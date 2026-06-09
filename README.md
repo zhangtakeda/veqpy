@@ -19,12 +19,11 @@
 [![Tests](https://img.shields.io/badge/tests-pytest-informational)](tests/)
 [![Style](https://img.shields.io/badge/style-ruff-black)](https://docs.astral.sh/ruff/)
 
-> **Article-specific computation and visualization scripts will be released as a tagged
-> artifact accompanying the first public arXiv version of paper "Zhang2026".**
+---
 
 # VEQPy
 
-VEQPy is the Python implementation of **VEQ** (Veloce EQuilibrium), a fast
+**VEQPy** is the Python implementation of **VEQ** (Veloce EQuilibrium), a fast
 parametric Grad--Shafranov solver for fixed-boundary, axisymmetric tokamak equilibria.
 It is designed for repeated modeling calls that require low-latency access to
 continuous fixed-boundary geometry. Unlike grid-map equilibrium solvers whose primary
@@ -58,18 +57,20 @@ and easier to reuse than full solver-native equilibrium or reconstruction pipeli
   derived properties to store minimal root state and lazily reconstruct geometry and
   physics diagnostics by formula.
 
-VEQPy is not a free-boundary equilibrium solver and does not aim to replace CHEASE, EFIT,
-ECOM, DESC, or related tools in contexts that require their own variables, boundary
-treatments, experimental constraints, solver-native outputs, or solver-native
-certificates. Its role is a fixed-boundary, continuously parameterized equilibrium solve
-and geometry-diagnostic layer for repeated calls.
-
 ## Installation
 
-VEQPy requires Python 3.12 or newer. The recommended source-checkout setup uses a
-project-local virtual environment. The `dev` extra installs the runtime dependencies
-together with `pytest`, `ruff`, `build`, `twine`, and other development helpers into
-that environment.
+VEQPy requires Python 3.12 or newer. For normal use, install the published package from
+PyPI into a project-local virtual environment:
+
+```bash
+python3.12 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install veqpy
+```
+
+For development, install VEQPy from a source checkout in editable mode. The `dev` extra
+installs the runtime dependencies together with `pytest`, `ruff`, `build`, `twine`, and
+other development helpers into the same environment.
 
 ```bash
 git clone https://github.com/zhangtakeda/veqpy.git
@@ -79,7 +80,7 @@ python3.12 -m venv .venv
 .venv/bin/python -m pip install -e ".[dev]"
 ```
 
-For a runtime-only local install, omit the `dev` extra:
+For a runtime-only install from a local source checkout, omit the `dev` extra:
 
 ```bash
 .venv/bin/python -m pip install .
