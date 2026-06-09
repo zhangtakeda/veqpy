@@ -127,7 +127,8 @@ VEQPy 与配套论文 **"VEQ: a fast parametric Grad--Shafranov solver for fixed
 <em>BSD 3-Clause License</em><br>
 
 <strong>Maintainer</strong> (rhzhang):<br>
-<em>Email</em> - <em>rhzhang@mail.dlut.edu.cn</em> | <em>zhangtakeda@gmail.com</em><br>
-<em>Homepage</em> - <em>https://zhangtakeda.github.io</em>
+<em>Homepage</em> - <em>https://zhangtakeda.github.io</em><br>
+<em>Email</em> - <em>rhzhang@mail.dlut.edu.cn</em><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<em>zhangtakeda@gmail.com</em><br>
 
 </p>
