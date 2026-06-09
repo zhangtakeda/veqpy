@@ -55,6 +55,8 @@ def build_residual_full_stage_runner_into(
     B0 = case.B0
 
     def runner(out: np.ndarray) -> None:
+        # Residual compact fields depend only on current geometry/root fields and
+        # alpha state; profile coefficient packing happens in the next kernel.
         numba_residual.update_residual_compact(
             residual_surface_fields,
             float(alpha_state[0]),
@@ -63,6 +65,9 @@ def build_residual_full_stage_runner_into(
             surface_fields,
         )
         out.fill(0.0)
+        # Packed residual assembly projects each active residual block onto its
+        # corresponding basis/order metadata.  Inactive profile blocks have no
+        # entries here and therefore contribute no equations.
         numba_residual.run_residual_blocks_packed_precomputed(
             out,
             residual_pack_scratch,
@@ -113,6 +118,9 @@ def build_collocation_runner_into(
     geometry_surface_fields = geometry_workspace.surface_fields
 
     def runner(x_eval: np.ndarray, out: np.ndarray) -> None:
+        # Collocation intentionally runs the same profile/geometry/source stages
+        # as variational residuals, then writes pointwise weighted G instead of
+        # Galerkin-projected blocks.
         profile_stage_runner(x_eval)
         geometry_stage_runner()
         alpha1, alpha2 = source_stage_runner()
@@ -158,6 +166,9 @@ def build_fused_residual_runner_into(
 ) -> Callable[[np.ndarray, np.ndarray], None]:
     """Bind the fused packed-state residual runner into a caller output vector."""
     if plan.source_execution.requires_optimized_psin_profile and not psin_profile_fields_available:
+        # Fused Numba code cannot pull optimized psin fields that do not exist
+        # in ProfileWorkspace yet.  The sequential runner keeps behavior correct
+        # for layout-valid but not-fusible source/profile combinations.
         return _build_sequential_residual_runner_into(
             profile_stage_runner=profile_stage_runner,
             geometry_stage_runner=geometry_stage_runner,

@@ -12,6 +12,10 @@ Public API:
 Notes:
 - Only common routes are covered here.
 - PJ2-psin-uniform fixed-point psin is handled locally inside that route.
+- Fused residual binding has three ownership modes:
+  single-pass source-owned psin, profile-owned psin, and PJ2 fixed-point psin.
+  Each mode refreshes profile/geometry first, then writes root fields, alpha_state,
+  residual surface fields, and finally the packed residual.
 """
 
 from __future__ import annotations
@@ -90,6 +94,8 @@ def _convert_f_squared_fields_to_f_impl(fields: np.ndarray, eps: float = 1.0e-10
         F = np.sqrt(F2)
         inv_F = 1.0 / F
         inv_F3 = inv_F / F2
+        # Active F is optimized as F**2 to avoid sign changes; source kernels
+        # consume F, F_r, F_rr, so convert the derivative rows by the chain rule.
         fields[0, i] = F
         fields[1, i] = 0.5 * F2_r * inv_F
         fields[2, i] = 0.5 * F2_rr * inv_F - 0.25 * F2_r * F2_r * inv_F3
@@ -117,6 +123,9 @@ def _refresh_hot_runtime(
     *,
     hot_runtime_binding: backend_abi.FusedHotRuntimeABI,
 ) -> None:
+    # Stage A/B are fused here: packed coefficients refresh profile fields,
+    # profile-derived Fourier families are rebuilt, then geometry is updated
+    # before any source or residual kernel reads the workspaces.
     update_profiles_packed_bulk(
         hot_runtime_binding.profile_fields,
         hot_runtime_binding.profile_rp_fields,
@@ -173,6 +182,8 @@ def _pack_residual_output_into(
     *,
     residual_pack_binding: backend_abi.FusedResidualPackABI,
 ) -> None:
+    # Packing is separate from residual-surface refresh so fused, staged, and
+    # collocation paths can share the same compact G/G*grad(psin) workspace.
     out.fill(0.0)
     run_residual_blocks_packed_precomputed(
         out,
@@ -224,6 +235,8 @@ def _run_pj2_psin_uniform_spline_with_scratch_impl(
     source_scratch_1d: np.ndarray,
     source_scratch_2d: np.ndarray,
 ) -> tuple[float, float]:
+    # Materialize the first source sample on the previous psin query, then let
+    # each fixed-point pass update psin and remap heat/current onto the new query.
     _uniform_spline_interpolate_pair(
         materialized_heat_input,
         materialized_current_input,
@@ -299,6 +312,8 @@ def _run_pj2_psin_uniform_barycentric_with_scratch_impl(
     source_scratch_1d: np.ndarray,
     source_scratch_2d: np.ndarray,
 ) -> tuple[float, float]:
+    # Same fixed-point contract as the spline path, but interpolation uses a
+    # small local barycentric stencil to avoid building dense remap matrices.
     _local_barycentric_interpolate_pair(
         materialized_heat_input,
         materialized_current_input,
@@ -415,6 +430,9 @@ def bind_fused_residual_runner_into(
     """Bind fused residual execution into a caller-provided output vector."""
     route_key = tuple(source_execution.route_key)
     if route_key != source_plan.route_key:
+        # SourcePlan owns user-facing route semantics; SourceExecutionABI owns
+        # runtime workspace requirements.  A mismatch here would bind a valid
+        # kernel against the wrong ownership contract.
         raise ValueError(
             f"Source execution ABI route mismatch: plan={source_plan.route_key!r}, "
             f"binding={route_key!r}"
@@ -442,6 +460,8 @@ def bind_fused_residual_runner_into(
     )
 
     if route_key == ("PJ2", "psin", "uniform"):
+        # PJ2/psin/uniform is the only fused route whose source query is itself
+        # part of the solution, so it needs a dedicated fixed-point runner.
         return _bind_pj2_psin_uniform_residual_runner_core(
             source_plan=source_plan,
             grid_workspace=grid_workspace,
@@ -467,6 +487,9 @@ def bind_fused_residual_runner_into(
         fix_rho=fix_rho,
     )
     if source_execution.requires_optimized_psin_profile:
+        # These routes read psin from the packed profile, materialize source
+        # inputs against that profile, then evaluate source fields into a
+        # separate target root buffer so the optimized psin rows remain intact.
         return _bind_profile_owned_psin_residual_runner_core(
             source_plan=source_plan,
             source_execution=source_execution,
@@ -516,6 +539,8 @@ def _bind_single_pass_residual_runner_core(
 
     def runner(x: np.ndarray, out: np.ndarray) -> None:
         _refresh_hot_runtime(x, hot_runtime_binding=hot_runtime_binding)
+        # Single-pass routes let the source kernel own psin/root_fields directly.
+        # Source inputs were materialized by source_runtime before this runner.
         alpha1, alpha2 = source_eval_runner(
             root_fields,
             FFn_psin,
@@ -526,6 +551,8 @@ def _bind_single_pass_residual_runner_core(
         )
         alpha_state[0] = alpha1
         alpha_state[1] = alpha2
+        # alpha_state mirrors the returned scales for staged callers and
+        # snapshots; residual_compact consumes the local values immediately.
         update_residual_compact(
             residual_surface_fields,
             alpha1,
@@ -573,6 +600,9 @@ def _bind_profile_owned_psin_residual_runner_core(
 
     def runner(x: np.ndarray, out: np.ndarray) -> None:
         _refresh_hot_runtime(x, hot_runtime_binding=hot_runtime_binding)
+        # Profile-owned psin routes copy psin/psin_r/psin_rr from the active
+        # optimized profile, then evaluate heat/current samples at that psin
+        # coordinate.  The source kernel writes only source derivatives/scales.
         _materialize_profile_owned_psin_source_impl(
             psin,
             psin_r,
@@ -604,6 +634,9 @@ def _bind_profile_owned_psin_residual_runner_core(
         )
         alpha_state[0] = alpha1
         alpha_state[1] = alpha2
+        # residual_compact reads root_fields, not source_target_root_fields.
+        # That preserves the optimized psin rows while still using route-produced
+        # FFn/Pn and alpha scales.
         update_residual_compact(
             residual_surface_fields,
             alpha1,
@@ -663,6 +696,9 @@ def _bind_pj2_psin_uniform_residual_runner_core(
     beta = float(source_plan.beta)
     has_Ip = bool(np.isfinite(Ip))
     use_local_barycentric = bool(source_plan.uses_barycentric_interpolation)
+    # PJ2 fixed-point can use allocation-free local barycentric updates in the
+    # Ip-constrained path.  Other cases use spline coefficients already prepared
+    # for uniform source samples.
     barycentric_weights = uniform_barycentric_weights(
         min(
             PJ2_PSIN_UNIFORM_BARYCENTRIC_ORDER_CAP,
@@ -677,8 +713,13 @@ def _bind_pj2_psin_uniform_residual_runner_core(
     def runner(x: np.ndarray, out: np.ndarray) -> None:
         _refresh_hot_runtime(x, hot_runtime_binding=hot_runtime_binding)
         if source_psin_query[0] < 0.0:
+            # ``invalidate_source_state`` marks the query with -1.  The first
+            # evaluation after an x0 reset re-seeds it from the optimized psin
+            # profile before the fixed-point loop starts.
             _normalize_psin_query(source_psin_query, psin_profile_u)
         if has_Ip and use_local_barycentric:
+            # The barycentric helper updates heat/current inside the fixed-point
+            # loop without allocating a fresh remap matrix for each psin query.
             alpha1, alpha2 = _run_pj2_psin_uniform_barycentric_with_scratch_impl(
                 source_psin_query,
                 psin,
@@ -707,6 +748,8 @@ def _bind_pj2_psin_uniform_residual_runner_core(
                 source_scratch_2d,
             )
         else:
+            # Spline coefficients are reused across the loop; only query values
+            # and materialized source arrays change between iterations.
             alpha1, alpha2 = _run_pj2_psin_uniform_spline_with_scratch_impl(
                 source_psin_query,
                 psin,
@@ -737,6 +780,8 @@ def _bind_pj2_psin_uniform_residual_runner_core(
             )
         alpha_state[0] = alpha1
         alpha_state[1] = alpha2
+        # The fixed-point source kernel publishes its last root_fields even when
+        # the iteration stops by cap, so residual packing remains self-consistent.
         update_residual_compact(
             residual_surface_fields,
             alpha1,
@@ -762,6 +807,8 @@ def _bind_source_eval_runner_for_fused_backend(
         R0: float,
     ) -> tuple[float, float]:
         if source_eval_binding.scratch_source_kernel is None:
+            # Non-scratch kernels are retained for registry compatibility; new
+            # hot routes should normally expose the scratch variant.
             return source_eval_binding.source_kernel(
                 out_root_fields,
                 out_FFn_psin,

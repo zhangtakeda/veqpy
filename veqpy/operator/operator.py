@@ -299,6 +299,9 @@ class Operator:
     def build_equilibrium(self, x: np.ndarray) -> Equilibrium:
         """Build a complete Equilibrium snapshot from a packed state vector."""
         x_eval = self.coerce_x(x)
+        # Snapshotting intentionally runs the residual pipeline first: source
+        # routes own alpha1/alpha2 and root fields, so decoding coefficients alone
+        # is not enough to build a consistent Equilibrium.
         self.residual_var(x_eval)
         return self._snapshot_equilibrium_from_runtime(x_eval)
 
@@ -371,6 +374,8 @@ class Operator:
         self.profiles_by_name = profiles_by_name
         for name, profile in self.profiles_by_name.items():
             if hasattr(type(self), f"{name}_profile"):
+                # Keep legacy attribute access (h_profile, psin_profile, ...)
+                # as views of the runtime profile objects, not duplicated state.
                 setattr(self, f"{name}_profile", profile)
         self.profile_workspace = profile_workspace
         self.geometry_workspace = geometry_workspace
@@ -378,6 +383,8 @@ class Operator:
         self.residual_workspace = residual_workspace
 
     def _refresh_runtime_state(self) -> None:
+        # Case replacement may change source route semantics but must preserve
+        # the packed topology; compatibility was already checked by replace_case.
         self._apply_plan(
             refresh_operator_plan_for_case(
                 self.plan,
@@ -388,6 +395,8 @@ class Operator:
         self._validate_runtime_profile_support()
         self._refresh_profile_runtime()
         self._refresh_fourier_family_metadata()
+        # Source runtime refresh happens after profile metadata because some
+        # routes decide whether psin is source-owned or optimized-profile-owned.
         refresh_source_runtime(
             case=self.case,
             grid_rho=self.plan.grid_workspace.rho,
@@ -400,6 +409,8 @@ class Operator:
         self._refresh_runtime_bindings()
 
     def _refresh_profile_runtime(self) -> None:
+        # Profiles are mutable runtime views over immutable plan topology.  The
+        # refresh updates offsets, passive fields, and active metadata in place.
         refresh_profile_runtime(
             case=self.case,
             operator_grid=self.plan.grid_workspace,
@@ -430,7 +441,11 @@ class Operator:
         fixed_profile_ids = np.flatnonzero(~self.plan.active_profile_mask).astype(
             np.int64, copy=False
         )
+        # Build all passive profile fields after binding so geometry/source
+        # stages can read a complete profile table before the first residual.
         for p in fixed_profile_ids:
+            # Passive profiles are not refreshed by Stage A because they have no
+            # packed coefficients, so materialize them immediately after binding.
             self.profile_workspace.refresh_profile_fields(
                 profile_id=int(p),
                 profile=self.profiles_by_name[self.plan.profile_names[int(p)]],
@@ -438,6 +453,8 @@ class Operator:
             )
         f_profile_id = self.plan.profile_index.get("F", -1)
         if f_profile_id >= 0 and not bool(self.plan.active_profile_mask[f_profile_id]):
+            # Passive F is stored as F**2 for the same postprocess contract as
+            # active F; convert once so source kernels always see F fields.
             self.layout.profile.run_postprocess()
 
     def _refresh_stage_a_runtime(self) -> None:
@@ -455,6 +472,8 @@ class Operator:
         )
 
     def _refresh_fourier_family_metadata(self) -> None:
+        # Effective order is case-dependent: a coefficient-free high-order
+        # profile with nonzero boundary offset still contributes to geometry.
         self.c_effective_order, self.s_effective_order = refresh_fourier_family_metadata(
             c_profile_names=self.plan.c_profile_names,
             s_profile_names=self.plan.s_profile_names,
@@ -468,6 +487,8 @@ class Operator:
     def invalidate_source_state(self) -> None:
         """Invalidate cached source state when a route requires fixed-point psin."""
         if tuple(self.plan.source_execution.route_key) == ("PJ2", "psin", "uniform"):
+            # Negative sentinel forces the next PJ2 fixed-point runner to seed
+            # its query from the current psin profile instead of stale psin.
             self.source_workspace.psin_query.fill(-1.0)
 
     def _snapshot_equilibrium_from_runtime(self, x: np.ndarray) -> Equilibrium:
@@ -533,6 +554,8 @@ def _estimate_h0_from_case(case: "OperatorCase") -> float:
             if av > h_max:
                 h_max = av
             if i >= edge_start:
+                # A sign change in the outer derivative is a coarse pedestal
+                # detector; it only affects the initial guess, not physics.
                 edge_mean += av
                 cur_diff = av - prev_edge
                 if prev_edge_diff < 0.0 and cur_diff > 0.0:
@@ -550,6 +573,8 @@ def _estimate_h0_from_case(case: "OperatorCase") -> float:
             edge_mean /= float(n - edge_start)
             if edge_mean > 1.0e-30:
                 return 0.66 * a / R0
+        # Even without a resolved pedestal, any nonuniform source benefits from
+        # the same small Shafranov-shift seed used for shaped cases.
         return 0.66 * a / R0  # structured, no clear pedestal
     except (TypeError, ValueError):
         return 0.66 * a / R0

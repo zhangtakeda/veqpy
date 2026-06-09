@@ -62,6 +62,8 @@ def build_operator_layout(
     """Bind a full executable ``OperatorLayout`` from refreshed runtime state."""
 
     alpha_state = source_workspace.alpha_state
+    # Build stage closures in dependency order.  Later fused/collocation runners
+    # reuse the same closures so staged and fused paths share workspace semantics.
     profile_stage_runner = _build_profile_stage_runner(
         plan=plan, profile_workspace=profile_workspace
     )
@@ -97,6 +99,8 @@ def build_operator_layout(
     source_stage_runner = _bind_alpha_tracking_source_runner(
         raw_source_stage_runner, alpha_state=alpha_state
     )
+    # Residual closures read alpha_state, so alpha tracking must wrap the source
+    # runner before residual and collocation runners are bound.
     residual_full_stage_runner_into = build_residual_full_stage_runner_into(
         plan=plan,
         case=case,
@@ -132,6 +136,8 @@ def build_operator_layout(
         plan=plan,
         runner_into=fused_residual_runner_into,
     )
+    # Collocation shares the Stage A/B/C refresh chain but writes a pointwise
+    # objective instead of the packed Galerkin residual.
     collocation_runner_into = build_collocation_runner_into(
         geometry_workspace=geometry_workspace,
         residual_workspace=residual_workspace,
@@ -184,6 +190,8 @@ def _build_profile_postprocess_runner(
     f_fields = profile_workspace.fields_for("F")
 
     def runner() -> None:
+        # F profiles are packed as F**2 for positivity during Stage A; source
+        # and diagnostics consume F and dF/drho, so convert after every refresh.
         numba_operator.convert_f_squared_fields_to_f(f_fields, eps=eps)
 
     return runner

@@ -221,6 +221,9 @@ def _regularize_axis_linear_profile(
     if values.size < 3 or abs(rho[0]) >= 1e-10:
         return values
 
+    # Diagnostics such as q and j are singular-looking at rho=0 even when the
+    # physical limit is finite.  Reconstruct only the axis sample from the first
+    # two off-axis values so plotted/exported profiles stay regular.
     rho1 = float(rho[1])
     rho2 = float(rho[2])
     if abs(rho2 - rho1) < 1e-14:
@@ -246,6 +249,8 @@ def _regularize_axis_linear_surface(
     if values.shape[0] < 3 or abs(rho[0]) >= 1e-10:
         return values
 
+    # Apply the same axis-limit repair independently for each theta sample of a
+    # surface diagnostic; the equilibrium root fields themselves are unchanged.
     rho1 = float(rho[1])
     rho2 = float(rho[2])
     if abs(rho2 - rho1) < 1e-14:
@@ -303,6 +308,9 @@ class Equilibrium(Reactive, Serial):
         self.shape_profiles = _normalize_shape_profiles(shape_profiles)
 
         self.psin = np.asarray(psin, dtype=np.float64)
+        # Source profiles are stored as derivatives with respect to psin.  Their
+        # axis values are used by diagnostics/export, so repair only the snapshot
+        # copy and leave the solver root arrays untouched.
         self.FFn_psin = _regularize_axis_linear_profile(FFn_psin, grid.rho, copy=True)
         self.Pn_psin = _regularize_axis_linear_profile(Pn_psin, grid.rho, copy=True)
         self.psin_r = np.asarray(psin_r, dtype=np.float64)
@@ -673,6 +681,8 @@ class Equilibrium(Reactive, Serial):
         psi_scale = float(self.alpha2)
         if abs(psi_scale) <= 1.0e-14:
             raise ValueError("alpha2 is zero")
+        # GEQDSK stores physical psi on a rectangular R/Z grid.  Internally this
+        # snapshot carries normalized psin, so alpha2 supplies the physical span.
         psi_bound = psi_axis + psi_scale
         psi_outside_value = psi_bound if psi_outside is None else float(psi_outside)
         R = self.R
@@ -698,6 +708,9 @@ class Equilibrium(Reactive, Serial):
             Ip=float(self.Ip),
             psi_axis=psi_axis,
             psi_bound=psi_bound,
+            # Profile arrays in GEQDSK are sampled on uniform normalized psin,
+            # not on the solver's rho grid.  Sorting/deduplicating psin below
+            # protects exports from slightly nonuniform optimized psin profiles.
             F=_sample_profile_on_uniform_psin(self.psin, self.F, psin_uniform),
             P=_sample_profile_on_uniform_psin(self.psin, self.P, psin_uniform),
             FF_psi=_sample_profile_on_uniform_psin(
@@ -833,6 +846,10 @@ def _build_resampled_equilibrium(
         K_max=source_grid.K_max,
     )
 
+    # Plot/export grids are often uniform even when the solve grid is spectral;
+    # interpolate root profiles in rho and recompute psin_rr on the target grid.
+    # The original shape profiles remain analytic Profile objects, so geometry
+    # is re-evaluated on the target grid instead of interpolating R/Z surfaces.
     psin_r = _resample_profile_linear(
         source_grid.rho,
         np.asarray(equilibrium.psin_r, dtype=np.float64),
@@ -882,6 +899,8 @@ def _render_equilibrium_summary(
     if profile_equilibrium is None:
         profile_equilibrium = surface_equilibrium
 
+    # Surface panels may use a dense resampled grid, while 1D profile panels stay
+    # on the original solve grid so diagnostics match the exported snapshot.
     _apply_equilibrium_plot_style()
     if plot_all or plot_residual:
         fig = plt.figure(figsize=(EQUILIBRIUM_PLOT_WIDTH, EQUILIBRIUM_PLOT_HEIGHT))
@@ -990,6 +1009,8 @@ def _build_surface_panel_data(equilibrium: Equilibrium) -> dict:
         idx = int(np.argmin(np.abs(rho - rho_value)))
         if rho[idx] <= 0.0:
             continue
+        # Close only at plotting data level; R/Z storage stays Nt-periodic
+        # without duplicating theta=0 in the model arrays.
         surfaces.append(
             {
                 "rho": float(rho[idx]),
@@ -1054,6 +1075,8 @@ def _include_shape_panel_profile(name: str) -> bool:
 
 
 def _build_source_panel_data(equilibrium: Equilibrium) -> dict:
+    # alpha1 converts normalized source derivatives into the physical GEQDSK-like
+    # source convention used in the summary panel.
     return {
         "rho": equilibrium.rho,
         "FF_psi": equilibrium.alpha1 * equilibrium.FFn_psin.copy(),
@@ -1331,6 +1354,9 @@ def _prepare_profile_interp_axis(
     order = np.argsort(psin_arr)
     psin_sorted = psin_arr[order]
     values_sorted = values_arr[order]
+    # np.interp requires a strictly increasing axis.  Optimized psin can contain
+    # duplicate edge/axis samples after clipping or regularization, so keep the
+    # first value for each distinct psin sample.
     psin_unique, unique_indices = np.unique(psin_sorted, return_index=True)
     values_unique = values_sorted[unique_indices]
     if psin_unique.size < 2:
@@ -1376,6 +1402,8 @@ def _interpolate_psin_to_rectilinear_grid(
         raise ValueError(f"rho2_src must have shape ({R_surfaces.shape[0]},), got {rho2_src.shape}")
 
     R_grid, Z_grid = np.meshgrid(R_nodes, Z_nodes, indexing="ij")
+    # The flux mesh is monotone in rho**2, which gives a better-conditioned
+    # interpolation coordinate near the magnetic axis than rho itself.
     rho2_grid = _interpolate_rho2_to_rectilinear_grid(
         R_surfaces,
         Z_surfaces,
@@ -1387,6 +1415,8 @@ def _interpolate_psin_to_rectilinear_grid(
     psi_grid = np.full(R_grid.shape, float(psi_outside), dtype=np.float64)
     inside = np.isfinite(rho2_grid)
     if np.any(inside):
+        # First locate each R/Z cell in the flux-surface mesh, then convert the
+        # recovered rho**2 back to the solver's psin profile.
         psi_grid[inside] = float(psi_axis) + float(psi_scale) * np.interp(
             rho2_grid[inside], rho2_src, psin
         )
@@ -1448,6 +1478,8 @@ def _build_flux_mesh_triangulation(
     points_Z = np.empty(point_count, dtype=np.float64)
     point_values = np.empty(point_count, dtype=np.float64)
 
+    # All theta samples collapse to one magnetic-axis point.  Store that once,
+    # then index later rings with periodic theta wrapping.
     points_R[0] = float(R_surfaces[0, 0])
     points_Z[0] = float(Z_surfaces[0, 0])
     point_values[0] = float(rho2_surfaces[0])
@@ -1469,11 +1501,14 @@ def _build_flux_mesh_triangulation(
         return 1 + (i - 1) * nt + (j % nt)
 
     for j in range(nt):
+        # The first ring is triangulated as a fan from the single axis point.
         triangles[cursor] = [vertex_index(0, 0), vertex_index(1, j), vertex_index(1, j + 1)]
         cursor += 1
 
     for i in range(1, nr - 1):
         for j in range(nt):
+            # Each annular quad is split consistently across the periodic theta
+            # seam; vertex_index wraps j+1 back to zero.
             triangles[cursor] = [
                 vertex_index(i, j),
                 vertex_index(i + 1, j),
@@ -1506,6 +1541,9 @@ def _build_degenerate_triangle_mask(
         np.maximum(np.abs(points_Z[p0]), np.abs(points_Z[p1])),
     )
     scale = np.maximum(scale, 1.0)
+    # Degenerate triangles can appear near the magnetic axis or on highly
+    # compressed surfaces.  Masking them avoids unstable barycentric weights in
+    # the GEQDSK rasterizer.
     return np.abs(twice_area) <= 1.0e-14 * scale * scale
 
 
@@ -1530,6 +1568,8 @@ def _rasterize_triangle_to_grid(
     if i0 >= i1 or j0 >= j1:
         return
 
+    # Restrict barycentric evaluation to the triangle bounding box; full-grid
+    # evaluation would dominate GEQDSK export cost for moderate NR/NZ.
     x0, x1, x2 = map(float, tri_R)
     y0, y1, y2 = map(float, tri_Z)
     denom = (y1 - y2) * (x0 - x2) + (x2 - x1) * (y0 - y2)
@@ -1547,6 +1587,8 @@ def _rasterize_triangle_to_grid(
 
     values = l0 * float(tri_values[0]) + l1 * float(tri_values[1]) + l2 * float(tri_values[2])
     target = rho2_grid[i0:i1, j0:j1]
+    # Later triangles may touch the same grid node on shared edges.  The
+    # interpolated rho**2 is identical up to roundoff, so last writer is fine.
     target[inside] = values[inside]
 
 

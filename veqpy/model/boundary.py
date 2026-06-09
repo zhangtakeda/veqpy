@@ -133,6 +133,8 @@ def _fit_boundary_params(
     if (M is None) != (N is None):
         raise ValueError("M and N must be provided together or both omitted")
     if M is None and N is None:
+        # Auto mode increments cosine/sine orders together and returns the first
+        # order that passes both RMS and local curve-distance checks.
         return _fit_minimal_order_boundary(geqdsk, maxtol=maxtol, R0=R0, Z0=Z0, a=a, ka=ka)
 
     assert M is not None and N is not None
@@ -163,9 +165,13 @@ def _fit_minimal_order_boundary(
     for step in range(MAX_FOURIER_ORDER):
         M = step
         N = step + 1
+        # Use one extra sine order because Z(theta) is represented separately
+        # through ka while R receives the theta_bar Fourier correction.
         params = _fit_boundary_for_orders(geqdsk, M=M, N=N, R0=R0, Z0=Z0, a=a, ka=ka)
         if best is None or params["rms"] < best["rms"]:
             best = params
+        # RMS alone can hide a localized miss on X-point-like boundaries.  Keep
+        # a stricter bidirectional curve-distance gate before accepting an order.
         if params["rms"] < maxtol and params["max_curve_error"] < curve_tol:
             return params
 
@@ -207,6 +213,8 @@ def _fit_boundary_for_orders(
     if initial_a <= 0.0:
         raise ValueError("Boundary width must be positive")
     ka0 = max(float(ka) if ka is not None else float(0.5 * span_z / initial_a), 1.0e-6)
+    # Bounds are intentionally broad but finite; unconstrained least_squares can
+    # trade a/ka against Fourier offsets and produce equivalent but unstable fits.
     bounds = _build_fit_bounds(
         r_min=r_min,
         r_max=r_max,
@@ -221,6 +229,8 @@ def _fit_boundary_for_orders(
 
     best_fit = None
     for r_points, z_points in _ordered_boundary_variants(R, Z):
+        # GEQDSK boundaries may be clockwise or counter-clockwise.  Fit both
+        # orderings so theta inference is not coupled to file orientation.
         start = {
             "R0": initial_R0,
             "Z0": initial_Z0,
@@ -293,6 +303,8 @@ def _ordered_boundary_variants(
     start = int(np.argmin(Z))
     r_ordered = np.roll(R, -start)
     z_ordered = np.roll(Z, -start)
+    # Start at the bottom point: theta inference assumes a monotone walk from
+    # the lower branch and then unwraps arcsin candidates around the curve.
     return (
         (r_ordered, z_ordered),
         (
@@ -334,6 +346,7 @@ def _build_fit_bounds(
 
 
 def _pack_boundary_fit_params(params: dict[str, float | np.ndarray], *, N: int) -> np.ndarray:
+    # The optimizer vector omits s0 because sine-order zero is structurally zero.
     vector = [
         float(params["R0"]),
         float(params["Z0"]),
@@ -361,6 +374,8 @@ def _unpack_boundary_fit_params(
     idx += M + 1
     s_offsets = np.zeros(N + 1, dtype=np.float64)
     if N > 0:
+        # Restore the omitted s0 slot so downstream boundary arrays are indexed
+        # directly by Fourier order.
         s_offsets[1:] = np.asarray(vector[idx : idx + N], dtype=np.float64)
     params["c_offsets"] = c_offsets
     params["s_offsets"] = s_offsets
@@ -430,6 +445,7 @@ def _normalize_fitted_offsets(
 ) -> tuple[np.ndarray, np.ndarray]:
     c_out = np.asarray(c_offsets, dtype=np.float64).copy()
     s_out = np.asarray(s_offsets, dtype=np.float64).copy()
+    # c0 is an angular phase; wrap it so equivalent fits serialize stably.
     c_out[0] = float((c_out[0] + np.pi) % (2.0 * np.pi) - np.pi)
     if s_out.size > 0:
         s_out[0] = 0.0
@@ -447,6 +463,8 @@ def _infer_theta(z_points: np.ndarray, z0: float, a_value: float, ka: float) -> 
         alpha = np.arcsin(sin_theta[index])
         candidates = []
         for candidate in (alpha, np.pi - alpha):
+            # arcsin has two geometric branches.  Pick the branch nearest the
+            # expected forward step so theta remains unwrapped around the LCFS.
             while candidate < previous - 1.0e-12:
                 candidate += 2.0 * np.pi
             candidates.extend((candidate, candidate + 2.0 * np.pi))

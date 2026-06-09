@@ -35,7 +35,12 @@ RouteKey = tuple[str, str, str]
 
 @dataclass(frozen=True, slots=True)
 class SourcePlan:
-    """Describe the read-only source semantics and runner binding plan."""
+    """Describe the read-only source semantics and runner binding plan.
+
+    This is the semantic layer: route, coordinate, node layout, interpolation
+    choice, input arrays, and global constraints.  Runtime ownership decisions
+    are derived later in ``SourceExecutionABI``.
+    """
 
     route: str
     kernel: Callable
@@ -99,6 +104,9 @@ def build_source_plan(
     interpolation_kind: str = "cubic",
 ) -> SourcePlan:
     """Build the immutable source plan for an ``OperatorCase``."""
+    # Parameterization is route-specific.  For example PP/psin/uniform samples
+    # on sqrt(psin) to bias resolution near the magnetic axis while all kernels
+    # still exchange normalized psin/root fields internally.
     return SourcePlan(
         route=str(case.route).upper(),
         kernel=source_route_spec.implementation,
@@ -113,6 +121,8 @@ def build_source_plan(
         Ip=float(case.Ip),
         beta=float(case.beta),
         interpolation_kind=(
+            # Grid-node sources are already sampled on operator rho; leave the
+            # interpolation slot empty so runtime binding cannot remap them.
             ""
             if str(case.nodes).lower() == "grid"
             else normalize_source_interpolation_kind(interpolation_kind)
@@ -139,12 +149,17 @@ def validate_source_plan_profile_support(
         bool(getattr(source_execution, "requires_optimized_psin_profile", False))
         and not has_active_psin
     ):
+        # PF/PP/PI/PJ1/PQ psin-uniform routes query external source samples at
+        # the current optimized psin each residual evaluation.
         raise ValueError(f"{case.route} requires an active psin profile")
     if (
         source_plan.is_psin_coordinate
         and has_active_psin
         and not bool(getattr(source_execution, "requires_optimized_psin_profile", False))
     ):
+        # Source-owned psin routes reconstruct flux in the source kernel.  An
+        # active psin profile would create two independent owners of the same
+        # root field and stale source queries.
         raise ValueError(
             f"{case.route} does not accept an active psin profile because psin is source-owned"
         )
@@ -158,6 +173,8 @@ def validate_source_inputs(case: OperatorCase, nr: int) -> None:
             f"got {case.heat_input.shape} and {case.current_input.shape}"
         )
     if case.nodes == "grid" and case.heat_input.shape[0] != nr:
+        # Grid-node routes skip interpolation entirely, so source samples must
+        # already match the operator radial grid.
         raise ValueError(f"Expected grid inputs to have shape ({nr},), got {case.heat_input.shape}")
     if case.heat_input.shape[0] < 1:
         raise ValueError(

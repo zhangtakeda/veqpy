@@ -14,6 +14,9 @@ Public API:
 Notes:
 - Source route routing stays here.
 - The operator layer only binds one source runner and uses it as the Stage-C entrypoint.
+- Each route must fill the same normalized root/source contract:
+  psin, psin_r, psin_rr, Pn_psin, FFn_psin, alpha1, and alpha2.  The route
+  name only changes which user source profile is treated as primitive.
 """
 
 from __future__ import annotations
@@ -88,7 +91,9 @@ SOURCE_PARAMETERIZATION_SQRT_PSIN = "sqrt_psin"
 SOURCE_PARAMETERIZATION_CODE_IDENTITY = 0
 SOURCE_PARAMETERIZATION_CODE_SQRT_PSIN = 1
 
-# Scratch slot indices into SourceWorkspace.scratch_1d (7 + Nr rows × Nr)
+# Scratch slot indices into SourceWorkspace.scratch_1d (7 + Nr rows × Nr).  These
+# symbolic names are part of the hot-kernel ABI with SourceWorkspace; changing
+# the row order requires updating the allocator at the same time.
 _SLOT_INTEGRAND = 0
 _SLOT_AUX0 = 1
 _SLOT_AUX1 = 2
@@ -233,6 +238,8 @@ def source_parameterization_for_route_key(route_key: RouteKey | str) -> str:
         supported = ", ".join("/".join(route_key) for route_key in sorted(ROUTE_REGISTRY))
         raise KeyError(f"Unknown source route {normalized_key!r}; supported: {supported}")
     if normalized_key == ("PP", "psin", "uniform"):
+        # This public source axis is sqrt(psin) to give uniform samples more
+        # resolution near the magnetic axis.  Internal root fields stay in psin.
         return SOURCE_PARAMETERIZATION_SQRT_PSIN
     return SOURCE_PARAMETERIZATION_IDENTITY
 
@@ -249,6 +256,8 @@ def _source_geometry_workspace_views(
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    # Keep the tuple order synchronized with GeometryWorkspace row contracts.
+    # Named unpacking at call sites is the only documentation numba preserves.
     return (
         radial_fields[1],
         radial_fields[2],
@@ -282,6 +291,8 @@ def _update_psin_coordinate(
     psin_r: np.ndarray,
     accumulator: np.ndarray,
 ) -> np.ndarray:
+    # Source kernels solve for a positive psin_r first.  The coordinate itself
+    # is then integrated and normalized to the external [0, 1] flux convention.
     full_integration(out_psin, psin_r, accumulator)
     return _normalize_psin_coordinate_inplace(out_psin)
 
@@ -305,6 +316,9 @@ def _regularize_axis_linear(profile: np.ndarray, rho: np.ndarray, n_fix: int) ->
     if n_fix <= 0:
         return profile
 
+    # Axis-near derivatives are ill-conditioned in rho coordinates.  Fit the
+    # smooth ratio profile/rho against rho**2 outside the affected region and
+    # extrapolate inward.
     anchor0 = n_fix
     anchor1 = n_fix + 1
     rho0 = rho[anchor0]
@@ -348,6 +362,8 @@ def _regularize_axis_even(profile: np.ndarray, rho: np.ndarray, n_fix: int) -> n
     if n_fix <= 0:
         return profile
 
+    # Even profiles have zero first derivative at the magnetic axis.  Linear
+    # extrapolation in rho**2 preserves that parity better than in rho.
     anchor0 = n_fix
     anchor1 = n_fix + 1
     x0 = rho[anchor0] * rho[anchor0]
@@ -745,6 +761,9 @@ def _solve_pq_psin_beta_alpha1(
         beta_target,
     )
     for _ in range(80):
+        # The beta constraint is scalar and monotone for valid q/F branches.
+        # Expanding a positive upper bracket is cheaper and more robust than
+        # exposing a second dense solve to the hot path.
         if np.isfinite(r_upper) and r_lower * r_upper <= 0.0:
             break
         upper *= 2.0
@@ -805,7 +824,13 @@ def build_source_remap_cache(
     stencil_size: int = DEFAULT_LOCAL_BARYCENTRIC_STENCIL,
     interpolation_kind: str | None = None,
 ) -> tuple[int, np.ndarray, np.ndarray]:
-    """Build reusable interpolation cache data for sampled source inputs."""
+    """Build reusable interpolation cache data for sampled source inputs.
+
+    Rho-coordinate sources are tied to the fixed operator grid, so their remap
+    matrix can be built once.  Psin-coordinate sources depend on the current
+    solution and only keep interpolation weights here; their query is refreshed
+    at each source evaluation.
+    """
     coord = str(coordinate).lower()
     if coord not in ("rho", "psin"):
         raise ValueError(f"Unsupported coordinate {coordinate!r}")
@@ -845,7 +870,7 @@ def resolve_source_inputs(
     psin_query: np.ndarray,
     use_barycentric: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Resolve uniform source inputs onto operator rho nodes."""
+    """Resolve sampled heat/current source inputs onto operator rho nodes."""
 
     heat = np.asarray(heat_input, dtype=np.float64)
     current = np.asarray(current_input, dtype=np.float64)
@@ -868,6 +893,8 @@ def resolve_source_inputs(
         raise ValueError(f"Expected psin_query to be 1D, got {psin_query.shape}")
 
     if coordinate_code == RHO_COORDINATE:
+        # Rho inputs use the precomputed linear map; no solver state participates
+        # after the cache is built.
         np.matmul(fixed_remap_matrix, heat, out=out_heat_input)
         np.matmul(fixed_remap_matrix, current, out=out_current_input)
         return out_heat_input, out_current_input
@@ -875,6 +902,9 @@ def resolve_source_inputs(
     if psin_query.shape != out_heat_input.shape:
         raise ValueError(f"psin_query shape mismatch: {psin_query.shape} vs {out_heat_input.shape}")
 
+    # Psin inputs are materialized against the current psin field.  Spline is
+    # smoother for general sampled inputs; local barycentric keeps high-order
+    # route variants allocation-free inside fixed-point loops.
     if use_barycentric:
         _local_barycentric_interpolate_pair(
             out_heat_input,
@@ -898,6 +928,20 @@ def resolve_source_inputs(
 # ---------------------------------------------------------------------------
 # Zero-allocation scratch variants (Phase 3)
 # ---------------------------------------------------------------------------
+
+# Route families share one output contract but choose different primitives:
+# PF derives psin_r from pressure/current source balance, PP takes psin_r-like
+# current data directly, PI works through toroidal-current primitives, PJ routes
+# start from current-density-like data, and PQ treats q as strict input.  The
+# repeated rho/psin/uniform/grid functions below differ mainly in how the input
+# profiles are interpreted or remapped; keep family-level comments here instead
+# of duplicating them in every variant.
+#
+# Docs-facing route meanings in compact form:
+# - PF: heat drives pressure-gradient data; current drives FF' data.
+# - PP: current drives normalized flux-gradient/psin_r data.
+# - PI/PJ1/PJ2: current drives cumulative/current-density/parallel-current data.
+# - PQ: current is safety factor q, so F or F**2 is solved from q and edge F.
 
 
 @register_source_route(
@@ -940,10 +984,15 @@ def _update_pf_from_rho_inputs_with_scratch(
     _regularize_psin_r(out_psin_r, rho, n_axis_fix)
     prof = out_psin_r
     integral_prof = dot(prof, weights)
+    # alpha2 stores the pre-normalization integral; psin_r itself is normalized
+    # to integrate to one so downstream geometry uses the canonical psin scale.
     out_psin_r /= integral_prof
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
     _update_psin_coordinate(out_psin, out_psin_r, accumulator)
     if (not has_Ip) and (not has_beta):
+        # With no global Ip/beta target, PF determines both alpha scales from
+        # the integrated source profiles.  Constrained paths solve only alpha1
+        # and derive alpha2 from the normalized psin_r scale.
         alpha2 = integral_prof
         alpha1 = -dot(heat_input, weights) / alpha2
         scaled_ratio_into(out_Pn_psin, heat_input, out_psin_r, 1.0 / (alpha1 * alpha2))
@@ -1174,6 +1223,9 @@ def _update_pp_from_rho_inputs_with_scratch(
     has_Ip = not np.isnan(Ip)
     has_beta = not np.isnan(beta)
     if has_Ip:
+        # PP treats current_input as the unnormalized psin_r shape.  Ip pins the
+        # absolute scale through the edge value; otherwise alpha2 is the weighted
+        # normalization integral.
         copy_into(out_psin_r, current_input)
         alpha2 = Ip / (2.0 * np.pi * Kn[-1] * out_psin_r[-1])
     else:
@@ -1397,6 +1449,9 @@ def _update_pi_from_rho_inputs_with_scratch(
     has_beta = not np.isnan(beta)
     Itor = source_scratch_1d[_SLOT_AUX0]
     if has_Ip:
+        # PI source profiles represent cumulative toroidal current.  Rescale the
+        # whole primitive when Ip is prescribed, then differentiate only after
+        # psin_r has been normalized.
         scale_into(Itor, current_input, Ip / current_input[-1])
     else:
         copy_into(Itor, current_input)
@@ -1619,6 +1674,8 @@ def _update_pj1_from_rho_inputs_with_scratch(
     I_tor = source_scratch_1d[_SLOT_AUX1]
     jtor = source_scratch_1d[_SLOT_AUX2]
     if has_Ip:
+        # PJ1 integrates a current-density-like input into I_tor first; the same
+        # Ip scale must be applied to the primitive and to the local jtor profile.
         scale_into(I_tor, I_tor_prof, Ip / I_tor_prof[-1])
         scale_into(jtor, current_input, Ip / I_tor_prof[-1])
     else:
@@ -1878,6 +1935,8 @@ def _update_pj2_from_psin_uniform_inputs_with_scratch(
     copy_into(integral_val, out_psin_r)
 
     if has_Ip:
+        # PJ2 couples the source current to the current F profile.  In psin
+        # routes the edge normalization uses the physical edge F=R0*B0.
         scaled_product_into(I_tor, F, integral_val, Ip / (R0 * B0 * integral_val[-1]))
     else:
         scaled_product_into(I_tor, F, integral_val, 2.0 * np.pi)
@@ -2111,6 +2170,10 @@ def _update_pq_from_psin_uniform_inputs_with_scratch(
     _fill_pq_q_profile(q_prof, current_input, Kn, Ln_r, edge_F, Ip)
     _fill_pq_W_and_derivative(W, F_r, Kn, Ln_r, q_prof, differentiator)
 
+    # PQ/psin treats q as strict input.  The unknown F profile solves a dense
+    # first-order collocation system, then psin_r follows from q = F*Ln_r/psin_r.
+    # This is intentionally more constrained than the PF/PP/PI/PJ routes: an
+    # invalid q profile should fail early instead of being silently regularized.
     pressure_factor = 1.0 / (4.0 * np.pi**2)
     for i in range(n):
         coeff_d[i] = W[i] + q_prof[i]
@@ -2169,6 +2232,7 @@ def _update_pq_from_psin_uniform_inputs_with_scratch(
         if not np.isfinite(out_psin_r[i]) or out_psin_r[i] <= 0.0:
             raise ValueError("PQ/psin strict solve produced invalid psi_r")
 
+    # alpha2 normalizes psin so the integrated coordinate still spans [0, 1].
     alpha2 = dot(out_psin_r, weights)
     _validate_pq_source_scalar(alpha2, 0)
     scale_into(out_psin_r, out_psin_r, 1.0 / alpha2)
@@ -2237,6 +2301,8 @@ def _update_pq_from_psin_grid_inputs_with_scratch(
     _fill_pq_q_profile(q_prof, current_input, Kn, Ln_r, edge_F, Ip)
     _fill_pq_W_and_derivative(W, F_r, Kn, Ln_r, q_prof, differentiator)
 
+    # Grid and uniform psin variants share the same strict-q algebra after the
+    # source inputs have been materialized onto the operator grid.
     pressure_factor = 1.0 / (4.0 * np.pi**2)
     for i in range(n):
         coeff_d[i] = W[i] + q_prof[i]
@@ -2366,6 +2432,8 @@ def _update_pq_from_rho_inputs_with_scratch(
     _fill_pq_q_profile(q_prof, current_input, Kn, Ln_r, edge_F, Ip)
     _fill_pq_W_and_derivative(W, Y_r, Kn, Ln_r, q_prof, differentiator)
 
+    # In rho-coordinate PQ, solving for Y=F**2 keeps the strict edge condition
+    # sign-safe; F is recovered only after the dense system succeeds.
     has_beta = not np.isnan(beta)
     pressure_scale = 1.0
     beta_C = 0.0
@@ -2462,7 +2530,13 @@ def materialize_profile_owned_psin_source(
     barycentric_weights: np.ndarray | None = None,
     use_barycentric: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Materialize source arrays for routes where optimized psin owns the query."""
+    """Materialize source arrays for routes where optimized psin owns the query.
+
+    Profile-owned psin routes bypass source-derived psin_r: the optimized psin
+    derivative becomes the coordinate map, then heat/current samples are queried
+    in that coordinate.  The returned source inputs are therefore stateful and
+    must be refreshed whenever the packed psin coefficients change.
+    """
     if psin_fields.ndim != 2 or psin_fields.shape[0] != 3:
         raise ValueError(f"Expected psin_fields to have shape (3, Nr), got {psin_fields.shape}")
     nr = psin_fields.shape[1]
@@ -2525,7 +2599,12 @@ def update_fourier_family_fields(
     c_active_order: int,
     s_active_order: int,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Combine c/s Fourier family base fields into active family fields."""
+    """Combine c/s Fourier family base fields into active family fields.
+
+    Orders whose source profile id is negative keep their boundary/base fields;
+    orders above the active truncation are zeroed so stale higher-order profiles
+    cannot leak from an earlier case into the current geometry update.
+    """
     if out_c_fields.ndim != 3 or out_s_fields.ndim != 3:
         raise ValueError(
             f"Expected 3D c/s outputs, got {out_c_fields.shape} and {out_s_fields.shape}"
@@ -2561,7 +2640,12 @@ def update_fixed_point_psin_query(
     psin: np.ndarray,
     max_residual: float,
 ) -> bool:
-    """Update a fixed-point psin source query and report convergence."""
+    """Update a fixed-point psin source query and report convergence.
+
+    The residual is measured before overwriting the query.  Callers can then use
+    the updated query immediately for the next remap while still knowing whether
+    the last fixed-point step was small enough.
+    """
     if query.ndim != 1 or psin.ndim != 1 or query.shape != psin.shape:
         raise ValueError(f"query/psin shape mismatch: {query.shape} vs {psin.shape}")
     return bool(
@@ -2707,6 +2791,9 @@ def _materialize_profile_owned_psin_source_impl(
     barycentric_weights: np.ndarray,
     use_barycentric: bool,
 ) -> None:
+    # Copy only psin_r from optimized profile fields; psin and psin_rr are
+    # reconstructed so all source paths share the same axis regularization and
+    # integration conventions.
     for i in range(out_psin.shape[0]):
         out_psin_r[i] = psin_fields[1, i]
 
@@ -2720,6 +2807,8 @@ def _materialize_profile_owned_psin_source_impl(
         out_parameter_query[i] = psin_value
 
     if parameterization_code == SOURCE_PARAMETERIZATION_CODE_SQRT_PSIN:
+        # PP/psin/uniform accepts samples in sqrt(psin) to give more resolution
+        # near the magnetic axis while keeping the internal query in psin.
         for i in range(out_parameter_query.shape[0]):
             value = out_parameter_query[i]
             if value < 0.0:
@@ -2759,6 +2848,8 @@ def _update_fourier_family_fields_impl(
     c_active_order: int,
     s_active_order: int,
 ) -> None:
+    # The c0 mode is a regular radial profile and may be source-owned; s0 is not
+    # a physical sine mode, so it always remains the base zero/placeholder field.
     for order in range(out_c_fields.shape[0]):
         if order <= c_active_order:
             profile_id = c_source_profile_ids[order]
@@ -2819,6 +2910,9 @@ def _uniform_spline_interpolate_pair(
     last_interval = interval_count - 1
     for i in range(out0.shape[0]):
         q = query[i]
+        # Source queries are clipped rather than extrapolated.  Most source
+        # inputs represent tabulated physical profiles on [0, 1], and allowing
+        # cubic extrapolation at the edge can dominate the nonlinear solve.
         if q < 0.0:
             q = 0.0
         elif q > 1.0:
@@ -2863,6 +2957,8 @@ def _local_barycentric_interpolate_pair(
     denom_scale = source_sample_count - 1.0
     for i in range(out0.shape[0]):
         q = query[i]
+        # Local barycentric interpolation keeps the polynomial stencil bounded;
+        # exact grid hits are special-cased below to avoid the 1/(q-x_j) pole.
         if q < 0.0:
             q = 0.0
         elif q > 1.0:
@@ -2913,6 +3009,8 @@ def _build_uniform_barycentric_matrix(
     stencil_size: int,
     weights: np.ndarray,
 ) -> np.ndarray:
+    # This dense matrix is used only for fixed rho-coordinate remaps.  Dynamic
+    # psin-coordinate remaps call the allocation-free pair interpolators instead.
     matrix = np.empty((query.shape[0], source_sample_count), dtype=np.float64)
     if source_sample_count == 1:
         matrix[:, 0] = 1.0

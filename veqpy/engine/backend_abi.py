@@ -51,12 +51,19 @@ PROFILE_OWNED_PSIN_ROUTE_KEYS: frozenset[RouteKey] = frozenset(
 )
 
 
+# Keep this list derived from the engine registry so route additions fail at
+# bind time only when their ABI ownership rules have not been modeled here.
 SUPPORTED_FUSED_SOURCE_ROUTE_KEYS: frozenset[RouteKey] = frozenset(SOURCE_ROUTE_KEYS)
 
 
 @dataclass(frozen=True, slots=True)
 class SourceExecutionABI:
-    """Source-route execution requirements derived at bind time."""
+    """Source-route execution requirements derived at bind time.
+
+    ``SourcePlan`` says what the user requested; this ABI says which runtime
+    layer owns psin/F/source queries for that request.  The fused backend consumes
+    only these booleans and flat arrays, so ownership decisions stay in Python.
+    """
 
     route_key: RouteKey
     psin_active_length: int
@@ -101,6 +108,9 @@ def build_source_execution_abi(
     """Build source-route ABI metadata from a source plan and packed profile layout."""
     route_key = (source_plan.route, source_plan.coordinate, source_plan.nodes)
     del coeff_index  # preserved in the signature for call-site compatibility
+
+    # Active profile ownership is a layout fact, not a route-name convention.
+    # Resolve slots here so source kernels can stay flat numba callables.
     psin_active_slot, psin_active_length = _active_profile_slot_and_length(
         "psin",
         profile_index=profile_index,
@@ -123,6 +133,9 @@ def build_source_execution_abi(
     if route_key[0] == "PQ" and F_active_length > 0:
         raise ValueError("PQ strict routes do not accept an active F profile")
 
+    # In psin-coordinate routes, exactly one layer owns psin: either the packed
+    # optimizer profile, or the source kernel. Mixing the two would make the
+    # source query stale or double-count an optimized flux coordinate.
     requires_optimized_psin_profile = route_key in PROFILE_OWNED_PSIN_ROUTE_KEYS
     if requires_optimized_psin_profile and psin_active_length <= 0:
         raise ValueError(
@@ -154,7 +167,11 @@ def build_source_execution_abi(
 
 @dataclass(frozen=True, slots=True)
 class FusedHotRuntimeABI:
-    """Array bundle required by fused profile/geometry hot-path kernels."""
+    """Array bundle required by fused profile/geometry hot-path kernels.
+
+    All arrays are borrowed views from workspaces.  The ABI does not own memory;
+    it freezes which rows/fields a compiled runner will read and overwrite.
+    """
 
     profile_fields: np.ndarray
     profile_rp_fields: np.ndarray
@@ -197,7 +214,11 @@ class FusedHotRuntimeABI:
 
 @dataclass(frozen=True, slots=True)
 class FusedResidualPackABI:
-    """Array bundle required to pack fused residual blocks."""
+    """Array bundle required to pack fused residual blocks.
+
+    The residual packer receives integer metadata from packed_layout and scratch
+    from ResidualWorkspace.  It must not inspect profile names at runtime.
+    """
 
     residual_pack_scratch: np.ndarray
     residual_surface_fields: np.ndarray
@@ -219,7 +240,12 @@ class FusedResidualPackABI:
 
 @dataclass(frozen=True, slots=True)
 class FusedSourceEvalABI:
-    """Array and kernel bundle required by fused source evaluation."""
+    """Array and kernel bundle required by fused source evaluation.
+
+    Source kernels are flat Numba callables.  This object supplies the selected
+    kernel plus the geometry/source/profile arrays needed to call it without
+    reaching back into Python objects.
+    """
 
     source_kernel: Callable
     scratch_source_kernel: Callable | None
@@ -339,7 +365,12 @@ def build_fused_source_eval_abi(
     """Collect arrays and constants required by fused source evaluation."""
     source_kernel = source_plan.kernel
 
+    # ``fix_rho`` is lowered once at bind time; source kernels only need the
+    # integer cutoff for axis regularization.
     n_axis_fix = int(np.searchsorted(grid_workspace.rho, fix_rho))
+    # The scratch kernel is the zero-allocation hot-path implementation.  If a
+    # legacy route lacks one, numba_operator can still call the registered kernel
+    # through the same ABI.
 
     return FusedSourceEvalABI(
         source_kernel=source_kernel,
@@ -371,6 +402,8 @@ def build_profile_owned_psin_source_abi(
 ) -> SimpleNamespace:
     """Collect scratch arrays for routes where psin is an optimized profile."""
     del source_execution
+    # Keep this as a SimpleNamespace because it is consumed only by Python-side
+    # runner binding; the Numba call itself receives the individual arrays.
     return SimpleNamespace(
         source_target_root_fields=source_workspace.target_root_fields,
         rho=grid_workspace.rho,

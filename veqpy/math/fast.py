@@ -44,6 +44,8 @@ scalar = nb.float64
 array = nb.types.Array(nb.float64, 1, "C")
 matrix = nb.types.Array(nb.float64, 2, "C")
 indices = nb.types.Array(nb.intp, 1, "C")
+# Readonly signatures let Numba optimize callers that pass shared workspace
+# inputs while still requiring explicit writable ``out`` arrays for results.
 const_array = nb.types.Array(nb.float64, 1, "C", readonly=True)
 const_matrix = nb.types.Array(nb.float64, 2, "C", readonly=True)
 const_indices = nb.types.Array(nb.intp, 1, "C", readonly=True)
@@ -51,6 +53,8 @@ const_indices = nb.types.Array(nb.intp, 1, "C", readonly=True)
 
 def fast_kernel(signature) -> Callable:
     """Decorator for small fast Numba kernels."""
+    # inline="always" keeps these helpers cheap inside larger hot kernels; the
+    # functions are intentionally tiny and allocation-free.
     return nb.njit(signature, cache=True, nogil=True, fastmath=True, inline="always")
 
 
@@ -62,6 +66,8 @@ def matmul_into(out: np.ndarray, lhs: np.ndarray, rhs: np.ndarray) -> None:
     n_cols = rhs.shape[1]
 
     for i in range(n_rows):
+        # Clear row before accumulation so callers can reuse scratch matrices
+        # without paying for a separate fill.
         for j in range(n_cols):
             out[i, j] = 0.0
 
@@ -198,6 +204,8 @@ def colwise_sum_into(out: np.ndarray, values: np.ndarray) -> None:
     n_cols = values.shape[1]
 
     for j in range(n_cols):
+        # Column reductions are written in two passes so ``out`` never carries
+        # data from a previous workspace use.
         out[j] = 0.0
 
     for i in range(n_rows):
@@ -315,6 +323,8 @@ def maximum_floor_into(
     floor_value: float,
 ) -> None:
     """Compute `out[i] = max(src[i], floor_value)`."""
+    # Used for current-like profiles where the cumulative primitive must remain
+    # positive enough for later divisions; it is not a generic clipping policy.
     for i in range(src.shape[0]):
         value = src[i]
         out[i] = value if value > floor_value else floor_value

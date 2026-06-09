@@ -33,6 +33,8 @@ OptimizeMethod = Callable[..., Any]
 
 
 def _root_method(method: str) -> OptimizeMethod:
+    # Store thin wrappers instead of scipy callables directly so the registry
+    # presents one uniform signature to Solver.
     def run(fun, x0, **kwargs):
         return root(fun, x0, method=method, **kwargs)
 
@@ -40,6 +42,8 @@ def _root_method(method: str) -> OptimizeMethod:
 
 
 def _least_squares_method(method: str) -> OptimizeMethod:
+    # least_squares uses a different SciPy entrypoint but remains a Solver
+    # method choice once wrapped with the same callable shape.
     def run(fun, x0, **kwargs):
         return least_squares(fun, x0, method=method, **kwargs)
 
@@ -80,6 +84,8 @@ class SolverConfig:
     fallback_methods: tuple[str, ...] | list[str] | None = field(default=None)
     enable_verbose: bool = False
     enable_history: bool = True
+    # String default is "fast" for backward-compatible solves.  Passing None is
+    # an explicit request for the library default builder from residual_scale.
     residual_normalization: str | None = "fast"
     residual_normalization_floor: float = 1.0
     residual_normalization_max_ratio: float = 1.0e6
@@ -111,6 +117,8 @@ class SolverConfig:
                 continue
             seen.add(method_name)
             deduped_fallback_methods.append(method_name)
+        # Fallback order is user-visible in SolverResult messages, so de-dupe
+        # without sorting.
 
         if method not in SUPPORTED_METHODS:
             supported = ", ".join(SUPPORTED_METHODS)
@@ -146,6 +154,8 @@ class SolverConfig:
             initial_policy = "zeros"
         if initial_policy == "warmstart":
             initial_policy = "warm"
+        # Accept the common aliases above, then store only the canonical policy
+        # strings consumed by Solver._build_initial_state.
         if initial_policy is not None and initial_policy not in SUPPORTED_INITIAL_POLICIES:
             supported = ", ".join(sorted(SUPPORTED_INITIAL_POLICIES))
             raise ValueError(
@@ -191,6 +201,8 @@ class SolverConfig:
             if self.residual_normalization is None
             else str(self.residual_normalization).strip().lower().replace("_", "-")
         )
+        # Hyphen-normalized mode names keep CLI/config spelling flexible while
+        # residual_scale receives a stable token.
         residual_normalization_floor = float(self.residual_normalization_floor)
         residual_normalization_max_ratio = float(self.residual_normalization_max_ratio)
         residual_normalization_huber_tau = float(self.residual_normalization_huber_tau)
@@ -235,6 +247,8 @@ class SolverConfig:
                 f"got {self.residual_normalization_sensitivity_lambda!r}."
             )
         object.__setattr__(self, "method", method)
+        # The dataclass is frozen to make solve configs snapshot-safe for history
+        # records.  __post_init__ writes validated canonical values exactly once.
         object.__setattr__(self, "enable_collocation", bool(self.enable_collocation))
         object.__setattr__(self, "collocation_method", collocation_method)
         object.__setattr__(self, "collocation_weight", collocation_weight)

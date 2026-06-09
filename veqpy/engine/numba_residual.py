@@ -12,6 +12,8 @@ Public API:
 Notes:
 - Keep only the minimal interface required by the numba hot path.
 - The old staged/binder residual API has been removed.
+- Packed residual block codes are layout ABI, not local magic numbers:
+  0=h, 1=v, 2=k, 3=c0, 4=c_m, 5=s_m, 6=psin, 7=F.
 """
 
 from __future__ import annotations
@@ -73,6 +75,8 @@ def update_residual_compact(
             )
             G_ij = alpha1 * G1n + alpha2 * G2n
             out_G[i, j] = G_ij
+            # Variational residual blocks project G against shape derivatives.
+            # Cache the repeated G*grad(psin) products once per surface point.
             Gpsin_R = G_ij * psin_R
             out_Gpsin_R[i, j] = Gpsin_R
             out_Gpsin_Z[i, j] = G_ij * psin_Z
@@ -89,6 +93,8 @@ def _project_scaled2(
     weight_b: np.ndarray,
     scalar: float,
 ) -> None:
+    # ``collapsed`` is scratch owned by the caller.  Scale in place, then project
+    # onto the active coefficient basis indices for this residual block.
     for i in range(collapsed.shape[0]):
         collapsed[i] *= weight_a[i] * weight_b[i] * scalar
     indexed_matvec_into(out_packed, coeff_indices, T, collapsed)
@@ -140,27 +146,38 @@ def _run_residual_blocks_packed_precomputed(
     nt = G.shape[1]
     base_scale = 2.0 * np.pi / nt
     for slot in range(block_codes.shape[0]):
+        # block_codes are packed-layout metadata: 0/1/2/3/4/5 project shape
+        # families, while 6/7 project psin and F source-prefix profiles.
         coeff_indices = coeff_index_rows[slot, : lengths[slot]]
         code = block_codes[slot]
         order = block_orders[slot]
         radial_power = block_radial_powers[slot]
         if code == 0:
+            # h and v are low-order shape translations; they project G*grad(psin)
+            # against the edge envelope y and the radial Chebyshev basis.
             rowwise_sum_into(scratch, Gpsin_R)
             _project_scaled2(out_packed, coeff_indices, T, scratch, y, weights, base_scale * a)
         elif code == 1:
             rowwise_sum_into(scratch, Gpsin_Z)
             _project_scaled2(out_packed, coeff_indices, T, scratch, y, weights, base_scale * a)
         elif code == 2:
+            # k modifies vertical elongation through rho*sin(theta), hence the
+            # extra radial rho factor and theta sine weighting.
             rowwise_weighted_sum_into(scratch, Gpsin_Z, sin_theta)
             _project_scaled3(
                 out_packed, coeff_indices, T, scratch, rho, y, weights, base_scale * (-a)
             )
         elif code == 3:
+            # c0 is the axisymmetric theta_bar shift.  It uses the c-family
+            # residual form but no explicit Fourier cosine factor.
             rowwise_sum_into(scratch, Gpsin_R_sin_tb)
             _project_scaled3(
                 out_packed, coeff_indices, T, scratch, rho, y, weights, base_scale * (-a)
             )
         elif code == 4:
+            # Higher cosine/sine shape modes carry their regularity power through
+            # block_radial_powers; residual projection uses power+1 because the
+            # boundary variation contributes one additional rho factor.
             rowwise_weighted_sum_into(scratch, Gpsin_R_sin_tb, cos_mtheta[order])
             _project_scaled3(
                 out_packed,
@@ -185,9 +202,13 @@ def _run_residual_blocks_packed_precomputed(
                 base_scale * (-a),
             )
         elif code == 6:
+            # psin coefficients project the strong-form G block itself, with
+            # rho**2 regularity matching the psin profile convention.
             rowwise_sum_into(scratch, G)
             _project_scaled3(out_packed, coeff_indices, T, scratch, rho2, y, weights, base_scale)
         elif code == 7:
+            # F is represented by normalized F**2 profile coefficients.  The
+            # projection scale restores the physical edge magnitude (R0*B0)**2.
             rowwise_sum_into(scratch, G)
             _project_scaled3(
                 out_packed,
@@ -222,5 +243,7 @@ def write_weighted_scaled_g_collocation_field_into(
     for i in range(nr):
         weight_i = sqrt_weights[i]
         for j in range(nt):
+            # Collocation writes pointwise R/J * G with sqrt quadrature weights
+            # so least_squares minimizes a discrete L2 norm over the surface grid.
             out[cursor] = weight_i * (R_surface[i, j] / J_surface[i, j]) * G[i, j]
             cursor += 1

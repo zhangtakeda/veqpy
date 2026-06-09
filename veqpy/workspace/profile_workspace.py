@@ -75,6 +75,8 @@ class ProfileWorkspace:
         n_active = int(active_profile_ids.size)
         max_active_len = 0
         if n_active > 0:
+            # The active coefficient index table is rectangular for Numba.  Rows
+            # shorter than max_active_len are padded with -1 and length-guarded.
             max_active_len = max(int(profile_L[int(p)]) + 1 for p in active_profile_ids)
 
         self.profile_names = tuple(profile_names)
@@ -100,6 +102,8 @@ class ProfileWorkspace:
             if c_name in profile_index:
                 self.c_family_source_profile_ids[order] = profile_index[c_name]
             if order == 0:
+                # s0 is structurally absent; -1 keeps family update code on the
+                # base zero field for that row.
                 continue
             s_name = f"s{order}"
             if s_name in profile_index:
@@ -119,6 +123,8 @@ class ProfileWorkspace:
         self.profile_env_fields.flags.writeable = True
         rp_fields = self.profile_rp_fields[p]
         env_fields = self.profile_env_fields[p]
+        # Power/envelope terms depend only on static profile shape and grid, not
+        # on packed coefficients.  Refresh them when the profile spec changes.
         _fill_power_terms(rp_fields, grid_workspace.rho, int(profile.power))
         _fill_envelope_terms(
             env_fields,
@@ -129,6 +135,8 @@ class ProfileWorkspace:
         )
         self.profile_rp_fields.flags.writeable = False
         self.profile_env_fields.flags.writeable = False
+        # Passive and active profiles both materialize through the same helper so
+        # derivative row semantics stay identical.
         _fill_profile_outputs(
             self.profile_fields[p],
             grid_workspace.T,
@@ -267,6 +275,8 @@ def _fill_profile_outputs(
 
     update_profile(u_fields, T, T_r, T_rr, rp_fields, env_fields, offset, coeff)
     if scale != 1.0:
+        # Scale is applied uniformly to value and derivative rows; for F this is
+        # how normalized coefficients become physical F**2 fields.
         np.multiply(u_fields, scale, out=u_fields)
 
 
@@ -281,6 +291,7 @@ def _fill_power_terms(out: np.ndarray, rho: np.ndarray, power: int) -> None:
     out[0] = rho**power
     out[1] = power * rho ** (power - 1)
     if power == 1:
+        # Avoid rho**-1 at the axis; the second derivative is analytically zero.
         out[2].fill(0.0)
     else:
         out[2] = power * (power - 1) * rho ** (power - 2)
@@ -301,6 +312,7 @@ def _fill_envelope_terms(
         return
 
     if envelope_power == 1:
+        # y is the standard edge envelope 1-rho**2.
         out[0] = y
         out[1] = -2.0 * rho
         out[2].fill(-2.0)

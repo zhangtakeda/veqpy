@@ -33,7 +33,7 @@ from veqpy.model.boundary import _fit_boundary_params
 from veqpy.operator import Operator, OperatorCase
 from veqpy.solver import Solver, SolverConfig
 
-DEFAULT_GEQDSK = Path("data") / "EFIT.geqdsk"
+DEFAULT_GEQDSK = Path("data") / "SOLOVEV.geqdsk"
 
 MU0 = 4.0e-7 * np.pi
 

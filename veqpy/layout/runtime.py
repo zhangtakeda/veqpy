@@ -102,6 +102,9 @@ class OperatorLayout:
     def empty(cls, x_size: int) -> Self:
         """Create a no-op layout placeholder before runtime arrays are bound."""
 
+        # Operator construction installs this placeholder before workspaces and
+        # route-specific closures are ready; every callable keeps the public
+        # interface usable but returns zeros until real binding replaces it.
         def residual_full() -> np.ndarray:
             return np.zeros(x_size, dtype=np.float64)
 

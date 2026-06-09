@@ -364,6 +364,8 @@ def _json_to_python(data: Any, expected: type | tuple) -> Any:
             return result
         expected_name = getattr(expected, "__name__", None)
         if expected_name == next(iter(data)):
+            # Support both nested typed payloads and already-unwrapped attribute
+            # dictionaries; older files may contain either representation.
             data = data[expected_name]
 
     origin = get_origin(expected)
@@ -441,6 +443,8 @@ def _try_instantiate_from_tagged_dict(data: dict) -> Any | None:
         return None
 
     attrs = data[type_name]
+    # The type registry is intentionally name-based so JSON payloads do not need
+    # to persist import paths that can change across package refactors.
     if hasattr(cls, "serial_attributes"):
         return _instantiate_serial(cls, attrs)
 
@@ -470,6 +474,8 @@ def _construct_object(cls: type, field_values: dict[str, Any]) -> Any:
     except TypeError:
         pass
 
+    # Some legacy serial classes do not accept every serial attribute in
+    # __init__; construct with the supported subset and restore the rest.
     try:
         sig = inspect.signature(cls.__init__)
     except (ValueError, TypeError):

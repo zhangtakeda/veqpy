@@ -35,6 +35,8 @@ def update_profile(
     nr = out_fields.shape[1]
 
     if coeff is None:
+        # Passive profiles are pure offset * rho_power envelopes.  They still
+        # need derivative rows so geometry can consume them like active profiles.
         for i in range(nr):
             out_fields[0, i] = offset * rp_fields[0, i]
             out_fields[1, i] = offset * rp_fields[1, i]
@@ -46,6 +48,8 @@ def update_profile(
         series = 0.0
         series_r = 0.0
         series_rr = 0.0
+        # Build Chebyshev value/derivative series first, then apply the envelope
+        # and radial power through product-rule derivatives.
         for k in range(coeff_size):
             c = coeff[k]
             series += c * T[k, i]
@@ -99,6 +103,8 @@ def update_profiles_packed_bulk(
             series_rr = 0.0
 
             for k in range(coeff_size):
+                # coeff_index_rows maps this active slot into packed x; using it
+                # here keeps the hot kernel independent of profile names.
                 c = x[coeff_index_rows[active_slot, k]]
                 series += c * T[k, i]
                 series_r += c * T_r[k, i]
@@ -115,6 +121,8 @@ def update_profiles_packed_bulk(
             rp = profile_rp_fields[profile_id, 0, i]
             rp_r = profile_rp_fields[profile_id, 1, i]
             rp_rr = profile_rp_fields[profile_id, 2, i]
+            # Store three rows: value, rho derivative, and second rho
+            # derivative.  Later stages never recompute profile derivatives.
             profile_fields[profile_id, 0, i] = scale * (rp * amp)
             profile_fields[profile_id, 1, i] = scale * (rp_r * amp + rp * base_r)
             profile_fields[profile_id, 2, i] = scale * (

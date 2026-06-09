@@ -95,6 +95,8 @@ def update_geometry_hot(
             tb_rt_ij = 0.0
             tb_tt_ij = 0.0
 
+            # theta_bar is the Fourier-distorted poloidal angle used by the R
+            # surface only; Z keeps the explicit elongation/sine form below.
             for order in range(1, c_limit):
                 cos_kt = cos_mtheta[order, j]
                 k_sin_kt = m_sin_mtheta[order, j]
@@ -130,6 +132,8 @@ def update_geometry_hot(
 
             R_ij = R0 + a * (h_i + rho_i * cos_tb_ij)
             if R_ij < 1e-6:
+                # Downstream source/residual formulas divide by R and J; clamp
+                # only the singular denominator, not the user-facing profile.
                 R_ij = 1e-6
 
             R_r_ij = a * (h_r_i + cos_tb_ij - rho_i * sin_tb_ij * tb_r_ij)
@@ -152,8 +156,14 @@ def update_geometry_hot(
 
             J_ij = R_t_ij * Z_r_ij - R_r_ij * Z_t_ij
             if J_ij < 1e-6:
+                # A non-positive Jacobian means the surface map folded.  The
+                # hot path keeps running with a finite penalty instead of
+                # injecting NaNs into the nonlinear optimizer.
                 J_ij = 1e-6
 
+            # Store only metric combinations consumed by source/residual stages;
+            # full R/Z derivative tensors would add memory traffic without a
+            # current caller.
             J_r_ij = -(R_rr_ij * Z_t_ij - R_rt_ij * Z_r_ij + R_r_ij * Z_rt_ij - R_t_ij * Z_rr_ij)
             J_t_ij = -(R_rt_ij * Z_t_ij - R_tt_ij * Z_r_ij + R_r_ij * Z_tt_ij - R_t_ij * Z_rt_ij)
             JR_ij = J_ij * R_ij
@@ -186,6 +196,8 @@ def update_geometry_hot(
             sum_gttdivJR_r += gttdivJR_r_ij
             sum_JdivR += JdivR_ij
 
+        # Radial fields are theta integrals or means paired with the compact
+        # surface-field row layout documented by GeometryWorkspace.
         S_r[i] = sum_J * theta_scale
         V_r[i] = sum_JR * theta_scale * two_pi
         Kn[i] = sum_gttdivJR * mean_scale

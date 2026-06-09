@@ -52,6 +52,9 @@ class OperatorCase:
 
     def __post_init__(self) -> None:
         """Normalize fields into stable runtime representations after construction."""
+        # Keep all public constructors permissive, but store one canonical form:
+        # uppercase route, lowercase coordinate/nodes, ndarray inputs, and NaN
+        # sentinels for optional scalar constraints.
         object.__setattr__(self, "route", _normalize_case_value("route", self.route))
         object.__setattr__(self, "coordinate", _normalize_case_value("coordinate", self.coordinate))
         object.__setattr__(self, "nodes", _normalize_case_value("nodes", self.nodes))
@@ -84,6 +87,8 @@ class OperatorCase:
             "heat_input",
             "current_input",
         ):
+            # OperatorCase is mutable for workflows that update inputs in place;
+            # normalize every root write so replacement cases stay layout-safe.
             value = _normalize_case_value(name, value)
         object.__setattr__(self, name, value)
 
@@ -196,6 +201,8 @@ def _normalize_profile_coeff(name: str, coeff: ProfileCoeffInput) -> ProfileCoef
         length = int(coeff)
         if length <= 0:
             raise ValueError(f"{name} coeff length indicator must be positive, got {coeff}")
+        # Integer shorthand declares an active profile block with zero initial
+        # coefficients.  None, by contrast, means passive/unpacked profile.
         return np.zeros(length, dtype=np.float64)
     if isinstance(coeff, (list, np.ndarray)):
         return _as_1d_array(coeff, name=f"{name} coeff").astype(np.float64, copy=True)
@@ -244,6 +251,9 @@ def _normalize_case_value(name: str, value):
 def _normalize_setup_inputs(case: OperatorCase) -> None:
     rejected_inputs: list[str] = []
 
+    # User-facing setup inputs are accepted in physical current/pressure units
+    # and scaled by mu0 once.  Rejecting implausible magnitudes protects callers
+    # from accidentally passing already-normalized arrays through this path.
     _normalize_setup_profile(
         case,
         field_name="heat_input",
@@ -283,6 +293,8 @@ def _heat_input_requires_mu0_scaling(case: OperatorCase) -> bool:
 
 
 def _current_input_requires_mu0_scaling(case: OperatorCase) -> bool:
+    # Only routes whose current_input represents a current/current-density-like
+    # physical profile receive the same mu0 setup scaling as heat_input.
     return case.route in CURRENT_PROFILE_ROUTES
 
 
@@ -299,6 +311,8 @@ def _normalize_setup_profile(
         return
     if requires_mu0_scaling:
         if _in_closed_range(max_abs, SETUP_PHYSICAL_ABS_MIN, SETUP_PHYSICAL_ABS_MAX):
+            # In-place mutation is intentional: __post_init__ already copied the
+            # arrays, and case.copy() preserves the canonical scaled values.
             values *= MU0
         else:
             rejected_inputs.append(

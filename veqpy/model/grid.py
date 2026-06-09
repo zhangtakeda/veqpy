@@ -188,6 +188,8 @@ class Grid(Reactive, Serial):
         """Apply spectral differentiation to a 1D field on this Grid."""
         if out is None:
             out = np.empty_like(f_1D)
+        # Delegate to the same engine helper used by source kernels so model
+        # diagnostics and hot-path residuals share derivative conventions.
         return full_differentiation(out, f_1D, self.differentiator)
 
     def accumulate(
@@ -199,6 +201,8 @@ class Grid(Reactive, Serial):
         """Apply prefix integration to a 1D field on this Grid."""
         if out is None:
             out = np.empty_like(f_1D)
+        # Prefix integration preserves the radial node shape; it is not the same
+        # operation as integrate(), which contracts a dimension.
         return full_integration(out, f_1D, self.accumulator)
 
     def integrate(
@@ -215,6 +219,8 @@ class Grid(Reactive, Serial):
                     return dot(f, self.weights)
                 if f.ndim != 2:
                     raise ValueError(f"Expected a 1D or 2D array, got shape {f.shape}")
+                # 2D integrals use radial quadrature first and uniform theta
+                # averaging second; this matches the engine's row-major fields.
                 scratch = np.empty(f.shape[1], dtype=f.dtype)
                 colwise_weighted_sum_into(scratch, f, self.weights)
                 total = 0.0
@@ -232,10 +238,13 @@ class Grid(Reactive, Serial):
                 raise ValueError(f"Unsupported quadrature axis {axis}")
 
         if axis == RHO_AXIS:
+            # Contract rho and leave theta samples.
             colwise_weighted_sum_into(out, f, self.weights)
         elif axis == THETA_AXIS:
             nt = f.shape[1]
             rowwise_sum_into(out, f)
+            # Theta nodes are uniform over [0, 2*pi), so the quadrature weight is
+            # a single constant after rowwise summation.
             out *= 2.0 * np.pi / nt
         else:
             raise ValueError(f"Unsupported quadrature axis {axis}")
@@ -275,6 +284,8 @@ class Grid(Reactive, Serial):
     def _trig_tables(
         self,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        # Store value, first-theta-factor, and second-theta-factor tables once;
+        # geometry kernels only multiply by profile amplitudes at runtime.
         harmonics = np.arange(self.M_max + 1, dtype=np.float64)[:, None]
         ktheta = harmonics * self.theta[None, :]
         cos_mtheta = np.cos(ktheta)
@@ -336,6 +347,8 @@ class Grid(Reactive, Serial):
         rho_powers = np.empty((max_rho_power + 1, self.Nr), dtype=np.float64)
         rho_powers[0].fill(1.0)
         for power in range(1, max_rho_power + 1):
+            # Powers are small and reused heavily by residual packing, so precompute
+            # instead of calling rho**k inside hot loops.
             rho_powers[power] = self.rho**power
         return _const_array(rho_powers)
 
@@ -356,6 +369,8 @@ def _build_K_values(M_max: int, K_max: int | None) -> np.ndarray:
     powers = np.arange(int(M_max) + 1, dtype=np.int64)
     powers[0] = 0
     if K_max is not None:
+        # Capping high-order powers avoids over-damping Fourier modes near the
+        # axis while preserving the m=0 no-envelope convention.
         powers[1:] = np.minimum(powers[1:], int(K_max))
     return powers
 
@@ -379,6 +394,8 @@ def _build_chebyshev_tables(
         Tx[k + 1, :] = 2.0 * T[k, :] + 2.0 * x * Tx[k, :] - Tx[k - 1, :]
         Txx[k + 1, :] = 4.0 * Tx[k, :] + 2.0 * x * Txx[k, :] - Txx[k - 1, :]
 
+    # Basis polynomials are defined in x = 2*rho**2 - 1.  Store derivatives in
+    # rho coordinates because all profile and geometry kernels consume d/drho.
     dx_dr = 4.0 * rho
     d2x_dr2 = 4.0
     T_r = Tx * dx_dr[None, :]

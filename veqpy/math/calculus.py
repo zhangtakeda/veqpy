@@ -7,6 +7,12 @@ Role:
 
 Public API:
 - make_calculus
+
+Notes:
+- Calculus matrices are reusable linear operators on radial nodes.  They do not
+  know whether a field is geometry, source, or diagnostic data.
+- Accumulators are prefix integrals from the magnetic-axis-side origin, with the
+  additive constant fixed by the value-at-zero constraint.
 """
 
 from __future__ import annotations
@@ -52,6 +58,9 @@ def spectral_calculus(nodes: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 
     _validate_nodes(nodes, min_size=4)
     if _has_uniform_spacing(nodes):
+        # Uniform nodes use compact finite differences for differentiation; the
+        # global polynomial spectral matrix is mainly for nonuniform quadrature
+        # nodes such as Legendre/Radau/Lobatto.
         return (
             _uniform_accumulator(nodes.shape[0]),
             _cfd33_differentiator(nodes),
@@ -114,6 +123,8 @@ def _compact_calculus(
     )
     return (
         _compact_accumulator(nodes, a_matrix, b_matrix),
+        # Pre-eliminate A once so runtime differentiation is a matrix-vector
+        # product, matching the spectral scheme interface.
         np.linalg.solve(a_matrix, b_matrix),
     )
 
@@ -145,6 +156,9 @@ def _compact_matrices(
             and explicit_start >= 0
             and explicit_stop <= n
         ):
+            # Interior rows use compact moment-matched stencils.  Boundary rows
+            # fall back to explicit finite differences to avoid one-sided
+            # implicit systems with weak support.
             implicit_indices = np.arange(implicit_start, implicit_stop, dtype=np.int64)
             explicit_indices = np.arange(explicit_start, explicit_stop, dtype=np.int64)
             a_values, b_values = _compact_row_coefficients(
@@ -230,6 +244,8 @@ def _compact_accumulator(
     rhs_matrix = a_matrix.copy()
 
     constraint_row = int(np.argmin(np.abs(nodes)))
+    # Differentiation matrices are singular up to an additive constant; replacing
+    # one row with v(0)=0 turns the inverse into a prefix-integration operator.
     system[constraint_row, :] = interpolation_matrix(nodes, np.array([0.0], dtype=np.float64))[0]
     rhs_matrix[constraint_row, :] = 0.0
     return np.linalg.solve(system, rhs_matrix)
@@ -244,6 +260,8 @@ def _spectral_differentiator(nodes: np.ndarray) -> np.ndarray:
     np.fill_diagonal(diff, 1.0)
     log_ratio = log_weights[None, :] - log_weights[:, None]
     mag_ratio = np.exp(np.clip(log_ratio, -700.0, 700.0))
+    # The diagonal is filled from the zero-row-sum identity after off-diagonal
+    # barycentric entries are scaled into a finite exponent range.
     matrix = signs[None, :] * signs[:, None] * mag_ratio / diff
     np.fill_diagonal(matrix, 0.0)
     matrix[np.diag_indices_from(matrix)] = -np.sum(matrix, axis=1)
@@ -256,6 +274,8 @@ def _spectral_accumulator(nodes: np.ndarray) -> np.ndarray:
     nodes = np.asarray(nodes, dtype=np.float64)
     n = nodes.shape[0]
     xg = 2.0 * nodes - 1.0
+    # Build the prefix integral in a Legendre basis on [-1, 1], then solve for
+    # nodal weights that reproduce the antiderivative at every radial node.
     full_legendre = np.polynomial.legendre.legvander(xg, n)
     legendre = full_legendre[:, :n]
 
@@ -276,6 +296,8 @@ def _spectral_accumulator(nodes: np.ndarray) -> np.ndarray:
     cond = np.linalg.cond(legendre)
     if np.isfinite(cond) and cond <= 1.0 / np.sqrt(np.finfo(np.float64).eps):
         return np.linalg.solve(legendre.T, rhs).T
+    # High-order or clustered nodes can make the Vandermonde solve borderline;
+    # least squares gives a stable accumulator instead of throwing away the grid.
     return np.linalg.lstsq(legendre.T, rhs, rcond=None)[0].T
 
 
@@ -285,6 +307,8 @@ def _uniform_accumulator(n: int) -> np.ndarray:
     h = 1.0 / (n - 1)
     matrix = np.zeros((n, n), dtype=np.float64)
     for i in range(1, n):
+        # Row i integrates from node 0 to node i.  Rows remain prefix operators,
+        # not cumulative sums over every previous call.
         matrix[i, 0] = 0.5 * h
         matrix[i, i] = 0.5 * h
         if i > 1:

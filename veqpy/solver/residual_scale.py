@@ -8,6 +8,13 @@ Role:
 Public API:
 - _RESIDUAL_SCALE_BUILDER
 - make_residual_scale
+
+Mode summary:
+- ``fast`` / ``block_rms``: legacy first-residual block RMS scale.
+- ``balance`` / ``balanced`` / ``block_huber``: robust block RMS with floor and
+  max-ratio clipping.
+- ``safe`` / ``block_sensitivity``: robust amplitude plus deterministic local
+  finite-difference sensitivity probes.
 """
 
 from __future__ import annotations
@@ -23,6 +30,8 @@ from veqpy.base.registry import Registry
 # -----------------------------------------------------------------------------
 
 _RESIDUAL_SCALE_BUILDER: Registry[str, Callable] = Registry(str, Callable)
+# Used only when SolverConfig.residual_normalization is None.  The dataclass
+# default remains "fast" for backward-compatible solver behavior.
 DEFAULT_RESIDUAL_NORMALIZATION = "balance"
 
 # -----------------------------------------------------------------------------
@@ -59,6 +68,8 @@ def make_residual_scale(
 
 @_RESIDUAL_SCALE_BUILDER("block_rms", "fast")
 def _build_block_rms_scale(residual: np.ndarray, block_lengths: np.ndarray) -> np.ndarray | None:
+    # Legacy fast mode trusts the first residual block amplitudes and enforces a
+    # minimum scale of 1.0.  It is cheap and deterministic but not outlier-robust.
     residual_eval = np.asarray(residual, dtype=np.float64)
     lengths_eval = np.asarray(block_lengths, dtype=np.int64)
     block_rms = _block_rms_values(residual_eval, lengths_eval)
@@ -84,6 +95,8 @@ def _build_block_huber_scale(
     huber_tau: float,
     **params: object,
 ) -> np.ndarray:
+    # Balanced mode treats each residual block as one equation family.  Robust
+    # RMS prevents one explosive component from setting the whole block scale.
     residual_eval = np.asarray(residual, dtype=np.float64)
     if residual_eval.ndim != 1 or residual_eval.size == 0:
         return np.ones_like(residual_eval, dtype=np.float64)
@@ -95,6 +108,8 @@ def _build_block_huber_scale(
         huber_tau=float(huber_tau),
     )
     if block_values is None:
+        # Collocation and other single-block objectives do not have variational
+        # block metadata, so fall back to one global robust scale.
         global_scale = _robust_rms(residual_eval, huber_tau=float(huber_tau))
         global_scale = _clip_scale_by_anchor(
             np.asarray([global_scale], dtype=np.float64),
@@ -130,6 +145,8 @@ def _build_block_sensitivity_scale(
     sensitivity_lambda: float,
     **params: object,
 ) -> np.ndarray:
+    # Safe mode blends residual amplitude with local sensitivity so a quiet but
+    # stiff block still receives a meaningful scale.
     residual_eval = np.asarray(residual, dtype=np.float64)
     amplitude_values = _robust_balanced_block_rms_values(
         residual_eval,
@@ -152,6 +169,8 @@ def _build_block_sensitivity_scale(
         x_scale_eval = np.asarray(x_scale, dtype=np.float64)
     q = int(probe_count)
     step = float(probe_step)
+    # Deterministic Rademacher probes make the scale reproducible while still
+    # sampling local residual sensitivity in multiple packed-state directions.
     rng = np.random.default_rng(0)
     sensitivity_sq = np.zeros_like(amplitude_values, dtype=np.float64)
     for _ in range(q):
@@ -261,6 +280,8 @@ def _robust_rms(values: np.ndarray, *, huber_tau: float) -> float:
         return 0.0
     center = float(np.median(finite))
     mad = float(np.median(np.abs(finite - center)))
+    # The median/MAD cutoff trims explosive residual components without hiding
+    # the typical block amplitude seen by the nonlinear solver.
     cutoff = center + max(float(huber_tau), 0.0) * 1.4826 * mad
     if not np.isfinite(cutoff) or cutoff <= 0.0:
         cutoff = center
@@ -302,6 +323,8 @@ def _clip_scale_by_anchor(values: np.ndarray, *, floor: float, max_ratio: float)
     scale = np.maximum(values_eval, floor_eval)
     scale[~np.isfinite(scale)] = floor_eval
     anchor = _balanced_residual_anchor(scale, floor=floor_eval)
+    # Limit block-to-block scale spread around the median positive block scale;
+    # this keeps tiny blocks from dominating and huge blocks from disappearing.
     lower = max(floor_eval, anchor / ratio_eval)
     upper = _balanced_residual_upper_cap(anchor, floor=floor_eval, max_ratio=ratio_eval)
     return np.clip(scale, lower, upper)

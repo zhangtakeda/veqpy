@@ -96,6 +96,8 @@ def build_operator_plan(
         profile_names=profile_names,
         prefix_profile_names=prefix_profile_names,
     )
+    # The plan freezes topology from the initial case.  Later case refreshes may
+    # replace source inputs/routes but not active profile degrees or x_size.
     active_profile_mask, active_profile_ids = build_active_profile_metadata(
         profile_L,
         profile_names=profile_names,
@@ -117,6 +119,8 @@ def build_operator_plan(
         source_route_spec=source_route_spec,
         interpolation_kind=source_interpolation_kind,
     )
+    # SourceExecutionABI bridges the declarative source plan to workspace needs:
+    # whether psin is optimized, source-owned, or requires remap scratch.
     source_execution = backend_abi.build_source_execution_abi(
         source_plan=source_plan,
         profile_index=profile_index,
@@ -220,6 +224,8 @@ def build_profile_config(
     }
     for name in c_profile_names + s_profile_names:
         order = int(name[1:])
+        # Higher Fourier orders use axis envelopes so profile fields remain
+        # regular at rho=0; order c0 intentionally has no radial power.
         profile_static_kwargs_by_name[name] = (
             {} if order == 0 else {"power": int(grid_workspace.K_values[order])}
         )
