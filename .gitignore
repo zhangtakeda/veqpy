@@ -1,0 +1,73 @@
+# Python caches and tool state
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# Python build and editable-install metadata
+build/
+dist/
+*.egg-info/
+
+# LaTeX build artifacts
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.run.xml
+*.synctex.gz
+*.toc
+*.lof
+*.lot
+*.nav
+*.snm
+*.spl
+*.patch
+*.vrb
+*-blx.bib
+
+# Local-only manuscript guidance/reference material
+/*.md
+!README.md
+/*.pdf
+
+# Root-only scratch tools stay local; benchmark generators live under tests/.
+/tools/
+
+# Local environments
+.*
+!/.gitignore
+
+# Keep CI configuration trackable if added later.
+!/.github/
+!/.github/**
+
+# Public input data is limited to GEQDSK files unless explicitly unignored.
+data/*
+!data/*.geqdsk
+!data/README.md
+
+# Test source is trackable; generated outputs stay local.
+tests/*
+!tests/*.py
+!tests/helpers.py
+!tests/baselines/
+!tests/baselines/**
+tests/_outputs/
+tests/demo/
+tests/benchmark/
+
+# Example outputs, if examples/ is introduced.
+examples/_outputs/
+
+# Root-only manuscript scratch/artifact directories.
+/figures/
+/references/
+/scripts/

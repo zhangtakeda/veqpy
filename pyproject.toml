@@ -1,0 +1,76 @@
+[build-system]
+requires = [
+    "setuptools>=69",
+    "wheel",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "veqpy"
+version = "1.0.0"
+description = "VEQPy — Veloce EQuilibrium code"
+readme = "README.md"
+license = "BSD-3-Clause"
+authors = [
+    {name = "rhzhang", email = "rhzhang@mail.dlut.edu.cn"},
+]
+requires-python = ">=3.12"
+keywords = [
+    "Grad-Shafranov",
+    "equilibrium",
+    "fusion",
+    "tokamak",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Physics",
+]
+dependencies = [
+    "numpy>=1.24",
+    "orjson>=3.9",
+    "matplotlib>=3.7",
+    "scipy>=1.17.1",
+    "numba>=0.64.0",
+    "rich>=13",
+]
+
+[project.optional-dependencies]
+dev = [
+    "build>=1.2",
+    "packaging>=24.2",
+    "pytest>=7.0",
+    "ruff>=0.4",
+    "twine>=6.2",
+]
+
+[project.urls]
+Homepage = "https://zhangtakeda.github.io"
+Repository = "https://github.com/zhangtakeda/veqpy"
+Issues = "https://github.com/zhangtakeda/veqpy/issues"
+
+[tool.setuptools]
+include-package-data = false
+
+[tool.setuptools.packages.find]
+include = ["veqpy*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-p no:cacheprovider"
+markers = [
+    "slow: tests that may compile kernels or run nonlinear solves",
+    "examples: tests that execute user-facing example scripts",
+    "paper: manuscript reproduction artifact checks",
+]
