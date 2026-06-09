@@ -98,6 +98,8 @@ Basic demo:
 
 This script builds a smooth fixed-boundary case, solves an equilibrium using PF(`psin`)
 source input, writes an `Equilibrium` JSON snapshot, and generates a flux-surface figure.
+By default, outputs go under `./outputs/minimal_equilibrium`; set
+`VEQPY_OUTPUT_DIR` to choose another directory.
 
 GEQDSK demo:
 
@@ -105,11 +107,13 @@ GEQDSK demo:
 .venv/bin/python examples/geqdsk_workflow.py
 ```
 
-This script reads an EFIT-style GEQDSK file, fits it as a VEQPy fixed boundary, solves a
-PF(`psin`) case with an `Ip` constraint using one-dimensional source profiles from the
-GEQDSK file, and writes a VEQPy-vs-GEQDSK flux-surface comparison figure. **Reproducible
-scripts for manuscript figures will be released in the corresponding tagged artifact
-package for the first public arXiv version.**
+This script reads an EFIT-style GEQDSK file, fits it as a VEQPy fixed boundary, solves
+PF(`psin`) and PQ(`psin`) cases with an `Ip` constraint using one-dimensional source
+profiles from the GEQDSK file, and writes a two-column VEQPy-vs-GEQDSK comparison
+figure. By default, it reads `./data/EFIT.geqdsk` and writes outputs under
+`./outputs/geqdsk_workflow`; set `VEQPY_GEQDSK` and `VEQPY_OUTPUT_DIR` to override
+those paths. **Reproducible scripts for manuscript figures will be released in the
+corresponding tagged artifact package for the first public arXiv version.**
 
 ## Development Checks
 

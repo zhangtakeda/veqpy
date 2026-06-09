@@ -524,9 +524,11 @@ class Solver:
             (
                 self._display_attempt_label(
                     solve_config,
-                    start_kind="warm-start"
-                    if self._is_warm_initial_guess(x_initial, x0_was_provided)
-                    else "cold-start",
+                    start_kind=self._display_start_kind(
+                        x_initial,
+                        solve_config=solve_config,
+                        x0_was_provided=x0_was_provided,
+                    ),
                 ),
                 x_initial,
                 solve_config,
@@ -663,6 +665,21 @@ class Solver:
         if _uses_least_squares_api(solve_config):
             return f"least_squares/{solve_config.method}"
         return f"root/{solve_config.method}"
+
+    def _display_start_kind(
+        self,
+        x_guess: np.ndarray,
+        *,
+        solve_config: SolverConfig,
+        x0_was_provided: bool,
+    ) -> str:
+        if x0_was_provided or solve_config.initial_policy == "warm":
+            return "warm-start"
+        if solve_config.initial_policy == "homothetic":
+            return "homothetic-start"
+        if solve_config.initial_policy == "zeros":
+            return "zero-start"
+        return "encoded-start" if self._is_warm_initial_guess(x_guess, False) else "zero-start"
 
     def _is_warm_initial_guess(self, x_guess: np.ndarray, x0_was_provided: bool) -> bool:
         return bool(x0_was_provided or not self._is_zero_guess(x_guess))

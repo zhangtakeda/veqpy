@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _run_example(
@@ -19,9 +19,15 @@ def _run_example(
     env = os.environ.copy()
     env["VEQPY_OUTPUT_DIR"] = str(output_dir)
     env.setdefault("MPLCONFIGDIR", str(output_dir / "mplconfig"))
+    existing_pythonpath = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = (
+        str(PROJECT_ROOT)
+        if not existing_pythonpath
+        else os.pathsep.join((str(PROJECT_ROOT), existing_pythonpath))
+    )
     return subprocess.run(
-        [sys.executable, str(REPO_ROOT / "examples" / script_name)],
-        cwd=REPO_ROOT,
+        [sys.executable, str(PROJECT_ROOT / "examples" / script_name)],
+        cwd=PROJECT_ROOT,
         env=env,
         text=True,
         capture_output=True,

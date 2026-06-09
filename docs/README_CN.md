@@ -72,6 +72,7 @@ python3.12 -m venv .venv
 ```
 
 该脚本构造一个光滑固定边界案例，使用 PF(`psin`) source input 求解平衡，写出 `Equilibrium` JSON 快照，并生成磁通面图像。
+默认输出到 `./outputs/minimal_equilibrium`；可用 `VEQPY_OUTPUT_DIR` 指定其它目录。
 
 GEQDSK demo:
 
@@ -79,7 +80,7 @@ GEQDSK demo:
 .venv/bin/python examples/geqdsk_workflow.py
 ```
 
-该脚本读取 EFIT 风格 GEQDSK 文件，拟合为 VEQPy 的固定边界，使用 GEQDSK 中的一维源项剖面求解带 `Ip` 约束的 PF(`psin`) 案例，并输出 VEQPy 与 GEQDSK 磁通面的比较图。**论文图像的可复现脚本会随首个公开 arXiv 版本对应的 tagged artifact 发布**。
+该脚本读取 EFIT 风格 GEQDSK 文件，拟合为 VEQPy 的固定边界，使用 GEQDSK 中的一维源项剖面求解带 `Ip` 约束的 PF(`psin`) 和 PQ(`psin`) 案例，并输出双列 VEQPy 与 GEQDSK 磁通面比较图。默认读取 `./data/EFIT.geqdsk`，输出到 `./outputs/geqdsk_workflow`；可用 `VEQPY_GEQDSK` 和 `VEQPY_OUTPUT_DIR` 覆盖这些路径。**论文图像的可复现脚本会随首个公开 arXiv 版本对应的 tagged artifact 发布**。
 
 ## 开发检查
 

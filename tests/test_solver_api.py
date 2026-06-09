@@ -76,3 +76,42 @@ def test_solver_facade_initial_state_and_history_lifecycle() -> None:
     solver.history.append(object())
     solver.clear()
     assert solver.history == []
+
+
+def test_solver_attempt_label_reflects_initial_policy() -> None:
+    solver = Solver(operator=tiny_operator(), config=SolverConfig(enable_history=False))
+    nonzero_guess = np.ones(solver.operator.x_size, dtype=np.float64)
+    zero_guess = np.zeros(solver.operator.x_size, dtype=np.float64)
+
+    assert (
+        solver._display_start_kind(
+            nonzero_guess,
+            solve_config=SolverConfig(initial_policy="homothetic"),
+            x0_was_provided=False,
+        )
+        == "homothetic-start"
+    )
+    assert (
+        solver._display_start_kind(
+            zero_guess,
+            solve_config=SolverConfig(initial_policy="zeros"),
+            x0_was_provided=False,
+        )
+        == "zero-start"
+    )
+    assert (
+        solver._display_start_kind(
+            nonzero_guess,
+            solve_config=SolverConfig(initial_policy=None),
+            x0_was_provided=False,
+        )
+        == "encoded-start"
+    )
+    assert (
+        solver._display_start_kind(
+            nonzero_guess,
+            solve_config=SolverConfig(initial_policy=None),
+            x0_was_provided=True,
+        )
+        == "warm-start"
+    )
