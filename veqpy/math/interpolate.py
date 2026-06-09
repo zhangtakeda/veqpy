@@ -17,8 +17,7 @@ Notes:
 - Matrices use source nodes as columns and evaluation nodes as rows.
 - This module only remaps normalized one-dimensional source parameters.  Route
   meaning and constraint selection live in operator.source_plan / source kernels.
-- The math-layer default is used when callers pass ``kind=None`` directly; the
-  Operator can choose a different source_interpolation_kind default.
+- ``SOURCE_INTERP_DEFAULT`` is the single package default for source remapping.
 """
 
 from __future__ import annotations
@@ -32,12 +31,12 @@ from veqpy.base.registry import Registry
 
 DEFAULT_LOCAL_BARYCENTRIC_STENCIL = 8
 SOURCE_INTERP_KIND_ENV = "VEQPY_SOURCE_INTERP_KIND"
-SOURCE_INTERP_DEFAULT = "cubic"
 SOURCE_INTERP_BARYCENTRIC = "barycentric"
 SOURCE_INTERP_NOT_A_KNOT = "not-a-knot"
 SOURCE_INTERP_LINEAR = "linear"
 SOURCE_INTERP_QUADRATIC = "quadratic"
 SOURCE_INTERP_CUBIC = "cubic"
+SOURCE_INTERP_DEFAULT = SOURCE_INTERP_BARYCENTRIC
 
 _SOURCE_INTERP_ALIASES = {
     # Keep public spellings broad because this option is often set through env

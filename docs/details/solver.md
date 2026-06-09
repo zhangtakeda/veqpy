@@ -39,16 +39,12 @@ The homothetic initializer is meant as a cheap geometry-based guess for nested
 flux surfaces. It delegates to the operator's boundary-slope estimate: active
 Fourier shaping coefficients receive first-coefficient values derived from the
 boundary offsets, and `h` receives a Shafranov-shift estimate when the source
-profile is not uniform. `initial_homothetic_lambda` is accepted as the intended
-boundary-slope factor, but the current operator-side implementation keeps the
-same conservative estimate independent of that value.
+profile is not uniform. The initializer uses one conservative operator-side
+estimate rather than exposing a separate scale factor.
 
 Whenever the solve starts from an explicit `x0`, zeros, homothetic, or encoded
 case coefficients, the operator invalidates route-local source state before the
 attempt. `warm` keeps the current source state paired with the current `x0`.
-
-`enable_warmstart` is stored in `SolverConfig`, but the active initial-state
-selector is the explicit `x0` argument or `initial_policy="warm"`.
 
 ## Solve Flow
 
@@ -85,10 +81,10 @@ Current modes are:
 | `balance` / `balanced` / `block_huber` | Build robust block scales using Huber-style RMS, a floor, and a maximum scale ratio |
 | `safe` / `block_sensitivity` | Combine robust block amplitude with finite-difference sensitivity probes |
 
-The default config uses `fast`. Passing `residual_normalization=None` normalizes
-to the library default builder name, currently `balance`. For `hybr`, enabling
-normalization also tightens the initial trust-region factor to reduce large
-first steps in the scaled residual space.
+The default config uses `fast`. Passing `residual_normalization=None` resolves
+to the same package default. For `hybr`, enabling normalization also tightens
+the initial trust-region factor to reduce large first steps in the scaled
+residual space.
 
 ## Collocation Polish
 

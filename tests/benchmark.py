@@ -82,7 +82,6 @@ REFERENCE_SUMMARY_GRID = Grid(
 CONFIG = SolverConfig(
     method="hybr",
     enable_verbose=False,
-    enable_warmstart=False,
     enable_history=False,
 )
 
@@ -537,7 +536,6 @@ def _solve_reference(*, show_progress: bool = False) -> ReferenceBundle:
         max_evaluations=CONFIG.max_evaluations,
         enable_verbose=False,
         enable_history=False,
-        enable_warmstart=False,
     )
     result = solver.result
     equilibrium = solver.build_equilibrium()
@@ -744,7 +742,6 @@ def _solve_once(case: OperatorCase) -> tuple[object, object, np.ndarray]:
         max_evaluations=CONFIG.max_evaluations,
         enable_verbose=False,
         enable_history=False,
-        enable_warmstart=False,
     )
     result = solver.result
     if result is None:
@@ -762,7 +759,6 @@ def _solve_with_timing(case: OperatorCase) -> tuple[object, object, np.ndarray, 
         max_evaluations=CONFIG.max_evaluations,
         enable_verbose=False,
         enable_history=False,
-        enable_warmstart=False,
     )
 
     elapsed_ms_samples = np.empty(BENCHMARK_REPEAT_COUNT, dtype=np.float64)
@@ -774,7 +770,6 @@ def _solve_with_timing(case: OperatorCase) -> tuple[object, object, np.ndarray, 
             max_evaluations=CONFIG.max_evaluations,
             enable_verbose=False,
             enable_history=False,
-            enable_warmstart=False,
         )
         result = solver.result
         elapsed_ms_samples[index] = float(result.elapsed) / 1000.0

@@ -233,17 +233,15 @@ class ProfileWorkspace:
         *,
         x_size: int,
         profiles_by_name: dict[str, Profile],
-        boundary_slope_factor: float = 1.0,
     ) -> np.ndarray:
         """Build a geometrically-motivated packed x0 for c/s Fourier profiles.
 
         Uses ``-offset / (2*p + 1)`` which outperforms the original
-        homothetic formula ``0.5 * (p - lambda) * offset`` across
-        shaped H-mode, X-point, and D-shaped equilibria.
+        homothetic formula across shaped H-mode, X-point, and D-shaped
+        equilibria.
         """
 
         x = np.zeros(x_size, dtype=np.float64)
-        del boundary_slope_factor  # retained for API compatibility
         for profile_id, name in enumerate(self.profile_names):
             if not (name.startswith("c") or name.startswith("s")):
                 continue

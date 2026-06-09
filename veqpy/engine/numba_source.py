@@ -54,9 +54,10 @@ from veqpy.math.fast import (
     scaled_ratio_into,
     weighted_dot,
 )
-from veqpy.math.interpolate import build_uniform_source_interpolation_matrix
-
-DEFAULT_LOCAL_BARYCENTRIC_STENCIL = 8
+from veqpy.math.interpolate import (
+    DEFAULT_LOCAL_BARYCENTRIC_STENCIL,
+    build_uniform_source_interpolation_matrix,
+)
 
 # PJ2-psin-uniform is the only route that materializes psin by a
 # fixed-point loop. Keep these as route constants instead of user-facing

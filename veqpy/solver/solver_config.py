@@ -77,16 +77,14 @@ class SolverConfig:
     method: str | None = None
     max_residual: float = 1e-6
     max_evaluations: int = 1000
-    enable_warmstart: bool = False
     initial_policy: str | None = None
-    initial_homothetic_lambda: float = 1.0
     enable_fallback: bool = True
     fallback_methods: tuple[str, ...] | list[str] | None = field(default=None)
     enable_verbose: bool = False
     enable_history: bool = True
-    # String default is "fast" for backward-compatible solves.  Passing None is
-    # an explicit request for the library default builder from residual_scale.
-    residual_normalization: str | None = "fast"
+    # Passing None resolves to the same package default; no second normalization
+    # default is hidden behind the nullable form.
+    residual_normalization: str | None = DEFAULT_RESIDUAL_NORMALIZATION
     residual_normalization_floor: float = 1.0
     residual_normalization_max_ratio: float = 1.0e6
     residual_normalization_huber_tau: float = 3.0
@@ -160,12 +158,6 @@ class SolverConfig:
             supported = ", ".join(sorted(SUPPORTED_INITIAL_POLICIES))
             raise ValueError(
                 f"Unsupported initial_policy {self.initial_policy!r}; supported: {supported}."
-            )
-        initial_homothetic_lambda = float(self.initial_homothetic_lambda)
-        if not isfinite(initial_homothetic_lambda):
-            raise ValueError(
-                "SolverConfig.initial_homothetic_lambda must be finite; "
-                f"got {self.initial_homothetic_lambda!r}."
             )
         if not isfinite(max_residual) or max_residual <= 0.0:
             raise ValueError(
@@ -257,7 +249,6 @@ class SolverConfig:
         object.__setattr__(self, "max_residual", max_residual)
         object.__setattr__(self, "max_evaluations", max_evaluations)
         object.__setattr__(self, "initial_policy", initial_policy)
-        object.__setattr__(self, "initial_homothetic_lambda", initial_homothetic_lambda)
         object.__setattr__(self, "enable_fallback", bool(self.enable_fallback))
         object.__setattr__(self, "fallback_methods", tuple(deduped_fallback_methods))
         object.__setattr__(self, "residual_normalization", residual_normalization)
@@ -294,9 +285,6 @@ class SolverConfig:
         tree.add(f"max_residual: {self.max_residual:.6g}")
         tree.add(f"max_evaluations: {self.max_evaluations}")
         tree.add(f"initial_policy: {self.initial_policy}")
-        if self.initial_policy == "homothetic":
-            tree.add(f"initial_homothetic_lambda: {self.initial_homothetic_lambda:.6g}")
-        tree.add(f"enable_warmstart: {self.enable_warmstart}")
         tree.add(f"enable_fallback: {self.enable_fallback}")
         if self.enable_fallback:
             tree.add(f"fallback_methods: {list(self.fallback_methods)}")

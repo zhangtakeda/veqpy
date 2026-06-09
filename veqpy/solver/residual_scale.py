@@ -30,9 +30,8 @@ from veqpy.base.registry import Registry
 # -----------------------------------------------------------------------------
 
 _RESIDUAL_SCALE_BUILDER: Registry[str, Callable] = Registry(str, Callable)
-# Used only when SolverConfig.residual_normalization is None.  The dataclass
-# default remains "fast" for backward-compatible solver behavior.
-DEFAULT_RESIDUAL_NORMALIZATION = "balance"
+# SolverConfig, benchmarks, and GEQDSK workflows all use this same default.
+DEFAULT_RESIDUAL_NORMALIZATION = "fast"
 
 # -----------------------------------------------------------------------------
 # Mode helpers

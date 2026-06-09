@@ -83,9 +83,7 @@ class Solver:
         method: str | None = None,
         max_residual: float | None = None,
         max_evaluations: int | None = None,
-        enable_warmstart: bool | None = None,
         initial_policy: str | None = None,
-        initial_homothetic_lambda: float | None = None,
         enable_fallback: bool | None = None,
         fallback_methods: tuple[str, ...] | list[str] | None = None,
         enable_verbose: bool | None = None,
@@ -109,9 +107,7 @@ class Solver:
             method=method,
             max_residual=max_residual,
             max_evaluations=max_evaluations,
-            enable_warmstart=enable_warmstart,
             initial_policy=initial_policy,
-            initial_homothetic_lambda=initial_homothetic_lambda,
             enable_fallback=enable_fallback,
             fallback_methods=fallback_methods,
             enable_verbose=enable_verbose,
@@ -239,9 +235,7 @@ class Solver:
         method: str | None,
         max_residual: float | None,
         max_evaluations: int | None,
-        enable_warmstart: bool | None,
         initial_policy: str | None,
-        initial_homothetic_lambda: float | None,
         enable_fallback: bool | None,
         fallback_methods: tuple[str, ...] | list[str] | None,
         enable_verbose: bool | None,
@@ -268,12 +262,8 @@ class Solver:
             overrides["max_residual"] = float(max_residual)
         if max_evaluations is not None:
             overrides["max_evaluations"] = int(max_evaluations)
-        if enable_warmstart is not None:
-            overrides["enable_warmstart"] = bool(enable_warmstart)
         if initial_policy is not None:
             overrides["initial_policy"] = str(initial_policy)
-        if initial_homothetic_lambda is not None:
-            overrides["initial_homothetic_lambda"] = float(initial_homothetic_lambda)
         if enable_fallback is not None:
             overrides["enable_fallback"] = bool(enable_fallback)
         if fallback_methods is not None:
@@ -1496,36 +1486,26 @@ def _build_initial_state(operator: Operator, solve_config: SolverConfig) -> np.n
     if initial_policy == "zeros":
         return np.zeros(operator.x_size, dtype=np.float64)
     if initial_policy == "homothetic":
-        return _build_boundary_homothetic_initial_state(
-            operator, boundary_slope_factor=solve_config.initial_homothetic_lambda
-        )
+        return _build_boundary_homothetic_initial_state(operator)
     if initial_policy == "warm":
         raise RuntimeError("_build_initial_state('warm') needs the current solver x0")
     raise ValueError(f"Unsupported initial_policy {initial_policy!r}")
 
 
-def _build_boundary_homothetic_initial_state(
-    operator: Operator, *, boundary_slope_factor: float = 1.0
-) -> np.ndarray:
+def _build_boundary_homothetic_initial_state(operator: Operator) -> np.ndarray:
     """Return a cheap boundary-scaled x0 for nested, homothetic surfaces.
 
-    ``boundary_slope_factor`` sets the target boundary slope ratio
-    ``u_m'(1)=lambda*offset`` for each active c/s mode. The default ``1.0``
-    matches homothetic scaling; smaller values relax the boundary more
-    aggressively.
+    The operator uses one conservative boundary-slope estimate rather than a
+    separate public scale factor.
     """
 
-    return _build_boundary_slope_initial_state(
-        operator, boundary_slope_factor=boundary_slope_factor
-    )
+    return _build_boundary_slope_initial_state(operator)
 
 
-def _build_boundary_slope_initial_state(
-    operator: Operator, *, boundary_slope_factor: float
-) -> np.ndarray:
-    """Set first c/s coefficients so ``u_m'(1)=lambda*offset``."""
+def _build_boundary_slope_initial_state(operator: Operator) -> np.ndarray:
+    """Build the operator-owned boundary-slope initial state."""
 
-    return operator.build_boundary_slope_initial_state(boundary_slope_factor=boundary_slope_factor)
+    return operator.build_boundary_slope_initial_state()
 
 
 def _accepted_residual_norm(solve_config: SolverConfig) -> float:

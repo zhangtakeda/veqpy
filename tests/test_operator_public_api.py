@@ -5,6 +5,16 @@ import pytest
 from helpers import tiny_operator
 from numpy.testing import assert_allclose
 
+from veqpy.engine.numba_source import (
+    DEFAULT_LOCAL_BARYCENTRIC_STENCIL as ENGINE_LOCAL_BARYCENTRIC_STENCIL,
+)
+from veqpy.math import (
+    DEFAULT_LOCAL_BARYCENTRIC_STENCIL,
+    SOURCE_INTERP_DEFAULT,
+    normalize_source_interpolation_kind,
+)
+from veqpy.operator import Operator
+
 
 def test_operator_residual_interfaces_and_in_place_outputs() -> None:
     operator = tiny_operator()
@@ -30,6 +40,13 @@ def test_operator_residual_interfaces_and_in_place_outputs() -> None:
 
     residual_stage = operator.stage_d_residual()
     assert residual_stage.shape == (operator.x_size,)
+
+
+def test_source_interpolation_default_is_shared() -> None:
+    assert normalize_source_interpolation_kind(None) == SOURCE_INTERP_DEFAULT
+    source_interpolation_field = Operator.__dataclass_fields__["source_interpolation_kind"]
+    assert source_interpolation_field.default == SOURCE_INTERP_DEFAULT
+    assert ENGINE_LOCAL_BARYCENTRIC_STENCIL == DEFAULT_LOCAL_BARYCENTRIC_STENCIL
 
 
 def test_operator_validation_and_snapshot_helpers() -> None:

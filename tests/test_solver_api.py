@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import inspect
+
 import numpy as np
 import pytest
 from helpers import tiny_operator
 
 from veqpy.solver import Solver, SolverConfig, SolverResult
+from veqpy.solver.residual_scale import DEFAULT_RESIDUAL_NORMALIZATION
 
 
 def test_solver_config_normalizes_aliases_and_validates_methods() -> None:
@@ -26,6 +29,24 @@ def test_solver_config_normalizes_aliases_and_validates_methods() -> None:
         SolverConfig(collocation_weight=1.5)
     with pytest.raises(ValueError, match="max_residual"):
         SolverConfig(max_residual=0.0)
+
+
+def test_solver_warm_start_interface_uses_initial_policy_only() -> None:
+    assert "enable_warmstart" not in SolverConfig.__dataclass_fields__
+    assert "enable_warmstart" not in inspect.signature(Solver.solve).parameters
+
+
+def test_solver_default_normalization_is_single_source() -> None:
+    assert DEFAULT_RESIDUAL_NORMALIZATION == "fast"
+    assert SolverConfig().residual_normalization == DEFAULT_RESIDUAL_NORMALIZATION
+    assert SolverConfig(residual_normalization=None).residual_normalization == (
+        DEFAULT_RESIDUAL_NORMALIZATION
+    )
+
+
+def test_solver_homothetic_lambda_interface_is_removed() -> None:
+    assert "initial_homothetic_lambda" not in SolverConfig.__dataclass_fields__
+    assert "initial_homothetic_lambda" not in inspect.signature(Solver.solve).parameters
 
 
 def test_solver_result_copies_input_arrays_and_validates_rank() -> None:

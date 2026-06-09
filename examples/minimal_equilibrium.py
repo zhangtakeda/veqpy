@@ -175,7 +175,6 @@ def main() -> None:
         operator=Operator(grid=solve_grid, case=case),
         config=SolverConfig(
             method="hybr",
-            enable_warmstart=False,
             enable_verbose=False,
             enable_history=False,
         ),
@@ -185,7 +184,7 @@ def main() -> None:
         solver.solve()
         solver.reset()
 
-    solver.solve(enable_warmstart=False, enable_verbose=False, enable_history=False)
+    solver.solve(enable_verbose=False, enable_history=False)
     print(solver.result)
     equilibrium = solver.build_equilibrium()
     equilibrium.plot(outdir / "demo_equilibrium.png", grid=plot_grid)

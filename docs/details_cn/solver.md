@@ -36,16 +36,12 @@ Solver 自己持有一个 packed 向量 `Solver.x0`。构造 `Solver` 时，它�
 
 `homothetic` 初值是一个廉价的几何初猜，面向近似嵌套磁面。它委托给 operator
 的 boundary-slope estimate: active Fourier shaping 系数会从边界 offset 推出
-首项系数，`h` 在 source profile 非均匀时使用 Shafranov-shift 估计。
-`initial_homothetic_lambda` 作为预期边界斜率因子被配置层接收；当前 operator
-侧实现保持保守估计，不随该值改变。
+首项系数，`h` 在 source profile 非均匀时使用 Shafranov-shift 估计。该初值
+使用 operator 侧的一套保守估计，不再暴露额外的 scale factor。
 
 当本次求解使用显式 `x0`、zeros、homothetic 或 case-encoded 初值时，operator
 会在 attempt 前使 route-local source state 失效。`warm` 则保留当前 `x0` 对应
 的 source state。
-
-`enable_warmstart` 会保存在 `SolverConfig` 中，但实际选择本轮初值的是显式
-`x0` 参数或 `initial_policy="warm"`。
 
 ## 求解流程
 
@@ -79,9 +75,9 @@ operator 的 raw residual，不是优化器内部使用的缩放 residual。
 | `balance` / `balanced` / `block_huber` | 用 Huber-style RMS、floor 和最大 scale ratio 构造 robust block scale |
 | `safe` / `block_sensitivity` | 将 robust block amplitude 与有限差分 sensitivity probe 合并 |
 
-默认 config 使用 `fast`。若传入 `residual_normalization=None`，会归一到库默认
-builder 名称，目前是 `balance`。对于 `hybr`，启用 normalization 时还会收紧
-初始 trust-region factor，以减少缩放 residual 空间中的过大首步。
+默认 config 使用 `fast`。若传入 `residual_normalization=None`，也会归一到同一个
+包默认值。对于 `hybr`，启用 normalization 时还会收紧初始 trust-region factor，
+以减少缩放 residual 空间中的过大首步。
 
 ## Collocation Polish
 

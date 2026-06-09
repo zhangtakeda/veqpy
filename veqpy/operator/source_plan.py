@@ -23,6 +23,7 @@ from veqpy.engine.numba_source import (
     source_parameterization_for_route_key,
 )
 from veqpy.math.interpolate import (
+    SOURCE_INTERP_DEFAULT,
     normalize_source_interpolation_kind,
     source_interpolation_kind_is_barycentric,
 )
@@ -101,7 +102,7 @@ def build_source_plan(
     *,
     case: OperatorCase,
     source_route_spec: object,
-    interpolation_kind: str = "cubic",
+    interpolation_kind: str = SOURCE_INTERP_DEFAULT,
 ) -> SourcePlan:
     """Build the immutable source plan for an ``OperatorCase``."""
     # Parameterization is route-specific.  For example PP/psin/uniform samples

@@ -150,7 +150,6 @@ def build_operator_layout(
         profile_stage_runner=profile_stage_runner,
         profile_postprocess_runner=profile_postprocess_runner,
         geometry_stage_runner=geometry_stage_runner,
-        source_eval_runner=source_eval_runner,
         source_stage_runner=source_stage_runner,
         residual_full_stage_runner_into=residual_full_stage_runner_into,
         residual_full_stage_runner=residual_full_stage_runner,

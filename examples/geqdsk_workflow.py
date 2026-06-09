@@ -116,7 +116,6 @@ BOUNDARY_MAXTOL = 1.0
 SOLVER_METHOD = "hybr"
 SOLVER_MAXFEV = 2000
 SOLVER_INITIAL_POLICY = "homothetic"
-SOLVER_INITIAL_HOMOTHETIC_LAMBDA = 1.0
 SOLVER_WARMUP_RUNS = 1
 SOLVER_TIMING_REPEATS = 5
 
@@ -371,8 +370,6 @@ def build_solver(case: OperatorCase, solve_grid: Grid) -> Solver:
             method=SOLVER_METHOD,
             max_evaluations=SOLVER_MAXFEV,
             initial_policy=SOLVER_INITIAL_POLICY,
-            initial_homothetic_lambda=SOLVER_INITIAL_HOMOTHETIC_LAMBDA,
-            enable_warmstart=False,
             enable_fallback=False,
             enable_verbose=False,
             enable_history=False,
@@ -384,9 +381,7 @@ def solve_existing_solver_once(solver: Solver) -> tuple[Solver, float]:
     solver.solve(
         enable_verbose=False,
         enable_history=False,
-        enable_warmstart=False,
         initial_policy=SOLVER_INITIAL_POLICY,
-        initial_homothetic_lambda=SOLVER_INITIAL_HOMOTHETIC_LAMBDA,
         enable_fallback=False,
     )
     if solver.result is None:

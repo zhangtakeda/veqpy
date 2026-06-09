@@ -27,9 +27,9 @@ from veqpy.engine import (
     full_differentiation,
     full_integration,
 )
-from veqpy.math.calculus import make_calculus
+from veqpy.math.calculus import DEFAULT_CALCULUS, make_calculus
 from veqpy.math.fast import colwise_weighted_sum_into, dot, rowwise_sum_into
-from veqpy.math.quadrature import make_quadrature
+from veqpy.math.quadrature import DEFAULT_QUADRATURE, make_quadrature
 
 
 class Grid(Reactive, Serial):
@@ -52,8 +52,8 @@ class Grid(Reactive, Serial):
         L_max: int = 20,
         M_max: int = 20,
         K_max: int | None = None,
-        quadrature_scheme: str = "legendre",
-        calculus_scheme: str = "spectral",
+        quadrature_scheme: str = DEFAULT_QUADRATURE,
+        calculus_scheme: str = DEFAULT_CALCULUS,
     ) -> None:
         super().__init__()
 

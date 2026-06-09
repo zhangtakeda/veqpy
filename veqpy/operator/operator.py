@@ -21,6 +21,7 @@ import numpy as np
 
 from veqpy.layout.binding import build_operator_layout
 from veqpy.layout.runtime import OperatorLayout
+from veqpy.math.interpolate import SOURCE_INTERP_DEFAULT
 from veqpy.model.equilibrium import Equilibrium
 from veqpy.model.grid import Grid
 from veqpy.model.profile import Profile
@@ -61,7 +62,7 @@ class Operator:
     grid: InitVar[Grid]
     case: OperatorCase = field(repr=False)
     fix_rho: float = 0.05
-    source_interpolation_kind: str = "barycentric"
+    source_interpolation_kind: str = SOURCE_INTERP_DEFAULT
     plan: OperatorBuildPlan = field(init=False, repr=False)
     profile_workspace: ProfileWorkspace = field(init=False, repr=False)
     geometry_workspace: GeometryWorkspace = field(init=False, repr=False)
@@ -161,9 +162,7 @@ class Operator:
 
         return self.profile_workspace.active_profile_blocks()
 
-    def build_boundary_slope_initial_state(
-        self, *, boundary_slope_factor: float = 1.0
-    ) -> np.ndarray:
+    def build_boundary_slope_initial_state(self) -> np.ndarray:
         """Build a geometrically-motivated packed x0 in a single pass.
 
         c/s Fourier profiles use ``-offset / (2*p + 1)``.
@@ -175,7 +174,6 @@ class Operator:
 
         pw = self.profile_workspace
         x = np.zeros(self.plan.x_size, dtype=np.float64)
-        del boundary_slope_factor
 
         h0_est = _estimate_h0_from_case(self.case)
         if h0_est == 0.0:

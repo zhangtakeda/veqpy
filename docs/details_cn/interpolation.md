@@ -24,7 +24,7 @@ $$
 | 全局 Lagrange / barycentric | 任意互异节点之间的通用插值 |
 | `linear`, `quadratic`, `cubic` | uniform source 的局部多项式插值 |
 | `not-a-knot` | uniform source 的三次样条插值 |
-| `barycentric` | uniform source 的局部 barycentric stencil，当前 operator 默认使用 |
+| `barycentric` | uniform source 的局部 barycentric stencil，当前包默认使用 |
 
 局部格式只依赖查询点附近的有限个样本，更适合外部 source 数据的稳健重映射；全局格式保留完整多项式闭包，但每个查询点通常依赖所有源样本。样本数不足时，局部多项式和 spline 会退化到可支持的低阶形式。
 

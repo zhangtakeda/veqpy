@@ -54,7 +54,6 @@ class GeometryLayout:
 class SourceLayout:
     """Executable source stage layout."""
 
-    run_eval: Callable
     run_stage: Callable[[], tuple[float, float]]
 
     def run(self) -> tuple[float, float]:
@@ -116,7 +115,6 @@ class OperatorLayout:
             profile_stage_runner=lambda x: None,
             profile_postprocess_runner=lambda: None,
             geometry_stage_runner=lambda: None,
-            source_eval_runner=lambda *args: (0.0, 0.0),
             source_stage_runner=lambda: (0.0, 0.0),
             residual_full_stage_runner_into=lambda out: out.fill(0.0),
             residual_full_stage_runner=residual_full,
@@ -132,7 +130,6 @@ class OperatorLayout:
         profile_stage_runner: Callable[[np.ndarray], None],
         profile_postprocess_runner: Callable[[], None],
         geometry_stage_runner: Callable[[], None],
-        source_eval_runner: Callable,
         source_stage_runner: Callable[[], tuple[float, float]],
         residual_full_stage_runner_into: Callable[[np.ndarray], None],
         residual_full_stage_runner: Callable[[], np.ndarray],
@@ -147,10 +144,7 @@ class OperatorLayout:
                 run_postprocess=profile_postprocess_runner,
             ),
             geometry=GeometryLayout(run_stage=geometry_stage_runner),
-            source=SourceLayout(
-                run_eval=source_eval_runner,
-                run_stage=source_stage_runner,
-            ),
+            source=SourceLayout(run_stage=source_stage_runner),
             residual=ResidualLayout(
                 run_full_into=residual_full_stage_runner_into,
                 run_full=residual_full_stage_runner,
