@@ -65,8 +65,9 @@ tests/demo/
 tests/benchmark/
 
 # Example outputs, if examples/ is introduced.
-examples/_outputs/
+examples/
+outputs/
 
-# Root-only manuscript generated artifact directories.
+# Root-only manuscript scratch/artifact directories.
 /figures/
 /references/
