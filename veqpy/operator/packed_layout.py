@@ -62,7 +62,9 @@ ALL_PROFILE_FAMILIES = SHAPE_PROFILE_FAMILIES + PREFIX_PROFILE_FAMILIES
 
 PROFILE_STATIC_KWARGS: dict[str, dict[str, int]] = {
     "psin": {"power": 2},
-    "F": {"envelope_power": 2},
+    # PJ2 recovers FF_psi from F * dF/drho.  Keep the edge F value fixed while
+    # leaving the edge slope free; envelope_power=2 would force dF/drho=0 there.
+    "F": {"envelope_power": 1},
 }
 PROFILE_OFFSET_SPECS: dict[str, float | str] = {
     "h": 0.0,

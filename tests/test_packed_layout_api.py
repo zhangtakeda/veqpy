@@ -4,7 +4,11 @@ import numpy as np
 import pytest
 from numpy.testing import assert_allclose
 
+from veqpy.engine.numba_operator import convert_f_squared_fields_to_f
+from veqpy.model import Grid
+from veqpy.model.profile import Profile
 from veqpy.operator.packed_layout import (
+    PROFILE_STATIC_KWARGS,
     build_active_profile_metadata,
     build_fourier_profile_names,
     build_profile_index,
@@ -18,6 +22,8 @@ from veqpy.operator.packed_layout import (
     packed_size,
     validate_packed_state,
 )
+from veqpy.workspace.grid_workspace import GridWorkspace
+from veqpy.workspace.profile_workspace import ProfileWorkspace
 
 
 def test_profile_name_order_is_stable() -> None:
@@ -36,6 +42,33 @@ def test_profile_name_order_is_stable() -> None:
         "psin",
         "F",
     )
+
+
+def test_f_profile_keeps_edge_value_but_allows_edge_slope() -> None:
+    grid_workspace = GridWorkspace.from_grid(
+        Grid(Nr=5, Nt=4, M_max=1, L_max=1, quadrature_scheme="uniform")
+    )
+    workspace = ProfileWorkspace(
+        nr=grid_workspace.Nr,
+        m_max=grid_workspace.M_max,
+        profile_names=("F",),
+        profile_index={"F": 0},
+        active_profile_ids=np.array([0], dtype=np.int64),
+        profile_L=np.array([0], dtype=np.int64),
+    )
+    profile = Profile(
+        scale=1.0,
+        offset=1.0,
+        coeff=np.array([1.0], dtype=np.float64),
+        envelope_power=PROFILE_STATIC_KWARGS["F"]["envelope_power"],
+    )
+
+    workspace.refresh_profile_slot(profile_id=0, profile=profile, grid_workspace=grid_workspace)
+    f_fields = workspace.fields_for("F")
+    convert_f_squared_fields_to_f(f_fields)
+
+    assert_allclose(f_fields[0, -1], 1.0)
+    assert abs(f_fields[1, -1]) > 1.0e-12
 
 
 def test_degree_first_layout_encode_decode_and_active_metadata() -> None:

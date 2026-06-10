@@ -456,6 +456,14 @@ def _fill_pf_psin_integrand(
 
 
 @njit(cache=True, fastmath=True, nogil=True)
+def _weighted_profile_sign(values: np.ndarray, weights: np.ndarray) -> float:
+    weighted = dot(values, weights)
+    if weighted < 0.0:
+        return -1.0
+    return 1.0
+
+
+@njit(cache=True, fastmath=True, nogil=True)
 def _fill_g1n_psin_integrand(
     out: np.ndarray,
     JdivR: np.ndarray,
@@ -1034,7 +1042,7 @@ def _update_pf_from_rho_inputs_with_scratch(
         # With no global Ip/beta target, PF determines both alpha scales from
         # the integrated source profiles.  Constrained paths solve only alpha1
         # and derive alpha2 from the normalized psin_r scale.
-        alpha2 = integral_prof
+        alpha2 = _weighted_profile_sign(heat_input, weights) * integral_prof
         alpha1 = -dot(heat_input, weights) / alpha2
         scaled_ratio_into(out_Pn_psin, heat_input, out_psin_r, 1.0 / (alpha1 * alpha2))
         scaled_ratio_into(out_FFn_psin, current_input, out_psin_r, 1.0 / (alpha1 * alpha2))
@@ -1060,7 +1068,7 @@ def _update_pf_from_rho_inputs_with_scratch(
         scratch_aux = source_scratch_1d[_SLOT_AUX0]
         _compute_Pn_out(scratch_aux, heat_input, accumulator, weights)
         c1 = 0.5 * beta * B0**2 * dot(V_r, weights) / weighted_dot(scratch_aux, V_r, weights)
-        alpha1 = np.sqrt(c1 / c2)
+        alpha1 = _weighted_profile_sign(heat_input, weights) * np.sqrt(c1 / c2)
     else:
         raise ValueError("PF does not support applying Ip and beta constraints simultaneously")
     alpha2 = c2 * alpha1
@@ -1103,16 +1111,18 @@ def _update_pf_from_psin_uniform_inputs_with_scratch(
     full_integration(out_psin_r, integrand, accumulator)
     out_psin_r *= -1.0
     out_psin_r /= Kn
+    psi_scale_sign = _weighted_profile_sign(out_psin_r, weights)
+    if psi_scale_sign < 0.0:
+        out_psin_r *= -1.0
     _regularize_psin_r(out_psin_r, rho, n_axis_fix)
-    prof = out_psin_r
-    integral_prof = dot(prof, weights)
+    integral_prof = dot(out_psin_r, weights)
     out_psin_r /= integral_prof
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
     _update_psin_coordinate(out_psin, out_psin_r, accumulator)
     if (not has_Ip) and (not has_beta):
-        alpha2 = integral_prof
+        alpha2 = psi_scale_sign * integral_prof
         pressure_profile = source_scratch_1d[_SLOT_AUX0]
-        product_into(pressure_profile, heat_input, prof)
+        product_into(pressure_profile, heat_input, out_psin_r)
         alpha1 = -dot(pressure_profile, weights)
         scale_into(out_Pn_psin, heat_input, 1.0 / alpha1)
         scale_into(out_FFn_psin, current_input, 1.0 / alpha1)
@@ -1143,7 +1153,7 @@ def _update_pf_from_psin_uniform_inputs_with_scratch(
         scratch_aux = source_scratch_1d[_SLOT_AUX1]
         _compute_Pn_out(scratch_aux, scratch_Pn_r, accumulator, weights)
         c1 = 0.5 * beta * B0**2 * dot(V_r, weights) / weighted_dot(scratch_aux, V_r, weights)
-        alpha1 = np.sqrt(c1 / c2)
+        alpha1 = _weighted_profile_sign(heat_input, weights) * np.sqrt(c1 / c2)
     else:
         raise ValueError("PF does not support applying Ip and beta constraints simultaneously")
     alpha2 = c2 * alpha1
@@ -1183,16 +1193,18 @@ def _update_pf_from_psin_grid_inputs_with_scratch(
     full_integration(out_psin_r, integrand, accumulator)
     out_psin_r *= -1.0
     out_psin_r /= Kn
+    psi_scale_sign = _weighted_profile_sign(out_psin_r, weights)
+    if psi_scale_sign < 0.0:
+        out_psin_r *= -1.0
     _regularize_psin_r(out_psin_r, rho, n_axis_fix)
-    prof = out_psin_r
-    integral_prof = dot(prof, weights)
+    integral_prof = dot(out_psin_r, weights)
     out_psin_r /= integral_prof
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
     _update_psin_coordinate(out_psin, out_psin_r, accumulator)
     if (not has_Ip) and (not has_beta):
-        alpha2 = integral_prof
+        alpha2 = psi_scale_sign * integral_prof
         pressure_profile = source_scratch_1d[_SLOT_AUX0]
-        product_into(pressure_profile, heat_input, prof)
+        product_into(pressure_profile, heat_input, out_psin_r)
         alpha1 = -dot(pressure_profile, weights)
         scale_into(out_Pn_psin, heat_input, 1.0 / alpha1)
         scale_into(out_FFn_psin, current_input, 1.0 / alpha1)
@@ -1223,7 +1235,7 @@ def _update_pf_from_psin_grid_inputs_with_scratch(
         scratch_aux = source_scratch_1d[_SLOT_AUX1]
         _compute_Pn_out(scratch_aux, scratch_Pn_r, accumulator, weights)
         c1 = 0.5 * beta * B0**2 * dot(V_r, weights) / weighted_dot(scratch_aux, V_r, weights)
-        alpha1 = np.sqrt(c1 / c2)
+        alpha1 = _weighted_profile_sign(heat_input, weights) * np.sqrt(c1 / c2)
     else:
         raise ValueError("PF does not support applying Ip and beta constraints simultaneously")
     alpha2 = c2 * alpha1

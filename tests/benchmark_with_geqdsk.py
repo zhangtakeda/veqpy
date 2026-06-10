@@ -73,6 +73,7 @@ except Exception:  # pragma: no cover - only exercised on incompatible installs.
 MU0 = 4.0e-7 * math.pi
 SCHEMA_VERSION = 1
 DEFAULT_GEQDSK_NAME = "SOLOVEV.geqdsk"
+PLOT = True
 
 
 def _discover_project_root() -> Path:
@@ -137,6 +138,9 @@ SOLVER_MAX_RESIDUAL = 1.0e-7
 SOLVER_MAX_EVALUATIONS = 2000
 SOLVER_INITIAL_POLICY = "homothetic"
 ROUTE_SOLVER_INITIAL_POLICY: str | None = None
+EQUIVALENCE_SHAPE_REL_RMS_MAX = 1.0e-2
+EQUIVALENCE_PSI_R_REL_RMS_MAX = 5.0e-2
+EQUIVALENCE_FF_PSI_REL_RMS_MAX = 5.0e-2
 
 SURFACE_LEVELS = tuple(float(x) for x in np.linspace(0.1, 1.0, 10))
 PSI_R_TRUTH_CONTOUR_LEVELS = tuple(float(x) for x in np.linspace(0.02, 1.0, 64))
@@ -226,6 +230,7 @@ class GeqdskBenchmarkResult:
     spec: GeqdskBenchmarkSpec
     success: bool
     solver_success: bool | None
+    equivalence_success: bool | None
     error_type: str | None
     message: str | None
     traceback: str | None
@@ -1132,17 +1137,21 @@ def compute_profile_metrics(
     truth: GeqdskTruthBundle,
     equilibrium: Any,
     *,
+    truth_orientation: float,
     rho_eval: Sequence[float] = PROFILE_RHO_EVAL,
     psin_eval: Sequence[float] = PROFILE_PSIN_EVAL,
 ) -> dict[str, float | int | None]:
     rho_eval_arr = np.asarray(rho_eval, dtype=np.float64)
     psin_eval_arr = np.asarray(psin_eval, dtype=np.float64)
-    orientation = _truth_flux_orientation(truth, equilibrium)
 
-    psi_r_truth = orientation * truth.psi_span * _profile_derivative(
-        truth.rho_geom_axis,
-        truth.psin_geom_axis,
-        rho_eval_arr,
+    psi_r_truth = (
+        truth_orientation
+        * truth.psi_span
+        * _profile_derivative(
+            truth.rho_geom_axis,
+            truth.psin_geom_axis,
+            rho_eval_arr,
+        )
     )
     psi_r_actual_axis = np.asarray(equilibrium.rho, dtype=np.float64)
     psi_r_actual_profile = float(equilibrium.alpha2) * np.asarray(
@@ -1151,7 +1160,7 @@ def compute_profile_metrics(
     psi_r_actual = _profile_interp(psi_r_actual_axis, psi_r_actual_profile, rho_eval_arr)
     psi_r_rms, psi_r_max = _relative_rms_max(psi_r_actual, psi_r_truth)
 
-    ff_psi_truth = orientation * _profile_interp(
+    ff_psi_truth = truth_orientation * _profile_interp(
         truth.psin_profile_axis,
         truth.ff_psi_profile,
         psin_eval_arr,
@@ -1178,6 +1187,7 @@ def compute_all_metrics(
     equilibrium: Any,
     solve_grid: Grid,
     *,
+    truth_orientation: float,
     metric_nr: int = METRIC_NR,
     metric_nt: int = METRIC_NT,
 ) -> dict[str, float | int | None]:
@@ -1190,8 +1200,51 @@ def compute_all_metrics(
     metric_equilibrium = equilibrium.resample(metric_grid)
     metrics: dict[str, float | int | None] = {}
     metrics.update(compute_shape_metrics(truth, metric_equilibrium))
-    metrics.update(compute_profile_metrics(truth, equilibrium))
+    metrics.update(
+        compute_profile_metrics(
+            truth,
+            equilibrium,
+            truth_orientation=truth_orientation,
+        )
+    )
     return metrics
+
+
+def _metric_within_limit(value: float | int | None, limit: float) -> bool:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(numeric) and numeric <= limit
+
+
+def _equivalence_success(metrics: Mapping[str, float | int | None]) -> bool:
+    return (
+        _metric_within_limit(
+            metrics.get("shape_rel_rms_error"),
+            EQUIVALENCE_SHAPE_REL_RMS_MAX,
+        )
+        and _metric_within_limit(
+            metrics.get("psi_r_rel_rms_error"),
+            EQUIVALENCE_PSI_R_REL_RMS_MAX,
+        )
+        and _metric_within_limit(
+            metrics.get("ff_psi_rel_rms_error"),
+            EQUIVALENCE_FF_PSI_REL_RMS_MAX,
+        )
+    )
+
+
+def _equivalence_failure_message(metrics: Mapping[str, float | int | None]) -> str:
+    return (
+        "equivalence metric threshold exceeded: "
+        f"shape<={EQUIVALENCE_SHAPE_REL_RMS_MAX:.1e}, "
+        f"psi_r<={EQUIVALENCE_PSI_R_REL_RMS_MAX:.1e}, "
+        f"FF_psi<={EQUIVALENCE_FF_PSI_REL_RMS_MAX:.1e}; "
+        f"got shape={_format_float(metrics.get('shape_rel_rms_error'), 3)}, "
+        f"psi_r={_format_float(metrics.get('psi_r_rel_rms_error'), 3)}, "
+        f"FF_psi={_format_float(metrics.get('ff_psi_rel_rms_error'), 3)}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1224,6 +1277,7 @@ def _plot_case_comparison(
     spec: GeqdskBenchmarkSpec,
     output_path: Path,
     *,
+    truth_orientation: float,
     metric_nr: int = METRIC_NR,
     metric_nt: int = METRIC_NT,
 ) -> None:
@@ -1244,11 +1298,14 @@ def _plot_case_comparison(
     ax_shape.set_ylabel("Z")
 
     rho_eval = np.asarray(PROFILE_RHO_EVAL, dtype=np.float64)
-    orientation = _truth_flux_orientation(truth, equilibrium)
-    psi_r_truth = orientation * truth.psi_span * _profile_derivative(
-        truth.rho_geom_axis,
-        truth.psin_geom_axis,
-        rho_eval,
+    psi_r_truth = (
+        truth_orientation
+        * truth.psi_span
+        * _profile_derivative(
+            truth.rho_geom_axis,
+            truth.psin_geom_axis,
+            rho_eval,
+        )
     )
     psi_r_actual = _profile_interp(
         np.asarray(equilibrium.rho, dtype=np.float64),
@@ -1262,7 +1319,7 @@ def _plot_case_comparison(
     ax_psi_r.legend(loc="best", fontsize=8)
 
     psin_eval = np.asarray(PROFILE_PSIN_EVAL, dtype=np.float64)
-    ff_truth = orientation * _profile_interp(
+    ff_truth = truth_orientation * _profile_interp(
         truth.psin_profile_axis,
         truth.ff_psi_profile,
         psin_eval,
@@ -1323,6 +1380,7 @@ def run_benchmark_case(
         if elapsed is not None:
             timing_values.append(elapsed)
         equilibrium = solver.build_equilibrium()
+        truth_orientation = _truth_flux_orientation(truth, source.canonical_equilibrium)
 
         # Optional timing repeats are independent solves so warm-start leakage does
         # not hide regressions.  Metrics are computed from the first successful
@@ -1342,6 +1400,7 @@ def run_benchmark_case(
             truth,
             equilibrium,
             solve_grid,
+            truth_orientation=truth_orientation,
             metric_nr=metric_nr,
             metric_nt=metric_nt,
         )
@@ -1353,6 +1412,7 @@ def run_benchmark_case(
                 solve_grid,
                 spec,
                 plots_dir / f"{spec.case_name}_compare.png",
+                truth_orientation=truth_orientation,
                 metric_nr=metric_nr,
                 metric_nt=metric_nt,
             )
@@ -1363,12 +1423,24 @@ def run_benchmark_case(
         std_ms = float(np.std(timing_values)) if len(timing_values) > 1 else None
 
         solver_success = bool(_result_field(result, "success"))
+        equivalence_success = _equivalence_success(metrics) if solver_success else False
+        case_success = solver_success and equivalence_success
+        solver_message = str(_result_field(result, "message") or "")
         return GeqdskBenchmarkResult(
             spec=spec,
-            success=solver_success,
+            success=case_success,
             solver_success=solver_success,
-            error_type=None if solver_success else "SolverResultFailure",
-            message=str(_result_field(result, "message") or ""),
+            equivalence_success=equivalence_success,
+            error_type=(
+                None
+                if case_success
+                else ("SolverResultFailure" if not solver_success else "EquivalenceMetricFailure")
+            ),
+            message=(
+                solver_message
+                if not solver_success or case_success
+                else _equivalence_failure_message(metrics)
+            ),
             traceback=None,
             residual_norm_final=_as_float(
                 _result_field(result, "residual_norm_final", "residual_norm")
@@ -1398,6 +1470,7 @@ def run_benchmark_case(
             spec=spec,
             success=False,
             solver_success=None,
+            equivalence_success=None,
             error_type=type(exc).__name__,
             message=str(exc),
             traceback=traceback.format_exc(),
@@ -1438,6 +1511,7 @@ def benchmark_result_to_dict(
         "input_kind": result.spec.input_kind,
         "success": result.success,
         "solver_success": result.solver_success,
+        "equivalence_success": result.equivalence_success,
         "error_type": result.error_type,
         "message": result.message,
         "residual_norm_final": result.residual_norm_final,
@@ -1471,7 +1545,9 @@ def _best_or_worst_case(
     *,
     largest: bool = True,
 ) -> dict[str, Any] | None:
-    candidates = [case for case in cases if case.get("success") and case.get(key) is not None]
+    candidates = [
+        case for case in cases if case.get("solver_success") and case.get(key) is not None
+    ]
     if not candidates:
         return None
     return (
@@ -1538,6 +1614,9 @@ def _truth_summary(truth: GeqdskTruthBundle) -> dict[str, Any]:
 def _payload_summary(cases: Sequence[dict[str, Any]]) -> dict[str, Any]:
     failure_count = sum(1 for case in cases if not case.get("success"))
     solver_not_success_count = sum(1 for case in cases if case.get("solver_success") is False)
+    equivalence_not_success_count = sum(
+        1 for case in cases if case.get("equivalence_success") is False
+    )
     worst_shape = _best_or_worst_case(cases, "shape_rel_rms_error")
     worst_psi_r = _best_or_worst_case(cases, "psi_r_rel_rms_error")
     worst_ff = _best_or_worst_case(cases, "ff_psi_rel_rms_error")
@@ -1545,6 +1624,7 @@ def _payload_summary(cases: Sequence[dict[str, Any]]) -> dict[str, Any]:
         {
             "failure_count": failure_count,
             "solver_not_success_count": solver_not_success_count,
+            "equivalence_not_success_count": equivalence_not_success_count,
             "worst_shape_case": None if worst_shape is None else worst_shape["case_name"],
             "worst_shape_rel_rms_error": None
             if worst_shape is None
@@ -1629,6 +1709,11 @@ def build_payload(
                 "canonical_initial_policy": SOLVER_INITIAL_POLICY,
                 "route_initial_policy": ROUTE_SOLVER_INITIAL_POLICY,
             },
+            "equivalence_thresholds": {
+                "shape_rel_rms_error": EQUIVALENCE_SHAPE_REL_RMS_MAX,
+                "psi_r_rel_rms_error": EQUIVALENCE_PSI_R_REL_RMS_MAX,
+                "ff_psi_rel_rms_error": EQUIVALENCE_FF_PSI_REL_RMS_MAX,
+            },
         },
         "summary": _payload_summary(cases),
         "cases": cases,
@@ -1661,7 +1746,7 @@ def write_report(path: Path, payload: Mapping[str, Any]) -> None:
     geqdsk = payload["geqdsk"]
     canonical = payload["canonical"]
 
-    success_cases = [case for case in cases if case.get("success")]
+    solver_success_cases = [case for case in cases if case.get("solver_success")]
     failures = [case for case in cases if not case.get("success")]
 
     lines: list[str] = []
@@ -1677,6 +1762,7 @@ def write_report(path: Path, payload: Mapping[str, Any]) -> None:
     )
     lines.append(f"failure_count             : {summary.get('failure_count')}")
     lines.append(f"solver_not_success_count  : {summary.get('solver_not_success_count')}")
+    lines.append(f"equivalence_fail_count    : {summary.get('equivalence_not_success_count')}")
     lines.append(f"worst_shape_case          : {summary.get('worst_shape_case')}")
     lines.append(f"worst_psi_r_case          : {summary.get('worst_psi_r_case')}")
     lines.append(f"worst_FF_psi_case         : {summary.get('worst_ff_psi_case')}")
@@ -1684,9 +1770,10 @@ def write_report(path: Path, payload: Mapping[str, Any]) -> None:
 
     lines.append("Case results")
     lines.append(
-        "case".ljust(30) + " | shape_rms | psi_r_rms | FF_psi_rms | residual   | evals | ok"
+        "case".ljust(30)
+        + " | shape_rms | psi_r_rms | FF_psi_rms | residual   | evals | solver | equiv | ok"
     )
-    lines.append("-" * 96)
+    lines.append("-" * 115)
     for case in cases:
         lines.append(
             str(case["case_name"]).ljust(30)
@@ -1701,6 +1788,10 @@ def write_report(path: Path, payload: Mapping[str, Any]) -> None:
             + " | "
             + str(case.get("function_evaluations") or "-").rjust(5)
             + " | "
+            + str(case.get("solver_success")).rjust(6)
+            + " | "
+            + str(case.get("equivalence_success")).rjust(5)
+            + " | "
             + str(case.get("success"))
         )
     lines.append("")
@@ -1712,7 +1803,7 @@ def write_report(path: Path, payload: Mapping[str, Any]) -> None:
     ):
         lines.append(title)
         ranked = sorted(
-            [case for case in success_cases if case.get(key) is not None],
+            [case for case in solver_success_cases if case.get(key) is not None],
             key=lambda item: float(item[key]),
             reverse=True,
         )[:10]
@@ -1739,6 +1830,8 @@ def _case_progress_status(result: GeqdskBenchmarkResult) -> str:
         return "OK"
     if result.solver_success is False:
         return "SOLVER_FAIL"
+    if result.equivalence_success is False:
+        return "METRIC_FAIL"
     return "EXCEPTION"
 
 
@@ -1765,6 +1858,7 @@ def _format_case_progress_line(
         f"[{index:02d}/{total:02d}] {result.spec.case_name:<30} "
         f"{_case_progress_status(result):<11} "
         f"solver={result.solver_success!s:<5} "
+        f"equiv={result.equivalence_success!s:<5} "
         f"evals={evals:>5} "
         f"resid={_format_float(result.residual_norm_final).strip():>10} "
         f"shape={_format_float(result.shape_rel_rms_error).strip():>10} "
@@ -1788,7 +1882,7 @@ def run_geqdsk_benchmark(
     output_dir: Path | str | None = None,
     include_timing: bool = True,
     timing_repeats: int = 0,
-    enable_plots: bool = False,
+    enable_plots: bool = PLOT,
     write_artifacts: bool = True,
     write_baseline: bool = False,
     source_sample_count: int = SOURCE_SAMPLE_COUNT,
@@ -1810,6 +1904,8 @@ def run_geqdsk_benchmark(
         output_dir = DEFAULT_OUTPUT_ROOT / case_key
     output_dir = Path(output_dir).expanduser().resolve()
     plots_dir = output_dir / "plots" if enable_plots else None
+    if show_progress and plots_dir is not None:
+        print(f"[plots] writing comparison plots to {plots_dir}", flush=True)
 
     if show_progress:
         print(f"[geqdsk] reading truth case: {geqdsk_path}", flush=True)
@@ -1971,7 +2067,20 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Also write tests/baselines/benchmark_with_geqdsk_<case>_non_timing.json.",
     )
-    parser.add_argument("--plots", action="store_true", help="Write per-case comparison plots.")
+    plot_group = parser.add_mutually_exclusive_group()
+    plot_group.add_argument(
+        "--plots",
+        dest="plots",
+        action="store_true",
+        help="Write per-case comparison plots.",
+    )
+    plot_group.add_argument(
+        "--no-plots",
+        dest="plots",
+        action="store_false",
+        help="Skip per-case comparison plots.",
+    )
+    parser.set_defaults(plots=PLOT)
     parser.add_argument(
         "--timing-repeats",
         type=int,
