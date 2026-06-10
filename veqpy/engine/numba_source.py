@@ -464,6 +464,14 @@ def _weighted_profile_sign(values: np.ndarray, weights: np.ndarray) -> float:
 
 
 @njit(cache=True, fastmath=True, nogil=True)
+def _signed_sqrt_ratio(numerator: float, denominator: float) -> float:
+    ratio = numerator / denominator
+    if ratio < 0.0:
+        return -np.sqrt(-ratio)
+    return np.sqrt(ratio)
+
+
+@njit(cache=True, fastmath=True, nogil=True)
 def _fill_g1n_psin_integrand(
     out: np.ndarray,
     JdivR: np.ndarray,
@@ -488,11 +496,12 @@ def _fill_g1n_rho_integrand(
     R: np.ndarray,
     Pn_r: np.ndarray,
     psin_r: np.ndarray,
+    source_scale: float,
 ) -> np.ndarray:
     nr, nt = out.shape
     for i in range(nr):
-        ffn_i = FFn_r[i]
-        pn_i = Pn_r[i]
+        ffn_i = source_scale * FFn_r[i]
+        pn_i = source_scale * Pn_r[i]
         psin_r_i = psin_r[i]
         for j in range(nt):
             out[i, j] = JdivR[i, j] * (ffn_i + R[i, j] * R[i, j] * pn_i) / psin_r_i
@@ -1025,6 +1034,9 @@ def _update_pf_from_rho_inputs_with_scratch(
     _fill_pf_rho_integrand(integrand, Kn, current_input, Ln_r, V_r, heat_input)
     full_integration(out_psin_r, integrand, accumulator)
     out_psin_r *= -2.0
+    psi_square_sign = _weighted_profile_sign(out_psin_r, weights)
+    if psi_square_sign < 0.0:
+        out_psin_r *= -1.0
     for i in range(out_psin_r.shape[0]):
         if out_psin_r[i] < 1.0e-6:
             out_psin_r[i] = 1.0e-6
@@ -1040,18 +1052,28 @@ def _update_pf_from_rho_inputs_with_scratch(
     _update_psin_coordinate(out_psin, out_psin_r, accumulator)
     if (not has_Ip) and (not has_beta):
         # With no global Ip/beta target, PF determines both alpha scales from
-        # the integrated source profiles.  Constrained paths solve only alpha1
-        # and derive alpha2 from the normalized psin_r scale.
-        alpha2 = _weighted_profile_sign(heat_input, weights) * integral_prof
-        alpha1 = -dot(heat_input, weights) / alpha2
-        scaled_ratio_into(out_Pn_psin, heat_input, out_psin_r, 1.0 / (alpha1 * alpha2))
-        scaled_ratio_into(out_FFn_psin, current_input, out_psin_r, 1.0 / (alpha1 * alpha2))
+        # the integrated source profiles.  Rho-coordinate PF inputs are
+        # derivatives with respect to rho, so their global sign belongs to the
+        # flux-direction gauge carried by alpha2, not to the solved shape.
+        alpha2 = psi_square_sign * integral_prof
+        alpha1 = -dot(heat_input, weights) / integral_prof
+        source_scale = psi_square_sign / (alpha1 * alpha2)
+        scaled_ratio_into(out_Pn_psin, heat_input, out_psin_r, source_scale)
+        scaled_ratio_into(out_FFn_psin, current_input, out_psin_r, source_scale)
         _regularize_ffn_psin(out_FFn_psin, rho, n_axis_fix)
         return alpha1, alpha2
     c2 = integral_prof * integral_prof
     if has_Ip and (not has_beta):
         g1n_integrand = source_scratch_2d[0]
-        _fill_g1n_rho_integrand(g1n_integrand, JdivR, current_input, R, heat_input, out_psin_r)
+        _fill_g1n_rho_integrand(
+            g1n_integrand,
+            JdivR,
+            current_input,
+            R,
+            heat_input,
+            out_psin_r,
+            psi_square_sign,
+        )
         radial_scratch = source_scratch_1d[_SLOT_AUX0]
         nt = g1n_integrand.shape[1]
         for j in range(nt):
@@ -1068,12 +1090,12 @@ def _update_pf_from_rho_inputs_with_scratch(
         scratch_aux = source_scratch_1d[_SLOT_AUX0]
         _compute_Pn_out(scratch_aux, heat_input, accumulator, weights)
         c1 = 0.5 * beta * B0**2 * dot(V_r, weights) / weighted_dot(scratch_aux, V_r, weights)
-        alpha1 = _weighted_profile_sign(heat_input, weights) * np.sqrt(c1 / c2)
+        alpha1 = _signed_sqrt_ratio(c1, c2)
     else:
         raise ValueError("PF does not support applying Ip and beta constraints simultaneously")
     alpha2 = c2 * alpha1
-    scaled_ratio_into(out_Pn_psin, heat_input, out_psin_r, 1.0)
-    scaled_ratio_into(out_FFn_psin, current_input, out_psin_r, 1.0)
+    scaled_ratio_into(out_Pn_psin, heat_input, out_psin_r, psi_square_sign)
+    scaled_ratio_into(out_FFn_psin, current_input, out_psin_r, psi_square_sign)
     _regularize_ffn_psin(out_FFn_psin, rho, n_axis_fix)
     return alpha1, alpha2
 
@@ -1153,7 +1175,7 @@ def _update_pf_from_psin_uniform_inputs_with_scratch(
         scratch_aux = source_scratch_1d[_SLOT_AUX1]
         _compute_Pn_out(scratch_aux, scratch_Pn_r, accumulator, weights)
         c1 = 0.5 * beta * B0**2 * dot(V_r, weights) / weighted_dot(scratch_aux, V_r, weights)
-        alpha1 = _weighted_profile_sign(heat_input, weights) * np.sqrt(c1 / c2)
+        alpha1 = _signed_sqrt_ratio(c1, c2)
     else:
         raise ValueError("PF does not support applying Ip and beta constraints simultaneously")
     alpha2 = c2 * alpha1
@@ -1235,7 +1257,7 @@ def _update_pf_from_psin_grid_inputs_with_scratch(
         scratch_aux = source_scratch_1d[_SLOT_AUX1]
         _compute_Pn_out(scratch_aux, scratch_Pn_r, accumulator, weights)
         c1 = 0.5 * beta * B0**2 * dot(V_r, weights) / weighted_dot(scratch_aux, V_r, weights)
-        alpha1 = _weighted_profile_sign(heat_input, weights) * np.sqrt(c1 / c2)
+        alpha1 = _signed_sqrt_ratio(c1, c2)
     else:
         raise ValueError("PF does not support applying Ip and beta constraints simultaneously")
     alpha2 = c2 * alpha1

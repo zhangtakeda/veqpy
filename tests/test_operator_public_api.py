@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from helpers import tiny_operator
+from helpers import MU0, pf_reference_profiles, tiny_boundary, tiny_grid, tiny_operator
 from numpy.testing import assert_allclose
 
 from veqpy.engine.numba_source import (
@@ -13,7 +13,7 @@ from veqpy.math import (
     SOURCE_INTERP_DEFAULT,
     normalize_source_interpolation_kind,
 )
-from veqpy.operator import Operator
+from veqpy.operator import Operator, OperatorCase
 
 
 def test_operator_residual_interfaces_and_in_place_outputs() -> None:
@@ -64,3 +64,35 @@ def test_operator_validation_and_snapshot_helpers() -> None:
     equilibrium = operator.build_equilibrium(x0)
     assert equilibrium.grid.Nr == operator.plan.grid_workspace.Nr
     assert np.isfinite(equilibrium.Ip)
+
+
+def test_pf_rho_unconstrained_cases_use_positive_flux_branch() -> None:
+    grid = tiny_grid()
+    rho = np.asarray(grid.rho, dtype=np.float64)
+    ffn_psin, pn_psin = pf_reference_profiles(rho * rho)
+    common_kwargs = {
+        "route": "PF",
+        "coordinate": "rho",
+        "nodes": "grid",
+        "profile_coeffs": {"h": [0.0], "k": [0.0], "s1": [0.0]},
+        "boundary": tiny_boundary(),
+        "current_input": ffn_psin * (2.0 * rho),
+    }
+
+    null_case = OperatorCase(
+        **common_kwargs,
+        heat_input=pn_psin * (2.0 * rho) / MU0,
+    )
+    null_operator = Operator(grid, null_case)
+    null_eq = null_operator.build_equilibrium(null_operator.encode_initial_state())
+
+    beta_case = OperatorCase(
+        **common_kwargs,
+        heat_input=pn_psin * (2.0 * rho) / MU0,
+        beta=float(null_eq.beta_t),
+    )
+    beta_operator = Operator(grid, beta_case)
+    beta_eq = beta_operator.build_equilibrium(beta_operator.encode_initial_state())
+
+    assert null_eq.alpha2 > 0.0
+    assert beta_eq.alpha2 > 0.0

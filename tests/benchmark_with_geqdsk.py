@@ -424,6 +424,15 @@ def _p_psi_from_equilibrium(equilibrium: Any) -> np.ndarray:
     return np.asarray(equilibrium.P_r, dtype=np.float64) / _safe_divisor(psi_r)
 
 
+def _pf_flux_direction_is_underdetermined(spec: "GeqdskBenchmarkSpec") -> bool:
+    """Return whether a PF case lacks source data that fixes flux direction."""
+    if spec.mode != "PF":
+        return False
+    if spec.constraint == "beta":
+        return True
+    return spec.coordinate == "rho" and spec.constraint == "null"
+
+
 def _close_curve(points: np.ndarray) -> np.ndarray:
     points = np.asarray(points, dtype=np.float64)
     if points.ndim != 2 or points.shape[1] != 2:
@@ -1138,11 +1147,44 @@ def compute_profile_metrics(
     equilibrium: Any,
     *,
     truth_orientation: float,
+    align_flux_orientation: bool = False,
     rho_eval: Sequence[float] = PROFILE_RHO_EVAL,
     psin_eval: Sequence[float] = PROFILE_PSIN_EVAL,
 ) -> dict[str, float | int | None]:
     rho_eval_arr = np.asarray(rho_eval, dtype=np.float64)
     psin_eval_arr = np.asarray(psin_eval, dtype=np.float64)
+
+    psi_r_actual_axis = np.asarray(equilibrium.rho, dtype=np.float64)
+    psi_r_actual_profile = float(equilibrium.alpha2) * np.asarray(
+        equilibrium.psin_r, dtype=np.float64
+    )
+    psi_r_actual = _profile_interp(psi_r_actual_axis, psi_r_actual_profile, rho_eval_arr)
+
+    ff_psi_actual_axis = np.asarray(equilibrium.psin, dtype=np.float64)
+    ff_psi_actual_profile = _ff_psi_from_equilibrium(equilibrium)
+    ff_psi_actual = _profile_interp(ff_psi_actual_axis, ff_psi_actual_profile, psin_eval_arr)
+
+    if align_flux_orientation:
+        current_orientation = float(truth_orientation)
+        flipped_orientation = -current_orientation
+        current_score = _profile_orientation_error_score(
+            truth,
+            psi_r_actual,
+            ff_psi_actual,
+            orientation=current_orientation,
+            rho_eval=rho_eval_arr,
+            psin_eval=psin_eval_arr,
+        )
+        flipped_score = _profile_orientation_error_score(
+            truth,
+            psi_r_actual,
+            ff_psi_actual,
+            orientation=flipped_orientation,
+            rho_eval=rho_eval_arr,
+            psin_eval=psin_eval_arr,
+        )
+        if flipped_score < current_score:
+            truth_orientation = flipped_orientation
 
     psi_r_truth = (
         truth_orientation
@@ -1153,11 +1195,6 @@ def compute_profile_metrics(
             rho_eval_arr,
         )
     )
-    psi_r_actual_axis = np.asarray(equilibrium.rho, dtype=np.float64)
-    psi_r_actual_profile = float(equilibrium.alpha2) * np.asarray(
-        equilibrium.psin_r, dtype=np.float64
-    )
-    psi_r_actual = _profile_interp(psi_r_actual_axis, psi_r_actual_profile, rho_eval_arr)
     psi_r_rms, psi_r_max = _relative_rms_max(psi_r_actual, psi_r_truth)
 
     ff_psi_truth = truth_orientation * _profile_interp(
@@ -1165,9 +1202,6 @@ def compute_profile_metrics(
         truth.ff_psi_profile,
         psin_eval_arr,
     )
-    ff_psi_actual_axis = np.asarray(equilibrium.psin, dtype=np.float64)
-    ff_psi_actual_profile = _ff_psi_from_equilibrium(equilibrium)
-    ff_psi_actual = _profile_interp(ff_psi_actual_axis, ff_psi_actual_profile, psin_eval_arr)
     ff_psi_rms, ff_psi_max = _relative_rms_max(ff_psi_actual, ff_psi_truth)
 
     return {
@@ -1182,12 +1216,37 @@ def compute_profile_metrics(
     }
 
 
+def _profile_orientation_error_score(
+    truth: GeqdskTruthBundle,
+    psi_r_actual: np.ndarray,
+    ff_psi_actual: np.ndarray,
+    *,
+    orientation: float,
+    rho_eval: np.ndarray,
+    psin_eval: np.ndarray,
+) -> float:
+    psi_r_truth = (
+        float(orientation)
+        * truth.psi_span
+        * _profile_derivative(truth.rho_geom_axis, truth.psin_geom_axis, rho_eval)
+    )
+    ff_psi_truth = float(orientation) * _profile_interp(
+        truth.psin_profile_axis,
+        truth.ff_psi_profile,
+        psin_eval,
+    )
+    psi_r_rms, _ = _relative_rms_max(psi_r_actual, psi_r_truth)
+    ff_psi_rms, _ = _relative_rms_max(ff_psi_actual, ff_psi_truth)
+    return float(psi_r_rms) + float(ff_psi_rms)
+
+
 def compute_all_metrics(
     truth: GeqdskTruthBundle,
     equilibrium: Any,
     solve_grid: Grid,
     *,
     truth_orientation: float,
+    align_flux_orientation: bool = False,
     metric_nr: int = METRIC_NR,
     metric_nt: int = METRIC_NT,
 ) -> dict[str, float | int | None]:
@@ -1205,6 +1264,7 @@ def compute_all_metrics(
             truth,
             equilibrium,
             truth_orientation=truth_orientation,
+            align_flux_orientation=align_flux_orientation,
         )
     )
     return metrics
@@ -1278,6 +1338,7 @@ def _plot_case_comparison(
     output_path: Path,
     *,
     truth_orientation: float,
+    align_flux_orientation: bool = False,
     metric_nr: int = METRIC_NR,
     metric_nt: int = METRIC_NT,
 ) -> None:
@@ -1298,6 +1359,37 @@ def _plot_case_comparison(
     ax_shape.set_ylabel("Z")
 
     rho_eval = np.asarray(PROFILE_RHO_EVAL, dtype=np.float64)
+    psi_r_actual = _profile_interp(
+        np.asarray(equilibrium.rho, dtype=np.float64),
+        float(equilibrium.alpha2) * np.asarray(equilibrium.psin_r, dtype=np.float64),
+        rho_eval,
+    )
+    psin_eval = np.asarray(PROFILE_PSIN_EVAL, dtype=np.float64)
+    ff_actual = _profile_interp(
+        np.asarray(equilibrium.psin, dtype=np.float64),
+        _ff_psi_from_equilibrium(equilibrium),
+        psin_eval,
+    )
+    if align_flux_orientation:
+        current_score = _profile_orientation_error_score(
+            truth,
+            psi_r_actual,
+            ff_actual,
+            orientation=truth_orientation,
+            rho_eval=rho_eval,
+            psin_eval=psin_eval,
+        )
+        flipped_score = _profile_orientation_error_score(
+            truth,
+            psi_r_actual,
+            ff_actual,
+            orientation=-truth_orientation,
+            rho_eval=rho_eval,
+            psin_eval=psin_eval,
+        )
+        if flipped_score < current_score:
+            truth_orientation = -truth_orientation
+
     psi_r_truth = (
         truth_orientation
         * truth.psi_span
@@ -1307,26 +1399,15 @@ def _plot_case_comparison(
             rho_eval,
         )
     )
-    psi_r_actual = _profile_interp(
-        np.asarray(equilibrium.rho, dtype=np.float64),
-        float(equilibrium.alpha2) * np.asarray(equilibrium.psin_r, dtype=np.float64),
-        rho_eval,
-    )
     ax_psi_r.plot(rho_eval, psi_r_truth, linewidth=1.2, label="GEQDSK")
     ax_psi_r.plot(rho_eval, psi_r_actual, linewidth=1.0, linestyle="--", label="VEQ")
     ax_psi_r.set_title("psi_r(rho)")
     ax_psi_r.set_xlabel("rho")
     ax_psi_r.legend(loc="best", fontsize=8)
 
-    psin_eval = np.asarray(PROFILE_PSIN_EVAL, dtype=np.float64)
     ff_truth = truth_orientation * _profile_interp(
         truth.psin_profile_axis,
         truth.ff_psi_profile,
-        psin_eval,
-    )
-    ff_actual = _profile_interp(
-        np.asarray(equilibrium.psin, dtype=np.float64),
-        _ff_psi_from_equilibrium(equilibrium),
         psin_eval,
     )
     ax_ff.plot(psin_eval, ff_truth, linewidth=1.2, label="GEQDSK")
@@ -1381,6 +1462,7 @@ def run_benchmark_case(
             timing_values.append(elapsed)
         equilibrium = solver.build_equilibrium()
         truth_orientation = _truth_flux_orientation(truth, source.canonical_equilibrium)
+        align_flux_orientation = _pf_flux_direction_is_underdetermined(spec)
 
         # Optional timing repeats are independent solves so warm-start leakage does
         # not hide regressions.  Metrics are computed from the first successful
@@ -1401,6 +1483,7 @@ def run_benchmark_case(
             equilibrium,
             solve_grid,
             truth_orientation=truth_orientation,
+            align_flux_orientation=align_flux_orientation,
             metric_nr=metric_nr,
             metric_nt=metric_nt,
         )
@@ -1413,6 +1496,7 @@ def run_benchmark_case(
                 spec,
                 plots_dir / f"{spec.case_name}_compare.png",
                 truth_orientation=truth_orientation,
+                align_flux_orientation=align_flux_orientation,
                 metric_nr=metric_nr,
                 metric_nt=metric_nt,
             )
