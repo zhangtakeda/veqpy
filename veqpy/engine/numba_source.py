@@ -46,7 +46,6 @@ from veqpy.math.fast import (
     copy_into,
     dot,
     matvec_into,
-    maximum_floor_into,
     product_into,
     scale_into,
     scaled_product_into,
@@ -359,6 +358,22 @@ def _regularize_psin_r(psin_r: np.ndarray, rho: np.ndarray, n_fix: int) -> np.nd
 
 
 @njit(cache=True, fastmath=True, nogil=True)
+def _floor_signed_current_primitive(profile: np.ndarray) -> np.ndarray:
+    """Apply a tiny same-sign floor to cumulative current primitives."""
+    edge = profile[-1]
+    floor_value = max(abs(edge), 1.0) * 1.0e-12
+    if edge < 0.0:
+        for i in range(profile.shape[0]):
+            if profile[i] > -floor_value:
+                profile[i] = -floor_value
+    else:
+        for i in range(profile.shape[0]):
+            if profile[i] < floor_value:
+                profile[i] = floor_value
+    return profile
+
+
+@njit(cache=True, fastmath=True, nogil=True)
 def _regularize_axis_even(profile: np.ndarray, rho: np.ndarray, n_fix: int) -> np.ndarray:
     if n_fix <= 0:
         return profile
@@ -622,10 +637,30 @@ def _fill_pq_linear_matrix(
 def _validate_pq_source_scalar(value: float, label_code: int) -> None:
     if not np.isfinite(value):
         raise ValueError("PQ strict solve produced non-finite scalar")
-    if label_code == 0 and value <= 0.0:
-        raise ValueError("PQ strict solve produced non-positive alpha2")
+    if label_code == 0 and abs(value) <= 1.0e-14:
+        raise ValueError("PQ strict solve produced near-zero alpha2")
     if label_code == 1 and abs(value) <= 1.0e-14:
         raise ValueError("PQ strict solve produced near-zero alpha1")
+
+
+@njit(cache=True, nogil=True)
+def _normalize_pq_signed_psi_r(
+    psi_r: np.ndarray,
+    weights: np.ndarray,
+    rho: np.ndarray,
+    n_axis_fix: int,
+) -> float:
+    alpha2 = dot(psi_r, weights)
+    _validate_pq_source_scalar(alpha2, 0)
+    scale_into(psi_r, psi_r, 1.0 / alpha2)
+    for i in range(psi_r.shape[0]):
+        if not np.isfinite(psi_r[i]) or psi_r[i] <= 0.0:
+            raise ValueError("PQ strict solve produced invalid normalized psin_r")
+    _regularize_psin_r(psi_r, rho, n_axis_fix)
+    for i in range(psi_r.shape[0]):
+        if not np.isfinite(psi_r[i]) or psi_r[i] <= 0.0:
+            raise ValueError("PQ strict solve produced invalid normalized psin_r")
+    return alpha2
 
 
 @njit(cache=True, nogil=True)
@@ -695,14 +730,16 @@ def _pq_psin_beta_residual(
     for i in range(n):
         F_value = F0[i] + alpha1 * F1[i]
         psi_r = F_value * Ln_r[i] / q_prof[i]
-        if not np.isfinite(psi_r) or psi_r <= 0.0:
+        if not np.isfinite(psi_r):
             return np.nan
         trial_psin_r[i] = psi_r
         alpha2 += psi_r * weights[i]
-    if not np.isfinite(alpha2) or alpha2 <= 0.0:
+    if not np.isfinite(alpha2) or abs(alpha2) <= 1.0e-14:
         return np.nan
     for i in range(n):
         trial_psin_r[i] /= alpha2
+        if not np.isfinite(trial_psin_r[i]) or trial_psin_r[i] <= 0.0:
+            return np.nan
         trial_Pn_r[i] = heat_input[i] * trial_psin_r[i]
     _compute_Pn_out(trial_Pn, trial_Pn_r, accumulator, weights)
     beta_den = weighted_dot(trial_Pn, V_r, weights)
@@ -726,9 +763,9 @@ def _solve_pq_psin_beta_alpha1(
     trial_Pn: np.ndarray,
     beta_target: float,
 ) -> float:
-    lower = 0.0
-    r_lower = _pq_psin_beta_residual(
-        lower,
+    base = 0.0
+    r_base = _pq_psin_beta_residual(
+        base,
         F0,
         F1,
         q_prof,
@@ -742,32 +779,11 @@ def _solve_pq_psin_beta_alpha1(
         trial_Pn,
         beta_target,
     )
-    if not np.isfinite(r_lower):
+    if not np.isfinite(r_base):
         raise ValueError("PQ/psin strict beta solve failed at lower bracket")
 
-    upper = 1.0
-    r_upper = _pq_psin_beta_residual(
-        upper,
-        F0,
-        F1,
-        q_prof,
-        Ln_r,
-        heat_input,
-        V_r,
-        weights,
-        accumulator,
-        trial_psin_r,
-        trial_Pn_r,
-        trial_Pn,
-        beta_target,
-    )
-    for _ in range(80):
-        # The beta constraint is scalar and monotone for valid q/F branches.
-        # Expanding a positive upper bracket is cheaper and more robust than
-        # exposing a second dense solve to the hot path.
-        if np.isfinite(r_upper) and r_lower * r_upper <= 0.0:
-            break
-        upper *= 2.0
+    for direction in (1.0, -1.0):
+        upper = direction
         r_upper = _pq_psin_beta_residual(
             upper,
             F0,
@@ -783,38 +799,59 @@ def _solve_pq_psin_beta_alpha1(
             trial_Pn,
             beta_target,
         )
-    if not np.isfinite(r_upper) or r_lower * r_upper > 0.0:
-        raise ValueError("PQ/psin strict beta solve failed to bracket alpha1")
-
-    for _ in range(80):
-        mid = 0.5 * (lower + upper)
-        r_mid = _pq_psin_beta_residual(
-            mid,
-            F0,
-            F1,
-            q_prof,
-            Ln_r,
-            heat_input,
-            V_r,
-            weights,
-            accumulator,
-            trial_psin_r,
-            trial_Pn_r,
-            trial_Pn,
-            beta_target,
-        )
-        if not np.isfinite(r_mid):
-            upper = mid
-            continue
-        if abs(r_mid) <= 1.0e-12 * (1.0 + abs(beta_target)):
-            return mid
-        if r_lower * r_mid <= 0.0:
-            upper = mid
-            r_upper = r_mid
-        else:
-            lower = mid
-            r_lower = r_mid
-    return 0.5 * (lower + upper)
+        for _ in range(80):
+            # The beta constraint is scalar and monotone on each valid q/F
+            # branch.  Try both alpha1 signs because alpha2 carries current
+            # direction, so physical equilibria can need a negative alpha1.
+            if np.isfinite(r_upper) and r_base * r_upper <= 0.0:
+                lower = base
+                r_lower = r_base
+                for _ in range(80):
+                    mid = 0.5 * (lower + upper)
+                    r_mid = _pq_psin_beta_residual(
+                        mid,
+                        F0,
+                        F1,
+                        q_prof,
+                        Ln_r,
+                        heat_input,
+                        V_r,
+                        weights,
+                        accumulator,
+                        trial_psin_r,
+                        trial_Pn_r,
+                        trial_Pn,
+                        beta_target,
+                    )
+                    if not np.isfinite(r_mid):
+                        upper = mid
+                        continue
+                    if abs(r_mid) <= 1.0e-12 * (1.0 + abs(beta_target)):
+                        return mid
+                    if r_lower * r_mid <= 0.0:
+                        upper = mid
+                        r_upper = r_mid
+                    else:
+                        lower = mid
+                        r_lower = r_mid
+                return 0.5 * (lower + upper)
+            upper *= 2.0
+            r_upper = _pq_psin_beta_residual(
+                upper,
+                F0,
+                F1,
+                q_prof,
+                Ln_r,
+                heat_input,
+                V_r,
+                weights,
+                accumulator,
+                trial_psin_r,
+                trial_Pn_r,
+                trial_Pn,
+                beta_target,
+            )
+    raise ValueError("PQ/psin strict beta solve failed to bracket alpha1")
 
 
 def build_source_remap_cache(
@@ -980,6 +1017,9 @@ def _update_pf_from_rho_inputs_with_scratch(
     _fill_pf_rho_integrand(integrand, Kn, current_input, Ln_r, V_r, heat_input)
     full_integration(out_psin_r, integrand, accumulator)
     out_psin_r *= -2.0
+    for i in range(out_psin_r.shape[0]):
+        if out_psin_r[i] < 1.0e-6:
+            out_psin_r[i] = 1.0e-6
     out_psin_r[:] = np.sqrt(out_psin_r)
     out_psin_r /= Kn
     _regularize_psin_r(out_psin_r, rho, n_axis_fix)
@@ -1456,8 +1496,7 @@ def _update_pi_from_rho_inputs_with_scratch(
         scale_into(Itor, current_input, Ip / current_input[-1])
     else:
         copy_into(Itor, current_input)
-    itor_floor = max(Itor[-1], 1.0) * 1e-12
-    maximum_floor_into(Itor, Itor, itor_floor)
+    _floor_signed_current_primitive(Itor)
     itor_over_kn = source_scratch_1d[_SLOT_INTEGRAND]
     scaled_ratio_into(itor_over_kn, Itor, Kn, 1.0 / (2.0 * np.pi))
     alpha2 = dot(itor_over_kn, weights)
@@ -1527,8 +1566,7 @@ def _update_pi_from_psin_uniform_inputs_with_scratch(
         scale_into(Itor, current_input, Ip / current_input[-1])
     else:
         copy_into(Itor, current_input)
-    itor_floor = max(Itor[-1], 1.0) * 1e-12
-    maximum_floor_into(Itor, Itor, itor_floor)
+    _floor_signed_current_primitive(Itor)
     itor_over_kn = source_scratch_1d[_SLOT_INTEGRAND]
     scaled_ratio_into(itor_over_kn, Itor, Kn, 1.0 / (2.0 * np.pi))
     alpha2 = dot(itor_over_kn, weights)
@@ -1598,8 +1636,7 @@ def _update_pi_from_psin_grid_inputs_with_scratch(
         scale_into(Itor, current_input, Ip / current_input[-1])
     else:
         copy_into(Itor, current_input)
-    itor_floor = max(Itor[-1], 1.0) * 1e-12
-    maximum_floor_into(Itor, Itor, itor_floor)
+    _floor_signed_current_primitive(Itor)
     itor_over_kn = source_scratch_1d[_SLOT_INTEGRAND]
     scaled_ratio_into(itor_over_kn, Itor, Kn, 1.0 / (2.0 * np.pi))
     alpha2 = dot(itor_over_kn, weights)
@@ -1683,8 +1720,7 @@ def _update_pj1_from_rho_inputs_with_scratch(
         copy_into(I_tor, I_tor_prof)
         copy_into(jtor, current_input)
     _enforce_axis_even_profile(jtor, rho)
-    itor_floor = max(I_tor[-1], 1.0) * 1e-12
-    maximum_floor_into(I_tor, I_tor, itor_floor)
+    _floor_signed_current_primitive(I_tor)
     itor_over_kn = source_scratch_1d[_SLOT_INTEGRAND]
     scaled_ratio_into(itor_over_kn, I_tor, Kn, 1.0 / (2.0 * np.pi))
     alpha2 = dot(itor_over_kn, weights)
@@ -1769,8 +1805,7 @@ def _update_pj1_from_psin_uniform_inputs_with_scratch(
         copy_into(I_tor, I_tor_prof)
         copy_into(jtor, current_input)
     _enforce_axis_even_profile(jtor, rho)
-    itor_floor = max(I_tor[-1], 1.0) * 1e-12
-    maximum_floor_into(I_tor, I_tor, itor_floor)
+    _floor_signed_current_primitive(I_tor)
     itor_over_kn = source_scratch_1d[_SLOT_INTEGRAND]
     scaled_ratio_into(itor_over_kn, I_tor, Kn, 1.0 / (2.0 * np.pi))
     alpha2 = dot(itor_over_kn, weights)
@@ -1855,8 +1890,7 @@ def _update_pj1_from_psin_grid_inputs_with_scratch(
         copy_into(I_tor, I_tor_prof)
         copy_into(jtor, current_input)
     _enforce_axis_even_profile(jtor, rho)
-    itor_floor = max(I_tor[-1], 1.0) * 1e-12
-    maximum_floor_into(I_tor, I_tor, itor_floor)
+    _floor_signed_current_primitive(I_tor)
     itor_over_kn = source_scratch_1d[_SLOT_INTEGRAND]
     scaled_ratio_into(itor_over_kn, I_tor, Kn, 1.0 / (2.0 * np.pi))
     alpha2 = dot(itor_over_kn, weights)
@@ -2230,14 +2264,12 @@ def _update_pq_from_psin_uniform_inputs_with_scratch(
 
     for i in range(n):
         out_psin_r[i] = F_solved[i] * Ln_r[i] / q_prof[i]
-        if not np.isfinite(out_psin_r[i]) or out_psin_r[i] <= 0.0:
+        if not np.isfinite(out_psin_r[i]):
             raise ValueError("PQ/psin strict solve produced invalid psi_r")
 
-    # alpha2 normalizes psin so the integrated coordinate still spans [0, 1].
-    alpha2 = dot(out_psin_r, weights)
-    _validate_pq_source_scalar(alpha2, 0)
-    scale_into(out_psin_r, out_psin_r, 1.0 / alpha2)
-    _regularize_psin_r(out_psin_r, rho, n_axis_fix)
+    # F*Ln/q is signed physical psi_r.  Keep that sign in alpha2, then normalize
+    # the solver psin_r branch back to a positive [0, 1] coordinate.
+    alpha2 = _normalize_pq_signed_psi_r(out_psin_r, weights, rho, n_axis_fix)
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
     _update_psin_coordinate(out_psin, out_psin_r, accumulator)
 
@@ -2359,13 +2391,10 @@ def _update_pq_from_psin_grid_inputs_with_scratch(
 
     for i in range(n):
         out_psin_r[i] = F_solved[i] * Ln_r[i] / q_prof[i]
-        if not np.isfinite(out_psin_r[i]) or out_psin_r[i] <= 0.0:
+        if not np.isfinite(out_psin_r[i]):
             raise ValueError("PQ/psin strict solve produced invalid psi_r")
 
-    alpha2 = dot(out_psin_r, weights)
-    _validate_pq_source_scalar(alpha2, 0)
-    scale_into(out_psin_r, out_psin_r, 1.0 / alpha2)
-    _regularize_psin_r(out_psin_r, rho, n_axis_fix)
+    alpha2 = _normalize_pq_signed_psi_r(out_psin_r, weights, rho, n_axis_fix)
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
     _update_psin_coordinate(out_psin, out_psin_r, accumulator)
 
@@ -2467,13 +2496,10 @@ def _update_pq_from_rho_inputs_with_scratch(
             raise ValueError("PQ/rho strict solve produced non-positive F squared")
         F_i = sign_F * np.sqrt(Y[i])
         out_psin_r[i] = F_i * Ln_r[i] / q_prof[i]
-        if not np.isfinite(out_psin_r[i]) or out_psin_r[i] <= 0.0:
+        if not np.isfinite(out_psin_r[i]):
             raise ValueError("PQ/rho strict solve produced invalid psi_r")
 
-    alpha2 = dot(out_psin_r, weights)
-    _validate_pq_source_scalar(alpha2, 0)
-    scale_into(out_psin_r, out_psin_r, 1.0 / alpha2)
-    _regularize_psin_r(out_psin_r, rho, n_axis_fix)
+    alpha2 = _normalize_pq_signed_psi_r(out_psin_r, weights, rho, n_axis_fix)
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
     _update_psin_coordinate(out_psin, out_psin_r, accumulator)
 
