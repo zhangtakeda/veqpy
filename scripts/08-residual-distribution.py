@@ -55,9 +55,9 @@ from matplotlib import colors, ticker
 from matplotlib.lines import Line2D
 from scipy.interpolate import RegularGridInterpolator
 
-PNG_PATH = "figures/08-residual-distribution.png"
+PNG_PATH = "08-residual-distribution.png"
 PDF_PATH = None
-COMPACT_PNG_PATH = "figures/08-residual-distribution-compact.png"
+COMPACT_PNG_PATH = "08-residual-distribution-compact.png"
 DEFAULT_CACHE_PATH = "data/09-residual-cache.npz"
 RESIDUAL_CACHE_VERSION = 10
 CASE_KEYS_TO_RUN = "all"

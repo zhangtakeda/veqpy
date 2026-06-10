@@ -47,7 +47,7 @@ FIGURE_NCOLS = 2
 FIGURE_CONSTRAINED_LAYOUT = True
 FIGURE_WSPACE = 0.06
 FIGURE_HSPACE = 0.08
-PNG_PATH = "figures/05-multi-route-consistency.png"
+PNG_PATH = "05-multi-route-consistency.png"
 PDF_PATH = None
 
 TOP_SPINE_VISIBLE = True

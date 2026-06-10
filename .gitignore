@@ -35,6 +35,9 @@ dist/
 
 # Local-only manuscript guidance/reference material
 /*.md
+/*.png
+/*.svg
+/*.pptx
 !README.md
 /*.pdf
 

@@ -1,7 +1,7 @@
 """Render the operator-pipeline SVG into publication raster/vector outputs.
 
 This script is intentionally limited to format conversion.  The source diagram
-stays in ``figures/02-operator-pipeline.svg`` while ``PNG_PATH`` and
+stays in ``02-operator-pipeline.svg`` while ``PNG_PATH`` and
 ``PDF_PATH`` control which derived artifacts are written.
 """
 
@@ -15,7 +15,7 @@ from PIL import Image
 
 FIGURE_WIDTH_IN = 6.5
 SAVE_DPI = 500
-SOURCE_SVG_PATH = Path("figures/02-operator-pipeline.svg")
+SOURCE_SVG_PATH = Path("02-operator-pipeline.svg")
 PNG_PATH = SOURCE_SVG_PATH.with_suffix(".png")
 PDF_PATH = None
 

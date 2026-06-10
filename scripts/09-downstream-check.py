@@ -55,7 +55,7 @@ from config import (
 )
 from scipy.interpolate import RegularGridInterpolator
 
-PNG_PATH = "figures/09-downstream-check.png"
+PNG_PATH = "09-downstream-check.png"
 PDF_PATH = None
 
 LEVEL_LABELS = REDUCED_CONFIG_LABELS

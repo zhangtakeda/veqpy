@@ -23,7 +23,7 @@ from veqpy.model import Boundary, Grid
 from veqpy.operator import Operator, OperatorCase
 from veqpy.solver import Solver, SolverConfig
 
-PNG_PATH = "figures/03-demo-equilibrium.png"
+PNG_PATH = "03-demo-equilibrium.png"
 PDF_PATH = None
 
 WARMUP_TIMES = 10

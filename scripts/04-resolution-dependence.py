@@ -49,7 +49,7 @@ FIGURE_WSPACE = 0.05
 FIGURE_HSPACE = 0.04
 COLORBAR_HEIGHT_FRACTION = 0.68
 COLORBAR_Y0_FRACTION = 0.16
-PNG_PATH = "figures/04-resolution-dependence.png"
+PNG_PATH = "04-resolution-dependence.png"
 PDF_PATH = None
 
 HEATMAP_TICK_DIRECTION = "out"

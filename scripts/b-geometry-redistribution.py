@@ -59,9 +59,9 @@ from config import (
 from matplotlib import ticker
 from matplotlib.lines import Line2D
 
-PNG_PATH = "figures/b-geometry-redistribution.png"
+PNG_PATH = "b-geometry-redistribution.png"
 PDF_PATH = None
-COMPACT_PNG_PATH = "figures/b-geometry-redistribution-compact.png"
+COMPACT_PNG_PATH = "b-geometry-redistribution-compact.png"
 FIGURE_HEIGHT = 4.45
 PANEL_TITLE_PAD = 0.030
 EPS = 1.0e-300
@@ -201,9 +201,7 @@ def standard_gs_residual_from_equilibrium(equilibrium) -> np.ndarray:
         G,
         JdivR,
         out=G_std,
-        where=np.isfinite(G)
-        & np.isfinite(JdivR)
-        & (np.abs(JdivR) > STANDARD_GS_JDIVER_FLOOR),
+        where=np.isfinite(G) & np.isfinite(JdivR) & (np.abs(JdivR) > STANDARD_GS_JDIVER_FLOOR),
     )
     return G_std
 

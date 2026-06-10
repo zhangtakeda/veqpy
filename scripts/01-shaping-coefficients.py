@@ -37,7 +37,7 @@ from matplotlib.collections import LineCollection
 
 FIGURE_SIZE = (DOUBLE_COLUMN_WIDTH, 6)
 SUBPLOTS_ADJUST = {"bottom": 0.28, "hspace": 0.25, "wspace": 0.25}
-PNG_PATH = "figures/01-shaping-coefficients.png"
+PNG_PATH = "01-shaping-coefficients.png"
 PDF_PATH = None
 SUBPLOT_ROWS = 2
 SUBPLOT_COLS = 4

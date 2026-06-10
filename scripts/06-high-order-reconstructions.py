@@ -59,7 +59,7 @@ PANEL_GRID_NROWS = 5
 PANEL_GRID_HEIGHT_RATIOS = (3.5, 0.60, 1.25, 0.20, 1.25)
 PANEL_GRID_HSPACE = 0.0
 SAVE_GFILE_PATH = "data/SOLOVEV.geqdsk"
-PNG_PATH = "figures/06-high-order-reconstructions.png"
+PNG_PATH = "06-high-order-reconstructions.png"
 PDF_PATH = None
 
 TOP_SPINE_VISIBLE = True
