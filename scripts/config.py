@@ -76,6 +76,7 @@ def save_figure_outputs(
         saved_paths.append(path_text)
     return saved_paths
 
+
 # Numeric precision shared by generated LaTeX tables.
 FIXED_DECIMALS = 2
 SCIENTIFIC_DECIMALS = 2
@@ -97,11 +98,11 @@ LINESTYLE_C = (0, (5, 1, 1, 1, 1, 1))
 MU0 = 4.0e-7 * 3.141592653589793
 CASE_KEYS = ("solovev", "chease", "efit")
 CASE_LABELS = {
-    "solovev": "D-shape",
+    "solovev": "D-shaped",
     "chease": "H-mode",
     "efit": "X-point",
 }
-REFERENCE_LABELS = {case_key: "GEQDSK" for case_key in CASE_KEYS}
+REFERENCE_LABELS = {case_key: "G-EQDSK" for case_key in CASE_KEYS}
 CASE_COLORS = {
     "solovev": "#1f77b4",
     "chease": "#ff7f0e",

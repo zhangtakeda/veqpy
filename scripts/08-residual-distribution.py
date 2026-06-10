@@ -63,9 +63,9 @@ RESIDUAL_CACHE_VERSION = 10
 CASE_KEYS_TO_RUN = "all"
 
 EXTERNAL_REFERENCE_LABELS = {
-    "solovev": "GEQDSK",
-    "chease": "GEQDSK",
-    "efit": "GEQDSK",
+    "solovev": "G-EQDSK",
+    "chease": "G-EQDSK",
+    "efit": "G-EQDSK",
 }
 CONFIG_CMAP = "magma"
 LOG_RESIDUAL_FLOOR = -5.0
@@ -751,7 +751,7 @@ def plot_radial_panel(
             None,
             0.0,
         ),
-        "GEQDSK": (
+        "G-EQDSK": (
             "-",
             "#000000",
             EXTERNAL_RADIAL_LINE_WIDTH,
@@ -761,7 +761,7 @@ def plot_radial_panel(
         ),
     }
     zorder_by_label = {
-        "GEQDSK": 1.0,
+        "G-EQDSK": 1.0,
         "Ref": 1.5,
         "Low": 2.0,
         "Medium": 2.5,
@@ -1005,7 +1005,7 @@ def plot_shape_comparison_panel(
                 ls=SHAPE_TARGET_LINESTYLE,
                 alpha=1.0,
                 zorder=2,
-                label="GEQDSK" if show_legend and level == SHAPE_SURFACE_LEVELS[-1] else None,
+                label="G-EQDSK" if show_legend and level == SHAPE_SURFACE_LEVELS[-1] else None,
             )
         if sample_r.size:
             ax.plot(
@@ -1195,7 +1195,7 @@ def build_compact_figure(case_samples: dict[str, list[ResidualSample]]) -> plt.F
             color=COMPACT_REFERENCE_COLOR,
             lw=SHAPE_LINE_WIDTH * SHAPE_TARGET_LINE_WIDTH_SCALE,
             ls=SHAPE_TARGET_LINESTYLE,
-            label="GEQDSK",
+            label="G-EQDSK",
         ),
         Line2D(
             [0],

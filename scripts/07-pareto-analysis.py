@@ -107,9 +107,9 @@ RUN_CASE_WORKER_INNER_THREADS = 1
 RUN_FRONTIER_MIN_REL_IMPROVEMENT = 0.05
 RUN_RANDOM_SIGNATURE_COUNT = 5
 RUN_RANDOM_SIGNATURE_SEED = 20260407
-# Selected reduced rows target normalized shape errors E_ref/a.  D-shape has
+# Selected reduced rows target normalized shape errors E_ref/a.  D-shaped has
 # enough low-order accuracy to use a tighter Medium/High ladder than the
-# GEQDSK-derived H-mode and X-point cases.
+# G-EQDSK-derived H-mode and X-point cases.
 CASE_FASTEST_CONFIG_ERROR_THRESHOLDS = {
     "solovev": (1.0e-2, 1.0e-3, 1.0e-4),
     "chease": (1.0e-2, 5.0e-3, 1.0e-3),
@@ -4332,7 +4332,7 @@ def render(
     _style_axis(
         ax_time,
         title=r"$\bf{(a)}$ Time vs Error",
-        xlabel="solve-only median time [ms]",
+        xlabel="post-setup solve-only median time [ms]",
         ylabel=r"$E_{\mathrm{ref}}/a$",
     )
     remove_minor_ticks(ax_time)

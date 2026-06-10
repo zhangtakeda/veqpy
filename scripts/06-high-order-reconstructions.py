@@ -337,7 +337,7 @@ REFERENCE_CONFIG = SolovevReferenceConfig()
 
 CASE_SPECS = (
     CaseSpec(
-        title=r"$\bf{(a)}$ D-shape",
+        title=r"$\bf{(a)}$ D-shaped",
         reference_label="Solov'ev",
         case_key="solovev",
         gfile_path=SAVE_GFILE_PATH,
@@ -370,19 +370,19 @@ CASE_SPECS = (
 
 
 CASE_DISPLAY_NAMES = {
-    "Solov'ev": "D-shape",
+    "Solov'ev": "D-shaped",
     "CHEASE": "H-mode",
     "EFIT": "X-point",
 }
 
 CASE_SOURCE_LABELS = {
-    "Solov'ev": "analytic-generated GEQDSK",
-    "CHEASE": "CHEASE GEQDSK",
-    "EFIT": "EFIT GEQDSK",
+    "Solov'ev": "analytic-generated G-EQDSK",
+    "CHEASE": "CHEASE G-EQDSK",
+    "EFIT": "EFIT G-EQDSK",
 }
 
 CASE_BOUNDARY_LABELS = {
-    "Solov'ev": "D-shape",
+    "Solov'ev": "D-shaped",
     "CHEASE": "H-mode",
     "EFIT": "X-point",
 }
