@@ -44,6 +44,7 @@ def build_residual_full_stage_runner_into(
     surface_fields = geometry_workspace.surface_fields
     residual_surface_fields = residual_workspace.surface_fields
     residual_pack_scratch = residual_workspace.pack_scratch
+    residual_pack_scratch_rows = residual_workspace.pack_scratch_rows
     sin_mtheta = plan.grid_workspace.sin_mtheta
     cos_mtheta = plan.grid_workspace.cos_mtheta
     rho_powers = plan.grid_workspace.rho_powers
@@ -68,9 +69,10 @@ def build_residual_full_stage_runner_into(
         # Packed residual assembly projects each active residual block onto its
         # corresponding basis/order metadata.  Inactive profile blocks have no
         # entries here and therefore contribute no equations.
-        numba_residual.run_residual_blocks_packed_precomputed(
+        numba_residual.run_residual_blocks_packed_precomputed_auto(
             out,
             residual_pack_scratch,
+            residual_pack_scratch_rows,
             plan.residual_binding_layout.active_residual_block_codes,
             plan.residual_binding_layout.active_residual_block_orders,
             plan.residual_binding_layout.active_residual_block_radial_powers,

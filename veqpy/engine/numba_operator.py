@@ -30,7 +30,7 @@ import veqpy.engine.backend_abi as backend_abi
 from veqpy.engine.numba_geometry import update_geometry_hot
 from veqpy.engine.numba_profile import update_profiles_packed_bulk
 from veqpy.engine.numba_residual import (
-    run_residual_blocks_packed_precomputed,
+    run_residual_blocks_packed_precomputed_auto,
     update_residual_compact,
 )
 from veqpy.engine.numba_source import (
@@ -185,9 +185,10 @@ def _pack_residual_output_into(
     # Packing is separate from residual-surface refresh so fused, staged, and
     # collocation paths can share the same compact G/G*grad(psin) workspace.
     out.fill(0.0)
-    run_residual_blocks_packed_precomputed(
+    run_residual_blocks_packed_precomputed_auto(
         out,
         residual_pack_binding.residual_pack_scratch,
+        residual_pack_binding.residual_pack_scratch_rows,
         residual_pack_binding.active_residual_block_codes,
         residual_pack_binding.active_residual_block_orders,
         residual_pack_binding.active_residual_block_radial_powers,

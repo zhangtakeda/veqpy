@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 from numpy.testing import assert_allclose
 
+from veqpy.engine import numba_residual
 from veqpy.engine.numba_operator import convert_f_squared_fields_to_f
 from veqpy.model import Grid
 from veqpy.model.profile import Profile
@@ -113,3 +114,72 @@ def test_packed_layout_validation_errors() -> None:
         coeff_array_from_list("h", True)
     with pytest.raises(ValueError, match="shape"):
         validate_packed_state(np.zeros(2), np.array([[0, -1, -1]], dtype=np.int64))
+
+
+def test_residual_auto_packer_matches_legacy_high_block_path() -> None:
+    rng = np.random.default_rng(20240611)
+    nr = 5
+    nt = 4
+    block_count = 8
+    residual_workspace = np.ascontiguousarray(rng.normal(size=(4, nr, nt)))
+    scratch_legacy = np.empty(nr, dtype=np.float64)
+    scratch_auto = np.empty(nr, dtype=np.float64)
+    scratch_rows = np.empty((block_count + 5, nr), dtype=np.float64)
+    block_codes = np.array([0, 1, 2, 3, 4, 5, 6, 7], dtype=np.int64)
+    block_orders = np.array([0, 0, 0, 0, 1, 2, 0, 0], dtype=np.int64)
+    block_radial_powers = np.array([0, 0, 0, 0, 1, 1, 0, 0], dtype=np.int64)
+    coeff_index_rows = np.arange(block_count, dtype=np.int64).reshape(block_count, 1)
+    lengths = np.ones(block_count, dtype=np.int64)
+    theta = np.linspace(0.0, 2.0 * np.pi, nt, endpoint=False)
+    orders = np.arange(4, dtype=np.float64)[:, None]
+    sin_mtheta = np.ascontiguousarray(np.sin(orders * theta[None, :]))
+    cos_mtheta = np.ascontiguousarray(np.cos(orders * theta[None, :]))
+    rho = np.linspace(0.0, 1.0, nr, dtype=np.float64)
+    rho_powers = np.ascontiguousarray(np.vstack([rho**i for i in range(4)]))
+    y = np.linspace(1.0, 1.4, nr, dtype=np.float64)
+    T = np.ascontiguousarray(rng.normal(size=(1, nr)))
+    weights = np.linspace(0.1, 0.3, nr, dtype=np.float64)
+    out_legacy = np.zeros(block_count, dtype=np.float64)
+    out_auto = np.zeros(block_count, dtype=np.float64)
+
+    numba_residual.run_residual_blocks_packed_precomputed(
+        out_legacy,
+        scratch_legacy,
+        block_codes,
+        block_orders,
+        block_radial_powers,
+        coeff_index_rows,
+        lengths,
+        residual_workspace,
+        sin_mtheta,
+        cos_mtheta,
+        rho_powers,
+        y,
+        T,
+        weights,
+        0.4,
+        1.7,
+        2.1,
+    )
+    numba_residual.run_residual_blocks_packed_precomputed_auto(
+        out_auto,
+        scratch_auto,
+        scratch_rows,
+        block_codes,
+        block_orders,
+        block_radial_powers,
+        coeff_index_rows,
+        lengths,
+        residual_workspace,
+        sin_mtheta,
+        cos_mtheta,
+        rho_powers,
+        y,
+        T,
+        weights,
+        0.4,
+        1.7,
+        2.1,
+    )
+
+    assert_allclose(out_auto, out_legacy, rtol=0.0, atol=1.0e-14)

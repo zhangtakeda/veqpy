@@ -80,6 +80,7 @@ def allocate_runtime_state(
         nt=nt,
         x_size=x_size,
         radial_weights=np.asarray(grid_workspace.weights, dtype=np.float64),
+        active_residual_block_count=int(active_profile_ids.size),
     )
     return (
         profiles_by_name,

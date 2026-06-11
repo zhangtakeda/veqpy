@@ -117,6 +117,12 @@ def _project_scaled3(
 
 
 @njit(cache=True, fastmath=True, nogil=True)
+def _copy_row_into(out: np.ndarray, row: np.ndarray) -> None:
+    for i in range(out.shape[0]):
+        out[i] = row[i]
+
+
+@njit(cache=True, fastmath=True, nogil=True)
 def _run_residual_blocks_packed_precomputed(
     out_packed: np.ndarray,
     scratch: np.ndarray,
@@ -224,7 +230,165 @@ def _run_residual_blocks_packed_precomputed(
             raise ValueError("Unknown residual block code")
 
 
+@njit(cache=True, fastmath=True, nogil=True)
+def _run_residual_blocks_packed_precomputed_auto(
+    out_packed: np.ndarray,
+    scratch: np.ndarray,
+    scratch_rows: np.ndarray,
+    block_codes: np.ndarray,
+    block_orders: np.ndarray,
+    block_radial_powers: np.ndarray,
+    coeff_index_rows: np.ndarray,
+    lengths: np.ndarray,
+    residual_workspace: np.ndarray,
+    sin_mtheta: np.ndarray,
+    cos_mtheta: np.ndarray,
+    rho_powers: np.ndarray,
+    y: np.ndarray,
+    T: np.ndarray,
+    weights: np.ndarray,
+    a: float,
+    R0: float,
+    B0: float,
+) -> None:
+    block_count = block_codes.shape[0]
+    fourier_count = 0
+    need_gpsin_r = False
+    need_gpsin_z = False
+    need_k = False
+    need_c0 = False
+    need_g = False
+    for slot in range(block_count):
+        code = block_codes[slot]
+        if code == 0:
+            need_gpsin_r = True
+        elif code == 1:
+            need_gpsin_z = True
+        elif code == 2:
+            need_k = True
+        elif code == 3:
+            need_c0 = True
+        elif code == 4 or code == 5:
+            fourier_count += 1
+        elif code == 6 or code == 7:
+            need_g = True
+
+    if block_count < 8 and fourier_count < 4:
+        _run_residual_blocks_packed_precomputed(
+            out_packed,
+            scratch,
+            block_codes,
+            block_orders,
+            block_radial_powers,
+            coeff_index_rows,
+            lengths,
+            residual_workspace,
+            sin_mtheta,
+            cos_mtheta,
+            rho_powers,
+            y,
+            T,
+            weights,
+            a,
+            R0,
+            B0,
+        )
+        return
+
+    G = residual_workspace[0]
+    Gpsin_R = residual_workspace[1]
+    Gpsin_Z = residual_workspace[2]
+    Gpsin_R_sin_tb = residual_workspace[3]
+    sin_theta = sin_mtheta[1]
+    rho = rho_powers[1]
+    rho2 = rho_powers[2]
+    nt = G.shape[1]
+    base_scale = 2.0 * np.pi / nt
+
+    if need_gpsin_r:
+        rowwise_sum_into(scratch_rows[0], Gpsin_R)
+    if need_gpsin_z:
+        rowwise_sum_into(scratch_rows[1], Gpsin_Z)
+    if need_k:
+        rowwise_weighted_sum_into(scratch_rows[2], Gpsin_Z, sin_theta)
+    if need_c0:
+        rowwise_sum_into(scratch_rows[3], Gpsin_R_sin_tb)
+    if need_g:
+        rowwise_sum_into(scratch_rows[4], G)
+
+    for slot in range(block_count):
+        code = block_codes[slot]
+        order = block_orders[slot]
+        if code == 4:
+            rowwise_weighted_sum_into(scratch_rows[5 + slot], Gpsin_R_sin_tb, cos_mtheta[order])
+        elif code == 5:
+            rowwise_weighted_sum_into(scratch_rows[5 + slot], Gpsin_R_sin_tb, sin_mtheta[order])
+
+    for slot in range(block_count):
+        coeff_indices = coeff_index_rows[slot, : lengths[slot]]
+        code = block_codes[slot]
+        radial_power = block_radial_powers[slot]
+        if code == 0:
+            _copy_row_into(scratch, scratch_rows[0])
+            _project_scaled2(out_packed, coeff_indices, T, scratch, y, weights, base_scale * a)
+        elif code == 1:
+            _copy_row_into(scratch, scratch_rows[1])
+            _project_scaled2(out_packed, coeff_indices, T, scratch, y, weights, base_scale * a)
+        elif code == 2:
+            _copy_row_into(scratch, scratch_rows[2])
+            _project_scaled3(
+                out_packed, coeff_indices, T, scratch, rho, y, weights, base_scale * (-a)
+            )
+        elif code == 3:
+            _copy_row_into(scratch, scratch_rows[3])
+            _project_scaled3(
+                out_packed, coeff_indices, T, scratch, rho, y, weights, base_scale * (-a)
+            )
+        elif code == 4:
+            _copy_row_into(scratch, scratch_rows[5 + slot])
+            _project_scaled3(
+                out_packed,
+                coeff_indices,
+                T,
+                scratch,
+                rho_powers[radial_power + 1],
+                y,
+                weights,
+                base_scale * (-a),
+            )
+        elif code == 5:
+            _copy_row_into(scratch, scratch_rows[5 + slot])
+            _project_scaled3(
+                out_packed,
+                coeff_indices,
+                T,
+                scratch,
+                rho_powers[radial_power + 1],
+                y,
+                weights,
+                base_scale * (-a),
+            )
+        elif code == 6:
+            _copy_row_into(scratch, scratch_rows[4])
+            _project_scaled3(out_packed, coeff_indices, T, scratch, rho2, y, weights, base_scale)
+        elif code == 7:
+            _copy_row_into(scratch, scratch_rows[4])
+            _project_scaled3(
+                out_packed,
+                coeff_indices,
+                T,
+                scratch,
+                y,
+                y,
+                weights,
+                base_scale * (R0 * B0) * (R0 * B0),
+            )
+        else:
+            raise ValueError("Unknown residual block code")
+
+
 run_residual_blocks_packed_precomputed = _run_residual_blocks_packed_precomputed
+run_residual_blocks_packed_precomputed_auto = _run_residual_blocks_packed_precomputed_auto
 
 
 @njit(cache=True, fastmath=True, nogil=True)

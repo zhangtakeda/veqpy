@@ -29,19 +29,28 @@ class ResidualWorkspace:
     ``surface_fields`` shape: ``(4, Nr, Nt)`` with rows G, G*psin_R,
     G*psin_Z, and G*psin_R*sin_tb.
 
-    ``pack_scratch`` is a reusable one-dimensional temporary buffer allocated
-    with the workspace, then reused by residual basis-packing kernels. It has no
-    persistent value after a pack call and may be overwritten by each residual
-    block.
+    ``pack_scratch`` is the one-dimensional temporary buffer used by projection
+    kernels. ``pack_scratch_rows`` stores reusable row reductions for the
+    high-block packer. Neither scratch area has a persistent value after a pack
+    call.
     """
 
     root_fields: np.ndarray
     packed_residual: np.ndarray
     surface_fields: np.ndarray
     pack_scratch: np.ndarray
+    pack_scratch_rows: np.ndarray
     collocation_sqrt_weights: np.ndarray
 
-    def __init__(self, *, nr: int, nt: int, x_size: int, radial_weights: np.ndarray) -> None:
+    def __init__(
+        self,
+        *,
+        nr: int,
+        nt: int,
+        x_size: int,
+        radial_weights: np.ndarray,
+        active_residual_block_count: int = 0,
+    ) -> None:
         """Allocate residual/root-stage runtime memory."""
 
         if radial_weights.ndim != 1 or radial_weights.size != nr:
@@ -51,5 +60,9 @@ class ResidualWorkspace:
         self.packed_residual = np.empty(x_size, dtype=np.float64)
         self.surface_fields = np.empty((4, nr, nt), dtype=np.float64)
         self.pack_scratch = np.empty(nr, dtype=np.float64)
+        self.pack_scratch_rows = np.empty(
+            (max(1, int(active_residual_block_count) + 5), nr),
+            dtype=np.float64,
+        )
         poloidal_quadrature_weight = 2.0 * np.pi / max(nt, 1)
         self.collocation_sqrt_weights = np.sqrt(poloidal_quadrature_weight * radial_weights)

@@ -221,6 +221,7 @@ class FusedResidualPackABI:
     """
 
     residual_pack_scratch: np.ndarray
+    residual_pack_scratch_rows: np.ndarray
     residual_surface_fields: np.ndarray
     active_residual_block_codes: np.ndarray
     active_residual_block_orders: np.ndarray
@@ -332,6 +333,7 @@ def build_fused_residual_pack_abi(
     """Collect packed residual assembly arrays for fused residual execution."""
     return FusedResidualPackABI(
         residual_pack_scratch=residual_workspace.pack_scratch,
+        residual_pack_scratch_rows=residual_workspace.pack_scratch_rows,
         residual_surface_fields=residual_workspace.surface_fields,
         active_residual_block_codes=residual_binding_layout.active_residual_block_codes,
         active_residual_block_orders=residual_binding_layout.active_residual_block_orders,
