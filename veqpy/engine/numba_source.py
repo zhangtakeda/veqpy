@@ -1027,7 +1027,7 @@ def resolve_source_inputs(
 
     heat = np.asarray(heat_input, dtype=np.float64)
     current = np.asarray(current_input, dtype=np.float64)
-    return _resolve_source_inputs_kernel_ready(
+    return _resolve_source_inputs_prepared(
         out_heat_input,
         out_current_input,
         heat,
@@ -1043,7 +1043,7 @@ def resolve_source_inputs(
     )
 
 
-def _resolve_source_inputs_kernel_ready(
+def _resolve_source_inputs_prepared(
     out_heat_input: np.ndarray,
     out_current_input: np.ndarray,
     heat: np.ndarray,
@@ -2712,53 +2712,6 @@ def resolve_source_scratch_kernel(operator_kernel: Callable) -> Callable | None:
     return None
 
 
-def _materialize_profile_owned_psin_source_kernel_ready(
-    out_psin: np.ndarray,
-    out_psin_r: np.ndarray,
-    out_psin_rr: np.ndarray,
-    out_source_psin_query: np.ndarray,
-    out_parameter_query: np.ndarray,
-    out_heat_input: np.ndarray,
-    out_current_input: np.ndarray,
-    psin_fields: np.ndarray,
-    heat: np.ndarray,
-    current: np.ndarray,
-    heat_spline_coeff: np.ndarray,
-    current_spline_coeff: np.ndarray,
-    parameterization_code: int,
-    rho: np.ndarray,
-    differentiator: np.ndarray,
-    accumulator: np.ndarray,
-    n_axis_fix: int,
-    barycentric_weights: np.ndarray,
-    use_barycentric: bool = False,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Materialize profile-owned psin source inputs from normalized ndarrays."""
-
-    _materialize_profile_owned_psin_source_impl(
-        out_psin,
-        out_psin_r,
-        out_psin_rr,
-        out_source_psin_query,
-        out_parameter_query,
-        out_heat_input,
-        out_current_input,
-        psin_fields,
-        heat,
-        current,
-        heat_spline_coeff,
-        current_spline_coeff,
-        int(parameterization_code),
-        rho,
-        differentiator,
-        accumulator,
-        int(n_axis_fix),
-        barycentric_weights,
-        bool(use_barycentric),
-    )
-    return out_heat_input, out_current_input
-
-
 def update_fourier_family_fields(
     out_c_fields: np.ndarray,
     out_s_fields: np.ndarray,
@@ -2804,22 +2757,6 @@ def update_fourier_family_fields(
         int(s_active_order),
     )
     return out_c_fields, out_s_fields
-
-
-def _update_fixed_point_psin_query_kernel_ready(
-    query: np.ndarray,
-    psin: np.ndarray,
-    max_residual: float,
-) -> bool:
-    """Update a fixed-point psin query from normalized ndarrays."""
-
-    return bool(
-        _update_fixed_point_psin_query_impl(
-            query,
-            psin,
-            float(max_residual),
-        )
-    )
 
 
 @njit(cache=True, fastmath=True, nogil=True)

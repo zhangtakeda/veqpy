@@ -327,7 +327,7 @@ def _python_to_json(value: Any) -> Any:
         spec = type(value).serial_attributes()
         return {type(value).__name__: {k: _python_to_json(getattr(value, k)) for k in spec}}
 
-    if _is_dataclass_instance(value):
+    if is_dataclass(value) and not isinstance(value, type):
         spec = _dataclass_attribute_types(type(value))
         return {type(value).__name__: {k: _python_to_json(getattr(value, k)) for k in spec}}
 
@@ -507,10 +507,6 @@ def _construct_object(cls: type, field_values: dict[str, Any]) -> Any:
 def _dataclass_attribute_types(cls: type) -> dict[str, type]:
     hints = get_type_hints(cls)
     return {field.name: hints.get(field.name, Any) for field in dataclass_fields(cls)}
-
-
-def _is_dataclass_instance(value: Any) -> bool:
-    return is_dataclass(value) and not isinstance(value, type)
 
 
 def _set_attribute(instance: Any, key: str, value: Any) -> None:

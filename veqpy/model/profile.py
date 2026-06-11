@@ -99,7 +99,7 @@ class Profile(Reactive, Serial):
             power=self.power,
             envelope_power=self.envelope_power,
             offset=self.offset,
-            coeff=_copy_optional_array(self.coeff),
+            coeff=None if self.coeff is None else self.coeff.copy(),
         )
 
 
@@ -116,7 +116,3 @@ def _coerce_optional_array(value, *, copy: bool, name: str = "array") -> np.ndar
     if arr.ndim != 1:
         raise ValueError(f"{name} must be 1D, got {arr.shape}")
     return arr.copy() if copy else arr
-
-
-def _copy_optional_array(value: np.ndarray | None) -> np.ndarray | None:
-    return None if value is None else value.copy()

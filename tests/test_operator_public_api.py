@@ -48,6 +48,17 @@ def test_operator_residual_interfaces_and_in_place_outputs() -> None:
         operator.plan.grid_workspace.Nr * operator.plan.grid_workspace.Nt,
     )
     assert np.all(np.isfinite(collocation))
+    assert_allclose(operator.residual_collocation(x0.tolist()), collocation)
+
+    collocation_out = np.empty_like(collocation)
+    operator.residual_collocation_into(x0, collocation_out)
+    assert_allclose(collocation_out, collocation)
+
+    unchecked_collocation = operator.residual_collocation(x0, check=False)
+    assert_allclose(unchecked_collocation, collocation)
+    unchecked_collocation_out = np.empty_like(collocation)
+    operator.residual_collocation_into(x0, unchecked_collocation_out, check=False)
+    assert_allclose(unchecked_collocation_out, collocation)
 
     residual_stage = operator.stage_d_residual()
     assert residual_stage.shape == (operator.x_size,)
@@ -68,6 +79,9 @@ def test_operator_validation_and_snapshot_helpers() -> None:
         operator.coerce_x(np.zeros(operator.x_size + 1))
     with pytest.raises(TypeError, match="dtype float64"):
         operator.residual_var_into(x0, np.empty(operator.x_size, dtype=np.float32))
+    with pytest.raises(TypeError, match="dtype float64"):
+        collocation_size = operator.plan.grid_workspace.Nr * operator.plan.grid_workspace.Nt
+        operator.residual_collocation_into(x0, np.empty(collocation_size, dtype=np.float32))
     noncontiguous = np.empty(operator.x_size * 2, dtype=np.float64)[::2]
     noncontiguous[:] = x0
     assert not noncontiguous.flags.c_contiguous

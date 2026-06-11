@@ -86,23 +86,20 @@ class Operator:
         The input grid is lowered to a GridWorkspace snapshot at construction time;
         Operator does not read live Grid state afterwards.
         """
-        self._apply_plan(
-            build_operator_plan(
-                grid=grid,
-                case=self.case,
-                source_interpolation_kind=self.source_interpolation_kind,
-            )
+        self.plan = build_operator_plan(
+            grid=grid,
+            case=self.case,
+            source_interpolation_kind=self.source_interpolation_kind,
         )
-        self._validate_runtime_profile_support()
+        validate_source_plan_profile_support(
+            source_plan=self.plan.source_plan,
+            source_execution=self.plan.source_execution,
+            case=self.case,
+        )
 
         self.layout = OperatorLayout.empty(self.plan.x_size)
         self._setup_runtime_state()
         self._refresh_runtime_state()
-
-    def _apply_plan(self, plan: OperatorBuildPlan) -> None:
-        """Install the operator topology/configuration plan."""
-
-        self.plan = plan
 
     def __call__(self, x: np.ndarray, *args, **kwargs) -> np.ndarray:
         """Call the main variational residual evaluation entrypoint."""
@@ -194,15 +191,6 @@ class Operator:
                 x[idx0] = h0_est
         return x
 
-    def _validate_runtime_profile_support(self) -> None:
-        """Validate psin profile ownership requirements for the current source route."""
-        validate_source_plan_profile_support(
-            source_plan=self.plan.source_plan,
-            source_execution=self.plan.source_execution,
-            case=self.case,
-        )
-        return None
-
     def replace_case(self, case: OperatorCase) -> None:
         """Replace the current case without changing the packed layout."""
         validate_case_compatibility(
@@ -265,7 +253,12 @@ class Operator:
             out_eval = out
         self.layout.run_fused_residual_into(x_eval, out_eval)
 
-    def residual_collocation(self, x: np.ndarray) -> np.ndarray:
+    def residual_collocation(
+        self,
+        x: np.ndarray,
+        *,
+        check: bool = True,
+    ) -> np.ndarray:
         """Return the quadrature-scaled pointwise collocation residual.
 
         This residual does not append a Galerkin/weak-form residual to an external
@@ -275,22 +268,34 @@ class Operator:
         shape ``(Nr * Nt,)``.
         """
         out = np.empty(self.plan.grid_workspace.Nr * self.plan.grid_workspace.Nt, dtype=np.float64)
-        self.residual_collocation_into(x, out)
+        self.residual_collocation_into(x, out, check=check)
         return out
 
-    def residual_collocation_into(self, x: np.ndarray, out: np.ndarray) -> None:
+    def residual_collocation_into(
+        self,
+        x: np.ndarray,
+        out: np.ndarray,
+        *,
+        check: bool = True,
+    ) -> None:
         """Write the quadrature-scaled collocation residual into caller-provided ``out``."""
-        x_eval = self.coerce_x(x)
-        expected_size = self.plan.grid_workspace.Nr * self.plan.grid_workspace.Nt
-        if not isinstance(out, np.ndarray):
-            raise TypeError("Expected out to be a numpy.ndarray")
-        out_eval = out
-        if out_eval.dtype != np.float64:
-            raise TypeError(f"Expected out dtype float64, got {out_eval.dtype}")
-        if out_eval.ndim != 1 or out_eval.shape[0] != expected_size:
-            raise ValueError(f"Expected out to have shape ({expected_size},), got {out_eval.shape}")
-        if not out_eval.flags.c_contiguous:
-            raise ValueError("Expected out to be C-contiguous")
+        if check:
+            x_eval = self.coerce_x(x)
+            expected_size = self.plan.grid_workspace.Nr * self.plan.grid_workspace.Nt
+            if not isinstance(out, np.ndarray):
+                raise TypeError("Expected out to be a numpy.ndarray")
+            out_eval = out
+            if out_eval.dtype != np.float64:
+                raise TypeError(f"Expected out dtype float64, got {out_eval.dtype}")
+            if out_eval.ndim != 1 or out_eval.shape[0] != expected_size:
+                raise ValueError(
+                    f"Expected out to have shape ({expected_size},), got {out_eval.shape}"
+                )
+            if not out_eval.flags.c_contiguous:
+                raise ValueError("Expected out to be C-contiguous")
+        else:
+            x_eval = x
+            out_eval = out
         self.layout.run_collocation_into(x_eval, out_eval)
 
     def build_coeffs(
@@ -403,14 +408,16 @@ class Operator:
     def _refresh_runtime_state(self) -> None:
         # Case replacement may change source route semantics but must preserve
         # the packed topology; compatibility was already checked by replace_case.
-        self._apply_plan(
-            refresh_operator_plan_for_case(
-                self.plan,
-                case=self.case,
-                source_interpolation_kind=self.source_interpolation_kind,
-            )
+        self.plan = refresh_operator_plan_for_case(
+            self.plan,
+            case=self.case,
+            source_interpolation_kind=self.source_interpolation_kind,
         )
-        self._validate_runtime_profile_support()
+        validate_source_plan_profile_support(
+            source_plan=self.plan.source_plan,
+            source_execution=self.plan.source_execution,
+            case=self.case,
+        )
         self._refresh_profile_runtime()
         self._refresh_fourier_family_metadata()
         # Source runtime refresh happens after profile metadata because some

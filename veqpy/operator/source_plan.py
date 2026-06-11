@@ -88,10 +88,6 @@ class SourcePlan:
         )
 
 
-def _source_route_key(source_plan: SourcePlan) -> tuple[str, str, str]:
-    return (source_plan.route, source_plan.coordinate, source_plan.nodes)
-
-
 SOURCE_PARAMETERIZATION_CODES = {
     "identity": 0,
     "sqrt_psin": 1,
@@ -138,7 +134,7 @@ def validate_source_plan_profile_support(
     case: OperatorCase,
 ) -> None:
     """Validate source-plan compatibility with active profile ownership."""
-    route_key = _source_route_key(source_plan)
+    route_key = source_plan.route_key
     if route_key != tuple(getattr(source_execution, "route_key")):
         raise ValueError(
             f"Source execution binding route mismatch: plan={route_key!r}, "

@@ -82,7 +82,7 @@ def build_operator_plan(
 ) -> OperatorBuildPlan:
     """Build full Operator topology from an initial Grid + case."""
 
-    grid_workspace = build_grid_workspace(grid)
+    grid_workspace = GridWorkspace.from_grid(grid)
     prefix_profile_names = get_prefix_profile_names()
     shape_profile_names = build_shape_profile_names(grid_workspace.M_max)
     profile_names = build_profile_names(grid_workspace.M_max)
@@ -179,12 +179,6 @@ def refresh_operator_plan_for_case(
         source_plan=source_plan,
         source_execution=source_execution,
     )
-
-
-def build_grid_workspace(grid: Grid) -> GridWorkspace:
-    """Lower Grid into the static arrays consumed by runtime binding."""
-
-    return GridWorkspace.from_grid(grid)
 
 
 def build_residual_binding_layout(
