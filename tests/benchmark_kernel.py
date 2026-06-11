@@ -4,7 +4,7 @@ This script reuses ``tests/benchmark.py`` to build the same 46 route/constraint
 cases, solves each case once to obtain a representative packed state, then
 times repeated residual writes for that fixed state.  The nonlinear solver and
 SciPy are therefore setup costs only; measured samples cover the operator
-fused residual path.
+in-place residual API.
 """
 
 from __future__ import annotations
@@ -85,23 +85,6 @@ def _solve_case_once(benchmark: ModuleType, case) -> tuple[object, object]:
     return solver.operator, result
 
 
-def _residual_writer(operator) -> tuple[str, object]:
-    layout = getattr(operator, "layout", None)
-    layout_runner = getattr(layout, "run_fused_residual_into", None)
-    if callable(layout_runner):
-        return "Operator.layout.run_fused_residual_into(x, out)", layout_runner
-
-    private_runner = getattr(operator, "_residual_var_into_kernel_ready", None)
-    if callable(private_runner):
-        return "Operator._residual_var_into_kernel_ready(x, out)", private_runner
-
-    public_runner = getattr(operator, "residual_var_into", None)
-    if callable(public_runner):
-        return "Operator.residual_var_into(x, out)", public_runner
-
-    raise TypeError("operator does not expose a residual writer")
-
-
 def _time_residual_kernel(
     operator,
     x: np.ndarray,
@@ -110,17 +93,17 @@ def _time_residual_kernel(
     warmup_count: int,
 ) -> tuple[np.ndarray, np.ndarray, dict[str, float]]:
     out = np.empty(operator.x_size, dtype=np.float64)
-    measured_path, residual_writer = _residual_writer(operator)
+    measured_path = "Operator.residual_var_into(x, out)"
 
     operator.invalidate_source_state()
     for _ in range(warmup_count):
-        residual_writer(x, out)
+        operator.residual_var_into(x, out)
     baseline = out.copy()
 
     elapsed_ms = np.empty(repeat_count, dtype=np.float64)
     for index in range(repeat_count):
         start_ns = time.perf_counter_ns()
-        residual_writer(x, out)
+        operator.residual_var_into(x, out)
         elapsed_ms[index] = (time.perf_counter_ns() - start_ns) * 1.0e-6
 
     max_abs_delta = float(np.max(np.abs(out - baseline))) if out.size else 0.0
