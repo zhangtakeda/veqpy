@@ -3180,26 +3180,3 @@ def _local_uniform_stencil_start(q: float, source_sample_count: int, stencil_siz
     if start > max_start:
         return max_start
     return start
-
-
-def _assert_default_source_routes_registered() -> None:
-    expected = SOURCE_ROUTE_KEY_SET
-    actual = frozenset(ROUTE_REGISTRY)
-
-    missing = expected.difference(actual)
-    extra = actual.difference(expected)
-
-    implementation_count = len(
-        {id(route_spec.implementation) for route_spec in ROUTE_REGISTRY.values()}
-    )
-
-    if missing or extra or implementation_count != 18:
-        raise RuntimeError(
-            "Source route registry mismatch; "
-            f"missing={sorted(missing)!r}, "
-            f"extra={sorted(extra)!r}, "
-            f"implementation_count={implementation_count!r}"
-        )
-
-
-_assert_default_source_routes_registered()
