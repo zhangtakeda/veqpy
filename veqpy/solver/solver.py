@@ -24,7 +24,7 @@ import numpy as np
 from rich.console import Console
 
 from veqpy.model.equilibrium import Equilibrium
-from veqpy.operator.operator import Operator
+from veqpy.operator.operator import Operator, _validate_x_kernel_ready
 from veqpy.operator.operator_case import OperatorCase
 from veqpy.solver.residual_scale import (
     _block_rms_values,
@@ -1081,35 +1081,35 @@ class Solver:
             return None, None
         block_lengths_eval = np.asarray(block_lengths, dtype=np.int64)
         scale: np.ndarray | None = None
-        last_x: np.ndarray | None = None
-        last_raw_residual: np.ndarray | None = None
+        raw_buffer = np.empty(self.operator.x_size, dtype=np.float64)
+        scaled_buffer = np.empty(self.operator.x_size, dtype=np.float64)
+        last_x = np.empty_like(x_guess)
+        last_x_valid = False
 
         def wrapped(x: np.ndarray) -> np.ndarray:
-            nonlocal scale, last_x, last_raw_residual
-            x_eval = self.operator.coerce_x(x)
-            raw_residual = np.asarray(self.operator(x_eval), dtype=np.float64)
-            last_x = x_eval.copy()
-            last_raw_residual = raw_residual.copy()
+            nonlocal scale, last_x_valid
+            x_eval = _validate_x_kernel_ready(x, self.operator.x_size)
+            self.operator._residual_var_into_kernel_ready(x_eval, raw_buffer)
+            np.copyto(last_x, x_eval)
+            last_x_valid = True
             if scale is None:
                 # Legacy mode freezes the first evaluated block RMS.  Rebuilding
                 # it every call would make the residual map non-stationary.
-                scale = _build_block_rms_scale(raw_residual, block_lengths_eval)
+                scale = _build_block_rms_scale(raw_buffer, block_lengths_eval)
                 if scale is None:
-                    scale = np.ones_like(raw_residual)
-            scaled_residual = raw_residual / scale
+                    scale = np.ones_like(raw_buffer)
+            np.divide(raw_buffer, scale, out=scaled_buffer)
             if transform == "asinh":
-                return np.arcsinh(scaled_residual)
-            return scaled_residual
+                np.arcsinh(scaled_buffer, out=scaled_buffer)
+            return scaled_buffer.copy()
 
         def get_raw_residual(x: np.ndarray) -> np.ndarray:
             x_eval = self.operator.coerce_x(x)
-            if (
-                last_x is not None
-                and last_raw_residual is not None
-                and np.array_equal(last_x, x_eval)
-            ):
-                return last_raw_residual.copy()
-            return np.asarray(self.operator(x_eval), dtype=np.float64)
+            if last_x_valid and np.array_equal(last_x, x_eval):
+                return raw_buffer.copy()
+            out = np.empty(self.operator.x_size, dtype=np.float64)
+            self.operator._residual_var_into_kernel_ready(x_eval, out)
+            return out
 
         return wrapped, get_raw_residual
 
@@ -1148,14 +1148,28 @@ class Solver:
         max_ratio = float(solve_config.residual_normalization_max_ratio)
         huber_tau = float(solve_config.residual_normalization_huber_tau)
         scale: np.ndarray | None = None
-        last_x: np.ndarray | None = None
-        last_raw_residual: np.ndarray | None = None
+        residual_size = self.operator.x_size if residual_kind == "variational" else -1
+        raw_buffer = (
+            np.empty(residual_size, dtype=np.float64) if residual_size >= 0 else np.empty(0)
+        )
+        scaled_buffer = (
+            np.empty(residual_size, dtype=np.float64) if residual_size >= 0 else np.empty(0)
+        )
+        last_x = np.empty_like(x_guess)
+        last_x_valid = False
         if initial_residual is None and not _mode_is_block_rms(mode):
             try:
                 # Build the balanced scale at the reference point when possible;
                 # delayed construction is only a fallback for bad initial calls.
                 initial_x_eval = self.operator.coerce_x(x_guess)
-                initial_residual = np.asarray(residual_fun(initial_x_eval), dtype=np.float64)
+                if residual_kind == "variational":
+                    initial_residual = np.empty(self.operator.x_size, dtype=np.float64)
+                    self.operator._residual_var_into_kernel_ready(
+                        initial_x_eval,
+                        initial_residual,
+                    )
+                else:
+                    initial_residual = np.asarray(residual_fun(initial_x_eval), dtype=np.float64)
                 initial_x = initial_x_eval
             except Exception:
                 initial_residual = None
@@ -1173,22 +1187,23 @@ class Solver:
                 huber_tau=huber_tau,
             )
             if initial_x is not None:
-                last_x = self.operator.coerce_x(initial_x).copy()
-                last_raw_residual = initial_residual_eval.copy()
+                np.copyto(last_x, self.operator.coerce_x(initial_x))
+                if residual_kind == "variational":
+                    np.copyto(raw_buffer, initial_residual_eval)
+                last_x_valid = residual_kind == "variational"
 
         def wrapped(x: np.ndarray) -> np.ndarray:
-            nonlocal scale, last_x, last_raw_residual
-            x_eval = self.operator.coerce_x(x)
-            if (
-                last_x is not None
-                and last_raw_residual is not None
-                and np.array_equal(last_x, x_eval)
-            ):
-                raw_residual = last_raw_residual.copy()
+            nonlocal scale, last_x_valid
+            if residual_kind == "variational":
+                x_eval = _validate_x_kernel_ready(x, self.operator.x_size)
+                if not (last_x_valid and np.array_equal(last_x, x_eval)):
+                    self.operator._residual_var_into_kernel_ready(x_eval, raw_buffer)
+                    np.copyto(last_x, x_eval)
+                    last_x_valid = True
+                raw_residual = raw_buffer
             else:
+                x_eval = self.operator.coerce_x(x)
                 raw_residual = np.asarray(residual_fun(x_eval), dtype=np.float64)
-                last_x = x_eval.copy()
-                last_raw_residual = raw_residual.copy()
             if scale is None:
                 # Like the legacy wrapper, balanced normalization is a fixed left
                 # preconditioner for this solve attempt, not a dynamic objective.
@@ -1203,16 +1218,19 @@ class Solver:
                     max_ratio=max_ratio,
                     huber_tau=huber_tau,
                 )
+            if residual_kind == "variational":
+                np.divide(raw_residual, scale, out=scaled_buffer)
+                return scaled_buffer.copy()
             return raw_residual / scale
 
         def get_raw_residual(x: np.ndarray) -> np.ndarray:
             x_eval = self.operator.coerce_x(x)
-            if (
-                last_x is not None
-                and last_raw_residual is not None
-                and np.array_equal(last_x, x_eval)
-            ):
-                return last_raw_residual.copy()
+            if residual_kind == "variational" and last_x_valid and np.array_equal(last_x, x_eval):
+                return raw_buffer.copy()
+            if residual_kind == "variational":
+                out = np.empty(self.operator.x_size, dtype=np.float64)
+                self.operator._residual_var_into_kernel_ready(x_eval, out)
+                return out
             return np.asarray(residual_fun(x_eval), dtype=np.float64)
 
         return wrapped, get_raw_residual

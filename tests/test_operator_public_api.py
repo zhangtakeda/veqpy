@@ -27,6 +27,7 @@ def test_operator_residual_interfaces_and_in_place_outputs() -> None:
     residual = operator.residual_var(x0)
     assert residual.shape == (operator.x_size,)
     assert np.all(np.isfinite(residual))
+    assert_allclose(operator.residual_var(x0.tolist()), residual)
 
     out = np.empty_like(residual)
     operator.residual_var_into(x0, out)
@@ -57,6 +58,10 @@ def test_operator_validation_and_snapshot_helpers() -> None:
         operator.coerce_x(np.zeros(operator.x_size + 1))
     with pytest.raises(TypeError, match="dtype float64"):
         operator.residual_var_into(x0, np.empty(operator.x_size, dtype=np.float32))
+    noncontiguous = np.empty(operator.x_size * 2, dtype=np.float64)[::2]
+    noncontiguous[:] = x0
+    assert not noncontiguous.flags.c_contiguous
+    assert operator.coerce_x(noncontiguous).flags.c_contiguous
 
     coeffs = operator.build_coeffs(x0, include_none=False)
     assert set(coeffs) == {"h", "k", "s1", "psin"}

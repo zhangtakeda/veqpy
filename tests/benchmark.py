@@ -41,7 +41,7 @@ from veqpy.operator import (
 )
 from veqpy.solver import Solver, SolverConfig
 
-PLOT = True
+PLOT = False
 SHOW_PROGRESS = True
 COMPARE_SHAPE_KEYS = ("h", "k", "s1")
 COMPARE_SOURCE_KEYS = (
@@ -986,8 +986,7 @@ def build_benchmark_baseline_payload(*, show_progress: bool = False) -> dict[str
         "modes": list(BENCHMARK_MODES),
         "input_kinds": list(BENCHMARK_INPUT_KINDS),
         "mode_constraints": {
-            mode: list(constraints)
-            for mode, constraints in BENCHMARK_MODE_CONSTRAINTS.items()
+            mode: list(constraints) for mode, constraints in BENCHMARK_MODE_CONSTRAINTS.items()
         },
         "shape_match_tol": float(SHAPE_MATCH_TOL),
         "reference": {
