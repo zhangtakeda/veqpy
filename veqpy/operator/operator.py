@@ -231,33 +231,39 @@ class Operator:
     def residual_var(
         self,
         x: np.ndarray,
+        *,
+        check: bool = True,
     ) -> np.ndarray:
         """Return the variational/Galerkin residual vector."""
-        x_eval = self.coerce_x(x)
         out = np.empty(self.plan.x_size, dtype=np.float64)
-        self._residual_var_into_kernel_ready(x_eval, out)
+        self.residual_var_into(x, out, check=check)
         return out
 
-    def residual_var_into(self, x: np.ndarray, out: np.ndarray) -> None:
+    def residual_var_into(
+        self,
+        x: np.ndarray,
+        out: np.ndarray,
+        *,
+        check: bool = True,
+    ) -> None:
         """Write the variational/Galerkin residual into caller-provided ``out``."""
-        x_eval = self.coerce_x(x)
-        self._residual_var_into_kernel_ready(x_eval, out)
-
-    def _residual_var_into_kernel_ready(self, x: np.ndarray, out: np.ndarray) -> None:
-        """Write the variational residual for a kernel-ready packed state."""
-        _validate_x_kernel_ready(x, self.plan.x_size)
-        if not isinstance(out, np.ndarray):
-            raise TypeError("Expected out to be a numpy.ndarray")
-        out_eval = out
-        if out_eval.dtype != np.float64:
-            raise TypeError(f"Expected out dtype float64, got {out_eval.dtype}")
-        if out_eval.ndim != 1 or out_eval.shape[0] != self.plan.x_size:
-            raise ValueError(
-                f"Expected out to have shape ({self.plan.x_size},), got {out_eval.shape}"
-            )
-        if not out_eval.flags.c_contiguous:
-            raise ValueError("Expected out to be C-contiguous")
-        self.layout.run_fused_residual_into(x, out_eval)
+        if check:
+            x_eval = self.coerce_x(x)
+            if not isinstance(out, np.ndarray):
+                raise TypeError("Expected out to be a numpy.ndarray")
+            out_eval = out
+            if out_eval.dtype != np.float64:
+                raise TypeError(f"Expected out dtype float64, got {out_eval.dtype}")
+            if out_eval.ndim != 1 or out_eval.shape[0] != self.plan.x_size:
+                raise ValueError(
+                    f"Expected out to have shape ({self.plan.x_size},), got {out_eval.shape}"
+                )
+            if not out_eval.flags.c_contiguous:
+                raise ValueError("Expected out to be C-contiguous")
+        else:
+            x_eval = x
+            out_eval = out
+        self.layout.run_fused_residual_into(x_eval, out_eval)
 
     def residual_collocation(self, x: np.ndarray) -> np.ndarray:
         """Return the quadrature-scaled pointwise collocation residual.
@@ -268,19 +274,13 @@ class Operator:
         weights provide the discrete least-squares scaling. The returned vector has
         shape ``(Nr * Nt,)``.
         """
-        x_eval = self.coerce_x(x)
         out = np.empty(self.plan.grid_workspace.Nr * self.plan.grid_workspace.Nt, dtype=np.float64)
-        self._residual_collocation_into_kernel_ready(x_eval, out)
+        self.residual_collocation_into(x, out)
         return out
 
     def residual_collocation_into(self, x: np.ndarray, out: np.ndarray) -> None:
         """Write the quadrature-scaled collocation residual into caller-provided ``out``."""
         x_eval = self.coerce_x(x)
-        self._residual_collocation_into_kernel_ready(x_eval, out)
-
-    def _residual_collocation_into_kernel_ready(self, x: np.ndarray, out: np.ndarray) -> None:
-        """Write the collocation residual for a kernel-ready packed state."""
-        _validate_x_kernel_ready(x, self.plan.x_size)
         expected_size = self.plan.grid_workspace.Nr * self.plan.grid_workspace.Nt
         if not isinstance(out, np.ndarray):
             raise TypeError("Expected out to be a numpy.ndarray")
@@ -291,7 +291,7 @@ class Operator:
             raise ValueError(f"Expected out to have shape ({expected_size},), got {out_eval.shape}")
         if not out_eval.flags.c_contiguous:
             raise ValueError("Expected out to be C-contiguous")
-        self.layout.run_collocation_into(x, out_eval)
+        self.layout.run_collocation_into(x_eval, out_eval)
 
     def build_coeffs(
         self, x: np.ndarray, *, include_none: bool = True
@@ -529,20 +529,6 @@ class Operator:
             alpha1=self.alpha1,
             alpha2=self.alpha2,
         )
-
-
-def _validate_x_kernel_ready(x: np.ndarray, expected_size: int) -> np.ndarray:
-    """Validate a packed state that already crossed the public coercion boundary."""
-
-    if not isinstance(x, np.ndarray):
-        raise TypeError("Expected x to be a numpy.ndarray")
-    if x.dtype != np.float64:
-        raise TypeError(f"Expected x dtype float64, got {x.dtype}")
-    if x.ndim != 1 or x.shape[0] != int(expected_size):
-        raise ValueError(f"Expected x to have shape ({int(expected_size)},), got {x.shape}")
-    if not x.flags.c_contiguous:
-        raise ValueError("Expected x to be C-contiguous")
-    return x
 
 
 def _estimate_h0_from_case(case: "OperatorCase") -> float:

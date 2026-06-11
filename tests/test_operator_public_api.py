@@ -37,6 +37,12 @@ def test_operator_residual_interfaces_and_in_place_outputs() -> None:
     operator.residual_var_into(x0, out)
     assert_allclose(out, residual)
 
+    unchecked_residual = operator.residual_var(x0, check=False)
+    assert_allclose(unchecked_residual, residual)
+    unchecked_out = np.empty_like(residual)
+    operator.residual_var_into(x0, unchecked_out, check=False)
+    assert_allclose(unchecked_out, residual)
+
     collocation = operator.residual_collocation(x0)
     assert collocation.shape == (
         operator.plan.grid_workspace.Nr * operator.plan.grid_workspace.Nt,

@@ -24,7 +24,7 @@ import numpy as np
 from rich.console import Console
 
 from veqpy.model.equilibrium import Equilibrium
-from veqpy.operator.operator import Operator, _validate_x_kernel_ready
+from veqpy.operator.operator import Operator
 from veqpy.operator.operator_case import OperatorCase
 from veqpy.solver.residual_scale import (
     _block_rms_values,
@@ -869,7 +869,7 @@ class Solver:
         def residual_fun(x: np.ndarray) -> np.ndarray:
             x_eval = self.operator.coerce_x(x)
             if residual_kind == "variational":
-                return self.operator.residual_var(x_eval)
+                return self.operator.residual_var(x_eval, check=False)
             if residual_kind == "collocation":
                 return self.operator.residual_collocation(x_eval)
             raise ValueError(f"Unsupported residual kind {residual_kind!r}.")
@@ -1088,8 +1088,8 @@ class Solver:
 
         def wrapped(x: np.ndarray) -> np.ndarray:
             nonlocal scale, last_x_valid
-            x_eval = _validate_x_kernel_ready(x, self.operator.x_size)
-            self.operator._residual_var_into_kernel_ready(x_eval, raw_buffer)
+            x_eval = x
+            self.operator.residual_var_into(x_eval, raw_buffer, check=False)
             np.copyto(last_x, x_eval)
             last_x_valid = True
             if scale is None:
@@ -1108,7 +1108,7 @@ class Solver:
             if last_x_valid and np.array_equal(last_x, x_eval):
                 return raw_buffer.copy()
             out = np.empty(self.operator.x_size, dtype=np.float64)
-            self.operator._residual_var_into_kernel_ready(x_eval, out)
+            self.operator.residual_var_into(x_eval, out, check=False)
             return out
 
         return wrapped, get_raw_residual
@@ -1164,9 +1164,10 @@ class Solver:
                 initial_x_eval = self.operator.coerce_x(x_guess)
                 if residual_kind == "variational":
                     initial_residual = np.empty(self.operator.x_size, dtype=np.float64)
-                    self.operator._residual_var_into_kernel_ready(
+                    self.operator.residual_var_into(
                         initial_x_eval,
                         initial_residual,
+                        check=False,
                     )
                 else:
                     initial_residual = np.asarray(residual_fun(initial_x_eval), dtype=np.float64)
@@ -1195,9 +1196,9 @@ class Solver:
         def wrapped(x: np.ndarray) -> np.ndarray:
             nonlocal scale, last_x_valid
             if residual_kind == "variational":
-                x_eval = _validate_x_kernel_ready(x, self.operator.x_size)
+                x_eval = x
                 if not (last_x_valid and np.array_equal(last_x, x_eval)):
-                    self.operator._residual_var_into_kernel_ready(x_eval, raw_buffer)
+                    self.operator.residual_var_into(x_eval, raw_buffer, check=False)
                     np.copyto(last_x, x_eval)
                     last_x_valid = True
                 raw_residual = raw_buffer
@@ -1229,7 +1230,7 @@ class Solver:
                 return raw_buffer.copy()
             if residual_kind == "variational":
                 out = np.empty(self.operator.x_size, dtype=np.float64)
-                self.operator._residual_var_into_kernel_ready(x_eval, out)
+                self.operator.residual_var_into(x_eval, out, check=False)
                 return out
             return np.asarray(residual_fun(x_eval), dtype=np.float64)
 
