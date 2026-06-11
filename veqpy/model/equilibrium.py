@@ -1047,14 +1047,6 @@ def _close_periodic_curve(values: np.ndarray) -> np.ndarray:
     return np.concatenate([arr, arr[:1]])
 
 
-def _merge_surface_boundaries(*boundaries: dict) -> dict:
-    if not boundaries:
-        raise ValueError("At least one boundary must be provided")
-    R = np.concatenate([np.asarray(boundary["R"], dtype=np.float64) for boundary in boundaries])
-    Z = np.concatenate([np.asarray(boundary["Z"], dtype=np.float64) for boundary in boundaries])
-    return {"R": R, "Z": Z}
-
-
 def _build_shape_panel_data(equilibrium: Equilibrium) -> dict:
     values = {
         key: _evaluate_profile_fields(profile, equilibrium.grid)[0]
@@ -1737,20 +1729,6 @@ def _render_panel_a_surfaces(ax: plt.Axes, fig: plt.Figure, data: dict):
     _style_colorbar(cbar, label=RHO_LABEL)
     cbar.locator = ticker.MaxNLocator(nbins=SURFACE_COLORBAR_NBINS)
     cbar.update_ticks()
-
-
-def _render_panel_b_shapes(ax: plt.Axes, data: dict):
-    _style_axis(ax, xlabel=RHO_LABEL, ylabel=PROFILE_LABEL, title=PANEL_B_TITLE)
-    shape = data["shape"]
-    _plot_shape_profile_group(ax, shape, list(shape["values"]))
-
-    if shape["values"]:
-        if len(shape["values"]) < 5:
-            _style_legend(ax, loc="center left")
-        elif len(shape["values"]) > 8:
-            _style_legend(ax, loc="center left", ncols=3)
-        else:
-            _style_legend(ax, loc="center left", ncols=2)
 
 
 def _render_panel_b_shape_families(axes: list[plt.Axes], data: dict) -> None:

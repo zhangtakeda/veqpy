@@ -996,7 +996,7 @@ def build_source_remap_cache(
     local_size = min(count, int(stencil_size))
     if local_size < 1:
         raise ValueError(f"stencil_size must be positive, got {stencil_size!r}")
-    weights = _uniform_barycentric_weights(local_size)
+    weights = uniform_barycentric_weights(local_size)
     fixed_remap_matrix = np.empty((0, 0), dtype=np.float64)
     if coord_code == RHO_COORDINATE:
         if rho is None:
@@ -2712,83 +2712,6 @@ def resolve_source_scratch_kernel(operator_kernel: Callable) -> Callable | None:
     return None
 
 
-def materialize_profile_owned_psin_source(
-    out_psin: np.ndarray,
-    out_psin_r: np.ndarray,
-    out_psin_rr: np.ndarray,
-    out_source_psin_query: np.ndarray,
-    out_parameter_query: np.ndarray,
-    out_heat_input: np.ndarray,
-    out_current_input: np.ndarray,
-    psin_fields: np.ndarray,
-    heat_input: np.ndarray,
-    current_input: np.ndarray,
-    heat_spline_coeff: np.ndarray,
-    current_spline_coeff: np.ndarray,
-    parameterization_code: int,
-    rho: np.ndarray,
-    differentiator: np.ndarray,
-    accumulator: np.ndarray,
-    n_axis_fix: int,
-    barycentric_weights: np.ndarray | None = None,
-    use_barycentric: bool = False,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Materialize source arrays for routes where optimized psin owns the query.
-
-    Profile-owned psin routes bypass source-derived psin_r: the optimized psin
-    derivative becomes the coordinate map, then heat/current samples are queried
-    in that coordinate.  The returned source inputs are therefore stateful and
-    must be refreshed whenever the packed psin coefficients change.
-    """
-    if psin_fields.ndim != 2 or psin_fields.shape[0] != 3:
-        raise ValueError(f"Expected psin_fields to have shape (3, Nr), got {psin_fields.shape}")
-    nr = psin_fields.shape[1]
-    expected = (nr,)
-    arrays = {
-        "out_psin": out_psin,
-        "out_psin_r": out_psin_r,
-        "out_psin_rr": out_psin_rr,
-        "out_source_psin_query": out_source_psin_query,
-        "out_parameter_query": out_parameter_query,
-        "out_heat_input": out_heat_input,
-        "out_current_input": out_current_input,
-    }
-    for name, arr in arrays.items():
-        if arr.ndim != 1 or arr.shape != expected:
-            raise ValueError(f"Expected {name} to have shape {expected}, got {arr.shape}")
-
-    heat = np.asarray(heat_input, dtype=np.float64)
-    current = np.asarray(current_input, dtype=np.float64)
-    if heat.ndim != 1 or current.ndim != 1 or heat.shape != current.shape:
-        raise ValueError(f"Expected matching 1D heat/current, got {heat.shape} and {current.shape}")
-    bary_weights = (
-        np.empty(0, dtype=np.float64)
-        if barycentric_weights is None
-        else np.asarray(barycentric_weights, dtype=np.float64)
-    )
-    return materialize_profile_owned_psin_source_kernel_ready(
-        np.asarray(out_psin, dtype=np.float64),
-        np.asarray(out_psin_r, dtype=np.float64),
-        np.asarray(out_psin_rr, dtype=np.float64),
-        np.asarray(out_source_psin_query, dtype=np.float64),
-        np.asarray(out_parameter_query, dtype=np.float64),
-        np.asarray(out_heat_input, dtype=np.float64),
-        np.asarray(out_current_input, dtype=np.float64),
-        np.asarray(psin_fields, dtype=np.float64),
-        heat,
-        current,
-        np.asarray(heat_spline_coeff, dtype=np.float64),
-        np.asarray(current_spline_coeff, dtype=np.float64),
-        int(parameterization_code),
-        np.asarray(rho, dtype=np.float64),
-        np.asarray(differentiator, dtype=np.float64),
-        np.asarray(accumulator, dtype=np.float64),
-        int(n_axis_fix),
-        bary_weights,
-        bool(use_barycentric),
-    )
-
-
 def materialize_profile_owned_psin_source_kernel_ready(
     out_psin: np.ndarray,
     out_psin_r: np.ndarray,
@@ -2881,22 +2804,6 @@ def update_fourier_family_fields(
         int(s_active_order),
     )
     return out_c_fields, out_s_fields
-
-
-def update_fixed_point_psin_query(
-    query: np.ndarray,
-    psin: np.ndarray,
-    max_residual: float,
-) -> bool:
-    """Update a fixed-point psin source query and report convergence.
-
-    The residual is measured before overwriting the query.  Callers can then use
-    the updated query immediately for the next remap while still knowing whether
-    the last fixed-point step was small enough.
-    """
-    if query.ndim != 1 or psin.ndim != 1 or query.shape != psin.shape:
-        raise ValueError(f"query/psin shape mismatch: {query.shape} vs {psin.shape}")
-    return update_fixed_point_psin_query_kernel_ready(query, psin, max_residual)
 
 
 def update_fixed_point_psin_query_kernel_ready(
@@ -3250,53 +3157,12 @@ def _local_barycentric_interpolate_pair(
 
 
 @njit(cache=True, fastmath=True, nogil=True)
-def _uniform_barycentric_weights(source_sample_count: int) -> np.ndarray:
+def uniform_barycentric_weights(source_sample_count: int) -> np.ndarray:
     weights = np.empty(source_sample_count, dtype=np.float64)
     weights[0] = 1.0
     for j in range(1, source_sample_count):
         weights[j] = -weights[j - 1] * (source_sample_count - j) / j
     return weights
-
-
-uniform_barycentric_weights = _uniform_barycentric_weights
-
-
-def _build_uniform_barycentric_matrix(
-    query: np.ndarray,
-    source_sample_count: int,
-    stencil_size: int,
-    weights: np.ndarray,
-) -> np.ndarray:
-    # This dense matrix is used only for fixed rho-coordinate remaps.  Dynamic
-    # psin-coordinate remaps call the allocation-free pair interpolators instead.
-    matrix = np.empty((query.shape[0], source_sample_count), dtype=np.float64)
-    if source_sample_count == 1:
-        matrix[:, 0] = 1.0
-        return matrix
-
-    for i, q in enumerate(query):
-        for j in range(source_sample_count):
-            matrix[i, j] = 0.0
-        start = _local_uniform_stencil_start(q, source_sample_count, stencil_size)
-        hit = False
-        for local_j in range(stencil_size):
-            j = start + local_j
-            diff = q - j / (source_sample_count - 1.0)
-            if abs(diff) <= 1e-14:
-                matrix[i, j] = 1.0
-                hit = True
-                break
-        if hit:
-            continue
-
-        denominator = 0.0
-        for local_j in range(stencil_size):
-            j = start + local_j
-            denominator += weights[local_j] / (q - j / (source_sample_count - 1.0))
-        for local_j in range(stencil_size):
-            j = start + local_j
-            matrix[i, j] = (weights[local_j] / (q - j / (source_sample_count - 1.0))) / denominator
-    return matrix
 
 
 @njit(cache=True, fastmath=True, nogil=True)

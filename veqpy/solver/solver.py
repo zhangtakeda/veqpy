@@ -1545,10 +1545,6 @@ def _requires_strict_residual_acceptance(solve_config: SolverConfig, *, residual
     return residual_kind == "variational"
 
 
-def _hard_residual_norm_threshold() -> float:
-    return 1.0e3
-
-
 def _trf_robust_block_rms_threshold() -> float:
     return 2.0e40
 

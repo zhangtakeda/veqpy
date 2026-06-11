@@ -216,10 +216,6 @@ PACKED_LAYOUT_PROFILE_FIRST = False
 INTERLEAVE_SHAPE_COEFFS_BY_ORDER = not PACKED_LAYOUT_PROFILE_FIRST
 
 
-def _validated_profile_family_order() -> tuple[str, ...]:
-    return validate_profile_family_order(PACKED_PROFILE_FAMILY_ORDER)
-
-
 def build_profile_index(profile_names: tuple[str, ...]) -> dict[str, int]:
     """Build a name-to-row lookup for packed profile metadata arrays."""
     return {name: i for i, name in enumerate(profile_names)}

@@ -359,12 +359,6 @@ def _const_array(value: np.ndarray) -> np.ndarray:
     return array
 
 
-def _normalize_optional_int(value: int | None) -> int | None:
-    if value is None:
-        return None
-    return int(value)
-
-
 def _build_K_values(M_max: int, K_max: int | None) -> np.ndarray:
     powers = np.arange(int(M_max) + 1, dtype=np.int64)
     powers[0] = 0
