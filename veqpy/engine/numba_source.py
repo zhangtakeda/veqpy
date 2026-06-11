@@ -626,6 +626,74 @@ def _dense_solve_one_rhs_inplace(A: np.ndarray, b: np.ndarray, n: int, pivot_tol
 
 
 @njit(cache=True, nogil=True)
+def _dense_solve_two_rhs_inplace(
+    A: np.ndarray,
+    b0: np.ndarray,
+    b1: np.ndarray,
+    n: int,
+    pivot_tol: float,
+) -> None:
+    """Solve two RHS vectors with one dense partial-pivot elimination."""
+    scale = 0.0
+    for i in range(n):
+        for j in range(n):
+            value = abs(A[i, j])
+            if value > scale:
+                scale = value
+    threshold = pivot_tol
+    if scale > 1.0:
+        threshold = pivot_tol * scale
+
+    for k in range(n - 1):
+        pivot = k
+        pivot_abs = abs(A[k, k])
+        for i in range(k + 1, n):
+            value = abs(A[i, k])
+            if value > pivot_abs:
+                pivot = i
+                pivot_abs = value
+        if pivot_abs <= threshold or not np.isfinite(pivot_abs):
+            raise ValueError("PQ dense solve failed: singular pivot")
+
+        if pivot != k:
+            for j in range(n):
+                tmp = A[k, j]
+                A[k, j] = A[pivot, j]
+                A[pivot, j] = tmp
+            tmp_b0 = b0[k]
+            b0[k] = b0[pivot]
+            b0[pivot] = tmp_b0
+            tmp_b1 = b1[k]
+            b1[k] = b1[pivot]
+            b1[pivot] = tmp_b1
+
+        akk = A[k, k]
+        for i in range(k + 1, n):
+            factor = A[i, k] / akk
+            A[i, k] = factor
+            for j in range(k + 1, n):
+                A[i, j] -= factor * A[k, j]
+            b0[i] -= factor * b0[k]
+            b1[i] -= factor * b1[k]
+
+    last_pivot = abs(A[n - 1, n - 1])
+    if last_pivot <= threshold or not np.isfinite(last_pivot):
+        raise ValueError("PQ dense solve failed: singular last pivot")
+
+    for ii in range(n):
+        i = n - 1 - ii
+        accum0 = b0[i]
+        accum1 = b1[i]
+        for j in range(i + 1, n):
+            accum0 -= A[i, j] * b0[j]
+            accum1 -= A[i, j] * b1[j]
+        b0[i] = accum0 / A[i, i]
+        b1[i] = accum1 / A[i, i]
+        if not np.isfinite(b0[i]) or not np.isfinite(b1[i]):
+            raise ValueError("PQ dense solve produced non-finite solution")
+
+
+@njit(cache=True, nogil=True)
 def _fill_pq_linear_matrix(
     A: np.ndarray,
     rhs: np.ndarray,
@@ -648,6 +716,36 @@ def _fill_pq_linear_matrix(
         A[edge, j] = 0.0
     A[edge, edge] = 1.0
     rhs[edge] = edge_value
+
+
+@njit(cache=True, nogil=True)
+def _fill_pq_linear_matrix_two_rhs(
+    A: np.ndarray,
+    rhs0: np.ndarray,
+    rhs1: np.ndarray,
+    D: np.ndarray,
+    coeff_d: np.ndarray,
+    coeff_y: np.ndarray,
+    forcing0: np.ndarray,
+    forcing1: np.ndarray,
+    edge_value0: float,
+    edge_value1: float,
+    n: int,
+) -> None:
+    """Assemble one dense PQ system with two edge-conditioned RHS vectors."""
+    for i in range(n):
+        for j in range(n):
+            A[i, j] = coeff_d[i] * D[i, j]
+        A[i, i] += coeff_y[i]
+        rhs0[i] = forcing0[i]
+        rhs1[i] = forcing1[i]
+
+    edge = n - 1
+    for j in range(n):
+        A[edge, j] = 0.0
+    A[edge, edge] = 1.0
+    rhs0[edge] = edge_value0
+    rhs1[edge] = edge_value1
 
 
 @njit(cache=True, nogil=True)
@@ -2255,18 +2353,24 @@ def _update_pq_from_psin_uniform_inputs_with_scratch(
         # Solve A F0 = b_edge and A F1 = b_pressure, then determine alpha1 from
         # the scalar beta constraint with F = F0 + alpha1 * F1.
         for i in range(n):
-            rhs[i] = 0.0
-        _fill_pq_linear_matrix(A, rhs, differentiator, coeff_d, coeff_y, rhs, edge_F, n)
-        copy_into(F_solved, rhs)
-        _dense_solve_one_rhs_inplace(A, F_solved, n, 1.0e-12)
-
-        for i in range(n):
-            rhs[i] = -pressure_factor * V_r[i] * heat_input[i]
-            if not np.isfinite(rhs[i]):
+            F_solved[i] = 0.0
+            W[i] = -pressure_factor * V_r[i] * heat_input[i]
+            if not np.isfinite(W[i]):
                 raise ValueError("PQ/psin strict beta solve assembled non-finite pressure RHS")
-        _fill_pq_linear_matrix(A, rhs, differentiator, coeff_d, coeff_y, rhs, 0.0, n)
-        copy_into(W, rhs)
-        _dense_solve_one_rhs_inplace(A, W, n, 1.0e-12)
+        _fill_pq_linear_matrix_two_rhs(
+            A,
+            F_solved,
+            W,
+            differentiator,
+            coeff_d,
+            coeff_y,
+            F_solved,
+            W,
+            edge_F,
+            0.0,
+            n,
+        )
+        _dense_solve_two_rhs_inplace(A, F_solved, W, n, 1.0e-12)
 
         beta_target = 0.5 * beta * B0**2 * dot(V_r, weights)
         alpha1 = _solve_pq_psin_beta_alpha1(
@@ -2382,18 +2486,24 @@ def _update_pq_from_psin_grid_inputs_with_scratch(
         # Solve A F0 = b_edge and A F1 = b_pressure, then determine alpha1 from
         # the scalar beta constraint with F = F0 + alpha1 * F1.
         for i in range(n):
-            rhs[i] = 0.0
-        _fill_pq_linear_matrix(A, rhs, differentiator, coeff_d, coeff_y, rhs, edge_F, n)
-        copy_into(F_solved, rhs)
-        _dense_solve_one_rhs_inplace(A, F_solved, n, 1.0e-12)
-
-        for i in range(n):
-            rhs[i] = -pressure_factor * V_r[i] * heat_input[i]
-            if not np.isfinite(rhs[i]):
+            F_solved[i] = 0.0
+            W[i] = -pressure_factor * V_r[i] * heat_input[i]
+            if not np.isfinite(W[i]):
                 raise ValueError("PQ/psin strict beta solve assembled non-finite pressure RHS")
-        _fill_pq_linear_matrix(A, rhs, differentiator, coeff_d, coeff_y, rhs, 0.0, n)
-        copy_into(W, rhs)
-        _dense_solve_one_rhs_inplace(A, W, n, 1.0e-12)
+        _fill_pq_linear_matrix_two_rhs(
+            A,
+            F_solved,
+            W,
+            differentiator,
+            coeff_d,
+            coeff_y,
+            F_solved,
+            W,
+            edge_F,
+            0.0,
+            n,
+        )
+        _dense_solve_two_rhs_inplace(A, F_solved, W, n, 1.0e-12)
 
         beta_target = 0.5 * beta * B0**2 * dot(V_r, weights)
         alpha1 = _solve_pq_psin_beta_alpha1(

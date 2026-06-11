@@ -8,6 +8,10 @@ from numpy.testing import assert_allclose
 from veqpy.engine.numba_source import (
     DEFAULT_LOCAL_BARYCENTRIC_STENCIL as ENGINE_LOCAL_BARYCENTRIC_STENCIL,
 )
+from veqpy.engine.numba_source import (
+    _dense_solve_one_rhs_inplace,
+    _dense_solve_two_rhs_inplace,
+)
 from veqpy.math import (
     DEFAULT_LOCAL_BARYCENTRIC_STENCIL,
     SOURCE_INTERP_DEFAULT,
@@ -101,3 +105,27 @@ def test_pf_rho_unconstrained_cases_use_positive_flux_branch() -> None:
 
     assert null_eq.alpha2 > 0.0
     assert beta_eq.alpha2 > 0.0
+
+
+def test_pq_dense_two_rhs_solve_matches_two_one_rhs_solves() -> None:
+    rng = np.random.default_rng(20240611)
+    n = 6
+    A = rng.normal(size=(n, n))
+    A += np.eye(n) * 5.0
+    b0 = rng.normal(size=n)
+    b1 = rng.normal(size=n)
+
+    A0 = np.ascontiguousarray(A.copy())
+    A1 = np.ascontiguousarray(A.copy())
+    x0_expected = np.ascontiguousarray(b0.copy())
+    x1_expected = np.ascontiguousarray(b1.copy())
+    _dense_solve_one_rhs_inplace(A0, x0_expected, n, 1.0e-12)
+    _dense_solve_one_rhs_inplace(A1, x1_expected, n, 1.0e-12)
+
+    A2 = np.ascontiguousarray(A.copy())
+    x0_actual = np.ascontiguousarray(b0.copy())
+    x1_actual = np.ascontiguousarray(b1.copy())
+    _dense_solve_two_rhs_inplace(A2, x0_actual, x1_actual, n, 1.0e-12)
+
+    assert_allclose(x0_actual, x0_expected, rtol=0.0, atol=1.0e-14)
+    assert_allclose(x1_actual, x1_expected, rtol=0.0, atol=1.0e-14)
