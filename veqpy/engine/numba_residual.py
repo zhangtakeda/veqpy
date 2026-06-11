@@ -123,7 +123,7 @@ def _copy_row_into(out: np.ndarray, row: np.ndarray) -> None:
 
 
 @njit(cache=True, fastmath=True, nogil=True)
-def _run_residual_blocks_packed_precomputed(
+def run_residual_blocks_packed_precomputed(
     out_packed: np.ndarray,
     scratch: np.ndarray,
     block_codes: np.ndarray,
@@ -231,7 +231,7 @@ def _run_residual_blocks_packed_precomputed(
 
 
 @njit(cache=True, fastmath=True, nogil=True)
-def _run_residual_blocks_packed_precomputed_auto(
+def run_residual_blocks_packed_precomputed_auto(
     out_packed: np.ndarray,
     scratch: np.ndarray,
     scratch_rows: np.ndarray,
@@ -274,7 +274,7 @@ def _run_residual_blocks_packed_precomputed_auto(
             need_g = True
 
     if block_count < 8 and fourier_count < 4:
-        _run_residual_blocks_packed_precomputed(
+        run_residual_blocks_packed_precomputed(
             out_packed,
             scratch,
             block_codes,
@@ -385,11 +385,6 @@ def _run_residual_blocks_packed_precomputed_auto(
             )
         else:
             raise ValueError("Unknown residual block code")
-
-
-run_residual_blocks_packed_precomputed = _run_residual_blocks_packed_precomputed
-run_residual_blocks_packed_precomputed_auto = _run_residual_blocks_packed_precomputed_auto
-
 
 @njit(cache=True, fastmath=True, nogil=True)
 def write_weighted_scaled_g_collocation_field_into(
