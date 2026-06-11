@@ -1027,7 +1027,7 @@ def resolve_source_inputs(
 
     heat = np.asarray(heat_input, dtype=np.float64)
     current = np.asarray(current_input, dtype=np.float64)
-    return resolve_source_inputs_kernel_ready(
+    return _resolve_source_inputs_kernel_ready(
         out_heat_input,
         out_current_input,
         heat,
@@ -1043,7 +1043,7 @@ def resolve_source_inputs(
     )
 
 
-def resolve_source_inputs_kernel_ready(
+def _resolve_source_inputs_kernel_ready(
     out_heat_input: np.ndarray,
     out_current_input: np.ndarray,
     heat: np.ndarray,
@@ -2712,7 +2712,7 @@ def resolve_source_scratch_kernel(operator_kernel: Callable) -> Callable | None:
     return None
 
 
-def materialize_profile_owned_psin_source_kernel_ready(
+def _materialize_profile_owned_psin_source_kernel_ready(
     out_psin: np.ndarray,
     out_psin_r: np.ndarray,
     out_psin_rr: np.ndarray,
@@ -2806,7 +2806,7 @@ def update_fourier_family_fields(
     return out_c_fields, out_s_fields
 
 
-def update_fixed_point_psin_query_kernel_ready(
+def _update_fixed_point_psin_query_kernel_ready(
     query: np.ndarray,
     psin: np.ndarray,
     max_residual: float,

@@ -95,7 +95,7 @@ class OperatorLayout:
     geometry: GeometryLayout
     source: SourceLayout
     residual: ResidualLayout
-    run_collocation_runner_into: Callable[[np.ndarray, np.ndarray], None]
+    _run_collocation_into: Callable[[np.ndarray, np.ndarray], None]
 
     @classmethod
     def empty(cls, x_size: int) -> Self:
@@ -151,7 +151,7 @@ class OperatorLayout:
                 run_fused_into=fused_residual_runner_into,
                 run_fused=fused_residual_runner,
             ),
-            run_collocation_runner_into=collocation_runner_into,
+            _run_collocation_into=collocation_runner_into,
         )
 
     def run_profile(self, x: np.ndarray) -> None:
@@ -177,4 +177,4 @@ class OperatorLayout:
 
     def run_collocation_into(self, x: np.ndarray, out: np.ndarray) -> None:
         """Run the collocation residual path into ``out``."""
-        self.run_collocation_runner_into(x, out)
+        self._run_collocation_into(x, out)

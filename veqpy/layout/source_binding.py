@@ -19,9 +19,9 @@ import numpy as np
 from veqpy.engine.numba_source import (
     PJ2_PSIN_UNIFORM_FIXED_POINT_MAX_ITER,
     PJ2_PSIN_UNIFORM_FIXED_POINT_MAX_RESIDUAL,
-    materialize_profile_owned_psin_source_kernel_ready,
-    resolve_source_inputs_kernel_ready,
-    update_fixed_point_psin_query_kernel_ready,
+    _materialize_profile_owned_psin_source_kernel_ready,
+    _resolve_source_inputs_kernel_ready,
+    _update_fixed_point_psin_query_kernel_ready,
 )
 
 
@@ -99,7 +99,7 @@ def _build_source_stage_runner_shared(
                     raise RuntimeError("psin_profile runtime fields are not initialized")
                 # Optimized psin owns the root fields here.  Materialization also
                 # remaps heat/current using the just-built psin coordinate.
-                materialize_profile_owned_psin_source_kernel_ready(
+                _materialize_profile_owned_psin_source_kernel_ready(
                     psin,
                     psin_r,
                     psin_rr,
@@ -158,7 +158,7 @@ def _build_source_stage_runner_shared(
                 raise ValueError(
                     f"Unsupported source parameterization {source_plan.parameterization!r}"
                 )
-            resolve_source_inputs_kernel_ready(
+            _resolve_source_inputs_kernel_ready(
                 source_workspace.materialized_heat_input,
                 source_workspace.materialized_current_input,
                 source_plan.heat_input,
@@ -253,7 +253,7 @@ def _build_pj2_psin_uniform_source_stage_runner(
                 raise ValueError(
                     f"Unsupported source parameterization {source_plan.parameterization!r}"
                 )
-            resolve_source_inputs_kernel_ready(
+            _resolve_source_inputs_kernel_ready(
                 source_workspace.materialized_heat_input,
                 source_workspace.materialized_current_input,
                 source_plan.heat_input,
@@ -275,7 +275,7 @@ def _build_pj2_psin_uniform_source_stage_runner(
                 source_workspace.materialized_current_input,
                 case_R0,
             )
-            if update_fixed_point_psin_query_kernel_ready(
+            if _update_fixed_point_psin_query_kernel_ready(
                 source_workspace.psin_query,
                 target_root_fields[0],
                 PJ2_PSIN_UNIFORM_FIXED_POINT_MAX_RESIDUAL,
