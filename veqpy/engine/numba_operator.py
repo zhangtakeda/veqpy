@@ -107,7 +107,7 @@ def convert_f_squared_fields_to_f(fields: np.ndarray, eps: float = 1.0e-10) -> N
 
 
 def _normalize_psin_query(out: np.ndarray, source: np.ndarray) -> None:
-    np.copyto(out, np.asarray(source, dtype=np.float64))
+    np.copyto(out, source)
     offset = float(out[0])
     scale = float(out[-1] - offset)
     if abs(scale) < 1.0e-12:

@@ -1027,6 +1027,38 @@ def resolve_source_inputs(
 
     heat = np.asarray(heat_input, dtype=np.float64)
     current = np.asarray(current_input, dtype=np.float64)
+    return resolve_source_inputs_kernel_ready(
+        out_heat_input,
+        out_current_input,
+        heat,
+        current,
+        coordinate_code,
+        source_sample_count,
+        barycentric_weights,
+        fixed_remap_matrix,
+        heat_spline_coeff,
+        current_spline_coeff,
+        psin_query,
+        use_barycentric,
+    )
+
+
+def resolve_source_inputs_kernel_ready(
+    out_heat_input: np.ndarray,
+    out_current_input: np.ndarray,
+    heat: np.ndarray,
+    current: np.ndarray,
+    coordinate_code: int,
+    source_sample_count: int,
+    barycentric_weights: np.ndarray,
+    fixed_remap_matrix: np.ndarray,
+    heat_spline_coeff: np.ndarray,
+    current_spline_coeff: np.ndarray,
+    psin_query: np.ndarray,
+    use_barycentric: bool = False,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Resolve source inputs when all arrays are already normalized ndarrays."""
+
     if heat.ndim != 1 or current.ndim != 1:
         raise ValueError(f"Expected 1D heat/current inputs, got {heat.shape} and {current.shape}")
     if heat.shape != current.shape:
@@ -2734,8 +2766,7 @@ def materialize_profile_owned_psin_source(
         if barycentric_weights is None
         else np.asarray(barycentric_weights, dtype=np.float64)
     )
-
-    _materialize_profile_owned_psin_source_impl(
+    return materialize_profile_owned_psin_source_kernel_ready(
         np.asarray(out_psin, dtype=np.float64),
         np.asarray(out_psin_r, dtype=np.float64),
         np.asarray(out_psin_rr, dtype=np.float64),
@@ -2754,6 +2785,52 @@ def materialize_profile_owned_psin_source(
         np.asarray(accumulator, dtype=np.float64),
         int(n_axis_fix),
         bary_weights,
+        bool(use_barycentric),
+    )
+
+
+def materialize_profile_owned_psin_source_kernel_ready(
+    out_psin: np.ndarray,
+    out_psin_r: np.ndarray,
+    out_psin_rr: np.ndarray,
+    out_source_psin_query: np.ndarray,
+    out_parameter_query: np.ndarray,
+    out_heat_input: np.ndarray,
+    out_current_input: np.ndarray,
+    psin_fields: np.ndarray,
+    heat: np.ndarray,
+    current: np.ndarray,
+    heat_spline_coeff: np.ndarray,
+    current_spline_coeff: np.ndarray,
+    parameterization_code: int,
+    rho: np.ndarray,
+    differentiator: np.ndarray,
+    accumulator: np.ndarray,
+    n_axis_fix: int,
+    barycentric_weights: np.ndarray,
+    use_barycentric: bool = False,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Materialize profile-owned psin source inputs from normalized ndarrays."""
+
+    _materialize_profile_owned_psin_source_impl(
+        out_psin,
+        out_psin_r,
+        out_psin_rr,
+        out_source_psin_query,
+        out_parameter_query,
+        out_heat_input,
+        out_current_input,
+        psin_fields,
+        heat,
+        current,
+        heat_spline_coeff,
+        current_spline_coeff,
+        int(parameterization_code),
+        rho,
+        differentiator,
+        accumulator,
+        int(n_axis_fix),
+        barycentric_weights,
         bool(use_barycentric),
     )
     return out_heat_input, out_current_input
@@ -2793,13 +2870,13 @@ def update_fourier_family_fields(
         )
 
     _update_fourier_family_fields_impl(
-        np.asarray(out_c_fields, dtype=np.float64),
-        np.asarray(out_s_fields, dtype=np.float64),
-        np.asarray(base_c_fields, dtype=np.float64),
-        np.asarray(base_s_fields, dtype=np.float64),
-        np.asarray(profile_fields, dtype=np.float64),
-        np.asarray(c_source_profile_ids, dtype=np.int64),
-        np.asarray(s_source_profile_ids, dtype=np.int64),
+        out_c_fields,
+        out_s_fields,
+        base_c_fields,
+        base_s_fields,
+        profile_fields,
+        c_source_profile_ids,
+        s_source_profile_ids,
         int(c_active_order),
         int(s_active_order),
     )
@@ -2819,10 +2896,20 @@ def update_fixed_point_psin_query(
     """
     if query.ndim != 1 or psin.ndim != 1 or query.shape != psin.shape:
         raise ValueError(f"query/psin shape mismatch: {query.shape} vs {psin.shape}")
+    return update_fixed_point_psin_query_kernel_ready(query, psin, max_residual)
+
+
+def update_fixed_point_psin_query_kernel_ready(
+    query: np.ndarray,
+    psin: np.ndarray,
+    max_residual: float,
+) -> bool:
+    """Update a fixed-point psin query from normalized ndarrays."""
+
     return bool(
         _update_fixed_point_psin_query_impl(
-            np.asarray(query, dtype=np.float64),
-            np.asarray(psin, dtype=np.float64),
+            query,
+            psin,
             float(max_residual),
         )
     )
