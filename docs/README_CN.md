@@ -13,6 +13,7 @@
 
 <br clear="left"><br>
 
+[![arXiv](https://img.shields.io/badge/arXiv-2606.11821-b31b1b.svg)](https://arxiv.org/abs/2606.11821)
 [![Python](https://img.shields.io/badge/Python-3.12%2B-blue)](https://www.python.org/)
 [![Package](https://img.shields.io/badge/package-veqpy-blue)](https://pypi.org/project/veqpy/)
 [![License](https://img.shields.io/badge/License-BSD--3--Clause-green)](LICENSE)
@@ -116,6 +117,7 @@ VEQPy 与配套论文 **"VEQ: a fast parametric Grad--Shafranov solver for fixed
 
 相关 VEQ 系列和表示方法论文包括:
 
+- Ruohan Zhang, Huasheng Xie, Yueyan Li, Weiqi Meng, Feng Wang, and Zhengxiong Wang, "VEQ: a fast parametric Grad-Shafranov solver for fixed-boundary tokamak equilibria with flexible source profiles", arXiv:2606.11821, 2026. <https://arxiv.org/abs/2606.11821>
 - Huasheng Xie and Yueyan Li, "What Is the Minimum Number of Parameters Required to Represent Solutions of the Grad-Shafranov Equation?", arXiv:2601.02942, 2026. <https://arxiv.org/abs/2601.02942>
 - Xingyu Li, Huasheng Xie, Lai Wei, and Zhengxiong Wang, "Investigation of Toroidal Rotation Effects on Spherical Torus Equilibria using the Fast Spectral Solver VEQ-R", arXiv:2602.11422, 2026. <https://arxiv.org/abs/2602.11422>
 
