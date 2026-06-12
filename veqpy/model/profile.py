@@ -42,6 +42,9 @@ class Profile(Reactive, Serial):
         coeff: np.ndarray | None = None,
     ) -> None:
         super().__init__()
+        # Profile stores only the root parameters.  Derived value/derivative
+        # arrays are allocated in ProfileWorkspace so one Profile can be reused
+        # across grids and case refreshes.
         self.scale = scale
         self.power = power
         self.envelope_power = envelope_power
@@ -69,6 +72,8 @@ class Profile(Reactive, Serial):
             case "power" | "envelope_power":
                 return int(value)
             case "offset":
+                # None is accepted for older serialized payloads; internally an
+                # absent offset is just the neutral additive baseline.
                 return 0.0 if value is None else float(value)
             case "coeff":
                 return _coerce_optional_array(value, copy=False, name="coeff")
@@ -94,7 +99,7 @@ class Profile(Reactive, Serial):
             power=self.power,
             envelope_power=self.envelope_power,
             offset=self.offset,
-            coeff=_copy_optional_array(self.coeff),
+            coeff=None if self.coeff is None else self.coeff.copy(),
         )
 
 
@@ -104,12 +109,10 @@ def _coerce_optional_array(value, *, copy: bool, name: str = "array") -> np.ndar
     if isinstance(value, np.ndarray) and value.ndim == 0:
         scalar = value.item()
         if scalar is None or (isinstance(scalar, float) and np.isnan(scalar)):
+            # Scalar object arrays from legacy serializers can encode "missing"
+            # as None/NaN.  Preserve that as a passive profile marker.
             return None
     arr = np.asarray(value, dtype=np.float64)
     if arr.ndim != 1:
         raise ValueError(f"{name} must be 1D, got {arr.shape}")
     return arr.copy() if copy else arr
-
-
-def _copy_optional_array(value: np.ndarray | None) -> np.ndarray | None:
-    return None if value is None else value.copy()

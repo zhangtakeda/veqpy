@@ -41,6 +41,9 @@ def snapshot_equilibrium_from_runtime(
 ) -> Equilibrium:
     """Materialize an Equilibrium snapshot from current Operator runtime arrays."""
 
+    # The packed x supplies only active coefficients.  Passive profile specs come
+    # from profiles_by_name and are copied below so the Equilibrium is detached
+    # from future Operator.refresh_case mutations.
     coeff_values = decode_packed_blocks(
         x,
         profile_L,
@@ -80,6 +83,9 @@ def snapshot_equilibrium_profiles(
     """Snapshot passive shape-profile specs using the supplied packed state."""
 
     return {
+        # Shape profiles are the only model profiles needed for geometry
+        # reconstruction in Equilibrium; source/F/psin profiles are represented
+        # by root fields and source derivatives instead.
         name: snapshot_profile(profiles_by_name[name], coeff_values[profile_index[name]])
         for name in shape_profile_names
     }
@@ -89,6 +95,8 @@ def snapshot_profile(profile: Profile, coeff_values: np.ndarray | None) -> Profi
     """Copy one passive profile spec and replace its active coefficients."""
 
     copied = profile.copy()
+    # Active shape profiles receive the solved coefficient block; passive ones
+    # keep coeff=None and therefore remain pure offset/static profiles.
     copied.coeff = (
         None if coeff_values is None else np.asarray(coeff_values, dtype=np.float64).copy()
     )

@@ -21,6 +21,7 @@ import numpy as np
 
 from veqpy.layout.binding import build_operator_layout
 from veqpy.layout.runtime import OperatorLayout
+from veqpy.math.interpolate import SOURCE_INTERP_DEFAULT
 from veqpy.model.equilibrium import Equilibrium
 from veqpy.model.grid import Grid
 from veqpy.model.profile import Profile
@@ -61,7 +62,7 @@ class Operator:
     grid: InitVar[Grid]
     case: OperatorCase = field(repr=False)
     fix_rho: float = 0.05
-    source_interpolation_kind: str = "barycentric"
+    source_interpolation_kind: str = SOURCE_INTERP_DEFAULT
     plan: OperatorBuildPlan = field(init=False, repr=False)
     profile_workspace: ProfileWorkspace = field(init=False, repr=False)
     geometry_workspace: GeometryWorkspace = field(init=False, repr=False)
@@ -85,23 +86,20 @@ class Operator:
         The input grid is lowered to a GridWorkspace snapshot at construction time;
         Operator does not read live Grid state afterwards.
         """
-        self._apply_plan(
-            build_operator_plan(
-                grid=grid,
-                case=self.case,
-                source_interpolation_kind=self.source_interpolation_kind,
-            )
+        self.plan = build_operator_plan(
+            grid=grid,
+            case=self.case,
+            source_interpolation_kind=self.source_interpolation_kind,
         )
-        self._validate_runtime_profile_support()
+        validate_source_plan_profile_support(
+            source_plan=self.plan.source_plan,
+            source_execution=self.plan.source_execution,
+            case=self.case,
+        )
 
         self.layout = OperatorLayout.empty(self.plan.x_size)
         self._setup_runtime_state()
         self._refresh_runtime_state()
-
-    def _apply_plan(self, plan: OperatorBuildPlan) -> None:
-        """Install the operator topology/configuration plan."""
-
-        self.plan = plan
 
     def __call__(self, x: np.ndarray, *args, **kwargs) -> np.ndarray:
         """Call the main variational residual evaluation entrypoint."""
@@ -161,9 +159,7 @@ class Operator:
 
         return self.profile_workspace.active_profile_blocks()
 
-    def build_boundary_slope_initial_state(
-        self, *, boundary_slope_factor: float = 1.0
-    ) -> np.ndarray:
+    def build_boundary_slope_initial_state(self) -> np.ndarray:
         """Build a geometrically-motivated packed x0 in a single pass.
 
         c/s Fourier profiles use ``-offset / (2*p + 1)``.
@@ -175,7 +171,6 @@ class Operator:
 
         pw = self.profile_workspace
         x = np.zeros(self.plan.x_size, dtype=np.float64)
-        del boundary_slope_factor
 
         h0_est = _estimate_h0_from_case(self.case)
         if h0_est == 0.0:
@@ -195,15 +190,6 @@ class Operator:
             elif name == "h":
                 x[idx0] = h0_est
         return x
-
-    def _validate_runtime_profile_support(self) -> None:
-        """Validate psin profile ownership requirements for the current source route."""
-        validate_source_plan_profile_support(
-            source_plan=self.plan.source_plan,
-            source_execution=self.plan.source_execution,
-            case=self.case,
-        )
-        return None
 
     def replace_case(self, case: OperatorCase) -> None:
         """Replace the current case without changing the packed layout."""
@@ -233,29 +219,46 @@ class Operator:
     def residual_var(
         self,
         x: np.ndarray,
+        *,
+        check: bool = True,
     ) -> np.ndarray:
         """Return the variational/Galerkin residual vector."""
         out = np.empty(self.plan.x_size, dtype=np.float64)
-        self.residual_var_into(x, out)
+        self.residual_var_into(x, out, check=check)
         return out
 
-    def residual_var_into(self, x: np.ndarray, out: np.ndarray) -> None:
+    def residual_var_into(
+        self,
+        x: np.ndarray,
+        out: np.ndarray,
+        *,
+        check: bool = True,
+    ) -> None:
         """Write the variational/Galerkin residual into caller-provided ``out``."""
-        x_eval = self.coerce_x(x)
-        if not isinstance(out, np.ndarray):
-            raise TypeError("Expected out to be a numpy.ndarray")
-        out_eval = out
-        if out_eval.dtype != np.float64:
-            raise TypeError(f"Expected out dtype float64, got {out_eval.dtype}")
-        if out_eval.ndim != 1 or out_eval.shape[0] != self.plan.x_size:
-            raise ValueError(
-                f"Expected out to have shape ({self.plan.x_size},), got {out_eval.shape}"
-            )
-        if not out_eval.flags.c_contiguous:
-            raise ValueError("Expected out to be C-contiguous")
+        if check:
+            x_eval = self.coerce_x(x)
+            if not isinstance(out, np.ndarray):
+                raise TypeError("Expected out to be a numpy.ndarray")
+            out_eval = out
+            if out_eval.dtype != np.float64:
+                raise TypeError(f"Expected out dtype float64, got {out_eval.dtype}")
+            if out_eval.ndim != 1 or out_eval.shape[0] != self.plan.x_size:
+                raise ValueError(
+                    f"Expected out to have shape ({self.plan.x_size},), got {out_eval.shape}"
+                )
+            if not out_eval.flags.c_contiguous:
+                raise ValueError("Expected out to be C-contiguous")
+        else:
+            x_eval = x
+            out_eval = out
         self.layout.run_fused_residual_into(x_eval, out_eval)
 
-    def residual_collocation(self, x: np.ndarray) -> np.ndarray:
+    def residual_collocation(
+        self,
+        x: np.ndarray,
+        *,
+        check: bool = True,
+    ) -> np.ndarray:
         """Return the quadrature-scaled pointwise collocation residual.
 
         This residual does not append a Galerkin/weak-form residual to an external
@@ -265,22 +268,34 @@ class Operator:
         shape ``(Nr * Nt,)``.
         """
         out = np.empty(self.plan.grid_workspace.Nr * self.plan.grid_workspace.Nt, dtype=np.float64)
-        self.residual_collocation_into(x, out)
+        self.residual_collocation_into(x, out, check=check)
         return out
 
-    def residual_collocation_into(self, x: np.ndarray, out: np.ndarray) -> None:
+    def residual_collocation_into(
+        self,
+        x: np.ndarray,
+        out: np.ndarray,
+        *,
+        check: bool = True,
+    ) -> None:
         """Write the quadrature-scaled collocation residual into caller-provided ``out``."""
-        expected_size = self.plan.grid_workspace.Nr * self.plan.grid_workspace.Nt
-        if not isinstance(out, np.ndarray):
-            raise TypeError("Expected out to be a numpy.ndarray")
-        out_eval = out
-        if out_eval.dtype != np.float64:
-            raise TypeError(f"Expected out dtype float64, got {out_eval.dtype}")
-        if out_eval.ndim != 1 or out_eval.shape[0] != expected_size:
-            raise ValueError(f"Expected out to have shape ({expected_size},), got {out_eval.shape}")
-        if not out_eval.flags.c_contiguous:
-            raise ValueError("Expected out to be C-contiguous")
-        x_eval = self.coerce_x(x)
+        if check:
+            x_eval = self.coerce_x(x)
+            expected_size = self.plan.grid_workspace.Nr * self.plan.grid_workspace.Nt
+            if not isinstance(out, np.ndarray):
+                raise TypeError("Expected out to be a numpy.ndarray")
+            out_eval = out
+            if out_eval.dtype != np.float64:
+                raise TypeError(f"Expected out dtype float64, got {out_eval.dtype}")
+            if out_eval.ndim != 1 or out_eval.shape[0] != expected_size:
+                raise ValueError(
+                    f"Expected out to have shape ({expected_size},), got {out_eval.shape}"
+                )
+            if not out_eval.flags.c_contiguous:
+                raise ValueError("Expected out to be C-contiguous")
+        else:
+            x_eval = x
+            out_eval = out
         self.layout.run_collocation_into(x_eval, out_eval)
 
     def build_coeffs(
@@ -299,6 +314,9 @@ class Operator:
     def build_equilibrium(self, x: np.ndarray) -> Equilibrium:
         """Build a complete Equilibrium snapshot from a packed state vector."""
         x_eval = self.coerce_x(x)
+        # Snapshotting intentionally runs the residual pipeline first: source
+        # routes own alpha1/alpha2 and root fields, so decoding coefficients alone
+        # is not enough to build a consistent Equilibrium.
         self.residual_var(x_eval)
         return self._snapshot_equilibrium_from_runtime(x_eval)
 
@@ -336,10 +354,18 @@ class Operator:
         self.layout.run_residual_into(out_eval)
 
     def coerce_x(self, x: np.ndarray) -> np.ndarray:
-        """Validate the full packed state vector shape."""
+        """Return a C-contiguous float64 packed state vector."""
+        if isinstance(x, np.ndarray) and x.dtype == np.float64:
+            if x.ndim != 1 or x.shape[0] != self.plan.x_size:
+                raise ValueError(f"Expected x to have shape ({self.plan.x_size},), got {x.shape}")
+            if x.flags.c_contiguous:
+                return x
+            return np.ascontiguousarray(x)
         arr = np.asarray(x, dtype=np.float64)
         if arr.ndim != 1 or arr.shape[0] != self.plan.x_size:
             raise ValueError(f"Expected x to have shape ({self.plan.x_size},), got {arr.shape}")
+        if not arr.flags.c_contiguous:
+            arr = np.ascontiguousarray(arr, dtype=np.float64)
         return arr
 
     def _setup_runtime_state(self) -> None:
@@ -371,6 +397,8 @@ class Operator:
         self.profiles_by_name = profiles_by_name
         for name, profile in self.profiles_by_name.items():
             if hasattr(type(self), f"{name}_profile"):
+                # Keep legacy attribute access (h_profile, psin_profile, ...)
+                # as views of the runtime profile objects, not duplicated state.
                 setattr(self, f"{name}_profile", profile)
         self.profile_workspace = profile_workspace
         self.geometry_workspace = geometry_workspace
@@ -378,16 +406,22 @@ class Operator:
         self.residual_workspace = residual_workspace
 
     def _refresh_runtime_state(self) -> None:
-        self._apply_plan(
-            refresh_operator_plan_for_case(
-                self.plan,
-                case=self.case,
-                source_interpolation_kind=self.source_interpolation_kind,
-            )
+        # Case replacement may change source route semantics but must preserve
+        # the packed topology; compatibility was already checked by replace_case.
+        self.plan = refresh_operator_plan_for_case(
+            self.plan,
+            case=self.case,
+            source_interpolation_kind=self.source_interpolation_kind,
         )
-        self._validate_runtime_profile_support()
+        validate_source_plan_profile_support(
+            source_plan=self.plan.source_plan,
+            source_execution=self.plan.source_execution,
+            case=self.case,
+        )
         self._refresh_profile_runtime()
         self._refresh_fourier_family_metadata()
+        # Source runtime refresh happens after profile metadata because some
+        # routes decide whether psin is source-owned or optimized-profile-owned.
         refresh_source_runtime(
             case=self.case,
             grid_rho=self.plan.grid_workspace.rho,
@@ -400,6 +434,8 @@ class Operator:
         self._refresh_runtime_bindings()
 
     def _refresh_profile_runtime(self) -> None:
+        # Profiles are mutable runtime views over immutable plan topology.  The
+        # refresh updates offsets, passive fields, and active metadata in place.
         refresh_profile_runtime(
             case=self.case,
             operator_grid=self.plan.grid_workspace,
@@ -430,7 +466,11 @@ class Operator:
         fixed_profile_ids = np.flatnonzero(~self.plan.active_profile_mask).astype(
             np.int64, copy=False
         )
+        # Build all passive profile fields after binding so geometry/source
+        # stages can read a complete profile table before the first residual.
         for p in fixed_profile_ids:
+            # Passive profiles are not refreshed by Stage A because they have no
+            # packed coefficients, so materialize them immediately after binding.
             self.profile_workspace.refresh_profile_fields(
                 profile_id=int(p),
                 profile=self.profiles_by_name[self.plan.profile_names[int(p)]],
@@ -438,6 +478,8 @@ class Operator:
             )
         f_profile_id = self.plan.profile_index.get("F", -1)
         if f_profile_id >= 0 and not bool(self.plan.active_profile_mask[f_profile_id]):
+            # Passive F is stored as F**2 for the same postprocess contract as
+            # active F; convert once so source kernels always see F fields.
             self.layout.profile.run_postprocess()
 
     def _refresh_stage_a_runtime(self) -> None:
@@ -455,6 +497,8 @@ class Operator:
         )
 
     def _refresh_fourier_family_metadata(self) -> None:
+        # Effective order is case-dependent: a coefficient-free high-order
+        # profile with nonzero boundary offset still contributes to geometry.
         self.c_effective_order, self.s_effective_order = refresh_fourier_family_metadata(
             c_profile_names=self.plan.c_profile_names,
             s_profile_names=self.plan.s_profile_names,
@@ -468,6 +512,8 @@ class Operator:
     def invalidate_source_state(self) -> None:
         """Invalidate cached source state when a route requires fixed-point psin."""
         if tuple(self.plan.source_execution.route_key) == ("PJ2", "psin", "uniform"):
+            # Negative sentinel forces the next PJ2 fixed-point runner to seed
+            # its query from the current psin profile instead of stale psin.
             self.source_workspace.psin_query.fill(-1.0)
 
     def _snapshot_equilibrium_from_runtime(self, x: np.ndarray) -> Equilibrium:
@@ -533,6 +579,8 @@ def _estimate_h0_from_case(case: "OperatorCase") -> float:
             if av > h_max:
                 h_max = av
             if i >= edge_start:
+                # A sign change in the outer derivative is a coarse pedestal
+                # detector; it only affects the initial guess, not physics.
                 edge_mean += av
                 cur_diff = av - prev_edge
                 if prev_edge_diff < 0.0 and cur_diff > 0.0:
@@ -550,6 +598,8 @@ def _estimate_h0_from_case(case: "OperatorCase") -> float:
             edge_mean /= float(n - edge_start)
             if edge_mean > 1.0e-30:
                 return 0.66 * a / R0
+        # Even without a resolved pedestal, any nonuniform source benefits from
+        # the same small Shafranov-shift seed used for shaped cases.
         return 0.66 * a / R0  # structured, no clear pedestal
     except (TypeError, ValueError):
         return 0.66 * a / R0

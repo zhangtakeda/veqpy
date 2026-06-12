@@ -39,6 +39,8 @@ def make_profile(
     static_kwargs = profile_static_kwargs_by_name.get(name)
     if static_kwargs is None and name.startswith(("c", "s")) and name[1:].isdigit():
         order = int(name[1:])
+        # Fourier modes get their regularity power from the grid order table.
+        # c0 is the radial shift baseline and intentionally has no axis power.
         static_kwargs = {} if order == 0 else {"power": int(operator_grid.K_values[order])}
     if static_kwargs is not None:
         kwargs.update(static_kwargs)
@@ -65,6 +67,8 @@ def make_profile(
     p = profile_index[name]
     L = int(profile_L[p])
     coeff = case.profile_coeffs.get(name)
+    # L < 0 marks a passive profile: construct the Profile object but leave its
+    # coefficient vector absent so Stage A will not expect packed coefficients.
     kwargs["coeff"] = (
         None if L < 0 or coeff is None else coeff_array_from_list(name, coeff)[: L + 1].copy()
     )
@@ -89,6 +93,8 @@ def refresh_profile_runtime(
         static_kwargs = profile_static_kwargs_by_name.get(name)
         if static_kwargs is None and name.startswith(("c", "s")) and name[1:].isdigit():
             order = int(name[1:])
+            # Repeat make_profile's static-field rule during case replacement so
+            # reused Profile instances stay synchronized with grid topology.
             static_kwargs = {} if order == 0 else {"power": int(operator_grid.K_values[order])}
         elif static_kwargs is None:
             static_kwargs = {}
@@ -134,6 +140,8 @@ def refresh_profile_runtime(
 
 def _profile_scale(case: OperatorCase, name: str) -> float:
     if name == "F":
+        # F is represented as normalized F**2 coefficients in profiles; the
+        # runtime scale converts them back to physical edge magnitude.
         return float(case.R0 * case.B0) ** 2
     return 1.0
 
@@ -161,6 +169,8 @@ def refresh_stage_a_runtime(
         L = int(profile_L[p_int])
         coeff_indices = coeff_index[p_int, : L + 1]
 
+        # These compact arrays are the Stage-A ABI.  The hot kernel never looks
+        # up Profile objects by name during residual evaluation.
         active_offsets[slot] = profile.offset
         active_scales[slot] = profile.scale
         active_lengths[slot] = coeff_indices.size
@@ -185,6 +195,7 @@ def refresh_fourier_family_base_fields(
         if c_name in profile_index:
             np.copyto(c_family_base_fields[order], profile_workspace.fields_for(c_name))
         if order == 0:
+            # s0 is not a physical sine mode; keep the zero-filled base row.
             continue
         s_name = f"s{order}"
         if s_name in profile_index:
@@ -229,8 +240,11 @@ def refresh_fourier_family_metadata(
             s_effective_order = max(s_effective_order, order)
 
     if c_effective_order + 1 < c_family_fields.shape[0]:
+        # Zero inactive tails immediately so later fused geometry calls cannot
+        # see leftover higher-order data from an earlier case.
         c_family_fields[c_effective_order + 1 :].fill(0.0)
     if s_effective_order + 1 < s_family_fields.shape[0]:
+        # Same tail cleanup for sine modes; s0 may already be a structural zero.
         s_family_fields[s_effective_order + 1 :].fill(0.0)
     return c_effective_order, s_effective_order
 

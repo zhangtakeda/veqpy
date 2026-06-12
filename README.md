@@ -13,6 +13,7 @@
 
 <br clear="left"><br>
 
+[![arXiv](https://img.shields.io/badge/arXiv-2606.11821-b31b1b.svg)](https://arxiv.org/abs/2606.11821)
 [![Python](https://img.shields.io/badge/Python-3.12%2B-blue)](https://www.python.org/)
 [![Package](https://img.shields.io/badge/package-veqpy-blue)](https://pypi.org/project/veqpy/)
 [![License](https://img.shields.io/badge/License-BSD--3--Clause-green)](LICENSE)
@@ -98,6 +99,8 @@ Basic demo:
 
 This script builds a smooth fixed-boundary case, solves an equilibrium using PF(`psin`)
 source input, writes an `Equilibrium` JSON snapshot, and generates a flux-surface figure.
+By default, outputs go under `./outputs/minimal_equilibrium`; set
+`VEQPY_OUTPUT_DIR` to choose another directory.
 
 GEQDSK demo:
 
@@ -105,11 +108,13 @@ GEQDSK demo:
 .venv/bin/python examples/geqdsk_workflow.py
 ```
 
-This script reads an EFIT-style GEQDSK file, fits it as a VEQPy fixed boundary, solves a
-PF(`psin`) case with an `Ip` constraint using one-dimensional source profiles from the
-GEQDSK file, and writes a VEQPy-vs-GEQDSK flux-surface comparison figure. **Reproducible
-scripts for manuscript figures will be released in the corresponding tagged artifact
-package for the first public arXiv version.**
+This script reads an EFIT-style GEQDSK file, fits it as a VEQPy fixed boundary, solves
+PF(`psin`) and PQ(`psin`) cases with an `Ip` constraint using one-dimensional source
+profiles from the GEQDSK file, and writes a two-column VEQPy-vs-GEQDSK comparison
+figure. By default, it reads `./data/EFIT.geqdsk` and writes outputs under
+`./outputs/geqdsk_workflow`; set `VEQPY_GEQDSK` and `VEQPY_OUTPUT_DIR` to override
+those paths. **Reproducible scripts for manuscript figures will be released in the
+corresponding tagged artifact package for the first public arXiv version.**
 
 ## Development Checks
 
@@ -157,6 +162,10 @@ metadata.
 
 Related VEQ-family and representation papers include:
 
+- Ruohan Zhang, Huasheng Xie, Yueyan Li, Weiqi Meng, Feng Wang, and Zhengxiong Wang,
+  "VEQ: a fast parametric Grad-Shafranov solver for fixed-boundary tokamak equilibria
+  with flexible source profiles", arXiv:2606.11821, 2026.
+  <https://arxiv.org/abs/2606.11821>
 - Huasheng Xie and Yueyan Li, "What Is the Minimum Number of Parameters Required to
   Represent Solutions of the Grad-Shafranov Equation?", arXiv:2601.02942, 2026.
   <https://arxiv.org/abs/2601.02942>

@@ -33,6 +33,8 @@ OptimizeMethod = Callable[..., Any]
 
 
 def _root_method(method: str) -> OptimizeMethod:
+    # Store thin wrappers instead of scipy callables directly so the registry
+    # presents one uniform signature to Solver.
     def run(fun, x0, **kwargs):
         return root(fun, x0, method=method, **kwargs)
 
@@ -40,6 +42,8 @@ def _root_method(method: str) -> OptimizeMethod:
 
 
 def _least_squares_method(method: str) -> OptimizeMethod:
+    # least_squares uses a different SciPy entrypoint but remains a Solver
+    # method choice once wrapped with the same callable shape.
     def run(fun, x0, **kwargs):
         return least_squares(fun, x0, method=method, **kwargs)
 
@@ -73,14 +77,14 @@ class SolverConfig:
     method: str | None = None
     max_residual: float = 1e-6
     max_evaluations: int = 1000
-    enable_warmstart: bool = False
     initial_policy: str | None = None
-    initial_homothetic_lambda: float = 1.0
     enable_fallback: bool = True
     fallback_methods: tuple[str, ...] | list[str] | None = field(default=None)
     enable_verbose: bool = False
     enable_history: bool = True
-    residual_normalization: str | None = "fast"
+    # Passing None resolves to the same package default; no second normalization
+    # default is hidden behind the nullable form.
+    residual_normalization: str | None = DEFAULT_RESIDUAL_NORMALIZATION
     residual_normalization_floor: float = 1.0
     residual_normalization_max_ratio: float = 1.0e6
     residual_normalization_huber_tau: float = 3.0
@@ -111,6 +115,8 @@ class SolverConfig:
                 continue
             seen.add(method_name)
             deduped_fallback_methods.append(method_name)
+        # Fallback order is user-visible in SolverResult messages, so de-dupe
+        # without sorting.
 
         if method not in SUPPORTED_METHODS:
             supported = ", ".join(SUPPORTED_METHODS)
@@ -146,16 +152,12 @@ class SolverConfig:
             initial_policy = "zeros"
         if initial_policy == "warmstart":
             initial_policy = "warm"
+        # Accept the common aliases above, then store only the canonical policy
+        # strings consumed by Solver._build_initial_state.
         if initial_policy is not None and initial_policy not in SUPPORTED_INITIAL_POLICIES:
             supported = ", ".join(sorted(SUPPORTED_INITIAL_POLICIES))
             raise ValueError(
                 f"Unsupported initial_policy {self.initial_policy!r}; supported: {supported}."
-            )
-        initial_homothetic_lambda = float(self.initial_homothetic_lambda)
-        if not isfinite(initial_homothetic_lambda):
-            raise ValueError(
-                "SolverConfig.initial_homothetic_lambda must be finite; "
-                f"got {self.initial_homothetic_lambda!r}."
             )
         if not isfinite(max_residual) or max_residual <= 0.0:
             raise ValueError(
@@ -191,6 +193,8 @@ class SolverConfig:
             if self.residual_normalization is None
             else str(self.residual_normalization).strip().lower().replace("_", "-")
         )
+        # Hyphen-normalized mode names keep CLI/config spelling flexible while
+        # residual_scale receives a stable token.
         residual_normalization_floor = float(self.residual_normalization_floor)
         residual_normalization_max_ratio = float(self.residual_normalization_max_ratio)
         residual_normalization_huber_tau = float(self.residual_normalization_huber_tau)
@@ -235,6 +239,8 @@ class SolverConfig:
                 f"got {self.residual_normalization_sensitivity_lambda!r}."
             )
         object.__setattr__(self, "method", method)
+        # The dataclass is frozen to make solve configs snapshot-safe for history
+        # records.  __post_init__ writes validated canonical values exactly once.
         object.__setattr__(self, "enable_collocation", bool(self.enable_collocation))
         object.__setattr__(self, "collocation_method", collocation_method)
         object.__setattr__(self, "collocation_weight", collocation_weight)
@@ -243,7 +249,6 @@ class SolverConfig:
         object.__setattr__(self, "max_residual", max_residual)
         object.__setattr__(self, "max_evaluations", max_evaluations)
         object.__setattr__(self, "initial_policy", initial_policy)
-        object.__setattr__(self, "initial_homothetic_lambda", initial_homothetic_lambda)
         object.__setattr__(self, "enable_fallback", bool(self.enable_fallback))
         object.__setattr__(self, "fallback_methods", tuple(deduped_fallback_methods))
         object.__setattr__(self, "residual_normalization", residual_normalization)
@@ -280,9 +285,6 @@ class SolverConfig:
         tree.add(f"max_residual: {self.max_residual:.6g}")
         tree.add(f"max_evaluations: {self.max_evaluations}")
         tree.add(f"initial_policy: {self.initial_policy}")
-        if self.initial_policy == "homothetic":
-            tree.add(f"initial_homothetic_lambda: {self.initial_homothetic_lambda:.6g}")
-        tree.add(f"enable_warmstart: {self.enable_warmstart}")
         tree.add(f"enable_fallback: {self.enable_fallback}")
         if self.enable_fallback:
             tree.add(f"fallback_methods: {list(self.fallback_methods)}")

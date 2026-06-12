@@ -43,6 +43,16 @@ from veqpy.solver.solver_config import (
 from veqpy.solver.solver_record import SolverRecord
 from veqpy.solver.solver_result import SolverResult
 
+_ACCEPTED_RESIDUAL_FACTOR = 10.0
+_ACCEPTED_RESIDUAL_FLOOR = 1.0e-5
+_TRF_ROBUST_BLOCK_RMS_THRESHOLD = 2.0e40
+_X_SCALE_FLOOR = 1.0e-2
+_X_SCALE_CORE_PROFILE_PRIOR = 1.5e-1
+_X_SCALE_FOURIER_PROFILE_PRIOR = 5.0e-2
+_X_SCALE_F_PROFILE_PRIOR = 2.5e-1
+_X_SCALE_KAPPA_PROFILE_PRIOR = 1.0
+_X_SCALE_OFFSETLESS_PROFILES = frozenset({"h", "v", "psin"})
+
 
 class Solver:
     """Solve facade for a fixed packed layout."""
@@ -83,9 +93,7 @@ class Solver:
         method: str | None = None,
         max_residual: float | None = None,
         max_evaluations: int | None = None,
-        enable_warmstart: bool | None = None,
         initial_policy: str | None = None,
-        initial_homothetic_lambda: float | None = None,
         enable_fallback: bool | None = None,
         fallback_methods: tuple[str, ...] | list[str] | None = None,
         enable_verbose: bool | None = None,
@@ -109,9 +117,7 @@ class Solver:
             method=method,
             max_residual=max_residual,
             max_evaluations=max_evaluations,
-            enable_warmstart=enable_warmstart,
             initial_policy=initial_policy,
-            initial_homothetic_lambda=initial_homothetic_lambda,
             enable_fallback=enable_fallback,
             fallback_methods=fallback_methods,
             enable_verbose=enable_verbose,
@@ -138,6 +144,9 @@ class Solver:
         else:
             self.x0 = _build_initial_state(self.operator, solve_config).copy()
         if x0 is not None or solve_config.initial_policy != "warm":
+            # Source stages such as PJ2/psin/uniform cache a psin query tied to
+            # the previous x0.  Any externally supplied or rebuilt x0 must break
+            # that cache before the first residual evaluation.
             self.operator.invalidate_source_state()
 
         x_guess = self.x0.copy()
@@ -177,10 +186,20 @@ class Solver:
         x_final = self.operator.coerce_x(x_opt)
         residual_final_exc = None
         if not bool(success) and not np.isfinite(residual_norm_final):
+            final_residual_config = (
+                self._collocation_stage_config(solve_config)
+                if solve_config.enable_collocation
+                else solve_config
+            )
+            final_residual_kind = (
+                self._collocation_residual_kind(solve_config)
+                if solve_config.enable_collocation
+                else "variational"
+            )
             residual_norm_final, residual_final_exc = self._safe_residual_norm(
                 x_final,
-                solve_config=self._final_residual_config(solve_config),
-                residual_kind=self._final_residual_kind(solve_config),
+                solve_config=final_residual_config,
+                residual_kind=final_residual_kind,
             )
         if residual_final_exc is not None:
             success = False
@@ -236,9 +255,7 @@ class Solver:
         method: str | None,
         max_residual: float | None,
         max_evaluations: int | None,
-        enable_warmstart: bool | None,
         initial_policy: str | None,
-        initial_homothetic_lambda: float | None,
         enable_fallback: bool | None,
         fallback_methods: tuple[str, ...] | list[str] | None,
         enable_verbose: bool | None,
@@ -265,12 +282,8 @@ class Solver:
             overrides["max_residual"] = float(max_residual)
         if max_evaluations is not None:
             overrides["max_evaluations"] = int(max_evaluations)
-        if enable_warmstart is not None:
-            overrides["enable_warmstart"] = bool(enable_warmstart)
         if initial_policy is not None:
             overrides["initial_policy"] = str(initial_policy)
-        if initial_homothetic_lambda is not None:
-            overrides["initial_homothetic_lambda"] = float(initial_homothetic_lambda)
         if enable_fallback is not None:
             overrides["enable_fallback"] = bool(enable_fallback)
         if fallback_methods is not None:
@@ -324,7 +337,10 @@ class Solver:
     ) -> tuple[np.ndarray, bool, str, int, int, int, float]:
         """Run a variational solve first, then warm-start collocation polish from that result."""
 
-        variational_config = self._variational_stage_config(solve_config)
+        # The variational stage owns global equilibrium validity.  Collocation
+        # is a local polish step, so it starts from the weak-form result and is
+        # not allowed to run its own fallback sequence.
+        variational_config = replace(solve_config, enable_collocation=False)
         collocation_config = self._collocation_stage_config(solve_config)
         collocation_residual_kind = self._collocation_residual_kind(solve_config)
         _validate_stage_solve_config(variational_config, residual_kind="variational")
@@ -337,6 +353,8 @@ class Solver:
             x0_was_provided=x0_was_provided,
         )
         if float(solve_config.collocation_weight) <= 0.0:
+            # Keep the two-stage accounting path even when the collocation
+            # objective is disabled; callers still get a single combined result.
             return self._combine_variational_collocation_results(
                 variational_result=variational_result,
                 collocation_result=(
@@ -368,11 +386,6 @@ class Solver:
             collocation_error=collocation_error,
         )
 
-    def _variational_stage_config(self, solve_config: SolverConfig) -> SolverConfig:
-        """Return the variational-stage configuration for the two-stage workflow."""
-
-        return replace(solve_config, enable_collocation=False)
-
     def _collocation_stage_config(self, solve_config: SolverConfig) -> SolverConfig:
         """Return the collocation-polish configuration for the two-stage workflow."""
 
@@ -392,6 +405,9 @@ class Solver:
             max_residual=max_residual,
             max_evaluations=max_evaluations,
             enable_collocation=False,
+            # Fallbacks are disabled here because collocation is already a
+            # second-stage repair.  Restarting with other methods would blur
+            # whether the final x is still a local polish of the variational x.
             enable_fallback=False,
             fallback_methods=(),
         )
@@ -405,20 +421,6 @@ class Solver:
         if collocation_weight <= 0.0:
             return "variational"
         return "blended_collocation"
-
-    def _final_residual_config(self, solve_config: SolverConfig) -> SolverConfig:
-        """Return the residual evaluation configuration used for the final SolverResult x."""
-
-        if solve_config.enable_collocation:
-            return self._collocation_stage_config(solve_config)
-        return solve_config
-
-    def _final_residual_kind(self, solve_config: SolverConfig) -> str:
-        """Return the residual kind used for the final SolverResult x."""
-
-        if solve_config.enable_collocation:
-            return self._collocation_residual_kind(solve_config)
-        return "variational"
 
     def _combine_variational_collocation_results(
         self,
@@ -488,6 +490,8 @@ class Solver:
                     raise RuntimeError("Solve attempt succeeded without a result")
                 if idx == 0:
                     return result
+                # For fallback success, preserve every prior attempt in the
+                # message and aggregate counters so diagnostics match total work.
                 return self._finalize_attempts(attempts)
 
             if idx + 1 >= len(attempt_plans):
@@ -520,13 +524,18 @@ class Solver:
         x0_was_provided: bool,
     ) -> list[tuple[str, np.ndarray, SolverConfig]]:
         x_initial = self.operator.coerce_x(x_guess).copy()
+        # All attempts start from the same physical state.  This makes method
+        # comparisons meaningful and avoids carrying a failed method's possibly
+        # invalid source fixed-point state into the next attempt.
         attempt_plans = [
             (
                 self._display_attempt_label(
                     solve_config,
-                    start_kind="warm-start"
-                    if self._is_warm_initial_guess(x_initial, x0_was_provided)
-                    else "cold-start",
+                    start_kind=self._display_start_kind(
+                        x_initial,
+                        solve_config=solve_config,
+                        x0_was_provided=x0_was_provided,
+                    ),
                 ),
                 x_initial,
                 solve_config,
@@ -534,7 +543,8 @@ class Solver:
         ]
 
         seen_methods = {solve_config.method}
-        for fallback_method in self._ordered_fallback_methods(solve_config):
+        fallback_methods = () if not solve_config.enable_fallback else solve_config.fallback_methods
+        for fallback_method in fallback_methods:
             if fallback_method in seen_methods:
                 continue
             seen_methods.add(fallback_method)
@@ -542,16 +552,13 @@ class Solver:
             attempt_plans.append(
                 (
                     self._display_attempt_label(fallback_config, start_kind="warm-fallback"),
+                    # Fallbacks compare methods from the same physical initial
+                    # state, not from the failed method's terminal iterate.
                     x_initial.copy(),
                     fallback_config,
                 )
             )
         return attempt_plans
-
-    def _ordered_fallback_methods(self, solve_config: SolverConfig) -> tuple[str, ...]:
-        if not solve_config.enable_fallback:
-            return ()
-        return tuple(solve_config.fallback_methods)
 
     def _try_solve_attempt(
         self,
@@ -576,6 +583,9 @@ class Solver:
                 residual_kind=residual_kind,
             )
             if residual_exc is None and _residual_within_acceptance(residual_norm_x0, solve_config):
+                # SciPy may raise after evaluating an already-good initial
+                # state (for example while estimating a Jacobian). Preserve the
+                # usable x0 instead of forcing a worse fallback.
                 return (
                     (
                         x_guess_eval.copy(),
@@ -657,19 +667,27 @@ class Solver:
         )
 
     def _display_attempt_label(self, solve_config: SolverConfig, *, start_kind: str) -> str:
-        return f"{self._display_method_label(solve_config)} [{start_kind}]"
+        if solve_config.method in LEAST_SQUARES_METHODS:
+            method_label = f"least_squares/{solve_config.method}"
+        else:
+            method_label = f"root/{solve_config.method}"
+        return f"{method_label} [{start_kind}]"
 
-    def _display_method_label(self, solve_config: SolverConfig) -> str:
-        if _uses_least_squares_api(solve_config):
-            return f"least_squares/{solve_config.method}"
-        return f"root/{solve_config.method}"
-
-    def _is_warm_initial_guess(self, x_guess: np.ndarray, x0_was_provided: bool) -> bool:
-        return bool(x0_was_provided or not self._is_zero_guess(x_guess))
-
-    def _is_zero_guess(self, x_guess: np.ndarray) -> bool:
+    def _display_start_kind(
+        self,
+        x_guess: np.ndarray,
+        *,
+        solve_config: SolverConfig,
+        x0_was_provided: bool,
+    ) -> str:
+        if x0_was_provided or solve_config.initial_policy == "warm":
+            return "warm-start"
+        if solve_config.initial_policy == "homothetic":
+            return "homothetic-start"
+        if solve_config.initial_policy == "zeros":
+            return "zero-start"
         x_eval = self.operator.coerce_x(x_guess)
-        return bool(np.all(x_eval == 0.0))
+        return "encoded-start" if not bool(np.all(x_eval == 0.0)) else "zero-start"
 
     def _finalize_attempts(
         self,
@@ -692,6 +710,9 @@ class Solver:
                 ) from tail_exc
             raise RuntimeError("All solve attempts failed without a usable result")
 
+        # If every method reports failure, still return the numerically best
+        # finite attempt.  The success flag and message keep the failure visible
+        # while giving callers a reproducible terminal state to inspect.
         selected_label, selected_result, _ = attempts[candidate_idx]
         if selected_result is None:
             raise RuntimeError("Selected solve attempt has no result")
@@ -741,6 +762,8 @@ class Solver:
             ]
         if not candidate_indices:
             return None
+        # Select by final residual, not by attempt order, so a rejected but
+        # informative partial solve can be returned for inspection.
         return min(candidate_indices, key=lambda idx: self._attempt_residual_norm(attempts[idx][1]))
 
     def _solve_opt_problem(
@@ -756,6 +779,8 @@ class Solver:
         x_opt = self.operator.coerce_x(opt.x)
         residual_norm = self._optimizer_residual_norm(opt)
         if residual_norm is None or not np.isfinite(residual_norm):
+            # Some scipy methods do not expose a useful final fun vector; compute
+            # one last residual so acceptance and SolverResult use the same norm.
             residual_norm, _ = self._safe_residual_norm(
                 x_opt,
                 solve_config=solve_config,
@@ -768,21 +793,19 @@ class Solver:
                 bool(opt.success)
                 and residual_norm is not None
                 and np.isfinite(residual_norm)
-                and not _requires_strict_residual_acceptance(
-                    solve_config, residual_kind=residual_kind
-                )
+                and residual_kind != "variational"
             )
         )
+        # Variational solves are accepted by residual only; collocation polish is
+        # allowed to trust the least_squares success flag because its objective is
+        # a local post-process around a variational solution.
         message = str(opt.message)
         if not bool(opt.success) and accepted:
             message = f"{message} [accepted by residual]"
         if (
             bool(opt.success)
             and not accepted
-            and _requires_strict_residual_acceptance(
-                solve_config,
-                residual_kind=residual_kind,
-            )
+            and residual_kind == "variational"
         ):
             message = f"{message} [rejected by residual={residual_norm:.6e}]"
         return (
@@ -831,7 +854,7 @@ class Solver:
         def residual_fun(x: np.ndarray) -> np.ndarray:
             x_eval = self.operator.coerce_x(x)
             if residual_kind == "variational":
-                return self.operator.residual_var(x_eval)
+                return self.operator.residual_var(x_eval, check=False)
             if residual_kind == "collocation":
                 return self.operator.residual_collocation(x_eval)
             raise ValueError(f"Unsupported residual kind {residual_kind!r}.")
@@ -873,8 +896,13 @@ class Solver:
             if x_ref is None:
                 x_ref = x_eval.copy()
             if x_scale is None:
+                # Anchor regularization uses profile-aware coefficient scales so
+                # one high-amplitude family cannot dominate the local polish.
                 x_scale = _reference_x_scale_vector(self.operator, x_ref)
             if collocation_scale is None:
+                # Freeze the collocation RMS at the variational reference; if
+                # it changed with x, the optimizer could improve the objective by
+                # moving the scale rather than the equilibrium.
                 collocation_scale = _reference_rms_scale(
                     self.operator.residual_collocation(x_ref),
                     floor=float(config_eval.max_residual),
@@ -944,6 +972,9 @@ class Solver:
         options = _root_options_for(solve_config)
         balanced_scope = "block"
         initial_residual: np.ndarray | None = None
+        # root() sees either the raw residual, a fixed left-preconditioned
+        # residual, or both residual and x transformed for conditioning.  The
+        # reported opt.fun is restored to raw residual through get_raw_residual.
         scaled_fun, get_raw_residual = self._build_normalized_residual_wrapper(
             x_guess,
             solve_config=solve_config,
@@ -969,6 +1000,9 @@ class Solver:
         if scaled_fun is not None and solve_config.method == "hybr":
             normalization_mode = getattr(solve_config, "residual_normalization", "block_huber")
             if normalization_mode != "none":
+                # SciPy hybr's default trust-region factor can overstep badly
+                # once residual blocks are normalized; a smaller initial radius
+                # keeps the first Jacobian model local.
                 options = {**options, "factor": 1.0}
 
         return self._run_root_once(
@@ -1032,33 +1066,35 @@ class Solver:
             return None, None
         block_lengths_eval = np.asarray(block_lengths, dtype=np.int64)
         scale: np.ndarray | None = None
-        last_x: np.ndarray | None = None
-        last_raw_residual: np.ndarray | None = None
+        raw_buffer = np.empty(self.operator.x_size, dtype=np.float64)
+        scaled_buffer = np.empty(self.operator.x_size, dtype=np.float64)
+        last_x = np.empty_like(x_guess)
+        last_x_valid = False
 
         def wrapped(x: np.ndarray) -> np.ndarray:
-            nonlocal scale, last_x, last_raw_residual
-            x_eval = self.operator.coerce_x(x)
-            raw_residual = np.asarray(self.operator(x_eval), dtype=np.float64)
-            last_x = x_eval.copy()
-            last_raw_residual = raw_residual.copy()
+            nonlocal scale, last_x_valid
+            x_eval = x
+            self.operator.residual_var_into(x_eval, raw_buffer, check=False)
+            np.copyto(last_x, x_eval)
+            last_x_valid = True
             if scale is None:
-                scale = _build_block_rms_scale(raw_residual, block_lengths_eval)
+                # Legacy mode freezes the first evaluated block RMS.  Rebuilding
+                # it every call would make the residual map non-stationary.
+                scale = _build_block_rms_scale(raw_buffer, block_lengths_eval)
                 if scale is None:
-                    scale = np.ones_like(raw_residual)
-            scaled_residual = raw_residual / scale
+                    scale = np.ones_like(raw_buffer)
+            np.divide(raw_buffer, scale, out=scaled_buffer)
             if transform == "asinh":
-                return np.arcsinh(scaled_residual)
-            return scaled_residual
+                np.arcsinh(scaled_buffer, out=scaled_buffer)
+            return scaled_buffer.copy()
 
         def get_raw_residual(x: np.ndarray) -> np.ndarray:
             x_eval = self.operator.coerce_x(x)
-            if (
-                last_x is not None
-                and last_raw_residual is not None
-                and np.array_equal(last_x, x_eval)
-            ):
-                return last_raw_residual.copy()
-            return np.asarray(self.operator(x_eval), dtype=np.float64)
+            if last_x_valid and np.array_equal(last_x, x_eval):
+                return raw_buffer.copy()
+            out = np.empty(self.operator.x_size, dtype=np.float64)
+            self.operator.residual_var_into(x_eval, out, check=False)
+            return out
 
         return wrapped, get_raw_residual
 
@@ -1097,98 +1133,92 @@ class Solver:
         max_ratio = float(solve_config.residual_normalization_max_ratio)
         huber_tau = float(solve_config.residual_normalization_huber_tau)
         scale: np.ndarray | None = None
-        last_x: np.ndarray | None = None
-        last_raw_residual: np.ndarray | None = None
+        residual_size = self.operator.x_size if residual_kind == "variational" else -1
+        raw_buffer = (
+            np.empty(residual_size, dtype=np.float64) if residual_size >= 0 else np.empty(0)
+        )
+        scaled_buffer = (
+            np.empty(residual_size, dtype=np.float64) if residual_size >= 0 else np.empty(0)
+        )
+        last_x = np.empty_like(x_guess)
+        last_x_valid = False
+
+        def build_scale(residual: np.ndarray, x_scale_guess: np.ndarray) -> np.ndarray:
+            return make_residual_scale(
+                mode,
+                residual,
+                block_lengths_eval,
+                floor=floor,
+                max_ratio=max_ratio,
+                huber_tau=huber_tau,
+                residual_fun=residual_fun,
+                x_guess=x_scale_guess,
+                x_scale=_build_x_block_scale_vector(self.operator, x_scale_guess),
+                probe_count=int(solve_config.residual_normalization_probe_count),
+                probe_step=float(solve_config.residual_normalization_probe_step),
+                sensitivity_lambda=float(
+                    solve_config.residual_normalization_sensitivity_lambda
+                ),
+            )
+
         if initial_residual is None and not _mode_is_block_rms(mode):
             try:
+                # Build the balanced scale at the reference point when possible;
+                # delayed construction is only a fallback for bad initial calls.
                 initial_x_eval = self.operator.coerce_x(x_guess)
-                initial_residual = np.asarray(residual_fun(initial_x_eval), dtype=np.float64)
+                if residual_kind == "variational":
+                    initial_residual = np.empty(self.operator.x_size, dtype=np.float64)
+                    self.operator.residual_var_into(
+                        initial_x_eval,
+                        initial_residual,
+                        check=False,
+                    )
+                else:
+                    initial_residual = np.asarray(residual_fun(initial_x_eval), dtype=np.float64)
                 initial_x = initial_x_eval
             except Exception:
                 initial_residual = None
         if initial_residual is not None:
             initial_residual_eval = np.asarray(initial_residual, dtype=np.float64)
-            scale = self._build_residual_scale_for_mode(
-                initial_residual_eval,
-                block_lengths_eval,
-                solve_config=solve_config,
-                residual_fun=residual_fun,
-                x_guess=self.operator.coerce_x(x_guess),
-                mode=mode,
-                floor=floor,
-                max_ratio=max_ratio,
-                huber_tau=huber_tau,
-            )
+            scale = build_scale(initial_residual_eval, self.operator.coerce_x(x_guess))
             if initial_x is not None:
-                last_x = self.operator.coerce_x(initial_x).copy()
-                last_raw_residual = initial_residual_eval.copy()
+                np.copyto(last_x, self.operator.coerce_x(initial_x))
+                if residual_kind == "variational":
+                    np.copyto(raw_buffer, initial_residual_eval)
+                last_x_valid = residual_kind == "variational"
 
         def wrapped(x: np.ndarray) -> np.ndarray:
-            nonlocal scale, last_x, last_raw_residual
-            x_eval = self.operator.coerce_x(x)
-            if (
-                last_x is not None
-                and last_raw_residual is not None
-                and np.array_equal(last_x, x_eval)
-            ):
-                raw_residual = last_raw_residual.copy()
+            nonlocal scale, last_x_valid
+            if residual_kind == "variational":
+                x_eval = x
+                if not (last_x_valid and np.array_equal(last_x, x_eval)):
+                    self.operator.residual_var_into(x_eval, raw_buffer, check=False)
+                    np.copyto(last_x, x_eval)
+                    last_x_valid = True
+                raw_residual = raw_buffer
             else:
+                x_eval = self.operator.coerce_x(x)
                 raw_residual = np.asarray(residual_fun(x_eval), dtype=np.float64)
-                last_x = x_eval.copy()
-                last_raw_residual = raw_residual.copy()
             if scale is None:
-                scale = self._build_residual_scale_for_mode(
-                    raw_residual,
-                    block_lengths_eval,
-                    solve_config=solve_config,
-                    residual_fun=residual_fun,
-                    x_guess=x_eval,
-                    mode=mode,
-                    floor=floor,
-                    max_ratio=max_ratio,
-                    huber_tau=huber_tau,
-                )
+                # Like the legacy wrapper, balanced normalization is a fixed left
+                # preconditioner for this solve attempt, not a dynamic objective.
+                scale = build_scale(raw_residual, x_eval)
+            if residual_kind == "variational":
+                np.divide(raw_residual, scale, out=scaled_buffer)
+                return scaled_buffer.copy()
             return raw_residual / scale
 
         def get_raw_residual(x: np.ndarray) -> np.ndarray:
             x_eval = self.operator.coerce_x(x)
-            if (
-                last_x is not None
-                and last_raw_residual is not None
-                and np.array_equal(last_x, x_eval)
-            ):
-                return last_raw_residual.copy()
+            if residual_kind == "variational" and last_x_valid and np.array_equal(last_x, x_eval):
+                return raw_buffer.copy()
+            if residual_kind == "variational":
+                out = np.empty(self.operator.x_size, dtype=np.float64)
+                self.operator.residual_var_into(x_eval, out, check=False)
+                return out
             return np.asarray(residual_fun(x_eval), dtype=np.float64)
 
         return wrapped, get_raw_residual
-
-    def _build_residual_scale_for_mode(
-        self,
-        residual: np.ndarray,
-        block_lengths: np.ndarray | None,
-        *,
-        solve_config: SolverConfig,
-        residual_fun: Callable[[np.ndarray], np.ndarray],
-        x_guess: np.ndarray,
-        mode: str,
-        floor: float,
-        max_ratio: float,
-        huber_tau: float,
-    ) -> np.ndarray:
-        return make_residual_scale(
-            mode,
-            residual,
-            block_lengths,
-            floor=floor,
-            max_ratio=max_ratio,
-            huber_tau=huber_tau,
-            residual_fun=residual_fun,
-            x_guess=x_guess,
-            x_scale=_build_x_block_scale_vector(self.operator, x_guess),
-            probe_count=int(solve_config.residual_normalization_probe_count),
-            probe_step=float(solve_config.residual_normalization_probe_step),
-            sensitivity_lambda=float(solve_config.residual_normalization_sensitivity_lambda),
-        )
 
     def _build_x_transform_wrapper(
         self,
@@ -1209,6 +1239,8 @@ class Solver:
             z_eval = np.asarray(z, dtype=np.float64)
             if z_eval.ndim != 1 or z_eval.shape[0] != x_eval.shape[0]:
                 raise ValueError(f"Expected z to have shape {x_eval.shape}, got {z_eval.shape}")
+            # Root solvers operate in z-space for conditioning, but all operator
+            # kernels must see the original packed x coordinates.
             return self.operator.coerce_x(z_eval * x_scale)
 
         return map_z_to_x, x_eval * inv_scale, map_z_to_x
@@ -1257,6 +1289,9 @@ class Solver:
                 least_squares_fun = normalized_fun
                 normalizer_applied = True
                 if solve_config.method == "lm":
+                    # LM already uses the transformed residual scale; x_scale=1
+                    # prevents SciPy from layering a second heuristic scale on
+                    # top of the solver's block-aware coefficient scale.
                     kwargs["x_scale"] = 1.0
 
         if (
@@ -1269,6 +1304,9 @@ class Solver:
                 residual0,
                 self.operator.residual_block_lengths(),
             ):
+                # This branch is for pathological unnormalized starts only.
+                # Once explicit residual normalization is active, robust loss
+                # would change the calibrated objective and is skipped above.
                 kwargs["loss"] = "cauchy"
                 kwargs["f_scale"] = max(_residual_rms(residual0), 1.0)
 
@@ -1299,8 +1337,9 @@ def _validate_stage_solve_config(solve_config: SolverConfig, *, residual_kind: s
 
 
 def _validate_stage_method(solve_config: SolverConfig, *, residual_kind: str) -> None:
-    if residual_kind in {"collocation", "blended_collocation"} and not _uses_least_squares_api(
-        solve_config
+    if (
+        residual_kind in {"collocation", "blended_collocation"}
+        and solve_config.method not in LEAST_SQUARES_METHODS
     ):
         raise ValueError("Collocation needs least_squares ('trf' or 'lm').")
     if residual_kind not in {"variational", "collocation", "blended_collocation"}:
@@ -1410,10 +1449,6 @@ def _weighted_rms_vector(residual: np.ndarray, *, scale: np.ndarray, weight: flo
     return np.sqrt(float(weight)) * residual_eval / block_scale
 
 
-def _uses_least_squares_api(solve_config: SolverConfig) -> bool:
-    return solve_config.method in LEAST_SQUARES_METHODS
-
-
 def _build_initial_state(operator: Operator, solve_config: SolverConfig) -> np.ndarray:
     """Build the packed initial state requested by ``solve_config.initial_policy``."""
 
@@ -1423,108 +1458,53 @@ def _build_initial_state(operator: Operator, solve_config: SolverConfig) -> np.n
     if initial_policy == "zeros":
         return np.zeros(operator.x_size, dtype=np.float64)
     if initial_policy == "homothetic":
-        return _build_boundary_homothetic_initial_state(
-            operator, boundary_slope_factor=solve_config.initial_homothetic_lambda
-        )
+        return operator.build_boundary_slope_initial_state()
     if initial_policy == "warm":
         raise RuntimeError("_build_initial_state('warm') needs the current solver x0")
     raise ValueError(f"Unsupported initial_policy {initial_policy!r}")
 
 
-def _build_boundary_homothetic_initial_state(
-    operator: Operator, *, boundary_slope_factor: float = 1.0
-) -> np.ndarray:
-    """Return a cheap boundary-scaled x0 for nested, homothetic surfaces.
-
-    ``boundary_slope_factor`` sets the target boundary slope ratio
-    ``u_m'(1)=lambda*offset`` for each active c/s mode. The default ``1.0``
-    matches homothetic scaling; smaller values relax the boundary more
-    aggressively.
-    """
-
-    return _build_boundary_slope_initial_state(
-        operator, boundary_slope_factor=boundary_slope_factor
-    )
-
-
-def _build_boundary_slope_initial_state(
-    operator: Operator, *, boundary_slope_factor: float
-) -> np.ndarray:
-    """Set first c/s coefficients so ``u_m'(1)=lambda*offset``."""
-
-    return operator.build_boundary_slope_initial_state(boundary_slope_factor=boundary_slope_factor)
-
-
-def _accepted_residual_norm(solve_config: SolverConfig) -> float:
-    return max(float(solve_config.max_residual) * 10.0, 1.0e-5)
-
-
 def _residual_within_acceptance(residual_norm: float | None, solve_config: SolverConfig) -> bool:
+    # Optimizer tolerances are not identical to the physical residual target; a
+    # small acceptance band avoids rejecting numerically converged states solely
+    # because the final norm was recomputed outside SciPy's stopping test.
+    accepted_residual_norm = max(
+        float(solve_config.max_residual) * _ACCEPTED_RESIDUAL_FACTOR,
+        _ACCEPTED_RESIDUAL_FLOOR,
+    )
     return bool(
         residual_norm is not None
         and np.isfinite(residual_norm)
-        and residual_norm <= _accepted_residual_norm(solve_config)
+        and residual_norm <= accepted_residual_norm
     )
-
-
-def _requires_strict_residual_acceptance(solve_config: SolverConfig, *, residual_kind: str) -> bool:
-    return residual_kind == "variational"
-
-
-def _hard_residual_norm_threshold() -> float:
-    return 1.0e3
-
-
-def _trf_robust_block_rms_threshold() -> float:
-    return 2.0e40
 
 
 def _should_use_robust_trf_loss(
     residual: np.ndarray | None,
     block_lengths: np.ndarray | None,
 ) -> bool:
+    # The threshold is deliberately enormous: robust TRF is a last-resort guard
+    # for explosive initial residuals, not the normal convergence policy.
     if residual is None or block_lengths is None:
         return False
     block_rms = _block_rms_values(residual, np.asarray(block_lengths, dtype=np.int64))
     if block_rms is None or block_rms.size == 0:
         return False
-    return bool(np.median(block_rms) >= _trf_robust_block_rms_threshold())
-
-
-def _x_scale_floor() -> float:
-    return 1.0e-2
-
-
-def _x_scale_core_profile_prior() -> float:
-    return 1.5e-1
-
-
-def _x_scale_fourier_profile_prior() -> float:
-    return 5.0e-2
-
-
-def _x_scale_f_profile_prior() -> float:
-    return 2.5e-1
-
-
-def _x_scale_kappa_profile_prior() -> float:
-    return 1.0
+    return bool(np.median(block_rms) >= _TRF_ROBUST_BLOCK_RMS_THRESHOLD)
 
 
 def _x_scale_profile_prior(name: str) -> float:
+    # Priors reflect typical coefficient amplitudes by family.  They are only
+    # conditioning hints for solver space and must not encode physical units.
     if name in {"h", "v", "psin"}:
-        return _x_scale_core_profile_prior()
+        return _X_SCALE_CORE_PROFILE_PRIOR
     if name == "k":
-        return _x_scale_kappa_profile_prior()
+        return _X_SCALE_KAPPA_PROFILE_PRIOR
     if name.startswith(("c", "s")):
-        return _x_scale_fourier_profile_prior()
+        return _X_SCALE_FOURIER_PROFILE_PRIOR
     if name == "F":
-        return _x_scale_f_profile_prior()
-    return _x_scale_f_profile_prior()
-
-
-def _use_offset_for_x_scale(name: str) -> bool:
-    return name not in {"h", "v", "psin"}
+        return _X_SCALE_F_PROFILE_PRIOR
+    return _X_SCALE_F_PROFILE_PRIOR
 
 
 def _build_x_block_scale_vector(operator, x_guess: np.ndarray) -> np.ndarray | None:
@@ -1533,7 +1513,6 @@ def _build_x_block_scale_vector(operator, x_guess: np.ndarray) -> np.ndarray | N
         return None
 
     scale = np.ones_like(x_eval)
-    floor = _x_scale_floor()
     for _, profile_name, coeff_indices, offset, profile_scale in operator.active_profile_blocks():
         coeff_indices = np.asarray(coeff_indices, dtype=np.int64)
         length = int(coeff_indices.size)
@@ -1543,11 +1522,18 @@ def _build_x_block_scale_vector(operator, x_guess: np.ndarray) -> np.ndarray | N
             return None
         block_guess = x_eval[coeff_indices]
         guess_rms = float(np.linalg.norm(block_guess) / np.sqrt(length))
-        offset_scale = abs(float(offset)) if _use_offset_for_x_scale(profile_name) else 0.0
+        offset_scale = (
+            0.0
+            if profile_name in _X_SCALE_OFFSETLESS_PROFILES
+            else abs(float(offset))
+        )
         profile_scale = abs(float(profile_scale))
         profile_prior = _x_scale_profile_prior(profile_name)
         if abs(profile_scale - 1.0) <= 1.0e-12:
             profile_scale = profile_prior
-        block_scale = max(offset_scale, profile_scale, profile_prior, guess_rms, floor)
+        # Combine model offset, declared profile scale, family prior, and current
+        # guess RMS.  The maximum keeps z-space scaling stable for both zero
+        # starts and warm starts with already-large coefficients.
+        block_scale = max(offset_scale, profile_scale, profile_prior, guess_rms, _X_SCALE_FLOOR)
         scale[coeff_indices] = block_scale
     return scale

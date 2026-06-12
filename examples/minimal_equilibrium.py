@@ -29,7 +29,7 @@ DEFAULT_SURFACE_COLORS = tuple(plt.cm.viridis(np.linspace(0.18, 0.9, len(DEFAULT
 
 def ensure_output_dir() -> Path:
     env_out = os.environ.get("VEQPY_OUTPUT_DIR")
-    outdir = Path(env_out) if env_out else Path(__file__).resolve().parent / "minimal_equilibrium"
+    outdir = Path(env_out) if env_out else Path.cwd() / "outputs" / "minimal_equilibrium"
     outdir.mkdir(parents=True, exist_ok=True)
     return outdir
 
@@ -175,7 +175,6 @@ def main() -> None:
         operator=Operator(grid=solve_grid, case=case),
         config=SolverConfig(
             method="hybr",
-            enable_warmstart=False,
             enable_verbose=False,
             enable_history=False,
         ),
@@ -185,7 +184,7 @@ def main() -> None:
         solver.solve()
         solver.reset()
 
-    solver.solve(enable_warmstart=False, enable_verbose=False, enable_history=False)
+    solver.solve(enable_verbose=False, enable_history=False)
     print(solver.result)
     equilibrium = solver.build_equilibrium()
     equilibrium.plot(outdir / "demo_equilibrium.png", grid=plot_grid)

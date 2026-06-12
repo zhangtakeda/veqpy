@@ -115,3 +115,44 @@ def test_benchmark_non_timing_matches_baseline() -> None:
                 rtol=1.0e-6,
                 atol=1.0e-8,
             )
+
+
+def test_pf_rho_source_reversal_preserves_solved_shape() -> None:
+    benchmark = _load_benchmark_module()
+    reference = benchmark._solve_reference(show_progress=False)
+
+    for constraint in ("null", "beta", "Ip"):
+        for input_kind in benchmark.BENCHMARK_INPUT_KINDS:
+            spec = benchmark.BenchmarkCaseSpec(
+                mode="PF",
+                coordinate="rho",
+                constraint=constraint,
+                input_kind=input_kind,
+            )
+            case = benchmark._make_benchmark_case(spec, reference)
+            result, equilibrium, shape_x = benchmark._solve_once(case)
+
+            reversed_case = case.copy()
+            reversed_case.heat_input *= -1.0
+            reversed_case.current_input *= -1.0
+            reversed_result, reversed_equilibrium, reversed_shape_x = benchmark._solve_once(
+                reversed_case
+            )
+
+            n = min(shape_x.shape[0], reversed_shape_x.shape[0])
+            assert result.success
+            assert reversed_result.success
+            assert_allclose(reversed_shape_x[:n], shape_x[:n], rtol=0.0, atol=1.0e-12)
+            assert_allclose(
+                reversed_equilibrium.beta_t,
+                equilibrium.beta_t,
+                rtol=1.0e-12,
+                atol=1.0e-12,
+            )
+            if constraint == "Ip":
+                assert_allclose(
+                    reversed_equilibrium.Ip,
+                    equilibrium.Ip,
+                    rtol=1.0e-12,
+                    atol=1.0e-6,
+                )

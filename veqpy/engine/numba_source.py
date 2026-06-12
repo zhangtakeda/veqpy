@@ -14,6 +14,9 @@ Public API:
 Notes:
 - Source route routing stays here.
 - The operator layer only binds one source runner and uses it as the Stage-C entrypoint.
+- Each route must fill the same normalized root/source contract:
+  psin, psin_r, psin_rr, Pn_psin, FFn_psin, alpha1, and alpha2.  The route
+  name only changes which user source profile is treated as primitive.
 """
 
 from __future__ import annotations
@@ -43,7 +46,6 @@ from veqpy.math.fast import (
     copy_into,
     dot,
     matvec_into,
-    maximum_floor_into,
     product_into,
     scale_into,
     scaled_product_into,
@@ -51,9 +53,10 @@ from veqpy.math.fast import (
     scaled_ratio_into,
     weighted_dot,
 )
-from veqpy.math.interpolate import build_uniform_source_interpolation_matrix
-
-DEFAULT_LOCAL_BARYCENTRIC_STENCIL = 8
+from veqpy.math.interpolate import (
+    DEFAULT_LOCAL_BARYCENTRIC_STENCIL,
+    build_uniform_source_interpolation_matrix,
+)
 
 # PJ2-psin-uniform is the only route that materializes psin by a
 # fixed-point loop. Keep these as route constants instead of user-facing
@@ -88,7 +91,9 @@ SOURCE_PARAMETERIZATION_SQRT_PSIN = "sqrt_psin"
 SOURCE_PARAMETERIZATION_CODE_IDENTITY = 0
 SOURCE_PARAMETERIZATION_CODE_SQRT_PSIN = 1
 
-# Scratch slot indices into SourceWorkspace.scratch_1d (7 + Nr rows × Nr)
+# Scratch slot indices into SourceWorkspace.scratch_1d (7 + Nr rows × Nr).  These
+# symbolic names are part of the hot-kernel ABI with SourceWorkspace; changing
+# the row order requires updating the allocator at the same time.
 _SLOT_INTEGRAND = 0
 _SLOT_AUX0 = 1
 _SLOT_AUX1 = 2
@@ -233,6 +238,8 @@ def source_parameterization_for_route_key(route_key: RouteKey | str) -> str:
         supported = ", ".join("/".join(route_key) for route_key in sorted(ROUTE_REGISTRY))
         raise KeyError(f"Unknown source route {normalized_key!r}; supported: {supported}")
     if normalized_key == ("PP", "psin", "uniform"):
+        # This public source axis is sqrt(psin) to give uniform samples more
+        # resolution near the magnetic axis.  Internal root fields stay in psin.
         return SOURCE_PARAMETERIZATION_SQRT_PSIN
     return SOURCE_PARAMETERIZATION_IDENTITY
 
@@ -249,6 +256,8 @@ def _source_geometry_workspace_views(
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    # Keep the tuple order synchronized with GeometryWorkspace row contracts.
+    # Named unpacking at call sites is the only documentation numba preserves.
     return (
         radial_fields[1],
         radial_fields[2],
@@ -282,6 +291,8 @@ def _update_psin_coordinate(
     psin_r: np.ndarray,
     accumulator: np.ndarray,
 ) -> np.ndarray:
+    # Source kernels solve for a positive psin_r first.  The coordinate itself
+    # is then integrated and normalized to the external [0, 1] flux convention.
     full_integration(out_psin, psin_r, accumulator)
     return _normalize_psin_coordinate_inplace(out_psin)
 
@@ -305,6 +316,9 @@ def _regularize_axis_linear(profile: np.ndarray, rho: np.ndarray, n_fix: int) ->
     if n_fix <= 0:
         return profile
 
+    # Axis-near derivatives are ill-conditioned in rho coordinates.  Fit the
+    # smooth ratio profile/rho against rho**2 outside the affected region and
+    # extrapolate inward.
     anchor0 = n_fix
     anchor1 = n_fix + 1
     rho0 = rho[anchor0]
@@ -344,10 +358,28 @@ def _regularize_psin_r(psin_r: np.ndarray, rho: np.ndarray, n_fix: int) -> np.nd
 
 
 @njit(cache=True, fastmath=True, nogil=True)
+def _floor_signed_current_primitive(profile: np.ndarray) -> np.ndarray:
+    """Apply a tiny same-sign floor to cumulative current primitives."""
+    edge = profile[-1]
+    floor_value = max(abs(edge), 1.0) * 1.0e-12
+    if edge < 0.0:
+        for i in range(profile.shape[0]):
+            if profile[i] > -floor_value:
+                profile[i] = -floor_value
+    else:
+        for i in range(profile.shape[0]):
+            if profile[i] < floor_value:
+                profile[i] = floor_value
+    return profile
+
+
+@njit(cache=True, fastmath=True, nogil=True)
 def _regularize_axis_even(profile: np.ndarray, rho: np.ndarray, n_fix: int) -> np.ndarray:
     if n_fix <= 0:
         return profile
 
+    # Even profiles have zero first derivative at the magnetic axis.  Linear
+    # extrapolation in rho**2 preserves that parity better than in rho.
     anchor0 = n_fix
     anchor1 = n_fix + 1
     x0 = rho[anchor0] * rho[anchor0]
@@ -424,6 +456,22 @@ def _fill_pf_psin_integrand(
 
 
 @njit(cache=True, fastmath=True, nogil=True)
+def _weighted_profile_sign(values: np.ndarray, weights: np.ndarray) -> float:
+    weighted = dot(values, weights)
+    if weighted < 0.0:
+        return -1.0
+    return 1.0
+
+
+@njit(cache=True, fastmath=True, nogil=True)
+def _signed_sqrt_ratio(numerator: float, denominator: float) -> float:
+    ratio = numerator / denominator
+    if ratio < 0.0:
+        return -np.sqrt(-ratio)
+    return np.sqrt(ratio)
+
+
+@njit(cache=True, fastmath=True, nogil=True)
 def _fill_g1n_psin_integrand(
     out: np.ndarray,
     JdivR: np.ndarray,
@@ -448,11 +496,12 @@ def _fill_g1n_rho_integrand(
     R: np.ndarray,
     Pn_r: np.ndarray,
     psin_r: np.ndarray,
+    source_scale: float,
 ) -> np.ndarray:
     nr, nt = out.shape
     for i in range(nr):
-        ffn_i = FFn_r[i]
-        pn_i = Pn_r[i]
+        ffn_i = source_scale * FFn_r[i]
+        pn_i = source_scale * Pn_r[i]
         psin_r_i = psin_r[i]
         for j in range(nt):
             out[i, j] = JdivR[i, j] * (ffn_i + R[i, j] * R[i, j] * pn_i) / psin_r_i
@@ -577,6 +626,74 @@ def _dense_solve_one_rhs_inplace(A: np.ndarray, b: np.ndarray, n: int, pivot_tol
 
 
 @njit(cache=True, nogil=True)
+def _dense_solve_two_rhs_inplace(
+    A: np.ndarray,
+    b0: np.ndarray,
+    b1: np.ndarray,
+    n: int,
+    pivot_tol: float,
+) -> None:
+    """Solve two RHS vectors with one dense partial-pivot elimination."""
+    scale = 0.0
+    for i in range(n):
+        for j in range(n):
+            value = abs(A[i, j])
+            if value > scale:
+                scale = value
+    threshold = pivot_tol
+    if scale > 1.0:
+        threshold = pivot_tol * scale
+
+    for k in range(n - 1):
+        pivot = k
+        pivot_abs = abs(A[k, k])
+        for i in range(k + 1, n):
+            value = abs(A[i, k])
+            if value > pivot_abs:
+                pivot = i
+                pivot_abs = value
+        if pivot_abs <= threshold or not np.isfinite(pivot_abs):
+            raise ValueError("PQ dense solve failed: singular pivot")
+
+        if pivot != k:
+            for j in range(n):
+                tmp = A[k, j]
+                A[k, j] = A[pivot, j]
+                A[pivot, j] = tmp
+            tmp_b0 = b0[k]
+            b0[k] = b0[pivot]
+            b0[pivot] = tmp_b0
+            tmp_b1 = b1[k]
+            b1[k] = b1[pivot]
+            b1[pivot] = tmp_b1
+
+        akk = A[k, k]
+        for i in range(k + 1, n):
+            factor = A[i, k] / akk
+            A[i, k] = factor
+            for j in range(k + 1, n):
+                A[i, j] -= factor * A[k, j]
+            b0[i] -= factor * b0[k]
+            b1[i] -= factor * b1[k]
+
+    last_pivot = abs(A[n - 1, n - 1])
+    if last_pivot <= threshold or not np.isfinite(last_pivot):
+        raise ValueError("PQ dense solve failed: singular last pivot")
+
+    for ii in range(n):
+        i = n - 1 - ii
+        accum0 = b0[i]
+        accum1 = b1[i]
+        for j in range(i + 1, n):
+            accum0 -= A[i, j] * b0[j]
+            accum1 -= A[i, j] * b1[j]
+        b0[i] = accum0 / A[i, i]
+        b1[i] = accum1 / A[i, i]
+        if not np.isfinite(b0[i]) or not np.isfinite(b1[i]):
+            raise ValueError("PQ dense solve produced non-finite solution")
+
+
+@njit(cache=True, nogil=True)
 def _fill_pq_linear_matrix(
     A: np.ndarray,
     rhs: np.ndarray,
@@ -602,13 +719,63 @@ def _fill_pq_linear_matrix(
 
 
 @njit(cache=True, nogil=True)
+def _fill_pq_linear_matrix_two_rhs(
+    A: np.ndarray,
+    rhs0: np.ndarray,
+    rhs1: np.ndarray,
+    D: np.ndarray,
+    coeff_d: np.ndarray,
+    coeff_y: np.ndarray,
+    forcing0: np.ndarray,
+    forcing1: np.ndarray,
+    edge_value0: float,
+    edge_value1: float,
+    n: int,
+) -> None:
+    """Assemble one dense PQ system with two edge-conditioned RHS vectors."""
+    for i in range(n):
+        for j in range(n):
+            A[i, j] = coeff_d[i] * D[i, j]
+        A[i, i] += coeff_y[i]
+        rhs0[i] = forcing0[i]
+        rhs1[i] = forcing1[i]
+
+    edge = n - 1
+    for j in range(n):
+        A[edge, j] = 0.0
+    A[edge, edge] = 1.0
+    rhs0[edge] = edge_value0
+    rhs1[edge] = edge_value1
+
+
+@njit(cache=True, nogil=True)
 def _validate_pq_source_scalar(value: float, label_code: int) -> None:
     if not np.isfinite(value):
         raise ValueError("PQ strict solve produced non-finite scalar")
-    if label_code == 0 and value <= 0.0:
-        raise ValueError("PQ strict solve produced non-positive alpha2")
+    if label_code == 0 and abs(value) <= 1.0e-14:
+        raise ValueError("PQ strict solve produced near-zero alpha2")
     if label_code == 1 and abs(value) <= 1.0e-14:
         raise ValueError("PQ strict solve produced near-zero alpha1")
+
+
+@njit(cache=True, nogil=True)
+def _normalize_pq_signed_psi_r(
+    psi_r: np.ndarray,
+    weights: np.ndarray,
+    rho: np.ndarray,
+    n_axis_fix: int,
+) -> float:
+    alpha2 = dot(psi_r, weights)
+    _validate_pq_source_scalar(alpha2, 0)
+    scale_into(psi_r, psi_r, 1.0 / alpha2)
+    for i in range(psi_r.shape[0]):
+        if not np.isfinite(psi_r[i]) or psi_r[i] <= 0.0:
+            raise ValueError("PQ strict solve produced invalid normalized psin_r")
+    _regularize_psin_r(psi_r, rho, n_axis_fix)
+    for i in range(psi_r.shape[0]):
+        if not np.isfinite(psi_r[i]) or psi_r[i] <= 0.0:
+            raise ValueError("PQ strict solve produced invalid normalized psin_r")
+    return alpha2
 
 
 @njit(cache=True, nogil=True)
@@ -678,14 +845,16 @@ def _pq_psin_beta_residual(
     for i in range(n):
         F_value = F0[i] + alpha1 * F1[i]
         psi_r = F_value * Ln_r[i] / q_prof[i]
-        if not np.isfinite(psi_r) or psi_r <= 0.0:
+        if not np.isfinite(psi_r):
             return np.nan
         trial_psin_r[i] = psi_r
         alpha2 += psi_r * weights[i]
-    if not np.isfinite(alpha2) or alpha2 <= 0.0:
+    if not np.isfinite(alpha2) or abs(alpha2) <= 1.0e-14:
         return np.nan
     for i in range(n):
         trial_psin_r[i] /= alpha2
+        if not np.isfinite(trial_psin_r[i]) or trial_psin_r[i] <= 0.0:
+            return np.nan
         trial_Pn_r[i] = heat_input[i] * trial_psin_r[i]
     _compute_Pn_out(trial_Pn, trial_Pn_r, accumulator, weights)
     beta_den = weighted_dot(trial_Pn, V_r, weights)
@@ -709,9 +878,9 @@ def _solve_pq_psin_beta_alpha1(
     trial_Pn: np.ndarray,
     beta_target: float,
 ) -> float:
-    lower = 0.0
-    r_lower = _pq_psin_beta_residual(
-        lower,
+    base = 0.0
+    r_base = _pq_psin_beta_residual(
+        base,
         F0,
         F1,
         q_prof,
@@ -725,29 +894,11 @@ def _solve_pq_psin_beta_alpha1(
         trial_Pn,
         beta_target,
     )
-    if not np.isfinite(r_lower):
+    if not np.isfinite(r_base):
         raise ValueError("PQ/psin strict beta solve failed at lower bracket")
 
-    upper = 1.0
-    r_upper = _pq_psin_beta_residual(
-        upper,
-        F0,
-        F1,
-        q_prof,
-        Ln_r,
-        heat_input,
-        V_r,
-        weights,
-        accumulator,
-        trial_psin_r,
-        trial_Pn_r,
-        trial_Pn,
-        beta_target,
-    )
-    for _ in range(80):
-        if np.isfinite(r_upper) and r_lower * r_upper <= 0.0:
-            break
-        upper *= 2.0
+    for direction in (1.0, -1.0):
+        upper = direction
         r_upper = _pq_psin_beta_residual(
             upper,
             F0,
@@ -763,38 +914,59 @@ def _solve_pq_psin_beta_alpha1(
             trial_Pn,
             beta_target,
         )
-    if not np.isfinite(r_upper) or r_lower * r_upper > 0.0:
-        raise ValueError("PQ/psin strict beta solve failed to bracket alpha1")
-
-    for _ in range(80):
-        mid = 0.5 * (lower + upper)
-        r_mid = _pq_psin_beta_residual(
-            mid,
-            F0,
-            F1,
-            q_prof,
-            Ln_r,
-            heat_input,
-            V_r,
-            weights,
-            accumulator,
-            trial_psin_r,
-            trial_Pn_r,
-            trial_Pn,
-            beta_target,
-        )
-        if not np.isfinite(r_mid):
-            upper = mid
-            continue
-        if abs(r_mid) <= 1.0e-12 * (1.0 + abs(beta_target)):
-            return mid
-        if r_lower * r_mid <= 0.0:
-            upper = mid
-            r_upper = r_mid
-        else:
-            lower = mid
-            r_lower = r_mid
-    return 0.5 * (lower + upper)
+        for _ in range(80):
+            # The beta constraint is scalar and monotone on each valid q/F
+            # branch.  Try both alpha1 signs because alpha2 carries current
+            # direction, so physical equilibria can need a negative alpha1.
+            if np.isfinite(r_upper) and r_base * r_upper <= 0.0:
+                lower = base
+                r_lower = r_base
+                for _ in range(80):
+                    mid = 0.5 * (lower + upper)
+                    r_mid = _pq_psin_beta_residual(
+                        mid,
+                        F0,
+                        F1,
+                        q_prof,
+                        Ln_r,
+                        heat_input,
+                        V_r,
+                        weights,
+                        accumulator,
+                        trial_psin_r,
+                        trial_Pn_r,
+                        trial_Pn,
+                        beta_target,
+                    )
+                    if not np.isfinite(r_mid):
+                        upper = mid
+                        continue
+                    if abs(r_mid) <= 1.0e-12 * (1.0 + abs(beta_target)):
+                        return mid
+                    if r_lower * r_mid <= 0.0:
+                        upper = mid
+                        r_upper = r_mid
+                    else:
+                        lower = mid
+                        r_lower = r_mid
+                return 0.5 * (lower + upper)
+            upper *= 2.0
+            r_upper = _pq_psin_beta_residual(
+                upper,
+                F0,
+                F1,
+                q_prof,
+                Ln_r,
+                heat_input,
+                V_r,
+                weights,
+                accumulator,
+                trial_psin_r,
+                trial_Pn_r,
+                trial_Pn,
+                beta_target,
+            )
+    raise ValueError("PQ/psin strict beta solve failed to bracket alpha1")
 
 
 def build_source_remap_cache(
@@ -805,7 +977,13 @@ def build_source_remap_cache(
     stencil_size: int = DEFAULT_LOCAL_BARYCENTRIC_STENCIL,
     interpolation_kind: str | None = None,
 ) -> tuple[int, np.ndarray, np.ndarray]:
-    """Build reusable interpolation cache data for sampled source inputs."""
+    """Build reusable interpolation cache data for sampled source inputs.
+
+    Rho-coordinate sources are tied to the fixed operator grid, so their remap
+    matrix can be built once.  Psin-coordinate sources depend on the current
+    solution and only keep interpolation weights here; their query is refreshed
+    at each source evaluation.
+    """
     coord = str(coordinate).lower()
     if coord not in ("rho", "psin"):
         raise ValueError(f"Unsupported coordinate {coordinate!r}")
@@ -818,7 +996,7 @@ def build_source_remap_cache(
     local_size = min(count, int(stencil_size))
     if local_size < 1:
         raise ValueError(f"stencil_size must be positive, got {stencil_size!r}")
-    weights = _uniform_barycentric_weights(local_size)
+    weights = uniform_barycentric_weights(local_size)
     fixed_remap_matrix = np.empty((0, 0), dtype=np.float64)
     if coord_code == RHO_COORDINATE:
         if rho is None:
@@ -845,10 +1023,42 @@ def resolve_source_inputs(
     psin_query: np.ndarray,
     use_barycentric: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Resolve uniform source inputs onto operator rho nodes."""
+    """Resolve sampled heat/current source inputs onto operator rho nodes."""
 
     heat = np.asarray(heat_input, dtype=np.float64)
     current = np.asarray(current_input, dtype=np.float64)
+    return _resolve_source_inputs_prepared(
+        out_heat_input,
+        out_current_input,
+        heat,
+        current,
+        coordinate_code,
+        source_sample_count,
+        barycentric_weights,
+        fixed_remap_matrix,
+        heat_spline_coeff,
+        current_spline_coeff,
+        psin_query,
+        use_barycentric,
+    )
+
+
+def _resolve_source_inputs_prepared(
+    out_heat_input: np.ndarray,
+    out_current_input: np.ndarray,
+    heat: np.ndarray,
+    current: np.ndarray,
+    coordinate_code: int,
+    source_sample_count: int,
+    barycentric_weights: np.ndarray,
+    fixed_remap_matrix: np.ndarray,
+    heat_spline_coeff: np.ndarray,
+    current_spline_coeff: np.ndarray,
+    psin_query: np.ndarray,
+    use_barycentric: bool = False,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Resolve source inputs when all arrays are already normalized ndarrays."""
+
     if heat.ndim != 1 or current.ndim != 1:
         raise ValueError(f"Expected 1D heat/current inputs, got {heat.shape} and {current.shape}")
     if heat.shape != current.shape:
@@ -868,6 +1078,8 @@ def resolve_source_inputs(
         raise ValueError(f"Expected psin_query to be 1D, got {psin_query.shape}")
 
     if coordinate_code == RHO_COORDINATE:
+        # Rho inputs use the precomputed linear map; no solver state participates
+        # after the cache is built.
         np.matmul(fixed_remap_matrix, heat, out=out_heat_input)
         np.matmul(fixed_remap_matrix, current, out=out_current_input)
         return out_heat_input, out_current_input
@@ -875,6 +1087,9 @@ def resolve_source_inputs(
     if psin_query.shape != out_heat_input.shape:
         raise ValueError(f"psin_query shape mismatch: {psin_query.shape} vs {out_heat_input.shape}")
 
+    # Psin inputs are materialized against the current psin field.  Spline is
+    # smoother for general sampled inputs; local barycentric keeps high-order
+    # route variants allocation-free inside fixed-point loops.
     if use_barycentric:
         _local_barycentric_interpolate_pair(
             out_heat_input,
@@ -898,6 +1113,20 @@ def resolve_source_inputs(
 # ---------------------------------------------------------------------------
 # Zero-allocation scratch variants (Phase 3)
 # ---------------------------------------------------------------------------
+
+# Route families share one output contract but choose different primitives:
+# PF derives psin_r from pressure/current source balance, PP takes psin_r-like
+# current data directly, PI works through toroidal-current primitives, PJ routes
+# start from current-density-like data, and PQ treats q as strict input.  The
+# repeated rho/psin/uniform/grid functions below differ mainly in how the input
+# profiles are interpreted or remapped; keep family-level comments here instead
+# of duplicating them in every variant.
+#
+# Docs-facing route meanings in compact form:
+# - PF: heat drives pressure-gradient data; current drives FF' data.
+# - PP: current drives normalized flux-gradient/psin_r data.
+# - PI/PJ1/PJ2: current drives cumulative/current-density/parallel-current data.
+# - PQ: current is safety factor q, so F or F**2 is solved from q and edge F.
 
 
 @register_source_route(
@@ -935,25 +1164,46 @@ def _update_pf_from_rho_inputs_with_scratch(
     _fill_pf_rho_integrand(integrand, Kn, current_input, Ln_r, V_r, heat_input)
     full_integration(out_psin_r, integrand, accumulator)
     out_psin_r *= -2.0
+    psi_square_sign = _weighted_profile_sign(out_psin_r, weights)
+    if psi_square_sign < 0.0:
+        out_psin_r *= -1.0
+    for i in range(out_psin_r.shape[0]):
+        if out_psin_r[i] < 1.0e-6:
+            out_psin_r[i] = 1.0e-6
     out_psin_r[:] = np.sqrt(out_psin_r)
     out_psin_r /= Kn
     _regularize_psin_r(out_psin_r, rho, n_axis_fix)
     prof = out_psin_r
     integral_prof = dot(prof, weights)
+    # alpha2 stores the pre-normalization integral; psin_r itself is normalized
+    # to integrate to one so downstream geometry uses the canonical psin scale.
     out_psin_r /= integral_prof
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
     _update_psin_coordinate(out_psin, out_psin_r, accumulator)
     if (not has_Ip) and (not has_beta):
-        alpha2 = integral_prof
-        alpha1 = -dot(heat_input, weights) / alpha2
-        scaled_ratio_into(out_Pn_psin, heat_input, out_psin_r, 1.0 / (alpha1 * alpha2))
-        scaled_ratio_into(out_FFn_psin, current_input, out_psin_r, 1.0 / (alpha1 * alpha2))
+        # With no global Ip/beta target, PF determines both alpha scales from
+        # the integrated source profiles.  Rho-coordinate PF inputs are
+        # derivatives with respect to rho, so their global sign belongs to the
+        # flux-direction gauge carried by alpha2, not to the solved shape.
+        alpha2 = psi_square_sign * integral_prof
+        alpha1 = -dot(heat_input, weights) / integral_prof
+        source_scale = psi_square_sign / (alpha1 * alpha2)
+        scaled_ratio_into(out_Pn_psin, heat_input, out_psin_r, source_scale)
+        scaled_ratio_into(out_FFn_psin, current_input, out_psin_r, source_scale)
         _regularize_ffn_psin(out_FFn_psin, rho, n_axis_fix)
         return alpha1, alpha2
     c2 = integral_prof * integral_prof
     if has_Ip and (not has_beta):
         g1n_integrand = source_scratch_2d[0]
-        _fill_g1n_rho_integrand(g1n_integrand, JdivR, current_input, R, heat_input, out_psin_r)
+        _fill_g1n_rho_integrand(
+            g1n_integrand,
+            JdivR,
+            current_input,
+            R,
+            heat_input,
+            out_psin_r,
+            psi_square_sign,
+        )
         radial_scratch = source_scratch_1d[_SLOT_AUX0]
         nt = g1n_integrand.shape[1]
         for j in range(nt):
@@ -970,12 +1220,12 @@ def _update_pf_from_rho_inputs_with_scratch(
         scratch_aux = source_scratch_1d[_SLOT_AUX0]
         _compute_Pn_out(scratch_aux, heat_input, accumulator, weights)
         c1 = 0.5 * beta * B0**2 * dot(V_r, weights) / weighted_dot(scratch_aux, V_r, weights)
-        alpha1 = np.sqrt(c1 / c2)
+        alpha1 = _signed_sqrt_ratio(c1, c2)
     else:
         raise ValueError("PF does not support applying Ip and beta constraints simultaneously")
     alpha2 = c2 * alpha1
-    scaled_ratio_into(out_Pn_psin, heat_input, out_psin_r, 1.0)
-    scaled_ratio_into(out_FFn_psin, current_input, out_psin_r, 1.0)
+    scaled_ratio_into(out_Pn_psin, heat_input, out_psin_r, psi_square_sign)
+    scaled_ratio_into(out_FFn_psin, current_input, out_psin_r, psi_square_sign)
     _regularize_ffn_psin(out_FFn_psin, rho, n_axis_fix)
     return alpha1, alpha2
 
@@ -1013,16 +1263,18 @@ def _update_pf_from_psin_uniform_inputs_with_scratch(
     full_integration(out_psin_r, integrand, accumulator)
     out_psin_r *= -1.0
     out_psin_r /= Kn
+    psi_scale_sign = _weighted_profile_sign(out_psin_r, weights)
+    if psi_scale_sign < 0.0:
+        out_psin_r *= -1.0
     _regularize_psin_r(out_psin_r, rho, n_axis_fix)
-    prof = out_psin_r
-    integral_prof = dot(prof, weights)
+    integral_prof = dot(out_psin_r, weights)
     out_psin_r /= integral_prof
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
     _update_psin_coordinate(out_psin, out_psin_r, accumulator)
     if (not has_Ip) and (not has_beta):
-        alpha2 = integral_prof
+        alpha2 = psi_scale_sign * integral_prof
         pressure_profile = source_scratch_1d[_SLOT_AUX0]
-        product_into(pressure_profile, heat_input, prof)
+        product_into(pressure_profile, heat_input, out_psin_r)
         alpha1 = -dot(pressure_profile, weights)
         scale_into(out_Pn_psin, heat_input, 1.0 / alpha1)
         scale_into(out_FFn_psin, current_input, 1.0 / alpha1)
@@ -1053,7 +1305,7 @@ def _update_pf_from_psin_uniform_inputs_with_scratch(
         scratch_aux = source_scratch_1d[_SLOT_AUX1]
         _compute_Pn_out(scratch_aux, scratch_Pn_r, accumulator, weights)
         c1 = 0.5 * beta * B0**2 * dot(V_r, weights) / weighted_dot(scratch_aux, V_r, weights)
-        alpha1 = np.sqrt(c1 / c2)
+        alpha1 = _signed_sqrt_ratio(c1, c2)
     else:
         raise ValueError("PF does not support applying Ip and beta constraints simultaneously")
     alpha2 = c2 * alpha1
@@ -1093,16 +1345,18 @@ def _update_pf_from_psin_grid_inputs_with_scratch(
     full_integration(out_psin_r, integrand, accumulator)
     out_psin_r *= -1.0
     out_psin_r /= Kn
+    psi_scale_sign = _weighted_profile_sign(out_psin_r, weights)
+    if psi_scale_sign < 0.0:
+        out_psin_r *= -1.0
     _regularize_psin_r(out_psin_r, rho, n_axis_fix)
-    prof = out_psin_r
-    integral_prof = dot(prof, weights)
+    integral_prof = dot(out_psin_r, weights)
     out_psin_r /= integral_prof
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
     _update_psin_coordinate(out_psin, out_psin_r, accumulator)
     if (not has_Ip) and (not has_beta):
-        alpha2 = integral_prof
+        alpha2 = psi_scale_sign * integral_prof
         pressure_profile = source_scratch_1d[_SLOT_AUX0]
-        product_into(pressure_profile, heat_input, prof)
+        product_into(pressure_profile, heat_input, out_psin_r)
         alpha1 = -dot(pressure_profile, weights)
         scale_into(out_Pn_psin, heat_input, 1.0 / alpha1)
         scale_into(out_FFn_psin, current_input, 1.0 / alpha1)
@@ -1133,7 +1387,7 @@ def _update_pf_from_psin_grid_inputs_with_scratch(
         scratch_aux = source_scratch_1d[_SLOT_AUX1]
         _compute_Pn_out(scratch_aux, scratch_Pn_r, accumulator, weights)
         c1 = 0.5 * beta * B0**2 * dot(V_r, weights) / weighted_dot(scratch_aux, V_r, weights)
-        alpha1 = np.sqrt(c1 / c2)
+        alpha1 = _signed_sqrt_ratio(c1, c2)
     else:
         raise ValueError("PF does not support applying Ip and beta constraints simultaneously")
     alpha2 = c2 * alpha1
@@ -1174,6 +1428,9 @@ def _update_pp_from_rho_inputs_with_scratch(
     has_Ip = not np.isnan(Ip)
     has_beta = not np.isnan(beta)
     if has_Ip:
+        # PP treats current_input as the unnormalized psin_r shape.  Ip pins the
+        # absolute scale through the edge value; otherwise alpha2 is the weighted
+        # normalization integral.
         copy_into(out_psin_r, current_input)
         alpha2 = Ip / (2.0 * np.pi * Kn[-1] * out_psin_r[-1])
     else:
@@ -1397,11 +1654,13 @@ def _update_pi_from_rho_inputs_with_scratch(
     has_beta = not np.isnan(beta)
     Itor = source_scratch_1d[_SLOT_AUX0]
     if has_Ip:
+        # PI source profiles represent cumulative toroidal current.  Rescale the
+        # whole primitive when Ip is prescribed, then differentiate only after
+        # psin_r has been normalized.
         scale_into(Itor, current_input, Ip / current_input[-1])
     else:
         copy_into(Itor, current_input)
-    itor_floor = max(Itor[-1], 1.0) * 1e-12
-    maximum_floor_into(Itor, Itor, itor_floor)
+    _floor_signed_current_primitive(Itor)
     itor_over_kn = source_scratch_1d[_SLOT_INTEGRAND]
     scaled_ratio_into(itor_over_kn, Itor, Kn, 1.0 / (2.0 * np.pi))
     alpha2 = dot(itor_over_kn, weights)
@@ -1471,8 +1730,7 @@ def _update_pi_from_psin_uniform_inputs_with_scratch(
         scale_into(Itor, current_input, Ip / current_input[-1])
     else:
         copy_into(Itor, current_input)
-    itor_floor = max(Itor[-1], 1.0) * 1e-12
-    maximum_floor_into(Itor, Itor, itor_floor)
+    _floor_signed_current_primitive(Itor)
     itor_over_kn = source_scratch_1d[_SLOT_INTEGRAND]
     scaled_ratio_into(itor_over_kn, Itor, Kn, 1.0 / (2.0 * np.pi))
     alpha2 = dot(itor_over_kn, weights)
@@ -1542,8 +1800,7 @@ def _update_pi_from_psin_grid_inputs_with_scratch(
         scale_into(Itor, current_input, Ip / current_input[-1])
     else:
         copy_into(Itor, current_input)
-    itor_floor = max(Itor[-1], 1.0) * 1e-12
-    maximum_floor_into(Itor, Itor, itor_floor)
+    _floor_signed_current_primitive(Itor)
     itor_over_kn = source_scratch_1d[_SLOT_INTEGRAND]
     scaled_ratio_into(itor_over_kn, Itor, Kn, 1.0 / (2.0 * np.pi))
     alpha2 = dot(itor_over_kn, weights)
@@ -1619,14 +1876,15 @@ def _update_pj1_from_rho_inputs_with_scratch(
     I_tor = source_scratch_1d[_SLOT_AUX1]
     jtor = source_scratch_1d[_SLOT_AUX2]
     if has_Ip:
+        # PJ1 integrates a current-density-like input into I_tor first; the same
+        # Ip scale must be applied to the primitive and to the local jtor profile.
         scale_into(I_tor, I_tor_prof, Ip / I_tor_prof[-1])
         scale_into(jtor, current_input, Ip / I_tor_prof[-1])
     else:
         copy_into(I_tor, I_tor_prof)
         copy_into(jtor, current_input)
     _enforce_axis_even_profile(jtor, rho)
-    itor_floor = max(I_tor[-1], 1.0) * 1e-12
-    maximum_floor_into(I_tor, I_tor, itor_floor)
+    _floor_signed_current_primitive(I_tor)
     itor_over_kn = source_scratch_1d[_SLOT_INTEGRAND]
     scaled_ratio_into(itor_over_kn, I_tor, Kn, 1.0 / (2.0 * np.pi))
     alpha2 = dot(itor_over_kn, weights)
@@ -1711,8 +1969,7 @@ def _update_pj1_from_psin_uniform_inputs_with_scratch(
         copy_into(I_tor, I_tor_prof)
         copy_into(jtor, current_input)
     _enforce_axis_even_profile(jtor, rho)
-    itor_floor = max(I_tor[-1], 1.0) * 1e-12
-    maximum_floor_into(I_tor, I_tor, itor_floor)
+    _floor_signed_current_primitive(I_tor)
     itor_over_kn = source_scratch_1d[_SLOT_INTEGRAND]
     scaled_ratio_into(itor_over_kn, I_tor, Kn, 1.0 / (2.0 * np.pi))
     alpha2 = dot(itor_over_kn, weights)
@@ -1797,8 +2054,7 @@ def _update_pj1_from_psin_grid_inputs_with_scratch(
         copy_into(I_tor, I_tor_prof)
         copy_into(jtor, current_input)
     _enforce_axis_even_profile(jtor, rho)
-    itor_floor = max(I_tor[-1], 1.0) * 1e-12
-    maximum_floor_into(I_tor, I_tor, itor_floor)
+    _floor_signed_current_primitive(I_tor)
     itor_over_kn = source_scratch_1d[_SLOT_INTEGRAND]
     scaled_ratio_into(itor_over_kn, I_tor, Kn, 1.0 / (2.0 * np.pi))
     alpha2 = dot(itor_over_kn, weights)
@@ -1878,6 +2134,8 @@ def _update_pj2_from_psin_uniform_inputs_with_scratch(
     copy_into(integral_val, out_psin_r)
 
     if has_Ip:
+        # PJ2 couples the source current to the current F profile.  In psin
+        # routes the edge normalization uses the physical edge F=R0*B0.
         scaled_product_into(I_tor, F, integral_val, Ip / (R0 * B0 * integral_val[-1]))
     else:
         scaled_product_into(I_tor, F, integral_val, 2.0 * np.pi)
@@ -2111,6 +2369,10 @@ def _update_pq_from_psin_uniform_inputs_with_scratch(
     _fill_pq_q_profile(q_prof, current_input, Kn, Ln_r, edge_F, Ip)
     _fill_pq_W_and_derivative(W, F_r, Kn, Ln_r, q_prof, differentiator)
 
+    # PQ/psin treats q as strict input.  The unknown F profile solves a dense
+    # first-order collocation system, then psin_r follows from q = F*Ln_r/psin_r.
+    # This is intentionally more constrained than the PF/PP/PI/PJ routes: an
+    # invalid q profile should fail early instead of being silently regularized.
     pressure_factor = 1.0 / (4.0 * np.pi**2)
     for i in range(n):
         coeff_d[i] = W[i] + q_prof[i]
@@ -2123,18 +2385,24 @@ def _update_pq_from_psin_uniform_inputs_with_scratch(
         # Solve A F0 = b_edge and A F1 = b_pressure, then determine alpha1 from
         # the scalar beta constraint with F = F0 + alpha1 * F1.
         for i in range(n):
-            rhs[i] = 0.0
-        _fill_pq_linear_matrix(A, rhs, differentiator, coeff_d, coeff_y, rhs, edge_F, n)
-        copy_into(F_solved, rhs)
-        _dense_solve_one_rhs_inplace(A, F_solved, n, 1.0e-12)
-
-        for i in range(n):
-            rhs[i] = -pressure_factor * V_r[i] * heat_input[i]
-            if not np.isfinite(rhs[i]):
+            F_solved[i] = 0.0
+            W[i] = -pressure_factor * V_r[i] * heat_input[i]
+            if not np.isfinite(W[i]):
                 raise ValueError("PQ/psin strict beta solve assembled non-finite pressure RHS")
-        _fill_pq_linear_matrix(A, rhs, differentiator, coeff_d, coeff_y, rhs, 0.0, n)
-        copy_into(W, rhs)
-        _dense_solve_one_rhs_inplace(A, W, n, 1.0e-12)
+        _fill_pq_linear_matrix_two_rhs(
+            A,
+            F_solved,
+            W,
+            differentiator,
+            coeff_d,
+            coeff_y,
+            F_solved,
+            W,
+            edge_F,
+            0.0,
+            n,
+        )
+        _dense_solve_two_rhs_inplace(A, F_solved, W, n, 1.0e-12)
 
         beta_target = 0.5 * beta * B0**2 * dot(V_r, weights)
         alpha1 = _solve_pq_psin_beta_alpha1(
@@ -2166,13 +2434,12 @@ def _update_pq_from_psin_uniform_inputs_with_scratch(
 
     for i in range(n):
         out_psin_r[i] = F_solved[i] * Ln_r[i] / q_prof[i]
-        if not np.isfinite(out_psin_r[i]) or out_psin_r[i] <= 0.0:
+        if not np.isfinite(out_psin_r[i]):
             raise ValueError("PQ/psin strict solve produced invalid psi_r")
 
-    alpha2 = dot(out_psin_r, weights)
-    _validate_pq_source_scalar(alpha2, 0)
-    scale_into(out_psin_r, out_psin_r, 1.0 / alpha2)
-    _regularize_psin_r(out_psin_r, rho, n_axis_fix)
+    # F*Ln/q is signed physical psi_r.  Keep that sign in alpha2, then normalize
+    # the solver psin_r branch back to a positive [0, 1] coordinate.
+    alpha2 = _normalize_pq_signed_psi_r(out_psin_r, weights, rho, n_axis_fix)
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
     _update_psin_coordinate(out_psin, out_psin_r, accumulator)
 
@@ -2237,6 +2504,8 @@ def _update_pq_from_psin_grid_inputs_with_scratch(
     _fill_pq_q_profile(q_prof, current_input, Kn, Ln_r, edge_F, Ip)
     _fill_pq_W_and_derivative(W, F_r, Kn, Ln_r, q_prof, differentiator)
 
+    # Grid and uniform psin variants share the same strict-q algebra after the
+    # source inputs have been materialized onto the operator grid.
     pressure_factor = 1.0 / (4.0 * np.pi**2)
     for i in range(n):
         coeff_d[i] = W[i] + q_prof[i]
@@ -2249,18 +2518,24 @@ def _update_pq_from_psin_grid_inputs_with_scratch(
         # Solve A F0 = b_edge and A F1 = b_pressure, then determine alpha1 from
         # the scalar beta constraint with F = F0 + alpha1 * F1.
         for i in range(n):
-            rhs[i] = 0.0
-        _fill_pq_linear_matrix(A, rhs, differentiator, coeff_d, coeff_y, rhs, edge_F, n)
-        copy_into(F_solved, rhs)
-        _dense_solve_one_rhs_inplace(A, F_solved, n, 1.0e-12)
-
-        for i in range(n):
-            rhs[i] = -pressure_factor * V_r[i] * heat_input[i]
-            if not np.isfinite(rhs[i]):
+            F_solved[i] = 0.0
+            W[i] = -pressure_factor * V_r[i] * heat_input[i]
+            if not np.isfinite(W[i]):
                 raise ValueError("PQ/psin strict beta solve assembled non-finite pressure RHS")
-        _fill_pq_linear_matrix(A, rhs, differentiator, coeff_d, coeff_y, rhs, 0.0, n)
-        copy_into(W, rhs)
-        _dense_solve_one_rhs_inplace(A, W, n, 1.0e-12)
+        _fill_pq_linear_matrix_two_rhs(
+            A,
+            F_solved,
+            W,
+            differentiator,
+            coeff_d,
+            coeff_y,
+            F_solved,
+            W,
+            edge_F,
+            0.0,
+            n,
+        )
+        _dense_solve_two_rhs_inplace(A, F_solved, W, n, 1.0e-12)
 
         beta_target = 0.5 * beta * B0**2 * dot(V_r, weights)
         alpha1 = _solve_pq_psin_beta_alpha1(
@@ -2292,13 +2567,10 @@ def _update_pq_from_psin_grid_inputs_with_scratch(
 
     for i in range(n):
         out_psin_r[i] = F_solved[i] * Ln_r[i] / q_prof[i]
-        if not np.isfinite(out_psin_r[i]) or out_psin_r[i] <= 0.0:
+        if not np.isfinite(out_psin_r[i]):
             raise ValueError("PQ/psin strict solve produced invalid psi_r")
 
-    alpha2 = dot(out_psin_r, weights)
-    _validate_pq_source_scalar(alpha2, 0)
-    scale_into(out_psin_r, out_psin_r, 1.0 / alpha2)
-    _regularize_psin_r(out_psin_r, rho, n_axis_fix)
+    alpha2 = _normalize_pq_signed_psi_r(out_psin_r, weights, rho, n_axis_fix)
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
     _update_psin_coordinate(out_psin, out_psin_r, accumulator)
 
@@ -2366,6 +2638,8 @@ def _update_pq_from_rho_inputs_with_scratch(
     _fill_pq_q_profile(q_prof, current_input, Kn, Ln_r, edge_F, Ip)
     _fill_pq_W_and_derivative(W, Y_r, Kn, Ln_r, q_prof, differentiator)
 
+    # In rho-coordinate PQ, solving for Y=F**2 keeps the strict edge condition
+    # sign-safe; F is recovered only after the dense system succeeds.
     has_beta = not np.isnan(beta)
     pressure_scale = 1.0
     beta_C = 0.0
@@ -2398,13 +2672,10 @@ def _update_pq_from_rho_inputs_with_scratch(
             raise ValueError("PQ/rho strict solve produced non-positive F squared")
         F_i = sign_F * np.sqrt(Y[i])
         out_psin_r[i] = F_i * Ln_r[i] / q_prof[i]
-        if not np.isfinite(out_psin_r[i]) or out_psin_r[i] <= 0.0:
+        if not np.isfinite(out_psin_r[i]):
             raise ValueError("PQ/rho strict solve produced invalid psi_r")
 
-    alpha2 = dot(out_psin_r, weights)
-    _validate_pq_source_scalar(alpha2, 0)
-    scale_into(out_psin_r, out_psin_r, 1.0 / alpha2)
-    _regularize_psin_r(out_psin_r, rho, n_axis_fix)
+    alpha2 = _normalize_pq_signed_psi_r(out_psin_r, weights, rho, n_axis_fix)
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
     _update_psin_coordinate(out_psin, out_psin_r, accumulator)
 
@@ -2441,79 +2712,6 @@ def resolve_source_scratch_kernel(operator_kernel: Callable) -> Callable | None:
     return None
 
 
-def materialize_profile_owned_psin_source(
-    out_psin: np.ndarray,
-    out_psin_r: np.ndarray,
-    out_psin_rr: np.ndarray,
-    out_source_psin_query: np.ndarray,
-    out_parameter_query: np.ndarray,
-    out_heat_input: np.ndarray,
-    out_current_input: np.ndarray,
-    psin_fields: np.ndarray,
-    heat_input: np.ndarray,
-    current_input: np.ndarray,
-    heat_spline_coeff: np.ndarray,
-    current_spline_coeff: np.ndarray,
-    parameterization_code: int,
-    rho: np.ndarray,
-    differentiator: np.ndarray,
-    accumulator: np.ndarray,
-    n_axis_fix: int,
-    barycentric_weights: np.ndarray | None = None,
-    use_barycentric: bool = False,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Materialize source arrays for routes where optimized psin owns the query."""
-    if psin_fields.ndim != 2 or psin_fields.shape[0] != 3:
-        raise ValueError(f"Expected psin_fields to have shape (3, Nr), got {psin_fields.shape}")
-    nr = psin_fields.shape[1]
-    expected = (nr,)
-    arrays = {
-        "out_psin": out_psin,
-        "out_psin_r": out_psin_r,
-        "out_psin_rr": out_psin_rr,
-        "out_source_psin_query": out_source_psin_query,
-        "out_parameter_query": out_parameter_query,
-        "out_heat_input": out_heat_input,
-        "out_current_input": out_current_input,
-    }
-    for name, arr in arrays.items():
-        if arr.ndim != 1 or arr.shape != expected:
-            raise ValueError(f"Expected {name} to have shape {expected}, got {arr.shape}")
-
-    heat = np.asarray(heat_input, dtype=np.float64)
-    current = np.asarray(current_input, dtype=np.float64)
-    if heat.ndim != 1 or current.ndim != 1 or heat.shape != current.shape:
-        raise ValueError(f"Expected matching 1D heat/current, got {heat.shape} and {current.shape}")
-    bary_weights = (
-        np.empty(0, dtype=np.float64)
-        if barycentric_weights is None
-        else np.asarray(barycentric_weights, dtype=np.float64)
-    )
-
-    _materialize_profile_owned_psin_source_impl(
-        np.asarray(out_psin, dtype=np.float64),
-        np.asarray(out_psin_r, dtype=np.float64),
-        np.asarray(out_psin_rr, dtype=np.float64),
-        np.asarray(out_source_psin_query, dtype=np.float64),
-        np.asarray(out_parameter_query, dtype=np.float64),
-        np.asarray(out_heat_input, dtype=np.float64),
-        np.asarray(out_current_input, dtype=np.float64),
-        np.asarray(psin_fields, dtype=np.float64),
-        heat,
-        current,
-        np.asarray(heat_spline_coeff, dtype=np.float64),
-        np.asarray(current_spline_coeff, dtype=np.float64),
-        int(parameterization_code),
-        np.asarray(rho, dtype=np.float64),
-        np.asarray(differentiator, dtype=np.float64),
-        np.asarray(accumulator, dtype=np.float64),
-        int(n_axis_fix),
-        bary_weights,
-        bool(use_barycentric),
-    )
-    return out_heat_input, out_current_input
-
-
 def update_fourier_family_fields(
     out_c_fields: np.ndarray,
     out_s_fields: np.ndarray,
@@ -2525,7 +2723,12 @@ def update_fourier_family_fields(
     c_active_order: int,
     s_active_order: int,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Combine c/s Fourier family base fields into active family fields."""
+    """Combine c/s Fourier family base fields into active family fields.
+
+    Orders whose source profile id is negative keep their boundary/base fields;
+    orders above the active truncation are zeroed so stale higher-order profiles
+    cannot leak from an earlier case into the current geometry update.
+    """
     if out_c_fields.ndim != 3 or out_s_fields.ndim != 3:
         raise ValueError(
             f"Expected 3D c/s outputs, got {out_c_fields.shape} and {out_s_fields.shape}"
@@ -2543,34 +2746,17 @@ def update_fourier_family_fields(
         )
 
     _update_fourier_family_fields_impl(
-        np.asarray(out_c_fields, dtype=np.float64),
-        np.asarray(out_s_fields, dtype=np.float64),
-        np.asarray(base_c_fields, dtype=np.float64),
-        np.asarray(base_s_fields, dtype=np.float64),
-        np.asarray(profile_fields, dtype=np.float64),
-        np.asarray(c_source_profile_ids, dtype=np.int64),
-        np.asarray(s_source_profile_ids, dtype=np.int64),
+        out_c_fields,
+        out_s_fields,
+        base_c_fields,
+        base_s_fields,
+        profile_fields,
+        c_source_profile_ids,
+        s_source_profile_ids,
         int(c_active_order),
         int(s_active_order),
     )
     return out_c_fields, out_s_fields
-
-
-def update_fixed_point_psin_query(
-    query: np.ndarray,
-    psin: np.ndarray,
-    max_residual: float,
-) -> bool:
-    """Update a fixed-point psin source query and report convergence."""
-    if query.ndim != 1 or psin.ndim != 1 or query.shape != psin.shape:
-        raise ValueError(f"query/psin shape mismatch: {query.shape} vs {psin.shape}")
-    return bool(
-        _update_fixed_point_psin_query_impl(
-            np.asarray(query, dtype=np.float64),
-            np.asarray(psin, dtype=np.float64),
-            float(max_residual),
-        )
-    )
 
 
 @njit(cache=True, fastmath=True, nogil=True)
@@ -2707,6 +2893,9 @@ def _materialize_profile_owned_psin_source_impl(
     barycentric_weights: np.ndarray,
     use_barycentric: bool,
 ) -> None:
+    # Copy only psin_r from optimized profile fields; psin and psin_rr are
+    # reconstructed so all source paths share the same axis regularization and
+    # integration conventions.
     for i in range(out_psin.shape[0]):
         out_psin_r[i] = psin_fields[1, i]
 
@@ -2720,6 +2909,8 @@ def _materialize_profile_owned_psin_source_impl(
         out_parameter_query[i] = psin_value
 
     if parameterization_code == SOURCE_PARAMETERIZATION_CODE_SQRT_PSIN:
+        # PP/psin/uniform accepts samples in sqrt(psin) to give more resolution
+        # near the magnetic axis while keeping the internal query in psin.
         for i in range(out_parameter_query.shape[0]):
             value = out_parameter_query[i]
             if value < 0.0:
@@ -2759,6 +2950,8 @@ def _update_fourier_family_fields_impl(
     c_active_order: int,
     s_active_order: int,
 ) -> None:
+    # The c0 mode is a regular radial profile and may be source-owned; s0 is not
+    # a physical sine mode, so it always remains the base zero/placeholder field.
     for order in range(out_c_fields.shape[0]):
         if order <= c_active_order:
             profile_id = c_source_profile_ids[order]
@@ -2819,6 +3012,9 @@ def _uniform_spline_interpolate_pair(
     last_interval = interval_count - 1
     for i in range(out0.shape[0]):
         q = query[i]
+        # Source queries are clipped rather than extrapolated.  Most source
+        # inputs represent tabulated physical profiles on [0, 1], and allowing
+        # cubic extrapolation at the edge can dominate the nonlinear solve.
         if q < 0.0:
             q = 0.0
         elif q > 1.0:
@@ -2863,6 +3059,8 @@ def _local_barycentric_interpolate_pair(
     denom_scale = source_sample_count - 1.0
     for i in range(out0.shape[0]):
         q = query[i]
+        # Local barycentric interpolation keeps the polynomial stencil bounded;
+        # exact grid hits are special-cased below to avoid the 1/(q-x_j) pole.
         if q < 0.0:
             q = 0.0
         elif q > 1.0:
@@ -2896,51 +3094,12 @@ def _local_barycentric_interpolate_pair(
 
 
 @njit(cache=True, fastmath=True, nogil=True)
-def _uniform_barycentric_weights(source_sample_count: int) -> np.ndarray:
+def uniform_barycentric_weights(source_sample_count: int) -> np.ndarray:
     weights = np.empty(source_sample_count, dtype=np.float64)
     weights[0] = 1.0
     for j in range(1, source_sample_count):
         weights[j] = -weights[j - 1] * (source_sample_count - j) / j
     return weights
-
-
-uniform_barycentric_weights = _uniform_barycentric_weights
-
-
-def _build_uniform_barycentric_matrix(
-    query: np.ndarray,
-    source_sample_count: int,
-    stencil_size: int,
-    weights: np.ndarray,
-) -> np.ndarray:
-    matrix = np.empty((query.shape[0], source_sample_count), dtype=np.float64)
-    if source_sample_count == 1:
-        matrix[:, 0] = 1.0
-        return matrix
-
-    for i, q in enumerate(query):
-        for j in range(source_sample_count):
-            matrix[i, j] = 0.0
-        start = _local_uniform_stencil_start(q, source_sample_count, stencil_size)
-        hit = False
-        for local_j in range(stencil_size):
-            j = start + local_j
-            diff = q - j / (source_sample_count - 1.0)
-            if abs(diff) <= 1e-14:
-                matrix[i, j] = 1.0
-                hit = True
-                break
-        if hit:
-            continue
-
-        denominator = 0.0
-        for local_j in range(stencil_size):
-            j = start + local_j
-            denominator += weights[local_j] / (q - j / (source_sample_count - 1.0))
-        for local_j in range(stencil_size):
-            j = start + local_j
-            matrix[i, j] = (weights[local_j] / (q - j / (source_sample_count - 1.0))) / denominator
-    return matrix
 
 
 @njit(cache=True, fastmath=True, nogil=True)
@@ -2958,26 +3117,3 @@ def _local_uniform_stencil_start(q: float, source_sample_count: int, stencil_siz
     if start > max_start:
         return max_start
     return start
-
-
-def _assert_default_source_routes_registered() -> None:
-    expected = SOURCE_ROUTE_KEY_SET
-    actual = frozenset(ROUTE_REGISTRY)
-
-    missing = expected.difference(actual)
-    extra = actual.difference(expected)
-
-    implementation_count = len(
-        {id(route_spec.implementation) for route_spec in ROUTE_REGISTRY.values()}
-    )
-
-    if missing or extra or implementation_count != 18:
-        raise RuntimeError(
-            "Source route registry mismatch; "
-            f"missing={sorted(missing)!r}, "
-            f"extra={sorted(extra)!r}, "
-            f"implementation_count={implementation_count!r}"
-        )
-
-
-_assert_default_source_routes_registered()

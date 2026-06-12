@@ -327,7 +327,7 @@ def _python_to_json(value: Any) -> Any:
         spec = type(value).serial_attributes()
         return {type(value).__name__: {k: _python_to_json(getattr(value, k)) for k in spec}}
 
-    if _is_dataclass_instance(value):
+    if is_dataclass(value) and not isinstance(value, type):
         spec = _dataclass_attribute_types(type(value))
         return {type(value).__name__: {k: _python_to_json(getattr(value, k)) for k in spec}}
 
@@ -364,6 +364,8 @@ def _json_to_python(data: Any, expected: type | tuple) -> Any:
             return result
         expected_name = getattr(expected, "__name__", None)
         if expected_name == next(iter(data)):
+            # Support both nested typed payloads and already-unwrapped attribute
+            # dictionaries; older files may contain either representation.
             data = data[expected_name]
 
     origin = get_origin(expected)
@@ -441,6 +443,8 @@ def _try_instantiate_from_tagged_dict(data: dict) -> Any | None:
         return None
 
     attrs = data[type_name]
+    # The type registry is intentionally name-based so JSON payloads do not need
+    # to persist import paths that can change across package refactors.
     if hasattr(cls, "serial_attributes"):
         return _instantiate_serial(cls, attrs)
 
@@ -470,6 +474,8 @@ def _construct_object(cls: type, field_values: dict[str, Any]) -> Any:
     except TypeError:
         pass
 
+    # Some legacy serial classes do not accept every serial attribute in
+    # __init__; construct with the supported subset and restore the rest.
     try:
         sig = inspect.signature(cls.__init__)
     except (ValueError, TypeError):
@@ -501,10 +507,6 @@ def _construct_object(cls: type, field_values: dict[str, Any]) -> Any:
 def _dataclass_attribute_types(cls: type) -> dict[str, type]:
     hints = get_type_hints(cls)
     return {field.name: hints.get(field.name, Any) for field in dataclass_fields(cls)}
-
-
-def _is_dataclass_instance(value: Any) -> bool:
-    return is_dataclass(value) and not isinstance(value, type)
 
 
 def _set_attribute(instance: Any, key: str, value: Any) -> None:

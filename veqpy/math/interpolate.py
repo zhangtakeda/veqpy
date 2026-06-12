@@ -15,6 +15,9 @@ Public API:
 
 Notes:
 - Matrices use source nodes as columns and evaluation nodes as rows.
+- This module only remaps normalized one-dimensional source parameters.  Route
+  meaning and constraint selection live in operator.source_plan / source kernels.
+- ``SOURCE_INTERP_DEFAULT`` is the single package default for source remapping.
 """
 
 from __future__ import annotations
@@ -28,14 +31,16 @@ from veqpy.base.registry import Registry
 
 DEFAULT_LOCAL_BARYCENTRIC_STENCIL = 8
 SOURCE_INTERP_KIND_ENV = "VEQPY_SOURCE_INTERP_KIND"
-SOURCE_INTERP_DEFAULT = "cubic"
 SOURCE_INTERP_BARYCENTRIC = "barycentric"
 SOURCE_INTERP_NOT_A_KNOT = "not-a-knot"
 SOURCE_INTERP_LINEAR = "linear"
 SOURCE_INTERP_QUADRATIC = "quadratic"
 SOURCE_INTERP_CUBIC = "cubic"
+SOURCE_INTERP_DEFAULT = SOURCE_INTERP_BARYCENTRIC
 
 _SOURCE_INTERP_ALIASES = {
+    # Keep public spellings broad because this option is often set through env
+    # variables or examples; normalize to the registry keys below.
     "barycentric": SOURCE_INTERP_BARYCENTRIC,
     "local-barycentric": SOURCE_INTERP_BARYCENTRIC,
     "8": SOURCE_INTERP_BARYCENTRIC,
@@ -86,6 +91,8 @@ def barycentric_log_weights(nodes: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     np.fill_diagonal(abs_diff, 1.0)
     np.fill_diagonal(sign_diff, 1.0)
 
+    # Products of pairwise distances overflow quickly for spectral grids.  Keep
+    # signed log-weights and exponentiate only local ratios at evaluation time.
     log_abs_prod = np.sum(np.log(abs_diff), axis=1)
     signs = np.prod(sign_diff, axis=1)
     return signs, -log_abs_prod
@@ -109,6 +116,8 @@ def interpolation_matrix(source_nodes: np.ndarray, evaluation_nodes: np.ndarray)
 
         log_terms = log_weights - np.log(np.abs(diff))
         scale = np.max(log_terms)
+        # Rescale the barycentric numerator/denominator by the largest log term
+        # so exact high-order interpolation remains finite.
         terms = signs * np.sign(diff) * np.exp(log_terms - scale)
         matrix[i] = terms / np.sum(terms)
 
@@ -154,6 +163,8 @@ def _build_uniform_local_polynomial_coefficients(values: np.ndarray, degree: int
         return coeff
 
     local_degree = min(max(int(degree), 1), 3, n - 1)
+    # Local schemes degrade to the highest supported degree for the available
+    # sample count instead of failing small GEQDSK/profile inputs.
     if local_degree == 1:
         for interval in range(interval_count):
             y0 = samples[interval]
@@ -182,6 +193,8 @@ def _build_uniform_local_polynomial_coefficients(values: np.ndarray, degree: int
 
     for interval in range(interval_count):
         if interval == 0:
+            # Boundary intervals use one-sided finite-difference polynomials;
+            # interior intervals use centered local stencils below.
             y0 = samples[0]
             y1 = samples[1]
             y2 = samples[2]
@@ -219,8 +232,12 @@ def _build_uniform_not_a_knot_spline_coefficients(values: np.ndarray) -> np.ndar
     if n < 1:
         raise ValueError("source samples must be non-empty")
     if n < 4:
+        # Not-a-knot needs enough intervals to express endpoint constraints; for
+        # small inputs it is equivalent to the supported local polynomial fit.
         return _build_uniform_local_polynomial_coefficients(samples, min(n - 1, 3))
 
+    # Solve for second derivatives with not-a-knot endpoint constraints; the
+    # coefficients are stored in normalized interval coordinates t in [0, 1].
     h = 1.0 / (n - 1.0)
     h2 = h * h
     matrix = np.zeros((n, n), dtype=np.float64)
@@ -260,6 +277,8 @@ def _evaluate_uniform_coefficients(coeff: np.ndarray, query: np.ndarray) -> np.n
     interval_count = coeff.shape[0]
     if interval_count == 1:
         for i, q_raw in enumerate(evaluation):
+            # Clamp source queries to the tabulated physical interval.  Source
+            # remapping should not extrapolate beyond [0, 1].
             q = min(max(float(q_raw), 0.0), 1.0)
             out[i] = ((coeff[0, 3] * q + coeff[0, 2]) * q + coeff[0, 1]) * q + coeff[0, 0]
         return out
@@ -271,6 +290,7 @@ def _evaluate_uniform_coefficients(coeff: np.ndarray, query: np.ndarray) -> np.n
         position = q * denom_scale
         interval = int(position)
         if interval > last_interval:
+            # q==1 lands on the right edge of the last interval, not a new one.
             interval = last_interval
             t = 1.0
         else:
@@ -307,6 +327,8 @@ def _local_uniform_stencil_start(q: float, source_sample_count: int, stencil_siz
     max_start = source_sample_count - stencil_size
     if start > max_start:
         return max_start
+    # Prefer a centered local stencil, then clamp near endpoints so the stencil
+    # size stays fixed and barycentric weights can be reused.
     return start
 
 
@@ -379,6 +401,8 @@ def build_uniform_source_interpolation_matrix(
     matrix = np.empty((evaluation.shape[0], count), dtype=np.float64)
     basis = np.zeros(count, dtype=np.float64)
     for j in range(count):
+        # Schemes without a direct matrix builder get one by applying the
+        # coefficient evaluator to each source basis vector.
         basis[j] = 1.0
         matrix[:, j] = _evaluate_uniform_coefficients(
             uniform_source_interpolation_generator[normalized](basis),

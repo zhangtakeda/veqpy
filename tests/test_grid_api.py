@@ -5,6 +5,7 @@ import pytest
 from numpy.testing import assert_allclose
 
 from veqpy.engine import RHO_AXIS, THETA_AXIS
+from veqpy.math import DEFAULT_CALCULUS, DEFAULT_QUADRATURE
 from veqpy.model import Grid
 
 
@@ -22,6 +23,13 @@ def test_grid_shapes_quadrature_and_read_only_arrays() -> None:
     assert not grid.rho.flags.writeable
     with pytest.raises(ValueError, match="read-only"):
         grid.rho[0] = 0.5
+
+
+def test_grid_defaults_are_shared_with_math_layer() -> None:
+    grid = Grid(Nr=6, Nt=8)
+
+    assert grid.quadrature_scheme == DEFAULT_QUADRATURE
+    assert grid.calculus_scheme == DEFAULT_CALCULUS
 
 
 def test_grid_integrates_radial_poloidal_and_full_fields() -> None:

@@ -28,6 +28,9 @@ Notes:
 - This module defines packed layout rules.
 - It also handles state codecs for the same packed layout.
 - Does not own numerical kernels, residual assembly, or solver iteration control.
+- Treat this file as the single source of truth for both packed x ordering and
+  residual block ordering.  Engine kernels consume the integer metadata built
+  here and should not infer profile meaning from names.
 """
 
 from __future__ import annotations
@@ -49,6 +52,9 @@ RESIDUAL_BLOCK_CODE_BY_NAME = {
     "F": 7,
 }
 
+# Family order determines both model-facing coefficient dictionaries and the
+# row order of layout metadata arrays.  Reordering it is a file-format/runtime
+# compatibility change, not a local implementation detail.
 PACKED_PROFILE_FAMILY_ORDER = ("h", "v", "k", "c0", "c", "s", "psin", "F")
 PREFIX_PROFILE_FAMILIES = ("psin", "F")
 SHAPE_PROFILE_FAMILIES = ("h", "v", "k", "c0", "c", "s")
@@ -56,7 +62,9 @@ ALL_PROFILE_FAMILIES = SHAPE_PROFILE_FAMILIES + PREFIX_PROFILE_FAMILIES
 
 PROFILE_STATIC_KWARGS: dict[str, dict[str, int]] = {
     "psin": {"power": 2},
-    "F": {"envelope_power": 2},
+    # PJ2 recovers FF_psi from F * dF/drho.  Keep the edge F value fixed while
+    # leaving the edge slope free; envelope_power=2 would force dF/drho=0 there.
+    "F": {"envelope_power": 1},
 }
 PROFILE_OFFSET_SPECS: dict[str, float | str] = {
     "h": 0.0,
@@ -154,6 +162,8 @@ def build_profile_names(
 
 
 def _decode_residual_block_code(name: str) -> tuple[int, int]:
+    # c/s residual blocks share kernels across Fourier orders.  The returned
+    # order is a kernel argument; the code selects the projection formula.
     if name.startswith("c") and name[1:].isdigit():
         order = int(name[1:])
         if order == 0:
@@ -206,10 +216,6 @@ PACKED_LAYOUT_PROFILE_FIRST = False
 INTERLEAVE_SHAPE_COEFFS_BY_ORDER = not PACKED_LAYOUT_PROFILE_FIRST
 
 
-def _validated_profile_family_order() -> tuple[str, ...]:
-    return validate_profile_family_order(PACKED_PROFILE_FAMILY_ORDER)
-
-
 def build_profile_index(profile_names: tuple[str, ...]) -> dict[str, int]:
     """Build a name-to-row lookup for packed profile metadata arrays."""
     return {name: i for i, name in enumerate(profile_names)}
@@ -239,15 +245,22 @@ def build_profile_layout(
             continue
         profile_L[profile_index[name]] = coeff_array_from_list(name, coeff).size - 1
 
+    # profile_L == -1 marks a passive profile.  Active profiles get a row in
+    # coeff_index, with -1 cells left wherever that profile has no coefficient
+    # at a higher degree.
     max_L = int(np.max(profile_L))
     if max_L < 0:
         raise ValueError("At least one active profile is required")
 
     coeff_index = -np.ones((profile_count, max_L + 1), dtype=np.int64)
     order_offsets = np.full(max_L + 2, -1, dtype=np.int64)
+    # coeff_index[p, k] is the only supported map from (profile, degree) to x.
+    # Its -1 padding must never be dereferenced; active_lengths guards hot loops.
 
     x_pos = 0
     if not PACKED_LAYOUT_PROFILE_FIRST:
+        # Degree-first ordering keeps same-degree coefficients adjacent across
+        # profile families, which improves the current fused residual workload.
         for k in range(max_L + 1):
             order_offsets[k] = x_pos
             for name in profile_names:
@@ -256,6 +269,8 @@ def build_profile_layout(
                     coeff_index[p, k] = x_pos
                     x_pos += 1
     else:
+        # Profile-first remains supported for codecs and benchmarks, even though
+        # it is not the default runtime ordering.
         for name in profile_names:
             p = profile_index[name]
             L = int(profile_L[p])
@@ -270,6 +285,9 @@ def build_profile_layout(
             if order_offsets[k] < 0:
                 order_offsets[k] = x_pos
     order_offsets[max_L + 1] = x_pos
+    # order_offsets[k] gives the first packed position for degree k in the
+    # degree-first layout.  For profile-first it is retained for compatibility
+    # checks and monotone layout fingerprints.
 
     return profile_L, coeff_index, order_offsets
 
@@ -326,6 +344,8 @@ def encode_packed_state(
         coeff = profile_coeffs.get(name)
 
         if L < 0:
+            # Passive profiles are reconstructed from offsets/static coeffs; they
+            # intentionally occupy no packed x positions.
             continue
         if coeff is None:
             raise ValueError(f"{name} is active in layout but coeff is None")
@@ -337,6 +357,8 @@ def encode_packed_state(
             )
 
         for k in range(L + 1):
+            # Always encode through coeff_index so profile-first and degree-first
+            # layouts share the same codec.
             x[coeff_index[p, k]] = coeff_arr[k]
 
     return x
@@ -356,6 +378,8 @@ def decode_packed_blocks(
     for p, _ in enumerate(profile_names):
         L = int(profile_L[p])
         if L < 0:
+            # Preserve passive profile markers in the decoded tuple; callers use
+            # None to distinguish absent packed state from zero coefficients.
             blocks.append(None)
         else:
             block = np.empty(L + 1, dtype=np.float64)

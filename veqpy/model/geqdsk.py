@@ -93,6 +93,8 @@ class Geqdsk(Serial):
         }
 
     def __post_init__(self, path: str | os.PathLike[str] | None) -> None:
+        # Constructing with path is a load operation: defaults are normalized
+        # first, then overwritten by the text payload.
         self.header = str(self.header)
         self.NR = int(self.NR)
         self.NZ = int(self.NZ)
@@ -215,6 +217,8 @@ class Geqdsk(Serial):
             raise ValueError(f"Error reading geometry from line: {line}")
 
         r_box_len, z_box_len, self.R0, self.Rmin, self.Z0 = map(float, match.groups())
+        # GEQDSK stores the box as length plus lower/center coordinates, while
+        # this object keeps explicit min/max bounds for easier export/resampling.
         self.Rmax = self.Rmin + r_box_len
         self.Zmin = self.Z0 - 0.5 * z_box_len
         self.Zmax = self.Z0 + 0.5 * z_box_len
@@ -230,6 +234,8 @@ class Geqdsk(Serial):
 
     def _read_profiles_and_boundary(self, file) -> None:
         file.readline()
+        # Older g-files may omit whitespace between a positive exponent and the
+        # next negative value; _sanitize_line inserts that separator before split.
         payload = _sanitize_line(file.read().replace("\n", " "))
         fields = re.split(r"\s+", payload.strip())
         data = np.array(
@@ -245,6 +251,8 @@ class Geqdsk(Serial):
             end = index + count
             if data.size < end:
                 raise ValueError(f"GEQDSK payload ended before {label}.")
+            # Return a view while parsing, then copy at field assignment so the
+            # payload buffer can be discarded safely.
             out = data[index:end]
             index = end
             return out
@@ -304,6 +312,8 @@ def _coerce_point_array(value, *, name: str) -> np.ndarray:
 
 
 def _sanitize_line(line: str) -> str:
+    # Convert Fortran-style field concatenation like "1.0E+00-2.0E+00" into two
+    # Python-float tokens without disturbing exponent signs.
     return re.sub(r"([^Ee])-", r"\1 -", line)
 
 
@@ -311,6 +321,8 @@ def _safe_float_conversion(value: str) -> float:
     try:
         return float(value)
     except ValueError:
+        # Preserve payload length when a malformed numeric field is present; the
+        # shape checks later can still identify which section was affected.
         return np.nan
 
 

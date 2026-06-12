@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import inspect
+
 import numpy as np
 import pytest
 from helpers import tiny_operator
 
 from veqpy.solver import Solver, SolverConfig, SolverResult
+from veqpy.solver.residual_scale import DEFAULT_RESIDUAL_NORMALIZATION
 
 
 def test_solver_config_normalizes_aliases_and_validates_methods() -> None:
@@ -26,6 +29,24 @@ def test_solver_config_normalizes_aliases_and_validates_methods() -> None:
         SolverConfig(collocation_weight=1.5)
     with pytest.raises(ValueError, match="max_residual"):
         SolverConfig(max_residual=0.0)
+
+
+def test_solver_warm_start_interface_uses_initial_policy_only() -> None:
+    assert "enable_warmstart" not in SolverConfig.__dataclass_fields__
+    assert "enable_warmstart" not in inspect.signature(Solver.solve).parameters
+
+
+def test_solver_default_normalization_is_single_source() -> None:
+    assert DEFAULT_RESIDUAL_NORMALIZATION == "fast"
+    assert SolverConfig().residual_normalization == DEFAULT_RESIDUAL_NORMALIZATION
+    assert SolverConfig(residual_normalization=None).residual_normalization == (
+        DEFAULT_RESIDUAL_NORMALIZATION
+    )
+
+
+def test_solver_homothetic_lambda_interface_is_removed() -> None:
+    assert "initial_homothetic_lambda" not in SolverConfig.__dataclass_fields__
+    assert "initial_homothetic_lambda" not in inspect.signature(Solver.solve).parameters
 
 
 def test_solver_result_copies_input_arrays_and_validates_rank() -> None:
@@ -76,3 +97,42 @@ def test_solver_facade_initial_state_and_history_lifecycle() -> None:
     solver.history.append(object())
     solver.clear()
     assert solver.history == []
+
+
+def test_solver_attempt_label_reflects_initial_policy() -> None:
+    solver = Solver(operator=tiny_operator(), config=SolverConfig(enable_history=False))
+    nonzero_guess = np.ones(solver.operator.x_size, dtype=np.float64)
+    zero_guess = np.zeros(solver.operator.x_size, dtype=np.float64)
+
+    assert (
+        solver._display_start_kind(
+            nonzero_guess,
+            solve_config=SolverConfig(initial_policy="homothetic"),
+            x0_was_provided=False,
+        )
+        == "homothetic-start"
+    )
+    assert (
+        solver._display_start_kind(
+            zero_guess,
+            solve_config=SolverConfig(initial_policy="zeros"),
+            x0_was_provided=False,
+        )
+        == "zero-start"
+    )
+    assert (
+        solver._display_start_kind(
+            nonzero_guess,
+            solve_config=SolverConfig(initial_policy=None),
+            x0_was_provided=False,
+        )
+        == "encoded-start"
+    )
+    assert (
+        solver._display_start_kind(
+            nonzero_guess,
+            solve_config=SolverConfig(initial_policy=None),
+            x0_was_provided=True,
+        )
+        == "warm-start"
+    )

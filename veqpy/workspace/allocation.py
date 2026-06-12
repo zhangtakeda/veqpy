@@ -54,6 +54,8 @@ def allocate_runtime_state(
     nt = grid_workspace.Nt
     m_max = grid_workspace.M_max
 
+    # Build profile objects before workspaces so every stage can share the same
+    # stable profile id/order derived by the operator plan.
     profiles_by_name = {name: make_profile(name) for name in profile_names}
 
     profile_workspace = ProfileWorkspace(
@@ -78,6 +80,7 @@ def allocate_runtime_state(
         nt=nt,
         x_size=x_size,
         radial_weights=np.asarray(grid_workspace.weights, dtype=np.float64),
+        active_residual_block_count=int(active_profile_ids.size),
     )
     return (
         profiles_by_name,

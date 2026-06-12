@@ -46,6 +46,9 @@ def refresh_source_runtime(
         source_plan.interpolation_kind if not source_plan.is_grid_nodes else "",
     )
     if source_workspace.cache_key != case_key:
+        # Cache identity is tied to interpolation topology, not the numeric
+        # source samples.  New heat/current values reuse the same matrices and
+        # only rebuild spline coefficients below.
         if source_plan.is_grid_nodes:
             source_workspace.barycentric_weights = np.empty(0, dtype=np.float64)
             source_workspace.fixed_remap_matrix = np.empty((0, 0), dtype=np.float64)
@@ -64,9 +67,12 @@ def refresh_source_runtime(
             )
         source_workspace.cache_key = case_key
     if source_plan.is_grid_nodes:
+        # Grid-node inputs already live on the operator rho grid; spline slots are
+        # deliberately empty so later code cannot accidentally interpolate them.
         source_workspace.heat_spline_coeff = np.empty((0, 4), dtype=np.float64)
         source_workspace.current_spline_coeff = np.empty((0, 4), dtype=np.float64)
     else:
+        # Coefficients depend on source values even when the remap cache does not.
         source_workspace.heat_spline_coeff = build_uniform_source_interpolation_coefficients(
             source_plan.heat_input,
             kind=source_plan.interpolation_kind,
@@ -80,6 +86,8 @@ def refresh_source_runtime(
             np.copyto(source_workspace.materialized_heat_input, source_plan.heat_input)
             np.copyto(source_workspace.materialized_current_input, source_plan.current_input)
         else:
+            # Rho-coordinate uniform samples can be materialized during refresh
+            # because the query is fixed by grid_rho.
             resolve_source_inputs(
                 source_workspace.materialized_heat_input,
                 source_workspace.materialized_current_input,
@@ -95,4 +103,6 @@ def refresh_source_runtime(
                 source_plan.uses_barycentric_interpolation,
             )
     elif tuple(source_execution.route_key) == ("PJ2", "psin", "uniform"):
+        # PJ2/psin/uniform updates psin by fixed point during the source stage;
+        # the negative sentinel forces a fresh query seed on the next run.
         source_workspace.psin_query.fill(-1.0)

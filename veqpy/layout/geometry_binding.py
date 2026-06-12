@@ -56,6 +56,8 @@ def build_geometry_stage_runner(
     Z0 = float(Z0)
 
     def runner() -> None:
+        # Refresh Fourier family fields first: geometry consumes compact c/s
+        # arrays, while the owning profile fields may have just changed in Stage A.
         update_fourier_family_fields(
             c_family_fields,
             s_family_fields,
@@ -67,6 +69,8 @@ def build_geometry_stage_runner(
             c_effective_order,
             s_effective_order,
         )
+        # update_geometry_hot overwrites all surface/radial rows, so callers can
+        # reuse the same workspace without clearing it between residual calls.
         update_geometry_hot(
             surface_fields,
             radial_fields,

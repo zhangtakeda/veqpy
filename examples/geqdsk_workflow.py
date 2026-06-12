@@ -1,11 +1,12 @@
 """Standalone single-GEQDSK workflow demo.
 
 This no-argument demo keeps the public workflow small:
-1. choose one GEQDSK file with ``TARGET_GEQDSK``,
+1. choose one GEQDSK file with ``VEQPY_GEQDSK`` or ``data/EFIT.geqdsk``,
 2. fit the fixed boundary,
-3. solve the PF(psin) VEQPy reconstruction with the manuscript benchmark
-   settings,
-4. write a one-case diagnostic figure and serialized equilibrium.
+3. solve the PF(psin) and PQ(psin) VEQPy reconstructions with the manuscript
+   benchmark settings,
+4. write a two-column route diagnostic figure and serialized converged
+   equilibria.
 
 The script is intentionally self-contained.  It does not import anything from
 ``scripts/`` because those manuscript helpers are not part of the public test
@@ -32,9 +33,7 @@ from veqpy.model.boundary import _fit_boundary_params
 from veqpy.operator import Operator, OperatorCase
 from veqpy.solver import Solver, SolverConfig
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-
-TARGET_GEQDSK = REPO_ROOT / "data" / "EFIT.geqdsk"
+DEFAULT_GEQDSK = Path("data") / "SOLOVEV.geqdsk"
 
 MU0 = 4.0e-7 * np.pi
 
@@ -51,11 +50,14 @@ SAVE_TRANSPARENT = False
 FIXED_DECIMALS = 2
 SCIENTIFIC_DECIMALS = 2
 SINGLE_COLUMN_WIDTH = 4.75
+DOUBLE_COLUMN_WIDTH = 9.5
 
-FIGURE_SIZE = (SINGLE_COLUMN_WIDTH, 6.5)
+SINGLE_FIGURE_SIZE = (SINGLE_COLUMN_WIDTH, 6.5)
+FIGURE_SIZE = (DOUBLE_COLUMN_WIDTH, 6.5)
 PANEL_GRID_NROWS = 5
 PANEL_GRID_HEIGHT_RATIOS = (3.5, 0.60, 1.25, 0.20, 1.25)
 PANEL_GRID_HSPACE = 0.0
+PANEL_GRID_WSPACE = 0.18
 
 TOP_SPINE_VISIBLE = True
 RIGHT_SPINE_VISIBLE = True
@@ -114,12 +116,12 @@ BOUNDARY_MAXTOL = 1.0
 SOLVER_METHOD = "hybr"
 SOLVER_MAXFEV = 2000
 SOLVER_INITIAL_POLICY = "homothetic"
-SOLVER_INITIAL_HOMOTHETIC_LAMBDA = 1.0
 SOLVER_WARMUP_RUNS = 1
 SOLVER_TIMING_REPEATS = 5
 
 BOUNDARY_FIT_M = 10
 BOUNDARY_FIT_N = 10
+SOURCE_ROUTES = ("PF", "PQ")
 
 D_SHAPE_PROFILE_COEFFS = {
     "psin": [0.0] * 10,
@@ -193,6 +195,7 @@ class SolveTimingStats:
 
 @dataclass(frozen=True)
 class CaseResult:
+    route: str
     title: str
     reference_label: str
     case_spec: CaseSpec
@@ -208,7 +211,17 @@ class CaseResult:
     parameter_count: int
     boundary_fit_rms: float
     solver_residual: float
+    solver_success: bool
+    solver_message: str
     solve_timing: SolveTimingStats
+
+
+@dataclass(frozen=True)
+class RouteFailure:
+    route: str
+    case_spec: CaseSpec
+    error_type: str
+    message: str
 
 
 def scaled_font_size(size: float) -> float:
@@ -228,9 +241,21 @@ def apply_plot_style() -> None:
 
 def ensure_output_dir() -> Path:
     env_out = os.environ.get("VEQPY_OUTPUT_DIR")
-    outdir = Path(env_out) if env_out else Path(__file__).resolve().parent / "geqdsk_workflow"
+    outdir = Path(env_out) if env_out else Path.cwd() / "outputs" / "geqdsk_workflow"
     outdir.mkdir(parents=True, exist_ok=True)
     return outdir
+
+
+def target_geqdsk_path() -> Path:
+    path = Path(os.environ.get("VEQPY_GEQDSK", DEFAULT_GEQDSK))
+    path = path.expanduser()
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"GEQDSK file not found: {path}. Set VEQPY_GEQDSK to a GEQDSK file path."
+        )
+    return path
 
 
 def profile_parameter_count(profile_coeffs: dict[str, list[float]]) -> int:
@@ -312,16 +337,28 @@ def build_boundary(
 
 
 def build_solver_case(
-    boundary: Boundary, geqdsk: Geqdsk, *, profile_coeffs: dict[str, list[float]]
+    boundary: Boundary,
+    geqdsk: Geqdsk,
+    *,
+    route: str,
+    profile_coeffs: dict[str, list[float]],
 ) -> OperatorCase:
+    route = str(route).upper()
+    if route == "PF":
+        current_input = np.asarray(geqdsk.FF_psi, dtype=np.float64)
+    elif route == "PQ":
+        current_input = np.asarray(geqdsk.q, dtype=np.float64)
+    else:
+        raise ValueError(f"Unsupported source route {route!r}; expected one of {SOURCE_ROUTES}")
+
     return OperatorCase(
-        route="PF",
+        route=route,
         coordinate="psin",
         nodes="uniform",
         profile_coeffs={name: list(values) for name, values in profile_coeffs.items()},
         boundary=boundary,
         heat_input=np.asarray(geqdsk.P_psi, dtype=np.float64),
-        current_input=np.asarray(geqdsk.FF_psi, dtype=np.float64),
+        current_input=current_input,
         Ip=float(geqdsk.Ip),
     )
 
@@ -333,8 +370,6 @@ def build_solver(case: OperatorCase, solve_grid: Grid) -> Solver:
             method=SOLVER_METHOD,
             max_evaluations=SOLVER_MAXFEV,
             initial_policy=SOLVER_INITIAL_POLICY,
-            initial_homothetic_lambda=SOLVER_INITIAL_HOMOTHETIC_LAMBDA,
-            enable_warmstart=False,
             enable_fallback=False,
             enable_verbose=False,
             enable_history=False,
@@ -346,9 +381,7 @@ def solve_existing_solver_once(solver: Solver) -> tuple[Solver, float]:
     solver.solve(
         enable_verbose=False,
         enable_history=False,
-        enable_warmstart=False,
         initial_policy=SOLVER_INITIAL_POLICY,
-        initial_homothetic_lambda=SOLVER_INITIAL_HOMOTHETIC_LAMBDA,
         enable_fallback=False,
     )
     if solver.result is None:
@@ -806,6 +839,8 @@ def build_case_summary_latex_table(case_result: CaseResult) -> str:
     indent = "              "
     header = [
         "Case",
+        "Route",
+        "Status",
         "Params",
         "Time [ms]",
         r"$E_{\mathrm{gqdsk}}/a$",
@@ -817,6 +852,8 @@ def build_case_summary_latex_table(case_result: CaseResult) -> str:
     label = CASE_DISPLAY_NAMES.get(case_result.case_spec.case_key, case_result.reference_label)
     row = [
         label,
+        f"{case_result.route}(psin)",
+        "ok" if case_result.solver_success else "not converged",
         f"${int(case_result.parameter_count)}$",
         f"${float(case_result.solve_timing.median_ms):.{FIXED_DECIMALS}f}$",
         format_case_error_metric(case_result),
@@ -845,14 +882,20 @@ def build_case_summary_latex_table(case_result: CaseResult) -> str:
     )
 
 
-def build_case_result(case_spec: CaseSpec) -> CaseResult:
+def build_case_result(case_spec: CaseSpec, *, route: str) -> CaseResult:
+    route = str(route).upper()
     geqdsk = read_geqdsk(case_spec.gfile_path)
     boundary, fit = build_boundary(
         geqdsk,
         fit_m=case_spec.boundary_fit_m,
         fit_n=case_spec.boundary_fit_n,
     )
-    case = build_solver_case(boundary, geqdsk, profile_coeffs=case_spec.profile_coeffs)
+    case = build_solver_case(
+        boundary,
+        geqdsk,
+        route=route,
+        profile_coeffs=case_spec.profile_coeffs,
+    )
     solver, equilibrium, plot_equilibrium, timing = solve_equilibrium(
         case,
         solve_nr=case_spec.solve_nr,
@@ -874,9 +917,12 @@ def build_case_result(case_spec: CaseSpec) -> CaseResult:
 
     result = solver.result
     if result is not None:
-        print(case_spec.title)
+        print(f"{case_spec.title} {route}(psin)")
         print(f"boundary fit rms: {float(fit['rms']):.{SCIENTIFIC_DECIMALS}e}")
         print(f"solver residual: {float(result.residual_norm_final):.{SCIENTIFIC_DECIMALS}e}")
+        print(f"solver success: {bool(result.success)}")
+        if not bool(result.success):
+            print(f"solver message: {result.message}")
         print(
             "solve timing: "
             f"median={timing.median_ms:.{FIXED_DECIMALS}f} ms, "
@@ -892,7 +938,8 @@ def build_case_result(case_spec: CaseSpec) -> CaseResult:
             print(f"boundary rms distance: {surface_metrics[1.0]['rms']:.{SCIENTIFIC_DECIMALS}e}")
 
     return CaseResult(
-        title=case_spec.title,
+        route=route,
+        title=f"{case_spec.title} {route}(psin)",
         reference_label=case_spec.reference_label,
         case_spec=case_spec,
         geqdsk=geqdsk,
@@ -907,23 +954,55 @@ def build_case_result(case_spec: CaseSpec) -> CaseResult:
         parameter_count=profile_parameter_count(case_spec.profile_coeffs),
         boundary_fit_rms=float(fit["rms"]),
         solver_residual=float("nan") if result is None else float(result.residual_norm_final),
+        solver_success=False if result is None else bool(result.success),
+        solver_message="solver produced no result" if result is None else str(result.message),
         solve_timing=timing,
     )
 
 
-def build_single_case_figure(case_result: CaseResult) -> plt.Figure:
-    apply_plot_style()
-    fig = plt.figure(figsize=FIGURE_SIZE)
-    panel_grid = fig.add_gridspec(
-        PANEL_GRID_NROWS,
-        1,
-        height_ratios=PANEL_GRID_HEIGHT_RATIOS,
-        hspace=PANEL_GRID_HSPACE,
-    )
-    ax_surfaces = fig.add_subplot(panel_grid[0, 0])
-    ax_fp = fig.add_subplot(panel_grid[2, 0])
-    ax_psin = fig.add_subplot(panel_grid[4, 0], sharex=ax_fp)
+def route_panel_title(case_result: CaseResult) -> str:
+    label = CASE_DISPLAY_NAMES.get(case_result.case_spec.case_key, case_result.reference_label)
+    status = "" if case_result.solver_success else "\nnot converged"
+    return f"{label} {case_result.route}(psin){status}"
 
+
+def plot_source_profiles(ax: plt.Axes, case_result: CaseResult) -> None:
+    psin_axis = np.linspace(0.0, 1.0, case_result.geqdsk.NR, dtype=np.float64)
+    if case_result.route == "PQ":
+        ax.plot(
+            psin_axis,
+            np.asarray(case_result.geqdsk.q, dtype=np.float64),
+            color=SOURCE_FF_COLOR,
+            linewidth=PROFILE_LINE_WIDTH,
+            label=r"$q$",
+        )
+    else:
+        ax.plot(
+            psin_axis,
+            np.asarray(case_result.geqdsk.FF_psi, dtype=np.float64),
+            color=SOURCE_FF_COLOR,
+            linewidth=PROFILE_LINE_WIDTH,
+            label=r"$FF_\psi$",
+        )
+    ax.plot(
+        psin_axis,
+        MU0 * np.asarray(case_result.geqdsk.P_psi, dtype=np.float64),
+        color=SOURCE_P_COLOR,
+        linestyle="--",
+        linewidth=PROFILE_LINE_WIDTH,
+        label=r"$\mu_0 P_\psi$",
+    )
+
+
+def plot_case_result_column(
+    case_result: CaseResult,
+    *,
+    ax_surfaces: plt.Axes,
+    ax_source: plt.Axes,
+    ax_errors: plt.Axes,
+    rz_limits: tuple[tuple[float, float], tuple[float, float]] | None = None,
+    show_ylabels: bool = True,
+) -> None:
     for idx, level in enumerate(sorted(case_result.reference_surfaces)):
         linewidth = SURFACE_LINE_WIDTH if level < 1.0 - 1.0e-12 else BOUNDARY_SURFACE_LINE_WIDTH
         reference_curve = close_curve(case_result.reference_surfaces[level])
@@ -946,11 +1025,19 @@ def build_single_case_figure(case_result: CaseResult) -> plt.Figure:
                 label=("VEQ" if idx == 0 else None),
             )
 
-    style_axis(ax_surfaces, title=case_result.title, xlabel="R [m]", ylabel="Z [m]")
-    surface_curves = list(case_result.reference_surfaces.values()) + list(
-        case_result.veqpy_surfaces.values()
+    style_axis(
+        ax_surfaces,
+        title=route_panel_title(case_result),
+        xlabel="R [m]",
+        ylabel="Z [m]" if show_ylabels else "",
     )
-    limits = compute_rz_limits(surface_curves)
+    if rz_limits is None:
+        surface_curves = list(case_result.reference_surfaces.values()) + list(
+            case_result.veqpy_surfaces.values()
+        )
+        limits = compute_rz_limits(surface_curves)
+    else:
+        limits = rz_limits
     ax_surfaces.set_xlim(*limits[0])
     ax_surfaces.set_ylim(*limits[1])
     ax_surfaces.yaxis.set_major_locator(MultipleLocator(SURFACE_Y_TICK_INTERVAL))
@@ -981,29 +1068,14 @@ def build_single_case_figure(case_result: CaseResult) -> plt.Figure:
         labelspacing=LEGEND_LABEL_SPACING,
     )
 
-    psin_axis = np.linspace(0.0, 1.0, case_result.geqdsk.NR, dtype=np.float64)
-    ax_fp.plot(
-        psin_axis,
-        np.asarray(case_result.geqdsk.FF_psi, dtype=np.float64),
-        color=SOURCE_FF_COLOR,
-        linewidth=PROFILE_LINE_WIDTH,
-        label=r"$FF_\psi$",
-    )
-    ax_fp.plot(
-        psin_axis,
-        MU0 * np.asarray(case_result.geqdsk.P_psi, dtype=np.float64),
-        color=SOURCE_P_COLOR,
-        linestyle="--",
-        linewidth=PROFILE_LINE_WIDTH,
-        label=r"$\mu_0 P_\psi$",
-    )
-    style_axis(ax_fp, title="", xlabel="", ylabel="value")
-    ax_fp.tick_params(labelbottom=False)
+    plot_source_profiles(ax_source, case_result)
+    style_axis(ax_source, title="", xlabel="", ylabel="value" if show_ylabels else "")
+    ax_source.tick_params(labelbottom=False)
     set_symmetric_ylim(
-        ax_fp,
+        ax_source,
         headroom_ratio=max(SOURCE_BOTTOM_HEADROOM, SOURCE_TOP_HEADROOM),
     )
-    ax_fp.legend(
+    ax_source.legend(
         loc=SOURCE_LEGEND_LOC,
         fontsize=scaled_font_size(LEGEND_FONT_SIZE),
         frameon=LEGEND_FRAME_ON,
@@ -1015,7 +1087,7 @@ def build_single_case_figure(case_result: CaseResult) -> plt.Figure:
     shape_psin, shape_rms = case_result.shape_rms_profile
     shape_rms_normalized = shape_rms / max(reference_a(case_result), 1.0e-12)
     if shape_psin.size and shape_rms.size:
-        ax_psin.semilogy(
+        ax_errors.semilogy(
             shape_psin,
             np.maximum(shape_rms_normalized, LOG_Y_FLOOR),
             color=THIRD_ROW_SHAPE_COLOR,
@@ -1026,7 +1098,7 @@ def build_single_case_figure(case_result: CaseResult) -> plt.Figure:
             label=r"${R}_{\mathrm{rms}}(\hat{\psi})/a$",
         )
     if psi_psin.size and psi_error.size:
-        ax_psin.semilogy(
+        ax_errors.semilogy(
             psi_psin,
             np.maximum(psi_error, LOG_Y_FLOOR),
             color=THIRD_ROW_PSI_COLOR,
@@ -1037,9 +1109,14 @@ def build_single_case_figure(case_result: CaseResult) -> plt.Figure:
             markeredgewidth=THIRD_ROW_PSI_MARKER_EDGE_WIDTH,
             label=r"$|\Delta\hat{\psi}(\rho)|$",
         )
-    style_axis(ax_psin, title="", xlabel=r"$\hat{\psi}$", ylabel="error")
-    ax_psin.set_ylim(PSI_ERROR_YMIN, PSI_ERROR_YMAX)
-    ax_psin.legend(
+    style_axis(
+        ax_errors,
+        title="",
+        xlabel=r"$\hat{\psi}$",
+        ylabel="error" if show_ylabels else "",
+    )
+    ax_errors.set_ylim(PSI_ERROR_YMIN, PSI_ERROR_YMAX)
+    ax_errors.legend(
         loc=THIRD_ROW_LEGEND_LOC,
         fontsize=scaled_font_size(LEGEND_FONT_SIZE),
         frameon=LEGEND_FRAME_ON,
@@ -1047,31 +1124,174 @@ def build_single_case_figure(case_result: CaseResult) -> plt.Figure:
         labelspacing=LEGEND_LABEL_SPACING,
     )
 
+
+def plot_route_failure(
+    failure: RouteFailure,
+    *,
+    ax_surfaces: plt.Axes,
+    ax_source: plt.Axes,
+    ax_errors: plt.Axes,
+) -> None:
+    for ax in (ax_surfaces, ax_source, ax_errors):
+        ax.set_axis_off()
+    label = CASE_DISPLAY_NAMES.get(failure.case_spec.case_key, failure.case_spec.reference_label)
+    ax_surfaces.set_title(f"{label} {failure.route}(psin)\nfailed", fontsize=TITLE_FONT_SIZE)
+    ax_surfaces.text(
+        0.5,
+        0.5,
+        f"{failure.error_type}\n{failure.message}",
+        ha="center",
+        va="center",
+        transform=ax_surfaces.transAxes,
+        fontsize=scaled_font_size(TICK_LABEL_FONT_SIZE),
+        wrap=True,
+    )
+
+
+def route_compare_limits(
+    outcomes: dict[str, CaseResult | RouteFailure],
+) -> tuple[tuple[float, float], tuple[float, float]] | None:
+    curves: list[np.ndarray] = []
+    for outcome in outcomes.values():
+        if isinstance(outcome, RouteFailure):
+            continue
+        curves.extend(outcome.reference_surfaces.values())
+        curves.extend(outcome.veqpy_surfaces.values())
+    if not curves:
+        return None
+    return compute_rz_limits(curves)
+
+
+def build_route_compare_figure(
+    outcomes: dict[str, CaseResult | RouteFailure],
+) -> plt.Figure:
+    apply_plot_style()
+    fig = plt.figure(figsize=FIGURE_SIZE)
+    panel_grid = fig.add_gridspec(
+        PANEL_GRID_NROWS,
+        len(SOURCE_ROUTES),
+        height_ratios=PANEL_GRID_HEIGHT_RATIOS,
+        hspace=PANEL_GRID_HSPACE,
+        wspace=PANEL_GRID_WSPACE,
+    )
+    rz_limits = route_compare_limits(outcomes)
+    for col, route in enumerate(SOURCE_ROUTES):
+        ax_surfaces = fig.add_subplot(panel_grid[0, col])
+        ax_source = fig.add_subplot(panel_grid[2, col])
+        ax_errors = fig.add_subplot(panel_grid[4, col], sharex=ax_source)
+        outcome = outcomes[route]
+        if isinstance(outcome, RouteFailure):
+            plot_route_failure(
+                outcome,
+                ax_surfaces=ax_surfaces,
+                ax_source=ax_source,
+                ax_errors=ax_errors,
+            )
+        else:
+            plot_case_result_column(
+                outcome,
+                ax_surfaces=ax_surfaces,
+                ax_source=ax_source,
+                ax_errors=ax_errors,
+                rz_limits=rz_limits,
+                show_ylabels=(col == 0),
+            )
+
+    fig.subplots_adjust(left=0.07, right=0.985, bottom=0.08, top=0.94)
+    return fig
+
+
+def build_single_case_figure(case_result: CaseResult) -> plt.Figure:
+    apply_plot_style()
+    fig = plt.figure(figsize=SINGLE_FIGURE_SIZE)
+    panel_grid = fig.add_gridspec(
+        PANEL_GRID_NROWS,
+        1,
+        height_ratios=PANEL_GRID_HEIGHT_RATIOS,
+        hspace=PANEL_GRID_HSPACE,
+    )
+    ax_surfaces = fig.add_subplot(panel_grid[0, 0])
+    ax_source = fig.add_subplot(panel_grid[2, 0])
+    ax_errors = fig.add_subplot(panel_grid[4, 0], sharex=ax_source)
+    plot_case_result_column(
+        case_result,
+        ax_surfaces=ax_surfaces,
+        ax_source=ax_source,
+        ax_errors=ax_errors,
+    )
     fig.subplots_adjust(left=0.17, right=0.97, bottom=0.08, top=0.94)
     return fig
 
 
+def build_route_outcomes(case_spec: CaseSpec) -> dict[str, CaseResult | RouteFailure]:
+    outcomes: dict[str, CaseResult | RouteFailure] = {}
+    for route in SOURCE_ROUTES:
+        try:
+            outcomes[route] = build_case_result(case_spec, route=route)
+        except Exception as exc:  # noqa: BLE001 - public example should show both route outcomes.
+            message = str(exc).splitlines()[-1] if str(exc).strip() else type(exc).__name__
+            outcomes[route] = RouteFailure(
+                route=route,
+                case_spec=case_spec,
+                error_type=type(exc).__name__,
+                message=message,
+            )
+            print(f"{case_spec.title} {route}(psin)")
+            print(f"solver failed: {type(exc).__name__}: {message}")
+    return outcomes
+
+
+def write_equilibrium_outputs(
+    outcomes: dict[str, CaseResult | RouteFailure],
+    *,
+    output_dir: Path,
+) -> list[Path]:
+    saved_paths: list[Path] = []
+    for route in SOURCE_ROUTES:
+        outcome = outcomes[route]
+        if isinstance(outcome, RouteFailure) or not outcome.solver_success:
+            continue
+        route_path = output_dir / f"demo_geqdsk_{route.lower()}_equilibrium.json"
+        outcome.equilibrium.write_json(str(route_path))
+        saved_paths.append(route_path)
+        if route == "PF":
+            compatibility_path = output_dir / "demo_geqdsk_equilibrium.json"
+            outcome.equilibrium.write_json(str(compatibility_path))
+            saved_paths.append(compatibility_path)
+    return saved_paths
+
+
+def print_outcome_summary(outcomes: dict[str, CaseResult | RouteFailure]) -> None:
+    for route in SOURCE_ROUTES:
+        outcome = outcomes[route]
+        if isinstance(outcome, RouteFailure):
+            print(f"{route}(psin) failed: {outcome.error_type}: {outcome.message}")
+            continue
+        print(build_case_summary_latex_table(outcome))
+
+
 def main() -> None:
-    case_spec = infer_case_spec(TARGET_GEQDSK)
-    case_result = build_case_result(case_spec)
+    target_geqdsk = target_geqdsk_path()
+    case_spec = infer_case_spec(target_geqdsk)
+    outcomes = build_route_outcomes(case_spec)
 
     output_dir = ensure_output_dir()
     output_figure = output_dir / "demo_geqdsk_workflow.png"
-    output_equilibrium = output_dir / "demo_geqdsk_equilibrium.json"
 
-    fig = build_single_case_figure(case_result)
+    fig = build_route_compare_figure(outcomes)
     fig.savefig(
         output_figure,
         dpi=SAVE_DPI,
         transparent=SAVE_TRANSPARENT,
     )
     plt.close(fig)
-    case_result.equilibrium.write_json(str(output_equilibrium))
+    output_equilibria = write_equilibrium_outputs(outcomes, output_dir=output_dir)
 
-    print(build_case_summary_latex_table(case_result))
-    print(f"Read GEQDSK       : {TARGET_GEQDSK}")
-    print(f"Saved figure      : {output_figure}")
-    print(f"Saved equilibrium : {output_equilibrium}")
+    print_outcome_summary(outcomes)
+    print(f"Read GEQDSK  : {target_geqdsk}")
+    print(f"Saved figure : {output_figure}")
+    for path in output_equilibria:
+        print(f"Saved equilibrium : {path}")
 
 
 if __name__ == "__main__":

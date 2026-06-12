@@ -15,19 +15,14 @@ Notes:
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import TYPE_CHECKING
-
-import numpy as np
 
 from veqpy.engine import numba_operator, numba_profile
 from veqpy.layout.geometry_binding import build_geometry_stage_runner
 from veqpy.layout.profile_binding import build_profile_stage_runner
 from veqpy.layout.residual_binding import (
     build_collocation_runner_into,
-    build_fused_residual_runner,
     build_fused_residual_runner_into,
-    build_residual_full_stage_runner,
     build_residual_full_stage_runner_into,
 )
 from veqpy.layout.source_binding import build_bound_source_stage_runner
@@ -62,104 +57,9 @@ def build_operator_layout(
     """Bind a full executable ``OperatorLayout`` from refreshed runtime state."""
 
     alpha_state = source_workspace.alpha_state
-    profile_stage_runner = _build_profile_stage_runner(
-        plan=plan, profile_workspace=profile_workspace
-    )
-    profile_postprocess_runner = _build_profile_postprocess_runner(
-        profile_workspace=profile_workspace,
-    )
-    geometry_stage_runner = _build_geometry_stage_runner(
-        plan=plan,
-        case=case,
-        profile_workspace=profile_workspace,
-        geometry_workspace=geometry_workspace,
-        c_effective_order=c_effective_order,
-        s_effective_order=s_effective_order,
-    )
-    source_eval_runner = numba_operator.bind_source_eval_runner(
-        source_plan=plan.source_plan,
-        grid_workspace=grid_workspace,
-        profile_workspace=profile_workspace,
-        geometry_workspace=geometry_workspace,
-        source_workspace=source_workspace,
-        B0=case.B0,
-        fix_rho=fix_rho,
-    )
-    raw_source_stage_runner = _build_bound_source_stage_runner(
-        plan=plan,
-        case=case,
-        source_workspace=source_workspace,
-        profile_workspace=profile_workspace,
-        residual_workspace=residual_workspace,
-        fix_rho=fix_rho,
-        source_eval_runner=source_eval_runner,
-    )
-    source_stage_runner = _bind_alpha_tracking_source_runner(
-        raw_source_stage_runner, alpha_state=alpha_state
-    )
-    residual_full_stage_runner_into = build_residual_full_stage_runner_into(
-        plan=plan,
-        case=case,
-        profile_workspace=profile_workspace,
-        geometry_workspace=geometry_workspace,
-        residual_workspace=residual_workspace,
-        alpha_state=alpha_state,
-    )
-    residual_full_stage_runner = build_residual_full_stage_runner(
-        plan=plan,
-        runner_into=residual_full_stage_runner_into,
-    )
-    fused_residual_runner_into = build_fused_residual_runner_into(
-        plan=plan,
-        case=case,
-        grid_workspace=grid_workspace,
-        residual_binding_layout=residual_binding_layout,
-        profile_workspace=profile_workspace,
-        geometry_workspace=geometry_workspace,
-        source_workspace=source_workspace,
-        residual_workspace=residual_workspace,
-        alpha_state=alpha_state,
-        c_effective_order=c_effective_order,
-        s_effective_order=s_effective_order,
-        fix_rho=fix_rho,
-        psin_profile_fields_available=psin_profile_fields_available,
-        profile_stage_runner=profile_stage_runner,
-        geometry_stage_runner=geometry_stage_runner,
-        source_stage_runner=source_stage_runner,
-        residual_full_stage_runner_into=residual_full_stage_runner_into,
-    )
-    fused_residual_runner = build_fused_residual_runner(
-        plan=plan,
-        runner_into=fused_residual_runner_into,
-    )
-    collocation_runner_into = build_collocation_runner_into(
-        geometry_workspace=geometry_workspace,
-        residual_workspace=residual_workspace,
-        profile_stage_runner=profile_stage_runner,
-        geometry_stage_runner=geometry_stage_runner,
-        source_stage_runner=source_stage_runner,
-        alpha_state=alpha_state,
-    )
-    return OperatorLayout.from_callables(
-        profile_stage_runner=profile_stage_runner,
-        profile_postprocess_runner=profile_postprocess_runner,
-        geometry_stage_runner=geometry_stage_runner,
-        source_eval_runner=source_eval_runner,
-        source_stage_runner=source_stage_runner,
-        residual_full_stage_runner_into=residual_full_stage_runner_into,
-        residual_full_stage_runner=residual_full_stage_runner,
-        fused_residual_runner_into=fused_residual_runner_into,
-        fused_residual_runner=fused_residual_runner,
-        collocation_runner_into=collocation_runner_into,
-    )
-
-
-def _build_profile_stage_runner(
-    *,
-    plan: OperatorBuildPlan,
-    profile_workspace: ProfileWorkspace,
-) -> Callable[[np.ndarray], None]:
-    return build_profile_stage_runner(
+    # Build stage closures in dependency order.  Later fused/collocation runners
+    # reuse the same closures so staged and fused paths share workspace semantics.
+    profile_stage_runner = build_profile_stage_runner(
         active_profile_ids=plan.active_profile_ids,
         profile_fields=profile_workspace.profile_fields,
         profile_rp_fields=profile_workspace.profile_rp_fields,
@@ -173,32 +73,14 @@ def _build_profile_stage_runner(
         active_lengths=profile_workspace.active_lengths,
         update_profiles_packed_bulk=numba_profile.update_profiles_packed_bulk,
     )
-
-
-def _build_profile_postprocess_runner(
-    *,
-    profile_workspace: ProfileWorkspace,
-) -> Callable[[], None]:
-    eps = 1.0e-10
-
     f_fields = profile_workspace.fields_for("F")
 
-    def runner() -> None:
-        numba_operator.convert_f_squared_fields_to_f(f_fields, eps=eps)
+    def profile_postprocess_runner() -> None:
+        # F profiles are packed as F**2 for positivity during Stage A; source
+        # and diagnostics consume F and dF/drho, so convert after every refresh.
+        numba_operator.convert_f_squared_fields_to_f(f_fields, eps=1.0e-10)
 
-    return runner
-
-
-def _build_geometry_stage_runner(
-    *,
-    plan: OperatorBuildPlan,
-    case: OperatorCase,
-    profile_workspace: ProfileWorkspace,
-    geometry_workspace: GeometryWorkspace,
-    c_effective_order: int,
-    s_effective_order: int,
-) -> Callable[[], None]:
-    return build_geometry_stage_runner(
+    geometry_stage_runner = build_geometry_stage_runner(
         c_family_fields=profile_workspace.c_family_fields,
         s_family_fields=profile_workspace.s_family_fields,
         c_family_base_fields=profile_workspace.c_family_base_fields,
@@ -225,19 +107,16 @@ def _build_geometry_stage_runner(
         m2_cos_mtheta=plan.grid_workspace.m2_cos_mtheta,
         m2_sin_mtheta=plan.grid_workspace.m2_sin_mtheta,
     )
-
-
-def _build_bound_source_stage_runner(
-    *,
-    plan: OperatorBuildPlan,
-    case: OperatorCase,
-    source_workspace: SourceWorkspace,
-    profile_workspace: ProfileWorkspace,
-    residual_workspace: ResidualWorkspace,
-    fix_rho: float,
-    source_eval_runner: Callable,
-) -> Callable[[], tuple[float, float]]:
-    return build_bound_source_stage_runner(
+    source_eval_runner = numba_operator.bind_source_eval_runner(
+        source_plan=plan.source_plan,
+        grid_workspace=grid_workspace,
+        profile_workspace=profile_workspace,
+        geometry_workspace=geometry_workspace,
+        source_workspace=source_workspace,
+        B0=case.B0,
+        fix_rho=fix_rho,
+    )
+    raw_source_stage_runner = build_bound_source_stage_runner(
         plan=plan,
         case=case,
         source_workspace=source_workspace,
@@ -247,16 +126,57 @@ def _build_bound_source_stage_runner(
         source_eval_runner=source_eval_runner,
     )
 
-
-def _bind_alpha_tracking_source_runner(
-    runner: Callable[[], tuple[float, float]], *, alpha_state: np.ndarray
-) -> Callable[[], tuple[float, float]]:
-    """Return a source runner that writes source scale factors into workspace memory."""
-
-    def tracked_runner() -> tuple[float, float]:
-        alpha1, alpha2 = runner()
+    def source_stage_runner() -> tuple[float, float]:
+        alpha1, alpha2 = raw_source_stage_runner()
         alpha_state[0] = float(alpha1)
         alpha_state[1] = float(alpha2)
         return float(alpha1), float(alpha2)
 
-    return tracked_runner
+    # Residual closures read alpha_state, so alpha tracking must wrap the source
+    # runner before residual and collocation runners are bound.
+    residual_full_stage_runner_into = build_residual_full_stage_runner_into(
+        plan=plan,
+        case=case,
+        profile_workspace=profile_workspace,
+        geometry_workspace=geometry_workspace,
+        residual_workspace=residual_workspace,
+        alpha_state=alpha_state,
+    )
+    fused_residual_runner_into = build_fused_residual_runner_into(
+        plan=plan,
+        case=case,
+        grid_workspace=grid_workspace,
+        residual_binding_layout=residual_binding_layout,
+        profile_workspace=profile_workspace,
+        geometry_workspace=geometry_workspace,
+        source_workspace=source_workspace,
+        residual_workspace=residual_workspace,
+        alpha_state=alpha_state,
+        c_effective_order=c_effective_order,
+        s_effective_order=s_effective_order,
+        fix_rho=fix_rho,
+        psin_profile_fields_available=psin_profile_fields_available,
+        profile_stage_runner=profile_stage_runner,
+        geometry_stage_runner=geometry_stage_runner,
+        source_stage_runner=source_stage_runner,
+        residual_full_stage_runner_into=residual_full_stage_runner_into,
+    )
+    # Collocation shares the Stage A/B/C refresh chain but writes a pointwise
+    # objective instead of the packed Galerkin residual.
+    collocation_runner_into = build_collocation_runner_into(
+        geometry_workspace=geometry_workspace,
+        residual_workspace=residual_workspace,
+        profile_stage_runner=profile_stage_runner,
+        geometry_stage_runner=geometry_stage_runner,
+        source_stage_runner=source_stage_runner,
+        alpha_state=alpha_state,
+    )
+    return OperatorLayout.from_callables(
+        profile_stage_runner=profile_stage_runner,
+        profile_postprocess_runner=profile_postprocess_runner,
+        geometry_stage_runner=geometry_stage_runner,
+        source_stage_runner=source_stage_runner,
+        residual_full_stage_runner_into=residual_full_stage_runner_into,
+        fused_residual_runner_into=fused_residual_runner_into,
+        collocation_runner_into=collocation_runner_into,
+    )

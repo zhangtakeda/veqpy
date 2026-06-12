@@ -151,6 +151,8 @@ class Reactive:
         for name in roots:
             attr = cls._find_property(name)
             if attr is None:
+                # Most model classes declare roots as plain assignments; install
+                # descriptors so __init__ assignment still bumps reactive state.
                 cls._install_default_root_property(name)
             else:
                 cls._wrap_existing_root_property(name, attr)
@@ -241,6 +243,8 @@ class Reactive:
                     if entry is not None and entry.dependency_tokens == tokens:
                         return entry.value
 
+                    # Cache entries are validated by direct dependency tokens,
+                    # so downstream properties can stay cached until read.
                     value = orig(self)
                     self.cache[n] = self._CacheEntry(value=value, dependency_tokens=tokens)
                     self._bump_version(n, bump_object_revision=False)
@@ -326,6 +330,8 @@ class Reactive:
             raw_deps = _parse_dependency(original_func)
             explicit = getattr(original_func, "_reactive_deps", None)
             if explicit is not None:
+                # Explicit dependencies augment AST inference for dynamic reads
+                # that cannot be found from ``self.attr`` syntax.
                 raw_deps = raw_deps | explicit
 
             graph[name] = {d for d in raw_deps if d in valid_nodes and d != name}

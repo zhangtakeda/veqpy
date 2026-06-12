@@ -44,6 +44,7 @@ def build_residual_full_stage_runner_into(
     surface_fields = geometry_workspace.surface_fields
     residual_surface_fields = residual_workspace.surface_fields
     residual_pack_scratch = residual_workspace.pack_scratch
+    residual_pack_scratch_rows = residual_workspace.pack_scratch_rows
     sin_mtheta = plan.grid_workspace.sin_mtheta
     cos_mtheta = plan.grid_workspace.cos_mtheta
     rho_powers = plan.grid_workspace.rho_powers
@@ -55,6 +56,8 @@ def build_residual_full_stage_runner_into(
     B0 = case.B0
 
     def runner(out: np.ndarray) -> None:
+        # Residual compact fields depend only on current geometry/root fields and
+        # alpha state; profile coefficient packing happens in the next kernel.
         numba_residual.update_residual_compact(
             residual_surface_fields,
             float(alpha_state[0]),
@@ -63,9 +66,13 @@ def build_residual_full_stage_runner_into(
             surface_fields,
         )
         out.fill(0.0)
-        numba_residual.run_residual_blocks_packed_precomputed(
+        # Packed residual assembly projects each active residual block onto its
+        # corresponding basis/order metadata.  Inactive profile blocks have no
+        # entries here and therefore contribute no equations.
+        numba_residual.run_residual_blocks_packed_precomputed_auto(
             out,
             residual_pack_scratch,
+            residual_pack_scratch_rows,
             plan.residual_binding_layout.active_residual_block_codes,
             plan.residual_binding_layout.active_residual_block_orders,
             plan.residual_binding_layout.active_residual_block_radial_powers,
@@ -86,20 +93,6 @@ def build_residual_full_stage_runner_into(
     return runner
 
 
-def build_residual_full_stage_runner(
-    *,
-    plan: OperatorBuildPlan,
-    runner_into: Callable[[np.ndarray], None],
-) -> Callable[[], np.ndarray]:
-    """Bind staged residual assembly that allocates its output vector."""
-    def runner() -> np.ndarray:
-        out = np.empty(plan.x_size, dtype=np.float64)
-        runner_into(out)
-        return out
-
-    return runner
-
-
 def build_collocation_runner_into(
     *,
     geometry_workspace: GeometryWorkspace,
@@ -113,6 +106,9 @@ def build_collocation_runner_into(
     geometry_surface_fields = geometry_workspace.surface_fields
 
     def runner(x_eval: np.ndarray, out: np.ndarray) -> None:
+        # Collocation intentionally runs the same profile/geometry/source stages
+        # as variational residuals, then writes pointwise weighted G instead of
+        # Galerkin-projected blocks.
         profile_stage_runner(x_eval)
         geometry_stage_runner()
         alpha1, alpha2 = source_stage_runner()
@@ -158,13 +154,18 @@ def build_fused_residual_runner_into(
 ) -> Callable[[np.ndarray, np.ndarray], None]:
     """Bind the fused packed-state residual runner into a caller output vector."""
     if plan.source_execution.requires_optimized_psin_profile and not psin_profile_fields_available:
-        return _build_sequential_residual_runner_into(
-            profile_stage_runner=profile_stage_runner,
-            geometry_stage_runner=geometry_stage_runner,
-            source_stage_runner=source_stage_runner,
-            residual_full_stage_runner_into=residual_full_stage_runner_into,
-            alpha_state=alpha_state,
-        )
+        # Fused Numba code cannot pull optimized psin fields that do not exist
+        # in ProfileWorkspace yet.  The sequential runner keeps behavior correct
+        # for layout-valid but not-fusible source/profile combinations.
+        def sequential_runner(x_eval: np.ndarray, out: np.ndarray) -> None:
+            profile_stage_runner(x_eval)
+            geometry_stage_runner()
+            alpha1, alpha2 = source_stage_runner()
+            alpha_state[0] = float(alpha1)
+            alpha_state[1] = float(alpha2)
+            residual_full_stage_runner_into(out)
+
+        return sequential_runner
     return numba_operator.bind_fused_residual_runner_into(
         source_plan=plan.source_plan,
         source_execution=plan.source_execution,
@@ -183,38 +184,3 @@ def build_fused_residual_runner_into(
         B0=float(case.B0),
         fix_rho=fix_rho,
     )
-
-
-def _build_sequential_residual_runner_into(
-    *,
-    profile_stage_runner: Callable[[np.ndarray], None],
-    geometry_stage_runner: Callable[[], None],
-    source_stage_runner: Callable[[], tuple[float, float]],
-    residual_full_stage_runner_into: Callable[[np.ndarray], None],
-    alpha_state: np.ndarray,
-) -> Callable[[np.ndarray, np.ndarray], None]:
-    """Bind the non-fused residual pipeline when fused source prerequisites are unavailable."""
-
-    def runner(x_eval: np.ndarray, out: np.ndarray) -> None:
-        profile_stage_runner(x_eval)
-        geometry_stage_runner()
-        alpha1, alpha2 = source_stage_runner()
-        alpha_state[0] = float(alpha1)
-        alpha_state[1] = float(alpha2)
-        residual_full_stage_runner_into(out)
-
-    return runner
-
-
-def build_fused_residual_runner(
-    *,
-    plan: OperatorBuildPlan,
-    runner_into: Callable[[np.ndarray, np.ndarray], None],
-) -> Callable[[np.ndarray], np.ndarray]:
-    """Bind the fused packed-state residual runner that allocates output."""
-    def runner(x_eval: np.ndarray) -> np.ndarray:
-        out = np.empty(plan.x_size, dtype=np.float64)
-        runner_into(x_eval, out)
-        return out
-
-    return runner

@@ -24,7 +24,7 @@ When the source coordinate is `rho`, query points are fixed and a remap matrix c
 | Global Lagrange / barycentric | General interpolation between arbitrary distinct nodes |
 | `linear`, `quadratic`, `cubic` | Local polynomial interpolation for uniform source data |
 | `not-a-knot` | Cubic not-a-knot spline for uniform source data |
-| `barycentric` | Local barycentric stencil for uniform source data; this is the current operator default |
+| `barycentric` | Local barycentric stencil for uniform source data; this is the package default |
 
 Local formats depend only on a finite neighborhood around the query point, which makes them better suited to robust remapping of external source samples. Global formats retain full polynomial closure, but each query point usually depends on every source sample. If the sample count is too small, local polynomial and spline formats degrade to the supported lower order.
 

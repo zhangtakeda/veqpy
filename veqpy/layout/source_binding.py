@@ -19,9 +19,9 @@ import numpy as np
 from veqpy.engine.numba_source import (
     PJ2_PSIN_UNIFORM_FIXED_POINT_MAX_ITER,
     PJ2_PSIN_UNIFORM_FIXED_POINT_MAX_RESIDUAL,
-    materialize_profile_owned_psin_source,
-    resolve_source_inputs,
-    update_fixed_point_psin_query,
+    _materialize_profile_owned_psin_source_impl,
+    _resolve_source_inputs_prepared,
+    _update_fixed_point_psin_query_impl,
 )
 
 
@@ -38,6 +38,9 @@ def build_bound_source_stage_runner(
     """Bind the source stage runner selected by the source route key."""
     route_key = tuple(plan.source_execution.route_key)
     if route_key == ("PJ2", "psin", "uniform"):
+        # This route is stateful because source samples are queried in the psin
+        # produced by the same route.  It needs a fixed-point wrapper around the
+        # normal source kernel instead of the shared single-pass runner.
         return _build_pj2_psin_uniform_source_stage_runner(
             plan=plan,
             case=case,
@@ -94,7 +97,9 @@ def _build_source_stage_runner_shared(
             def runner() -> tuple[float, float]:
                 if psin_profile_fields.size == 0:
                     raise RuntimeError("psin_profile runtime fields are not initialized")
-                materialize_profile_owned_psin_source(
+                # Optimized psin owns the root fields here.  Materialization also
+                # remaps heat/current using the just-built psin coordinate.
+                _materialize_profile_owned_psin_source_impl(
                     psin,
                     psin_r,
                     psin_rr,
@@ -107,13 +112,13 @@ def _build_source_stage_runner_shared(
                     current_input,
                     source_workspace.heat_spline_coeff,
                     source_workspace.current_spline_coeff,
-                    parameterization_code,
+                    int(parameterization_code),
                     grid_workspace.rho,
                     grid_workspace.differentiator,
                     grid_workspace.accumulator,
-                    n_axis_fix,
+                    int(n_axis_fix),
                     source_workspace.barycentric_weights,
-                    source_plan.uses_barycentric_interpolation,
+                    bool(source_plan.uses_barycentric_interpolation),
                 )
                 return source_eval_runner(
                     source_target_root_fields,
@@ -133,6 +138,8 @@ def _build_source_stage_runner_shared(
         def runner() -> tuple[float, float]:
             if psin_profile_fields.size == 0:
                 raise RuntimeError("psin_profile runtime fields are not initialized")
+            # Grid-node or already-materialized psin routes can copy optimized
+            # psin fields directly, then remap only the source inputs.
             np.copyto(psin, psin_profile_u)
             np.copyto(psin_r, psin_profile_fields[1])
             np.copyto(psin_rr, psin_profile_fields[2])
@@ -151,7 +158,7 @@ def _build_source_stage_runner_shared(
                 raise ValueError(
                     f"Unsupported source parameterization {source_plan.parameterization!r}"
                 )
-            resolve_source_inputs(
+            _resolve_source_inputs_prepared(
                 source_workspace.materialized_heat_input,
                 source_workspace.materialized_current_input,
                 source_plan.heat_input,
@@ -177,6 +184,8 @@ def _build_source_stage_runner_shared(
         return runner
 
     def runner() -> tuple[float, float]:
+        # Source-owned psin routes write root_fields themselves; source inputs
+        # were already materialized by source_runtime refresh.
         return source_eval_runner(
             root_fields,
             FFn_psin,
@@ -211,7 +220,9 @@ def _build_pj2_psin_uniform_source_stage_runner(
 
     def runner() -> tuple[float, float]:
         if source_workspace.psin_query[0] < 0.0:
-            np.copyto(source_workspace.psin_query, np.asarray(psin_profile_u, dtype=np.float64))
+            # Seed from the optimized psin profile and normalize to [0, 1]; the
+            # fixed-point loop then evolves this query in source-owned psin space.
+            np.copyto(source_workspace.psin_query, psin_profile_u)
             if source_workspace.psin_query.ndim != 1 or source_workspace.psin_query.size < 2:
                 raise ValueError(
                     f"Expected psin query to be 1D with at least two points, "
@@ -228,6 +239,8 @@ def _build_pj2_psin_uniform_source_stage_runner(
         alpha1 = float("nan")
         alpha2 = float("nan")
         for _ in range(PJ2_PSIN_UNIFORM_FIXED_POINT_MAX_ITER):
+            # Each iteration remaps source samples using the previous psin query,
+            # runs the source kernel, then tests whether the produced psin moved.
             if source_plan.parameterization == "identity":
                 np.copyto(source_workspace.parameter_query, source_workspace.psin_query)
             elif source_plan.parameterization == "sqrt_psin":
@@ -240,7 +253,7 @@ def _build_pj2_psin_uniform_source_stage_runner(
                 raise ValueError(
                     f"Unsupported source parameterization {source_plan.parameterization!r}"
                 )
-            resolve_source_inputs(
+            _resolve_source_inputs_prepared(
                 source_workspace.materialized_heat_input,
                 source_workspace.materialized_current_input,
                 source_plan.heat_input,
@@ -262,12 +275,16 @@ def _build_pj2_psin_uniform_source_stage_runner(
                 source_workspace.materialized_current_input,
                 case_R0,
             )
-            if update_fixed_point_psin_query(
-                source_workspace.psin_query,
-                target_root_fields[0],
-                PJ2_PSIN_UNIFORM_FIXED_POINT_MAX_RESIDUAL,
+            if bool(
+                _update_fixed_point_psin_query_impl(
+                    source_workspace.psin_query,
+                    target_root_fields[0],
+                    float(PJ2_PSIN_UNIFORM_FIXED_POINT_MAX_RESIDUAL),
+                )
             ):
                 break
+        # Even if convergence exits by iteration cap, publish the last produced
+        # source-owned root fields so the residual is internally consistent.
         np.copyto(source_workspace.psin_query, target_root_fields[0])
         np.copyto(psin, target_root_fields[0])
         np.copyto(psin_r, target_root_fields[1])

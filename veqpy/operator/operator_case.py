@@ -52,6 +52,9 @@ class OperatorCase:
 
     def __post_init__(self) -> None:
         """Normalize fields into stable runtime representations after construction."""
+        # Keep all public constructors permissive, but store one canonical form:
+        # uppercase route, lowercase coordinate/nodes, ndarray inputs, and NaN
+        # sentinels for optional scalar constraints.
         object.__setattr__(self, "route", _normalize_case_value("route", self.route))
         object.__setattr__(self, "coordinate", _normalize_case_value("coordinate", self.coordinate))
         object.__setattr__(self, "nodes", _normalize_case_value("nodes", self.nodes))
@@ -84,6 +87,8 @@ class OperatorCase:
             "heat_input",
             "current_input",
         ):
+            # OperatorCase is mutable for workflows that update inputs in place;
+            # normalize every root write so replacement cases stay layout-safe.
             value = _normalize_case_value(name, value)
         object.__setattr__(self, name, value)
 
@@ -125,7 +130,7 @@ class OperatorCase:
         object.__setattr__(clone, "route", self.route)
         object.__setattr__(clone, "coordinate", self.coordinate)
         object.__setattr__(clone, "nodes", self.nodes)
-        object.__setattr__(clone, "profile_coeffs", _copy_coeffs(self.profile_coeffs))
+        object.__setattr__(clone, "profile_coeffs", _normalize_coeffs(self.profile_coeffs))
         object.__setattr__(
             clone,
             "boundary",
@@ -196,14 +201,12 @@ def _normalize_profile_coeff(name: str, coeff: ProfileCoeffInput) -> ProfileCoef
         length = int(coeff)
         if length <= 0:
             raise ValueError(f"{name} coeff length indicator must be positive, got {coeff}")
+        # Integer shorthand declares an active profile block with zero initial
+        # coefficients.  None, by contrast, means passive/unpacked profile.
         return np.zeros(length, dtype=np.float64)
     if isinstance(coeff, (list, np.ndarray)):
         return _as_1d_array(coeff, name=f"{name} coeff").astype(np.float64, copy=True)
     raise TypeError(f"Invalid {name} coeff type {type(coeff).__name__}")
-
-
-def _copy_coeffs(profile_coeffs: dict[str, ProfileCoeffInput]) -> dict[str, ProfileCoeff]:
-    return {name: _normalize_profile_coeff(name, coeff) for name, coeff in profile_coeffs.items()}
 
 
 def _as_1d_array(value: np.ndarray | list[float], *, name: str) -> np.ndarray:
@@ -244,20 +247,32 @@ def _normalize_case_value(name: str, value):
 def _normalize_setup_inputs(case: OperatorCase) -> None:
     rejected_inputs: list[str] = []
 
+    # User-facing setup inputs are accepted in physical current/pressure units
+    # and scaled by mu0 once.  Rejecting implausible magnitudes protects callers
+    # from accidentally passing already-normalized arrays through this path.
     _normalize_setup_profile(
         case,
         field_name="heat_input",
-        requires_mu0_scaling=_heat_input_requires_mu0_scaling(case),
+        requires_mu0_scaling=True,
         rejected_inputs=rejected_inputs,
     )
     _normalize_setup_profile(
         case,
         field_name="current_input",
-        requires_mu0_scaling=_current_input_requires_mu0_scaling(case),
+        # Only routes whose current_input represents a current/current-density-like
+        # physical profile receive the same mu0 setup scaling as heat_input.
+        requires_mu0_scaling=case.route in CURRENT_PROFILE_ROUTES,
         rejected_inputs=rejected_inputs,
     )
     if np.isfinite(case.Ip):
-        _normalize_setup_ip(case, rejected_inputs=rejected_inputs)
+        ip_abs = abs(float(case.Ip))
+        if ip_abs != 0.0:
+            if _in_closed_range(ip_abs, SETUP_PHYSICAL_ABS_MIN, SETUP_PHYSICAL_ABS_MAX):
+                object.__setattr__(case, "Ip", float(case.Ip) * MU0)
+            else:
+                rejected_inputs.append(
+                    f"Ip abs={ip_abs:.3e} outside physical current setup range"
+                )
 
     if rejected_inputs:
         message = (
@@ -278,14 +293,6 @@ def _normalize_setup_inputs(case: OperatorCase) -> None:
         raise ValueError(message)
 
 
-def _heat_input_requires_mu0_scaling(case: OperatorCase) -> bool:
-    return True
-
-
-def _current_input_requires_mu0_scaling(case: OperatorCase) -> bool:
-    return case.route in CURRENT_PROFILE_ROUTES
-
-
 def _normalize_setup_profile(
     case: OperatorCase,
     *,
@@ -294,11 +301,13 @@ def _normalize_setup_profile(
     rejected_inputs: list[str],
 ) -> None:
     values = getattr(case, field_name)
-    max_abs = _profile_max_abs(values)
+    max_abs = float(np.max(np.abs(values))) if values.size else 0.0
     if max_abs == 0.0:
         return
     if requires_mu0_scaling:
         if _in_closed_range(max_abs, SETUP_PHYSICAL_ABS_MIN, SETUP_PHYSICAL_ABS_MAX):
+            # In-place mutation is intentional: __post_init__ already copied the
+            # arrays, and case.copy() preserves the canonical scaled values.
             values *= MU0
         else:
             rejected_inputs.append(
@@ -309,20 +318,6 @@ def _normalize_setup_profile(
         rejected_inputs.append(
             f"{field_name} max_abs={max_abs:.3e} outside non-current/pressure setup range"
         )
-
-
-def _normalize_setup_ip(case: OperatorCase, *, rejected_inputs: list[str]) -> None:
-    ip_abs = abs(float(case.Ip))
-    if ip_abs == 0.0:
-        return
-    if _in_closed_range(ip_abs, SETUP_PHYSICAL_ABS_MIN, SETUP_PHYSICAL_ABS_MAX):
-        object.__setattr__(case, "Ip", float(case.Ip) * MU0)
-    else:
-        rejected_inputs.append(f"Ip abs={ip_abs:.3e} outside physical current setup range")
-
-
-def _profile_max_abs(values: np.ndarray) -> float:
-    return float(np.max(np.abs(values))) if values.size else 0.0
 
 
 def _in_closed_range(value: float, lower: float, upper: float) -> bool:
