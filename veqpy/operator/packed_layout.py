@@ -60,11 +60,11 @@ PREFIX_PROFILE_FAMILIES = ("psin", "F")
 SHAPE_PROFILE_FAMILIES = ("h", "v", "k", "c0", "c", "s")
 ALL_PROFILE_FAMILIES = SHAPE_PROFILE_FAMILIES + PREFIX_PROFILE_FAMILIES
 
-PROFILE_STATIC_KWARGS: dict[str, dict[str, int]] = {
+PROFILE_STATIC_KWARGS: dict[str, dict[str, float | int]] = {
     "psin": {"power": 2},
-    # PJ2 recovers FF_psi from F * dF/drho.  Keep the edge F value fixed while
-    # leaving the edge slope free; envelope_power=2 would force dF/drho=0 there.
-    "F": {"envelope_power": 1},
+    # F coefficients parameterize the dimensionless F**2 amplitude.  The generic
+    # profile evaluator takes the square root before source kernels consume F.
+    "F": {"envelope_power": 1, "amplitude_power": 0.5},
 }
 PROFILE_OFFSET_SPECS: dict[str, float | str] = {
     "h": 0.0,
@@ -207,9 +207,7 @@ def build_residual_block_radial_powers(
 
 # Global packed-vector ordering switch.
 # True  -> profile/name-first: h[0:L], v[0:L], ..., psin[0:L], F[0:L].
-# False -> degree-first: all active profile 0th coefficients, then 1st coefficients, ... .
-# Default remains degree-first because Zhang2026 script 06 was faster for all three
-# high-order reconstruction cases in the local A/B benchmark.
+# False -> degree-first: all active profile 0th coefficients, then 1st coefficients, etc.
 PACKED_LAYOUT_PROFILE_FIRST = False
 
 # Backwards-readable alias for the previous degree-first switch name.

@@ -82,30 +82,6 @@ def bind_source_eval_runner(
     )
 
 
-@njit(cache=True, fastmath=True, nogil=True)
-def _convert_f_squared_fields_to_f_impl(fields: np.ndarray, eps: float = 1.0e-10) -> None:
-    nr = fields.shape[1]
-    for i in range(nr):
-        F2 = fields[0, i]
-        F2_r = fields[1, i]
-        F2_rr = fields[2, i]
-        if F2 < eps:
-            F2 = eps
-        F = np.sqrt(F2)
-        inv_F = 1.0 / F
-        inv_F3 = inv_F / F2
-        # Active F is optimized as F**2 to avoid sign changes; source kernels
-        # consume F, F_r, F_rr, so convert the derivative rows by the chain rule.
-        fields[0, i] = F
-        fields[1, i] = 0.5 * F2_r * inv_F
-        fields[2, i] = 0.5 * F2_rr * inv_F - 0.25 * F2_r * F2_r * inv_F3
-
-
-def convert_f_squared_fields_to_f(fields: np.ndarray, eps: float = 1.0e-10) -> None:
-    """Convert packed ``F**2`` profile fields to ``F`` fields in place."""
-    _convert_f_squared_fields_to_f_impl(fields, eps=eps)
-
-
 def _normalize_psin_query(out: np.ndarray, source: np.ndarray) -> None:
     np.copyto(out, source)
     offset = float(out[0])
@@ -136,12 +112,11 @@ def _refresh_hot_runtime(
         hot_runtime_binding.T_rr,
         hot_runtime_binding.active_offsets,
         hot_runtime_binding.active_scales,
+        hot_runtime_binding.active_amplitude_powers,
         x,
         hot_runtime_binding.active_coeff_index_rows,
         hot_runtime_binding.active_lengths,
     )
-    if hot_runtime_binding.has_active_f_profile:
-        _convert_f_squared_fields_to_f_impl(hot_runtime_binding.f_profile_fields)
     _update_fourier_family_fields_impl(
         hot_runtime_binding.c_family_fields,
         hot_runtime_binding.s_family_fields,
@@ -443,7 +418,6 @@ def bind_fused_residual_runner_into(
         grid_workspace=grid_workspace,
         profile_workspace=profile_workspace,
         geometry_workspace=geometry_workspace,
-        source_execution=source_execution,
         c_active_order=c_active_order,
         s_active_order=s_active_order,
         a=a,

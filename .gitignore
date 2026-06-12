@@ -67,6 +67,7 @@ tests/benchmark/
 # Example outputs, if examples/ is introduced.
 examples/
 outputs/
+tmp/
 
 # Root-only manuscript scratch/artifact directories.
 /figures/

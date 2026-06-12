@@ -38,6 +38,7 @@ def test_profile_normalization_validation_and_copy_independence() -> None:
 
     assert profile.scale == 2.0
     assert profile.power == 3
+    assert profile.amplitude_power == 1.0
     assert profile.offset == 0.0
     assert profile.coeff is coeff
     profile.check()
@@ -46,6 +47,12 @@ def test_profile_normalization_validation_and_copy_independence() -> None:
     assert clone.coeff is not profile.coeff
     assert not np.shares_memory(clone.coeff, profile.coeff)
     assert not clone.coeff.flags.writeable
+
+    object.__delattr__(profile, "cached_amplitude_power")
+    assert profile.copy().amplitude_power == 1.0
+
+    with pytest.raises(TypeError):
+        Profile(amplitude_power=None)
     assert_allclose(clone.coeff, profile.coeff)
 
     with pytest.raises(ValueError, match="coeff must be 1D"):

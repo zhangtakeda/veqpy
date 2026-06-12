@@ -1254,6 +1254,7 @@ def _evaluate_profile_fields(profile: Profile, grid: Grid) -> np.ndarray:
         env_fields,
         float(profile.offset),
         profile.coeff,
+        float(profile.amplitude_power),
     )
     scale = float(profile.scale)
     if scale != 1.0:

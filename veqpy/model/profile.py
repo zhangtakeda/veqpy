@@ -29,6 +29,7 @@ class Profile(Reactive, Serial):
         "scale",
         "power",
         "envelope_power",
+        "amplitude_power",
         "offset",
         "coeff",
     }
@@ -38,6 +39,7 @@ class Profile(Reactive, Serial):
         scale: float = 1.0,
         power: int = 0,
         envelope_power: int = 1,
+        amplitude_power: float = 1.0,
         offset: float | None = 0.0,
         coeff: np.ndarray | None = None,
     ) -> None:
@@ -48,6 +50,7 @@ class Profile(Reactive, Serial):
         self.scale = scale
         self.power = power
         self.envelope_power = envelope_power
+        self.amplitude_power = amplitude_power
         self.offset = offset
         self.coeff = coeff
 
@@ -58,6 +61,7 @@ class Profile(Reactive, Serial):
             "scale": float,
             "power": int,
             "envelope_power": int,
+            "amplitude_power": float,
             "offset": float,
             "coeff": np.ndarray | None,
         }
@@ -68,6 +72,8 @@ class Profile(Reactive, Serial):
 
         match name:
             case "scale":
+                return float(value)
+            case "amplitude_power":
                 return float(value)
             case "power" | "envelope_power":
                 return int(value)
@@ -94,12 +100,18 @@ class Profile(Reactive, Serial):
 
     def copy(self) -> Self:
         """Copy root parameters."""
+        kwargs = {
+            "scale": self.scale,
+            "power": self.power,
+            "envelope_power": self.envelope_power,
+            "offset": self.offset,
+            "coeff": None if self.coeff is None else self.coeff.copy(),
+        }
+        amplitude_power = self.amplitude_power
+        if amplitude_power is not None:
+            kwargs["amplitude_power"] = amplitude_power
         return Profile(
-            scale=self.scale,
-            power=self.power,
-            envelope_power=self.envelope_power,
-            offset=self.offset,
-            coeff=None if self.coeff is None else self.coeff.copy(),
+            **kwargs,
         )
 
 

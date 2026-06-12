@@ -31,7 +31,7 @@ def make_profile(
     profile_L: np.ndarray,
     profile_names: tuple[str, ...],
     profile_index: dict[str, int],
-    profile_static_kwargs_by_name: dict[str, dict[str, int]],
+    profile_static_kwargs_by_name: dict[str, dict[str, float | int]],
     profile_offset_specs: dict[str, float | str],
 ) -> Profile:
     """Construct one profile object from case inputs and packed layout metadata."""
@@ -84,7 +84,7 @@ def refresh_profile_runtime(
     profile_L: np.ndarray,
     profiles_by_name: dict[str, Profile],
     profile_workspace: ProfileWorkspace,
-    profile_static_kwargs_by_name: dict[str, dict[str, int]],
+    profile_static_kwargs_by_name: dict[str, dict[str, float | int]],
     profile_offset_specs: dict[str, float | str],
 ) -> None:
     """Refresh profile objects and workspace slots from a replacement case."""
@@ -100,6 +100,7 @@ def refresh_profile_runtime(
             static_kwargs = {}
         profile.power = int(static_kwargs.get("power", 0))
         profile.envelope_power = int(static_kwargs.get("envelope_power", 1))
+        profile.amplitude_power = float(static_kwargs.get("amplitude_power", 1.0))
         if name.startswith("c") and name[1:].isdigit():
             order = int(name[1:])
             profile.offset = (
@@ -140,9 +141,9 @@ def refresh_profile_runtime(
 
 def _profile_scale(case: OperatorCase, name: str) -> float:
     if name == "F":
-        # F is represented as normalized F**2 coefficients in profiles; the
-        # runtime scale converts them back to physical edge magnitude.
-        return float(case.R0 * case.B0) ** 2
+        # F coefficients represent the normalized F**2 amplitude; the profile
+        # evaluator applies amplitude_power=0.5 and this scale restores F units.
+        return float(case.R0 * case.B0)
     return 1.0
 
 
@@ -155,6 +156,7 @@ def refresh_stage_a_runtime(
     coeff_index: np.ndarray,
     active_offsets: np.ndarray,
     active_scales: np.ndarray,
+    active_amplitude_powers: np.ndarray,
     active_lengths: np.ndarray,
     active_coeff_index_rows: np.ndarray,
 ) -> None:
@@ -173,6 +175,7 @@ def refresh_stage_a_runtime(
         # up Profile objects by name during residual evaluation.
         active_offsets[slot] = profile.offset
         active_scales[slot] = profile.scale
+        active_amplitude_powers[slot] = profile.amplitude_power
         active_lengths[slot] = coeff_indices.size
         if active_coeff_index_rows.shape[1] > 0:
             active_coeff_index_rows[slot].fill(-1)

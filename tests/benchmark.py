@@ -1511,6 +1511,7 @@ def _compare_shape_profile_values(equilibrium: object, name: str) -> np.ndarray:
         _compare_envelope_terms(grid, int(profile.envelope_power)),
         float(profile.offset),
         np.asarray(profile.coeff, dtype=np.float64),
+        float(profile.amplitude_power),
     )
     scale = float(profile.scale)
     return fields[0] if scale == 1.0 else fields[0] * scale

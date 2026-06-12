@@ -5,7 +5,6 @@ import pytest
 from numpy.testing import assert_allclose
 
 from veqpy.engine import numba_residual
-from veqpy.engine.numba_operator import convert_f_squared_fields_to_f
 from veqpy.model import Grid
 from veqpy.model.profile import Profile
 from veqpy.operator.packed_layout import (
@@ -62,14 +61,72 @@ def test_f_profile_keeps_edge_value_but_allows_edge_slope() -> None:
         offset=1.0,
         coeff=np.array([1.0], dtype=np.float64),
         envelope_power=PROFILE_STATIC_KWARGS["F"]["envelope_power"],
+        amplitude_power=PROFILE_STATIC_KWARGS["F"]["amplitude_power"],
     )
 
     workspace.refresh_profile_slot(profile_id=0, profile=profile, grid_workspace=grid_workspace)
     f_fields = workspace.fields_for("F")
-    convert_f_squared_fields_to_f(f_fields)
 
     assert_allclose(f_fields[0, -1], 1.0)
     assert abs(f_fields[1, -1]) > 1.0e-12
+
+
+def test_f_profile_amplitude_power_matches_f_squared_chain_rule() -> None:
+    grid_workspace = GridWorkspace.from_grid(
+        Grid(Nr=6, Nt=4, M_max=1, L_max=2, quadrature_scheme="uniform")
+    )
+    coeff = np.array([0.25, -0.1], dtype=np.float64)
+    scale = 3.0
+
+    workspace = ProfileWorkspace(
+        nr=grid_workspace.Nr,
+        m_max=grid_workspace.M_max,
+        profile_names=("F",),
+        profile_index={"F": 0},
+        active_profile_ids=np.array([0], dtype=np.int64),
+        profile_L=np.array([1], dtype=np.int64),
+    )
+    profile = Profile(
+        scale=scale,
+        offset=1.0,
+        coeff=coeff,
+        envelope_power=PROFILE_STATIC_KWARGS["F"]["envelope_power"],
+        amplitude_power=PROFILE_STATIC_KWARGS["F"]["amplitude_power"],
+    )
+
+    raw_workspace = ProfileWorkspace(
+        nr=grid_workspace.Nr,
+        m_max=grid_workspace.M_max,
+        profile_names=("F",),
+        profile_index={"F": 0},
+        active_profile_ids=np.array([0], dtype=np.int64),
+        profile_L=np.array([1], dtype=np.int64),
+    )
+    raw_profile = Profile(
+        scale=1.0,
+        offset=1.0,
+        coeff=coeff,
+        envelope_power=PROFILE_STATIC_KWARGS["F"]["envelope_power"],
+    )
+
+    workspace.refresh_profile_slot(profile_id=0, profile=profile, grid_workspace=grid_workspace)
+    raw_workspace.refresh_profile_slot(
+        profile_id=0, profile=raw_profile, grid_workspace=grid_workspace
+    )
+
+    f_fields = workspace.fields_for("F")
+    amplitude_fields = raw_workspace.fields_for("F")
+    amplitude = amplitude_fields[0]
+    sqrt_amplitude = np.sqrt(amplitude)
+    expected = np.empty_like(f_fields)
+    expected[0] = scale * sqrt_amplitude
+    expected[1] = scale * 0.5 * amplitude_fields[1] / sqrt_amplitude
+    expected[2] = scale * (
+        0.5 * amplitude_fields[2] / sqrt_amplitude
+        - 0.25 * amplitude_fields[1] * amplitude_fields[1] / (amplitude * sqrt_amplitude)
+    )
+
+    assert_allclose(f_fields, expected)
 
 
 def test_degree_first_layout_encode_decode_and_active_metadata() -> None:

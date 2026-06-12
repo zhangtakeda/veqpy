@@ -210,7 +210,7 @@ def build_profile_config(
     grid_workspace: GridWorkspace,
     c_profile_names: tuple[str, ...],
     s_profile_names: tuple[str, ...],
-) -> tuple[dict[str, dict[str, int]], dict[str, float | str]]:
+) -> tuple[dict[str, dict[str, float | int]], dict[str, float | str]]:
     """Build profile construction kwargs and offset specs from static topology."""
 
     profile_static_kwargs_by_name = {

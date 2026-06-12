@@ -476,11 +476,6 @@ class Operator:
                 profile=self.profiles_by_name[self.plan.profile_names[int(p)]],
                 grid_workspace=self.plan.grid_workspace,
             )
-        f_profile_id = self.plan.profile_index.get("F", -1)
-        if f_profile_id >= 0 and not bool(self.plan.active_profile_mask[f_profile_id]):
-            # Passive F is stored as F**2 for the same postprocess contract as
-            # active F; convert once so source kernels always see F fields.
-            self.layout.profile.run_postprocess()
 
     def _refresh_stage_a_runtime(self) -> None:
         profile_workspace = self.profile_workspace
@@ -492,6 +487,7 @@ class Operator:
             coeff_index=self.plan.coeff_index,
             active_offsets=profile_workspace.active_offsets,
             active_scales=profile_workspace.active_scales,
+            active_amplitude_powers=profile_workspace.active_amplitude_powers,
             active_lengths=profile_workspace.active_lengths,
             active_coeff_index_rows=profile_workspace.active_coeff_index_rows,
         )

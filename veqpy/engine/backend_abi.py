@@ -67,7 +67,6 @@ class SourceExecutionABI:
 
     route_key: RouteKey
     psin_active_length: int
-    has_active_f_profile: bool
     requires_optimized_psin_profile: bool
     requires_psin_query_workspace: bool
     requires_source_parameter_query: bool
@@ -155,7 +154,6 @@ def build_source_execution_abi(
     return SourceExecutionABI(
         route_key=route_key,
         psin_active_length=psin_active_length,
-        has_active_f_profile=F_active_length > 0,
         requires_optimized_psin_profile=requires_optimized_psin_profile,
         requires_psin_query_workspace=(requires_optimized_psin_profile or is_pj2_psin_uniform),
         requires_source_parameter_query=bool(
@@ -182,6 +180,7 @@ class FusedHotRuntimeABI:
     T_rr: np.ndarray
     active_offsets: np.ndarray
     active_scales: np.ndarray
+    active_amplitude_powers: np.ndarray
     active_coeff_index_rows: np.ndarray
     active_lengths: np.ndarray
     c_family_fields: np.ndarray
@@ -203,8 +202,6 @@ class FusedHotRuntimeABI:
     h_fields: np.ndarray
     v_fields: np.ndarray
     k_fields: np.ndarray
-    f_profile_fields: np.ndarray
-    has_active_f_profile: bool
     c_active_order: int
     s_active_order: int
     a: float
@@ -271,7 +268,6 @@ def build_fused_hot_runtime_abi(
     grid_workspace: GridWorkspace,
     profile_workspace: ProfileWorkspace,
     geometry_workspace: GeometryWorkspace,
-    source_execution: SourceExecutionABI,
     c_active_order: int,
     s_active_order: int,
     a: float,
@@ -289,6 +285,7 @@ def build_fused_hot_runtime_abi(
         T_rr=grid_workspace.T_rr,
         active_offsets=profile_workspace.active_offsets,
         active_scales=profile_workspace.active_scales,
+        active_amplitude_powers=profile_workspace.active_amplitude_powers,
         active_coeff_index_rows=profile_workspace.active_coeff_index_rows,
         active_lengths=profile_workspace.active_lengths,
         c_family_fields=profile_workspace.c_family_fields,
@@ -310,8 +307,6 @@ def build_fused_hot_runtime_abi(
         h_fields=profile_workspace.fields_for("h"),
         v_fields=profile_workspace.fields_for("v"),
         k_fields=profile_workspace.fields_for("k"),
-        f_profile_fields=profile_workspace.fields_for("F"),
-        has_active_f_profile=bool(source_execution.has_active_f_profile),
         c_active_order=c_active_order,
         s_active_order=s_active_order,
         a=a,

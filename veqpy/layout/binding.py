@@ -69,16 +69,13 @@ def build_operator_layout(
         T_rr=plan.grid_workspace.T_rr,
         active_offsets=profile_workspace.active_offsets,
         active_scales=profile_workspace.active_scales,
+        active_amplitude_powers=profile_workspace.active_amplitude_powers,
         active_coeff_index_rows=profile_workspace.active_coeff_index_rows,
         active_lengths=profile_workspace.active_lengths,
         update_profiles_packed_bulk=numba_profile.update_profiles_packed_bulk,
     )
-    f_fields = profile_workspace.fields_for("F")
-
     def profile_postprocess_runner() -> None:
-        # F profiles are packed as F**2 for positivity during Stage A; source
-        # and diagnostics consume F and dF/drho, so convert after every refresh.
-        numba_operator.convert_f_squared_fields_to_f(f_fields, eps=1.0e-10)
+        return None
 
     geometry_stage_runner = build_geometry_stage_runner(
         c_family_fields=profile_workspace.c_family_fields,
