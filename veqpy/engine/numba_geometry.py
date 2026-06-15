@@ -18,6 +18,26 @@ from __future__ import annotations
 import numpy as np
 from numba import njit
 
+from veqpy.workspace.field_rows import (
+    GEOMETRY_RADIAL_KN,
+    GEOMETRY_RADIAL_KN_R,
+    GEOMETRY_RADIAL_LN_R,
+    GEOMETRY_RADIAL_S_R,
+    GEOMETRY_RADIAL_V_R,
+    GEOMETRY_SURFACE_GRTDIVJR_T,
+    GEOMETRY_SURFACE_GTTDIVJR,
+    GEOMETRY_SURFACE_GTTDIVJR_R,
+    GEOMETRY_SURFACE_J,
+    GEOMETRY_SURFACE_JDIVR,
+    GEOMETRY_SURFACE_R,
+    GEOMETRY_SURFACE_R_T,
+    GEOMETRY_SURFACE_SIN_TB,
+    GEOMETRY_SURFACE_Z_T,
+    PROFILE_R,
+    PROFILE_RR,
+    PROFILE_VALUE,
+)
+
 
 @njit(cache=True, fastmath=True, nogil=True)
 def update_geometry_hot(
@@ -43,20 +63,20 @@ def update_geometry_hot(
     s_active_order: int,
 ) -> None:
     """Materialize only the geometry fields and integrals required by the fused solve hot path."""
-    sin_tb = surface_fields[0]
-    R_surface = surface_fields[1]
-    R_t_surface = surface_fields[2]
-    Z_t_surface = surface_fields[3]
-    J_surface = surface_fields[4]
-    JdivR_surface = surface_fields[5]
-    grtdivJR_t_surface = surface_fields[6]
-    gttdivJR_surface = surface_fields[7]
-    gttdivJR_r_surface = surface_fields[8]
-    S_r = radial_fields[0]
-    V_r = radial_fields[1]
-    Kn = radial_fields[2]
-    Kn_r = radial_fields[3]
-    Ln_r = radial_fields[4]
+    sin_tb = surface_fields[GEOMETRY_SURFACE_SIN_TB]
+    R_surface = surface_fields[GEOMETRY_SURFACE_R]
+    R_t_surface = surface_fields[GEOMETRY_SURFACE_R_T]
+    Z_t_surface = surface_fields[GEOMETRY_SURFACE_Z_T]
+    J_surface = surface_fields[GEOMETRY_SURFACE_J]
+    JdivR_surface = surface_fields[GEOMETRY_SURFACE_JDIVR]
+    grtdivJR_t_surface = surface_fields[GEOMETRY_SURFACE_GRTDIVJR_T]
+    gttdivJR_surface = surface_fields[GEOMETRY_SURFACE_GTTDIVJR]
+    gttdivJR_r_surface = surface_fields[GEOMETRY_SURFACE_GTTDIVJR_R]
+    S_r = radial_fields[GEOMETRY_RADIAL_S_R]
+    V_r = radial_fields[GEOMETRY_RADIAL_V_R]
+    Kn = radial_fields[GEOMETRY_RADIAL_KN]
+    Kn_r = radial_fields[GEOMETRY_RADIAL_KN_R]
+    Ln_r = radial_fields[GEOMETRY_RADIAL_LN_R]
     nr = rho.shape[0]
     nt = theta.shape[0]
     theta_scale = 2.0 * np.pi / nt
@@ -66,17 +86,17 @@ def update_geometry_hot(
     s_limit = min(s_active_order + 1, s_fields.shape[0], sin_mtheta.shape[0])
     for i in range(nr):
         rho_i = rho[i]
-        h_i = h_fields[0, i]
-        h_r_i = h_fields[1, i]
-        h_rr_i = h_fields[2, i]
-        v_r_i = v_fields[1, i]
-        v_rr_i = v_fields[2, i]
-        k_i = k_fields[0, i]
-        k_r_i = k_fields[1, i]
-        k_rr_i = k_fields[2, i]
-        c0_i = c_fields[0, 0, i]
-        c0_r_i = c_fields[0, 1, i]
-        c0_rr_i = c_fields[0, 2, i]
+        h_i = h_fields[PROFILE_VALUE, i]
+        h_r_i = h_fields[PROFILE_R, i]
+        h_rr_i = h_fields[PROFILE_RR, i]
+        v_r_i = v_fields[PROFILE_R, i]
+        v_rr_i = v_fields[PROFILE_RR, i]
+        k_i = k_fields[PROFILE_VALUE, i]
+        k_r_i = k_fields[PROFILE_R, i]
+        k_rr_i = k_fields[PROFILE_RR, i]
+        c0_i = c_fields[0, PROFILE_VALUE, i]
+        c0_r_i = c_fields[0, PROFILE_R, i]
+        c0_rr_i = c_fields[0, PROFILE_RR, i]
 
         sum_J = 0.0
         sum_JR = 0.0
@@ -101,9 +121,9 @@ def update_geometry_hot(
                 cos_kt = cos_mtheta[order, j]
                 k_sin_kt = m_sin_mtheta[order, j]
                 k2_cos_kt = m2_cos_mtheta[order, j]
-                c_i = c_fields[order, 0, i]
-                c_r_i = c_fields[order, 1, i]
-                c_rr_i = c_fields[order, 2, i]
+                c_i = c_fields[order, PROFILE_VALUE, i]
+                c_r_i = c_fields[order, PROFILE_R, i]
+                c_rr_i = c_fields[order, PROFILE_RR, i]
 
                 tb_ij += c_i * cos_kt
                 tb_r_ij += c_r_i * cos_kt
@@ -116,9 +136,9 @@ def update_geometry_hot(
                 sin_kt = sin_mtheta[order, j]
                 k_cos_kt = m_cos_mtheta[order, j]
                 k2_sin_kt = m2_sin_mtheta[order, j]
-                s_i = s_fields[order, 0, i]
-                s_r_i = s_fields[order, 1, i]
-                s_rr_i = s_fields[order, 2, i]
+                s_i = s_fields[order, PROFILE_VALUE, i]
+                s_r_i = s_fields[order, PROFILE_R, i]
+                s_rr_i = s_fields[order, PROFILE_RR, i]
 
                 tb_ij += s_i * sin_kt
                 tb_r_ij += s_r_i * sin_kt

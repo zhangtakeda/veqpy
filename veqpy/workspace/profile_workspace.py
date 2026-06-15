@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from veqpy.engine.numba_profile import update_profile
+from veqpy.workspace.field_rows import PROFILE_R, PROFILE_RR, PROFILE_VALUE
 
 if TYPE_CHECKING:
     from veqpy.model.profile import Profile
@@ -191,7 +192,17 @@ class ProfileWorkspace:
     def values_for(self, name: str) -> np.ndarray:
         """Return workspace-owned value row for ``name``."""
 
-        return self.fields_for(name)[0]
+        return self.fields_for(name)[PROFILE_VALUE]
+
+    def radial_derivative_for(self, name: str) -> np.ndarray:
+        """Return workspace-owned first radial derivative row for ``name``."""
+
+        return self.fields_for(name)[PROFILE_R]
+
+    def radial_second_derivative_for(self, name: str) -> np.ndarray:
+        """Return workspace-owned second radial derivative row for ``name``."""
+
+        return self.fields_for(name)[PROFILE_RR]
 
     def has_fields_for(self, name: str) -> bool:
         """Return whether a named profile has a workspace field slot."""

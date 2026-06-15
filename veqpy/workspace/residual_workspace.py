@@ -18,6 +18,18 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from veqpy.workspace.field_rows import (
+    RESIDUAL_ROOT_FFN_PSIN,
+    RESIDUAL_ROOT_PN_PSIN,
+    RESIDUAL_ROOT_PSIN,
+    RESIDUAL_ROOT_PSIN_R,
+    RESIDUAL_ROOT_PSIN_RR,
+    RESIDUAL_SURFACE_G,
+    RESIDUAL_SURFACE_GPSIN_R,
+    RESIDUAL_SURFACE_GPSIN_R_SIN_TB,
+    RESIDUAL_SURFACE_GPSIN_Z,
+)
+
 
 @dataclass(init=False, slots=True)
 class ResidualWorkspace:
@@ -66,3 +78,48 @@ class ResidualWorkspace:
         )
         poloidal_quadrature_weight = 2.0 * np.pi / max(nt, 1)
         self.collocation_sqrt_weights = np.sqrt(poloidal_quadrature_weight * radial_weights)
+
+    @property
+    def psin(self) -> np.ndarray:
+        """Return normalized poloidal flux samples."""
+        return self.root_fields[RESIDUAL_ROOT_PSIN]
+
+    @property
+    def psin_r(self) -> np.ndarray:
+        """Return radial derivative of normalized poloidal flux."""
+        return self.root_fields[RESIDUAL_ROOT_PSIN_R]
+
+    @property
+    def psin_rr(self) -> np.ndarray:
+        """Return second radial derivative of normalized poloidal flux."""
+        return self.root_fields[RESIDUAL_ROOT_PSIN_RR]
+
+    @property
+    def FFn_psin(self) -> np.ndarray:
+        """Return normalized ``F F'`` source profile."""
+        return self.root_fields[RESIDUAL_ROOT_FFN_PSIN]
+
+    @property
+    def Pn_psin(self) -> np.ndarray:
+        """Return normalized pressure-gradient source profile."""
+        return self.root_fields[RESIDUAL_ROOT_PN_PSIN]
+
+    @property
+    def G(self) -> np.ndarray:
+        """Return compact Grad-Shafranov residual samples."""
+        return self.surface_fields[RESIDUAL_SURFACE_G]
+
+    @property
+    def Gpsin_R(self) -> np.ndarray:
+        """Return cached ``G * psin_R`` samples."""
+        return self.surface_fields[RESIDUAL_SURFACE_GPSIN_R]
+
+    @property
+    def Gpsin_Z(self) -> np.ndarray:
+        """Return cached ``G * psin_Z`` samples."""
+        return self.surface_fields[RESIDUAL_SURFACE_GPSIN_Z]
+
+    @property
+    def Gpsin_R_sin_tb(self) -> np.ndarray:
+        """Return cached ``G * psin_R * sin(theta_bar)`` samples."""
+        return self.surface_fields[RESIDUAL_SURFACE_GPSIN_R_SIN_TB]

@@ -57,6 +57,18 @@ from veqpy.math.interpolate import (
     DEFAULT_LOCAL_BARYCENTRIC_STENCIL,
     build_uniform_source_interpolation_matrix,
 )
+from veqpy.workspace.field_rows import (
+    GEOMETRY_RADIAL_KN,
+    GEOMETRY_RADIAL_KN_R,
+    GEOMETRY_RADIAL_LN_R,
+    GEOMETRY_RADIAL_S_R,
+    GEOMETRY_RADIAL_V_R,
+    GEOMETRY_SURFACE_JDIVR,
+    GEOMETRY_SURFACE_R,
+    RESIDUAL_ROOT_PSIN,
+    RESIDUAL_ROOT_PSIN_R,
+    RESIDUAL_ROOT_PSIN_RR,
+)
 
 # PJ2-psin-uniform is the only route that materializes psin by a
 # fixed-point loop. Keep these as route constants instead of user-facing
@@ -248,7 +260,11 @@ def source_parameterization_for_route_key(route_key: RouteKey | str) -> str:
 def _source_output_root_views(
     out_root_fields: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    return out_root_fields[0], out_root_fields[1], out_root_fields[2]
+    return (
+        out_root_fields[RESIDUAL_ROOT_PSIN],
+        out_root_fields[RESIDUAL_ROOT_PSIN_R],
+        out_root_fields[RESIDUAL_ROOT_PSIN_RR],
+    )
 
 
 @njit(cache=True, nogil=True)
@@ -259,13 +275,13 @@ def _source_geometry_workspace_views(
     # Keep the tuple order synchronized with GeometryWorkspace row contracts.
     # Named unpacking at call sites is the only documentation numba preserves.
     return (
-        radial_fields[1],
-        radial_fields[2],
-        radial_fields[3],
-        radial_fields[4],
-        radial_fields[0],
-        surface_fields[1],
-        surface_fields[5],
+        radial_fields[GEOMETRY_RADIAL_V_R],
+        radial_fields[GEOMETRY_RADIAL_KN],
+        radial_fields[GEOMETRY_RADIAL_KN_R],
+        radial_fields[GEOMETRY_RADIAL_LN_R],
+        radial_fields[GEOMETRY_RADIAL_S_R],
+        surface_fields[GEOMETRY_SURFACE_R],
+        surface_fields[GEOMETRY_SURFACE_JDIVR],
     )
 
 

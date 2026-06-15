@@ -19,6 +19,15 @@ from typing import TYPE_CHECKING, Self
 
 import numpy as np
 
+from veqpy.workspace.field_rows import (
+    GRID_POLOIDAL_COS_MTHETA_START,
+    GRID_POLOIDAL_THETA,
+    GRID_RADIAL_RHO,
+    GRID_RADIAL_RHO_POWERS_START,
+    GRID_RADIAL_X,
+    GRID_RADIAL_Y,
+)
+
 if TYPE_CHECKING:
     from veqpy.model.grid import Grid
 
@@ -63,72 +72,82 @@ class GridWorkspace:
     @property
     def rho(self) -> np.ndarray:
         """Radial nodes packed for runtime kernels."""
-        return self.radial_fields[0]
+        return self.radial_fields[GRID_RADIAL_RHO]
 
     @property
     def x(self) -> np.ndarray:
         """Chebyshev coordinate packed for runtime kernels."""
-        return self.radial_fields[1]
+        return self.radial_fields[GRID_RADIAL_X]
 
     @property
     def y(self) -> np.ndarray:
         """Envelope coordinate packed for runtime kernels."""
-        return self.radial_fields[2]
+        return self.radial_fields[GRID_RADIAL_Y]
 
     @property
     def rho_powers(self) -> np.ndarray:
         """Packed powers of ``rho`` used by profile envelopes."""
-        return self.radial_fields[3 : 5 + self.K_max]
+        start = GRID_RADIAL_RHO_POWERS_START
+        return self.radial_fields[start : start + self.K_max + 2]
 
     @property
     def T(self) -> np.ndarray:
         """Packed Chebyshev basis values."""
-        return self.radial_fields[5 + self.K_max : 6 + self.K_max + self.L_max]
+        start = GRID_RADIAL_RHO_POWERS_START + self.K_max + 2
+        return self.radial_fields[start : start + self.L_max + 1]
 
     @property
     def T_r(self) -> np.ndarray:
         """Packed first derivatives of the Chebyshev basis."""
-        return self.radial_fields[6 + self.K_max + self.L_max : 7 + self.K_max + 2 * self.L_max]
+        start = GRID_RADIAL_RHO_POWERS_START + self.K_max + self.L_max + 3
+        return self.radial_fields[start : start + self.L_max + 1]
 
     @property
     def T_rr(self) -> np.ndarray:
         """Packed second derivatives of the Chebyshev basis."""
-        return self.radial_fields[7 + self.K_max + 2 * self.L_max : 8 + self.K_max + 3 * self.L_max]
+        start = GRID_RADIAL_RHO_POWERS_START + self.K_max + 2 * self.L_max + 4
+        return self.radial_fields[start : start + self.L_max + 1]
 
     @property
     def theta(self) -> np.ndarray:
         """Poloidal angle nodes packed for runtime kernels."""
-        return self.poloidal_fields[0]
+        return self.poloidal_fields[GRID_POLOIDAL_THETA]
 
     @property
     def cos_mtheta(self) -> np.ndarray:
         """Packed cosine Fourier table."""
-        return self.poloidal_fields[1 : 2 + self.M_max]
+        start = GRID_POLOIDAL_COS_MTHETA_START
+        return self.poloidal_fields[start : start + self.M_max + 1]
 
     @property
     def sin_mtheta(self) -> np.ndarray:
         """Packed sine Fourier table."""
-        return self.poloidal_fields[2 + self.M_max : 3 + 2 * self.M_max]
+        start = GRID_POLOIDAL_COS_MTHETA_START + self.M_max + 1
+        return self.poloidal_fields[start : start + self.M_max + 1]
 
     @property
     def m_cos_mtheta(self) -> np.ndarray:
         """Packed first-derivative cosine table."""
-        return self.poloidal_fields[3 + 2 * self.M_max : 4 + 3 * self.M_max]
+        start = GRID_POLOIDAL_COS_MTHETA_START + 2 * (self.M_max + 1)
+        return self.poloidal_fields[start : start + self.M_max + 1]
 
     @property
     def m_sin_mtheta(self) -> np.ndarray:
         """Packed first-derivative sine table."""
-        return self.poloidal_fields[4 + 3 * self.M_max : 5 + 4 * self.M_max]
+        start = GRID_POLOIDAL_COS_MTHETA_START + 3 * (self.M_max + 1)
+        return self.poloidal_fields[start : start + self.M_max + 1]
 
     @property
     def m2_cos_mtheta(self) -> np.ndarray:
         """Packed second-derivative cosine table."""
-        return self.poloidal_fields[5 + 4 * self.M_max : 6 + 5 * self.M_max]
+        start = GRID_POLOIDAL_COS_MTHETA_START + 4 * (self.M_max + 1)
+        return self.poloidal_fields[start : start + self.M_max + 1]
 
     @property
     def m2_sin_mtheta(self) -> np.ndarray:
         """Packed second-derivative sine table."""
-        return self.poloidal_fields[6 + 5 * self.M_max : 7 + 6 * self.M_max]
+        start = GRID_POLOIDAL_COS_MTHETA_START + 5 * (self.M_max + 1)
+        return self.poloidal_fields[start : start + self.M_max + 1]
 
     @classmethod
     def from_grid(cls, grid: Grid) -> Self:
@@ -191,13 +210,20 @@ def _pack_radial_fields(
     L_max = T.shape[0] - 1
 
     fields = np.empty((8 + K_max + 3 * L_max, Nr), dtype=np.float64)
-    fields[0] = rho
-    fields[1] = x
-    fields[2] = y
-    fields[3 : 5 + K_max] = rho_powers
-    fields[5 + K_max : 6 + K_max + L_max] = T
-    fields[6 + K_max + L_max : 7 + K_max + 2 * L_max] = T_r
-    fields[7 + K_max + 2 * L_max : 8 + K_max + 3 * L_max] = T_rr
+    fields[GRID_RADIAL_RHO] = rho
+    fields[GRID_RADIAL_X] = x
+    fields[GRID_RADIAL_Y] = y
+
+    rho_start = GRID_RADIAL_RHO_POWERS_START
+    rho_stop = rho_start + K_max + 2
+    T_start = rho_stop
+    T_stop = T_start + L_max + 1
+    T_r_stop = T_stop + L_max + 1
+
+    fields[rho_start:rho_stop] = rho_powers
+    fields[T_start:T_stop] = T
+    fields[T_stop:T_r_stop] = T_r
+    fields[T_r_stop : T_r_stop + L_max + 1] = T_rr
     fields.flags.writeable = False
     return fields
 
@@ -216,12 +242,20 @@ def _pack_poloidal_fields(
     M_max = cos_mtheta.shape[0] - 1
 
     fields = np.empty((7 + 6 * M_max, Nt), dtype=np.float64)
-    fields[0] = theta
-    fields[1 : 2 + M_max] = cos_mtheta
-    fields[2 + M_max : 3 + 2 * M_max] = sin_mtheta
-    fields[3 + 2 * M_max : 4 + 3 * M_max] = m_cos_mtheta
-    fields[4 + 3 * M_max : 5 + 4 * M_max] = m_sin_mtheta
-    fields[5 + 4 * M_max : 6 + 5 * M_max] = m2_cos_mtheta
-    fields[6 + 5 * M_max : 7 + 6 * M_max] = m2_sin_mtheta
+    fields[GRID_POLOIDAL_THETA] = theta
+
+    block = M_max + 1
+    start = GRID_POLOIDAL_COS_MTHETA_START
+    fields[start : start + block] = cos_mtheta
+    start += block
+    fields[start : start + block] = sin_mtheta
+    start += block
+    fields[start : start + block] = m_cos_mtheta
+    start += block
+    fields[start : start + block] = m_sin_mtheta
+    start += block
+    fields[start : start + block] = m2_cos_mtheta
+    start += block
+    fields[start : start + block] = m2_sin_mtheta
     fields.flags.writeable = False
     return fields
