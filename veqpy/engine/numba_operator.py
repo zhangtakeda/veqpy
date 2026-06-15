@@ -47,6 +47,7 @@ from veqpy.engine.numba_source import (
     uniform_barycentric_weights,
 )
 from veqpy.math.interpolate import build_uniform_source_interpolation_coefficients
+from veqpy.workspace.field_rows import GRID_RADIAL_RHO
 
 if TYPE_CHECKING:
     from veqpy.operator.build_plan import ResidualBindingLayout
@@ -107,9 +108,9 @@ def _refresh_hot_runtime(
         hot_runtime_binding.profile_rp_fields,
         hot_runtime_binding.profile_env_fields,
         hot_runtime_binding.active_profile_ids,
-        hot_runtime_binding.T,
-        hot_runtime_binding.T_r,
-        hot_runtime_binding.T_rr,
+        hot_runtime_binding.grid_radial_fields,
+        hot_runtime_binding.grid_k_max,
+        hot_runtime_binding.grid_l_max,
         hot_runtime_binding.active_offsets,
         hot_runtime_binding.active_scales,
         hot_runtime_binding.active_amplitude_powers,
@@ -779,6 +780,7 @@ def _bind_source_eval_runner_for_fused_backend(
         if source_eval_binding.scratch_source_kernel is None:
             # Non-scratch kernels are retained for registry compatibility; new
             # hot routes should normally expose the scratch variant.
+            legacy_rho = source_eval_binding.grid_radial_fields[GRID_RADIAL_RHO]
             return source_eval_binding.source_kernel(
                 out_root_fields,
                 out_FFn_psin,
@@ -791,7 +793,7 @@ def _bind_source_eval_runner_for_fused_backend(
                 source_eval_binding.weights,
                 source_eval_binding.differentiator,
                 source_eval_binding.accumulator,
-                source_eval_binding.rho,
+                legacy_rho,
                 source_eval_binding.n_axis_fix,
                 source_eval_binding.radial_fields,
                 source_eval_binding.surface_fields,

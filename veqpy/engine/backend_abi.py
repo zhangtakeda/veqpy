@@ -21,7 +21,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -184,9 +183,9 @@ class FusedHotRuntimeABI:
     profile_rp_fields: np.ndarray
     profile_env_fields: np.ndarray
     active_profile_ids: np.ndarray
-    T: np.ndarray
-    T_r: np.ndarray
-    T_rr: np.ndarray
+    grid_radial_fields: np.ndarray
+    grid_k_max: int
+    grid_l_max: int
     active_offsets: np.ndarray
     active_scales: np.ndarray
     active_amplitude_powers: np.ndarray
@@ -200,7 +199,6 @@ class FusedHotRuntimeABI:
     s_family_source_profile_ids: np.ndarray
     geometry_surface_fields: np.ndarray
     geometry_radial_fields: np.ndarray
-    grid_radial_fields: np.ndarray
     grid_poloidal_fields: np.ndarray
     h_fields: np.ndarray
     v_fields: np.ndarray
@@ -254,7 +252,6 @@ class FusedSourceEvalABI:
     weights: np.ndarray
     differentiator: np.ndarray
     accumulator: np.ndarray
-    rho: np.ndarray
     grid_radial_fields: np.ndarray
     n_axis_fix: int
     radial_fields: np.ndarray
@@ -264,6 +261,28 @@ class FusedSourceEvalABI:
     array_scratch: np.ndarray
     matrix_scratch: np.ndarray
     B0: float
+
+
+@dataclass(frozen=True, slots=True)
+class _ProfileOwnedPsinSourceABI:
+    """Python-side source materialization bundle for optimized-psin routes."""
+
+    source_target_root_fields: np.ndarray
+    grid_radial_fields: np.ndarray
+    differentiator: np.ndarray
+    accumulator: np.ndarray
+    source_psin_query: np.ndarray
+    source_parameter_query: np.ndarray
+    heat_spline_coeff: np.ndarray
+    current_spline_coeff: np.ndarray
+    barycentric_weights: np.ndarray
+    use_barycentric: bool
+    materialized_heat_input: np.ndarray
+    materialized_current_input: np.ndarray
+    psin_profile_fields: np.ndarray
+    parameterization_code: int
+    heat_input: np.ndarray
+    current_input: np.ndarray
 
 
 def build_fused_hot_runtime_abi(
@@ -283,9 +302,9 @@ def build_fused_hot_runtime_abi(
         profile_rp_fields=profile_workspace.profile_rp_fields,
         profile_env_fields=profile_workspace.profile_env_fields,
         active_profile_ids=profile_workspace.active_profile_ids,
-        T=grid_workspace.T,
-        T_r=grid_workspace.T_r,
-        T_rr=grid_workspace.T_rr,
+        grid_radial_fields=grid_workspace.radial_fields,
+        grid_k_max=int(grid_workspace.K_max),
+        grid_l_max=int(grid_workspace.L_max),
         active_offsets=profile_workspace.active_offsets,
         active_scales=profile_workspace.active_scales,
         active_amplitude_powers=profile_workspace.active_amplitude_powers,
@@ -299,7 +318,6 @@ def build_fused_hot_runtime_abi(
         s_family_source_profile_ids=profile_workspace.s_family_source_profile_ids,
         geometry_surface_fields=geometry_workspace.surface_fields,
         geometry_radial_fields=geometry_workspace.radial_fields,
-        grid_radial_fields=grid_workspace.radial_fields,
         grid_poloidal_fields=grid_workspace.poloidal_fields,
         h_fields=profile_workspace.fields_for("h"),
         v_fields=profile_workspace.fields_for("v"),
@@ -371,7 +389,6 @@ def build_fused_source_eval_abi(
         weights=grid_workspace.weights,
         differentiator=grid_workspace.differentiator,
         accumulator=grid_workspace.accumulator,
-        rho=grid_workspace.rho,
         grid_radial_fields=grid_workspace.radial_fields,
         n_axis_fix=n_axis_fix,
         radial_fields=geometry_workspace.radial_fields,
@@ -391,14 +408,13 @@ def build_profile_owned_psin_source_abi(
     grid_workspace: GridWorkspace,
     profile_workspace: ProfileWorkspace,
     source_workspace: SourceWorkspace,
-) -> SimpleNamespace:
+) -> _ProfileOwnedPsinSourceABI:
     """Collect scratch arrays for routes where psin is an optimized profile."""
     del source_execution
-    # Keep this as a SimpleNamespace because it is consumed only by Python-side
-    # runner binding; the Numba call itself receives the individual arrays.
-    return SimpleNamespace(
+    # This bundle is consumed only by Python-side runner binding; Numba kernels
+    # still receive the individual arrays, not the dataclass object.
+    return _ProfileOwnedPsinSourceABI(
         source_target_root_fields=source_workspace.target_root_fields,
-        rho=grid_workspace.rho,
         grid_radial_fields=grid_workspace.radial_fields,
         differentiator=grid_workspace.differentiator,
         accumulator=grid_workspace.accumulator,
@@ -408,7 +424,6 @@ def build_profile_owned_psin_source_abi(
         current_spline_coeff=source_workspace.current_spline_coeff,
         barycentric_weights=source_workspace.barycentric_weights,
         use_barycentric=bool(source_plan.uses_barycentric_interpolation),
-        endpoint_blend=source_workspace.endpoint_blend,
         materialized_heat_input=source_workspace.materialized_heat_input,
         materialized_current_input=source_workspace.materialized_current_input,
         psin_profile_fields=profile_workspace.fields_for("psin"),

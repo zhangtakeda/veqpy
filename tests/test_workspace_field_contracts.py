@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import numpy as np
-from helpers import tiny_boundary, tiny_grid
+from helpers import tiny_boundary, tiny_grid, tiny_operator
 from numpy.testing import assert_allclose
 
 import veqpy.workspace.field_rows as rows
-from veqpy.engine.backend_abi import SourceExecutionABI, build_fused_source_eval_abi
+from veqpy.engine.backend_abi import (
+    SourceExecutionABI,
+    build_fused_hot_runtime_abi,
+    build_fused_source_eval_abi,
+)
 from veqpy.engine.numba_geometry import update_geometry_hot
 from veqpy.operator import Operator, OperatorCase
 from veqpy.workspace.geometry_workspace import GeometryWorkspace
@@ -168,7 +172,32 @@ def test_rho_source_eval_bindings_use_grid_radial_fields() -> None:
             binding.grid_radial_fields,
             operator.plan.grid_workspace.radial_fields,
         )
-        assert np.shares_memory(binding.rho, operator.plan.grid_workspace.rho)
+        assert np.shares_memory(
+            binding.grid_radial_fields[rows.GRID_RADIAL_RHO],
+            operator.plan.grid_workspace.rho,
+        )
+        assert not hasattr(binding, "rho")
+
+
+def test_fused_hot_runtime_binding_uses_grid_radial_fields_for_profile_basis() -> None:
+    operator = tiny_operator()
+    binding = build_fused_hot_runtime_abi(
+        grid_workspace=operator.plan.grid_workspace,
+        profile_workspace=operator.profile_workspace,
+        geometry_workspace=operator.geometry_workspace,
+        c_active_order=operator.c_effective_order,
+        s_active_order=operator.s_effective_order,
+        a=operator.case.a,
+        R0=operator.case.R0,
+        Z0=operator.case.Z0,
+    )
+
+    assert np.shares_memory(binding.grid_radial_fields, operator.plan.grid_workspace.radial_fields)
+    assert binding.grid_k_max == operator.plan.grid_workspace.K_max
+    assert binding.grid_l_max == operator.plan.grid_workspace.L_max
+    assert not hasattr(binding, "T")
+    assert not hasattr(binding, "T_r")
+    assert not hasattr(binding, "T_rr")
 
 
 def test_update_geometry_hot_accepts_grid_field_slabs() -> None:

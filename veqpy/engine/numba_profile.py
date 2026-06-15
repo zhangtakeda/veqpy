@@ -19,6 +19,8 @@ from __future__ import annotations
 import numpy as np
 from numba import njit
 
+from veqpy.workspace.field_rows import GRID_RADIAL_RHO_POWERS_START
+
 _AMPLITUDE_POWER_FLOOR = 1.0e-10
 
 
@@ -58,6 +60,23 @@ def _apply_amplitude_power(
         * amp_r
     )
     return value, value_r, value_rr
+
+
+@njit(cache=True, fastmath=True, nogil=True)
+def _profile_basis_views(
+    grid_radial_fields: np.ndarray,
+    grid_k_max: int,
+    grid_l_max: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return Chebyshev basis rows from the packed grid radial field slab."""
+    T_start = GRID_RADIAL_RHO_POWERS_START + grid_k_max + 2
+    T_stop = T_start + grid_l_max + 1
+    T_r_stop = T_stop + grid_l_max + 1
+    return (
+        grid_radial_fields[T_start:T_stop],
+        grid_radial_fields[T_stop:T_r_stop],
+        grid_radial_fields[T_r_stop : T_r_stop + grid_l_max + 1],
+    )
 
 
 @njit(cache=True, fastmath=True, nogil=True)
@@ -195,9 +214,9 @@ def update_profiles_packed_bulk(
     profile_rp_fields: np.ndarray,
     profile_env_fields: np.ndarray,
     active_profile_ids: np.ndarray,
-    T: np.ndarray,
-    T_r: np.ndarray,
-    T_rr: np.ndarray,
+    grid_radial_fields: np.ndarray,
+    grid_k_max: int,
+    grid_l_max: int,
     offsets: np.ndarray,
     scales: np.ndarray,
     amplitude_powers: np.ndarray,
@@ -208,6 +227,7 @@ def update_profiles_packed_bulk(
     """Refresh all active profile fields from packed x in bulk."""
     n_active = active_profile_ids.shape[0]
     nr = profile_fields.shape[2]
+    T, T_r, T_rr = _profile_basis_views(grid_radial_fields, grid_k_max, grid_l_max)
 
     for active_slot in range(n_active):
         profile_id = active_profile_ids[active_slot]
