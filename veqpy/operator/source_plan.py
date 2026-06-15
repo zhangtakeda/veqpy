@@ -142,6 +142,16 @@ def validate_source_plan_profile_support(
         )
 
     has_active_psin = int(getattr(source_execution, "psin_active_length", 0)) > 0
+    has_active_F = int(getattr(source_execution, "f_active_length", 0)) > 0
+    requires_active_F = bool(getattr(source_execution, "requires_optimized_f_profile", False))
+    if has_active_F and not requires_active_F:
+        raise ValueError(
+            f"{case.route} does not accept an active F profile; active F is only supported for PJ2"
+        )
+    if requires_active_F and not has_active_F:
+        raise ValueError(f"{case.route} requires an active F profile")
+    if has_active_F and has_active_psin:
+        raise ValueError("Active F and active psin profiles are mutually exclusive")
     if (
         bool(getattr(source_execution, "requires_optimized_psin_profile", False))
         and not has_active_psin
@@ -158,7 +168,7 @@ def validate_source_plan_profile_support(
         # active psin profile would create two independent owners of the same
         # root field and stale source queries.
         raise ValueError(
-            f"{case.route} does not accept an active psin profile because psin is source-owned"
+            f"{case.route} does not accept an active psin profile"
         )
 
 

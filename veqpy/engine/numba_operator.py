@@ -73,12 +73,12 @@ def bind_source_eval_runner(
         source_eval_binding=backend_abi.build_fused_source_eval_abi(
             source_plan=source_plan,
             grid_workspace=grid_workspace,
-            profile_workspace=profile_workspace,
             geometry_workspace=geometry_workspace,
             source_workspace=source_workspace,
             B0=B0,
             fix_rho=fix_rho,
-        )
+        ),
+        f_profile_fields=profile_workspace.fields_for("F"),
     )
 
 
@@ -205,7 +205,7 @@ def _run_pj2_psin_uniform_spline_with_scratch_impl(
     n_axis_fix: int,
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
-    f_profile_u: np.ndarray,
+    f_profile_fields: np.ndarray,
     Ip: float,
     beta: float,
     source_scratch_1d: np.ndarray,
@@ -239,7 +239,7 @@ def _run_pj2_psin_uniform_spline_with_scratch_impl(
             n_axis_fix,
             radial_fields,
             surface_fields,
-            f_profile_u,
+            f_profile_fields,
             Ip,
             beta,
             source_scratch_1d,
@@ -282,7 +282,7 @@ def _run_pj2_psin_uniform_barycentric_with_scratch_impl(
     n_axis_fix: int,
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
-    f_profile_u: np.ndarray,
+    f_profile_fields: np.ndarray,
     Ip: float,
     beta: float,
     source_scratch_1d: np.ndarray,
@@ -317,7 +317,7 @@ def _run_pj2_psin_uniform_barycentric_with_scratch_impl(
             n_axis_fix,
             radial_fields,
             surface_fields,
-            f_profile_u,
+            f_profile_fields,
             Ip,
             beta,
             source_scratch_1d,
@@ -654,7 +654,7 @@ def _bind_pj2_psin_uniform_residual_runner_core(
     materialized_current_input = source_workspace.materialized_current_input
     source_scratch_1d = source_workspace.scratch_1d
     source_scratch_2d = source_workspace.scratch_2d
-    f_profile_u = profile_workspace.values_for("F")
+    f_profile_fields = profile_workspace.fields_for("F")
     psin_profile_u = profile_workspace.values_for("psin")
     heat_input = source_plan.heat_input
     current_input = source_plan.current_input
@@ -716,7 +716,7 @@ def _bind_pj2_psin_uniform_residual_runner_core(
                 n_axis_fix,
                 radial_fields,
                 surface_fields,
-                f_profile_u,
+                f_profile_fields,
                 Ip,
                 beta,
                 source_scratch_1d,
@@ -747,7 +747,7 @@ def _bind_pj2_psin_uniform_residual_runner_core(
                 n_axis_fix,
                 radial_fields,
                 surface_fields,
-                f_profile_u,
+                f_profile_fields,
                 Ip,
                 beta,
                 source_scratch_1d,
@@ -772,6 +772,7 @@ def _bind_pj2_psin_uniform_residual_runner_core(
 def _bind_source_eval_runner_for_fused_backend(
     *,
     source_eval_binding: backend_abi.FusedSourceEvalABI,
+    f_profile_fields: np.ndarray,
 ) -> Callable:
     def runner(
         out_root_fields: np.ndarray,
@@ -800,7 +801,7 @@ def _bind_source_eval_runner_for_fused_backend(
                 source_eval_binding.n_axis_fix,
                 source_eval_binding.radial_fields,
                 source_eval_binding.surface_fields,
-                source_eval_binding.f_profile_u,
+                f_profile_fields,
                 source_eval_binding.Ip,
                 source_eval_binding.beta,
             )
@@ -820,7 +821,7 @@ def _bind_source_eval_runner_for_fused_backend(
             source_eval_binding.n_axis_fix,
             source_eval_binding.radial_fields,
             source_eval_binding.surface_fields,
-            source_eval_binding.f_profile_u,
+            f_profile_fields,
             source_eval_binding.Ip,
             source_eval_binding.beta,
             source_eval_binding.source_scratch_1d,

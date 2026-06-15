@@ -903,11 +903,11 @@ def _profile_coeffs_for_case(
 ) -> dict[str, list[float]]:
     coeffs = {key: list(values) for key, values in GEQDSK_PROFILE_COEFFS.items()}
 
-    # ``psin`` is not universally accepted as an active profile.  In develop,
-    # psin-coordinate PF/PP/PI/PJ1/PQ require it, while PJ2(psin) owns its psin
-    # source internally and rejects an active psin profile.  Rho-coordinate routes
-    # do not need it.  Use backend ABI metadata when available and fall back to
-    # the known develop route set otherwise.
+    # ``psin`` is not universally accepted as an active profile.  Only non-PJ2
+    # psin/uniform routes need it to query source samples at the current optimized
+    # flux coordinate; psin/grid inputs are already materialized on operator nodes.
+    # Use backend ABI metadata when available and fall back to the known develop
+    # route set otherwise.
     route_key = (spec.mode, spec.coordinate, spec.input_kind)
     if backend_abi is not None:
         psin_required_keys = getattr(

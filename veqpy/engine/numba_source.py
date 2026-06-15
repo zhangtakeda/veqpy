@@ -1150,7 +1150,7 @@ def _update_pf_from_rho_inputs_with_scratch(
     n_axis_fix: int,
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
-    F: np.ndarray,
+    F_fields: np.ndarray,
     Ip: float,
     beta: float,
     source_scratch_1d: np.ndarray,
@@ -1248,7 +1248,7 @@ def _update_pf_from_psin_uniform_inputs_with_scratch(
     n_axis_fix: int,
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
-    F: np.ndarray,
+    F_fields: np.ndarray,
     Ip: float,
     beta: float,
     source_scratch_1d: np.ndarray,
@@ -1330,7 +1330,7 @@ def _update_pf_from_psin_grid_inputs_with_scratch(
     n_axis_fix: int,
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
-    F: np.ndarray,
+    F_fields: np.ndarray,
     Ip: float,
     beta: float,
     source_scratch_1d: np.ndarray,
@@ -1415,7 +1415,7 @@ def _update_pp_from_rho_inputs_with_scratch(
     n_axis_fix: int,
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
-    F: np.ndarray,
+    F_fields: np.ndarray,
     Ip: float,
     beta: float,
     source_scratch_1d: np.ndarray,
@@ -1491,7 +1491,7 @@ def _update_pp_from_psin_uniform_inputs_with_scratch(
     n_axis_fix: int,
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
-    F: np.ndarray,
+    F_fields: np.ndarray,
     Ip: float,
     beta: float,
     source_scratch_1d: np.ndarray,
@@ -1564,7 +1564,7 @@ def _update_pp_from_psin_grid_inputs_with_scratch(
     n_axis_fix: int,
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
-    F: np.ndarray,
+    F_fields: np.ndarray,
     Ip: float,
     beta: float,
     source_scratch_1d: np.ndarray,
@@ -1640,7 +1640,7 @@ def _update_pi_from_rho_inputs_with_scratch(
     n_axis_fix: int,
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
-    F: np.ndarray,
+    F_fields: np.ndarray,
     Ip: float,
     beta: float,
     source_scratch_1d: np.ndarray,
@@ -1713,7 +1713,7 @@ def _update_pi_from_psin_uniform_inputs_with_scratch(
     n_axis_fix: int,
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
-    F: np.ndarray,
+    F_fields: np.ndarray,
     Ip: float,
     beta: float,
     source_scratch_1d: np.ndarray,
@@ -1783,7 +1783,7 @@ def _update_pi_from_psin_grid_inputs_with_scratch(
     n_axis_fix: int,
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
-    F: np.ndarray,
+    F_fields: np.ndarray,
     Ip: float,
     beta: float,
     source_scratch_1d: np.ndarray,
@@ -1856,7 +1856,7 @@ def _update_pj1_from_rho_inputs_with_scratch(
     n_axis_fix: int,
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
-    F: np.ndarray,
+    F_fields: np.ndarray,
     Ip: float,
     beta: float,
     source_scratch_1d: np.ndarray,
@@ -1943,7 +1943,7 @@ def _update_pj1_from_psin_uniform_inputs_with_scratch(
     n_axis_fix: int,
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
-    F: np.ndarray,
+    F_fields: np.ndarray,
     Ip: float,
     beta: float,
     source_scratch_1d: np.ndarray,
@@ -2028,7 +2028,7 @@ def _update_pj1_from_psin_grid_inputs_with_scratch(
     n_axis_fix: int,
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
-    F: np.ndarray,
+    F_fields: np.ndarray,
     Ip: float,
     beta: float,
     source_scratch_1d: np.ndarray,
@@ -2113,7 +2113,7 @@ def _update_pj2_from_psin_uniform_inputs_with_scratch(
     n_axis_fix: int,
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
-    F: np.ndarray,
+    F_fields: np.ndarray,
     Ip: float,
     beta: float,
     source_scratch_1d: np.ndarray,
@@ -2121,6 +2121,8 @@ def _update_pj2_from_psin_uniform_inputs_with_scratch(
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
     V_r, Kn, _, Ln_r, _, _, _ = _source_geometry_workspace_views(radial_fields, surface_fields)
+    F = F_fields[0]
+    F_r = F_fields[1]
     has_Ip = not np.isnan(Ip)
     has_beta = not np.isnan(beta)
     integrand = source_scratch_1d[_SLOT_INTEGRAND]
@@ -2166,8 +2168,7 @@ def _update_pj2_from_psin_uniform_inputs_with_scratch(
         alpha1 = -weighted_dot(heat_input, out_psin_r, weights)
         scaled_product_ratio_into(out_Pn_psin, heat_input, out_psin_r, out_psin_r, 1.0 / alpha1)
 
-    full_differentiation(scratch_aux, F, differentiator)
-    product_into(out_FFn_psin, F, scratch_aux)
+    product_into(out_FFn_psin, F, F_r)
     scaled_ratio_into(out_FFn_psin, out_FFn_psin, out_psin_r, 1.0 / (alpha1 * alpha2))
     _regularize_ffn_psin(out_FFn_psin, rho, n_axis_fix)
     return alpha1, alpha2
@@ -2191,7 +2192,7 @@ def _update_pj2_from_psin_grid_inputs_with_scratch(
     n_axis_fix: int,
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
-    F: np.ndarray,
+    F_fields: np.ndarray,
     Ip: float,
     beta: float,
     source_scratch_1d: np.ndarray,
@@ -2199,6 +2200,8 @@ def _update_pj2_from_psin_grid_inputs_with_scratch(
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
     V_r, Kn, _, Ln_r, _, _, _ = _source_geometry_workspace_views(radial_fields, surface_fields)
+    F = F_fields[0]
+    F_r = F_fields[1]
     has_Ip = not np.isnan(Ip)
     has_beta = not np.isnan(beta)
     integrand = source_scratch_1d[_SLOT_INTEGRAND]
@@ -2242,8 +2245,7 @@ def _update_pj2_from_psin_grid_inputs_with_scratch(
         alpha1 = -weighted_dot(heat_input, out_psin_r, weights)
         scaled_product_ratio_into(out_Pn_psin, heat_input, out_psin_r, out_psin_r, 1.0 / alpha1)
 
-    full_differentiation(scratch_aux, F, differentiator)
-    product_into(out_FFn_psin, F, scratch_aux)
+    product_into(out_FFn_psin, F, F_r)
     scaled_ratio_into(out_FFn_psin, out_FFn_psin, out_psin_r, 1.0 / (alpha1 * alpha2))
     _regularize_ffn_psin(out_FFn_psin, rho, n_axis_fix)
     return alpha1, alpha2
@@ -2270,7 +2272,7 @@ def _update_pj2_from_rho_inputs_with_scratch(
     n_axis_fix: int,
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
-    F: np.ndarray,
+    F_fields: np.ndarray,
     Ip: float,
     beta: float,
     source_scratch_1d: np.ndarray,
@@ -2280,6 +2282,8 @@ def _update_pj2_from_rho_inputs_with_scratch(
     V_r, Kn, Kn_r, Ln_r, S_r, R, JdivR = _source_geometry_workspace_views(
         radial_fields, surface_fields
     )
+    F = F_fields[0]
+    F_r = F_fields[1]
     has_Ip = not np.isnan(Ip)
     has_beta = not np.isnan(beta)
     integrand = source_scratch_1d[_SLOT_INTEGRAND]
@@ -2318,8 +2322,6 @@ def _update_pj2_from_rho_inputs_with_scratch(
         copy_into(scratch_Pr, heat_input)
         alpha1 = -dot(scratch_Pr, weights) / alpha2
         scaled_ratio_into(out_Pn_psin, scratch_Pr, out_psin_r, 1.0 / (alpha1 * alpha2))
-    F_r = source_scratch_1d[_SLOT_Fr]
-    full_differentiation(F_r, F, differentiator)
     scaled_product_into(out_FFn_psin, F, F_r, 1.0 / (alpha1 * alpha2))
     scaled_ratio_into(out_FFn_psin, out_FFn_psin, out_psin_r, 1.0)
     _regularize_ffn_psin(out_FFn_psin, rho, n_axis_fix)
@@ -2344,7 +2346,7 @@ def _update_pq_from_psin_uniform_inputs_with_scratch(
     n_axis_fix: int,
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
-    F: np.ndarray,
+    F_fields: np.ndarray,
     Ip: float,
     beta: float,
     source_scratch_1d: np.ndarray,
@@ -2479,7 +2481,7 @@ def _update_pq_from_psin_grid_inputs_with_scratch(
     n_axis_fix: int,
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
-    F: np.ndarray,
+    F_fields: np.ndarray,
     Ip: float,
     beta: float,
     source_scratch_1d: np.ndarray,
@@ -2613,7 +2615,7 @@ def _update_pq_from_rho_inputs_with_scratch(
     n_axis_fix: int,
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
-    F: np.ndarray,
+    F_fields: np.ndarray,
     Ip: float,
     beta: float,
     source_scratch_1d: np.ndarray,

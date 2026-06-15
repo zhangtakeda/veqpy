@@ -59,14 +59,15 @@ flux. `nodes="grid"` means the arrays already live on the operator radial grid;
 `PP/psin/uniform` route uses a `sqrt(psin)` uniform source parameterization so
 edge-resolved input can be sampled more evenly.
 
-For `psin/uniform` routes where the flux profile is part of the solve (`PF`,
-`PP`, `PI`, `PJ1`, and `PQ`), `psin` must be an active optimized profile because
-the source samples need the current flux coordinate during every residual
-evaluation. `PJ2/psin/uniform` is the special case: it updates the source query
-by a fixed-point iteration instead of taking `psin` as an active unknown. `PQ`
-is also strict about the toroidal-field profile: it solves the `F` or `F^2`
-profile from `q` and the edge value `R0 * B0`, so an active `F` profile is not
-accepted.
+For non-`PJ2` `psin/uniform` routes (`PF`, `PP`, `PI`, `PJ1`, and `PQ`), `psin`
+must be an active optimized profile because the source samples need the current
+flux coordinate during every residual evaluation. `psin/grid` inputs are already
+materialized on the operator radial nodes, so they do not own an active `psin`
+profile. Active `F` is required only by `PJ2`, where the parallel-current source
+uses the current optimized toroidal-field profile; active `F` and active `psin`
+are mutually exclusive. `PQ` is also strict about the toroidal-field profile: it
+solves the `F` or `F^2` profile from `q` and the edge value `R0 * B0`, so an
+active `F` profile is not accepted.
 
 ## Constraints and Scaling
 

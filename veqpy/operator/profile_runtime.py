@@ -275,4 +275,39 @@ def validate_case_compatibility(
         raise ValueError("Replacement case changes the packed coefficient layout")
     if not np.array_equal(next_order_offsets, order_offsets):
         raise ValueError("Replacement case changes the degree ordering layout")
+    _validate_active_prefix_profile_ownership(
+        case=case,
+        profile_names=profile_names,
+        profile_L=profile_L,
+    )
     validate_source_inputs(case)
+
+
+def _validate_active_prefix_profile_ownership(
+    *,
+    case: OperatorCase,
+    profile_names: tuple[str, ...],
+    profile_L: np.ndarray,
+) -> None:
+    active_names = {
+        profile_names[index] for index, length in enumerate(profile_L) if int(length) >= 0
+    }
+    requires_active_F = case.route == "PJ2"
+    requires_active_psin = (
+        case.route != "PJ2" and case.coordinate == "psin" and case.nodes == "uniform"
+    )
+
+    if "F" in active_names and not requires_active_F:
+        raise ValueError(
+            f"{case.route} does not accept an active F profile; active F is only supported for PJ2"
+        )
+    if requires_active_F and "F" not in active_names:
+        raise ValueError(f"{case.route} requires an active F profile")
+    if "F" in active_names and "psin" in active_names:
+        raise ValueError("Active F and active psin profiles are mutually exclusive")
+    if "psin" in active_names and not requires_active_psin:
+        raise ValueError(
+            f"{case.route} {case.coordinate}/{case.nodes} does not accept an active psin profile"
+        )
+    if requires_active_psin and "psin" not in active_names:
+        raise ValueError(f"{case.route} requires an active psin profile")

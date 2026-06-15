@@ -51,12 +51,13 @@ route 的差别在于这些场如何由一维输入重构:
 `PP/psin/uniform` route 使用 `sqrt(psin)` 作为均匀 source 参数化，使边缘附近
 的输入采样更均匀。
 
-对于 flux profile 参与求解的 `psin/uniform` route (`PF`, `PP`, `PI`, `PJ1`,
-`PQ`)，`psin` 必须是 active optimized profile，因为每次 residual 评估都要用
-当前磁通坐标查询 source 样本。`PJ2/psin/uniform` 是特例: 它不把 `psin` 当作
-active unknown，而是通过 fixed-point 迭代更新 source query。`PQ` 对环向场
-profile 也更严格: 它从 `q` 和边界值 `R0 * B0` 解出 `F` 或 `F^2`，因此不接受
-active `F` profile。
+对于非 `PJ2` 的 `psin/uniform` route (`PF`, `PP`, `PI`, `PJ1`, `PQ`)，
+`psin` 必须是 active optimized profile，因为每次 residual 评估都要用当前磁通
+坐标查询 source 样本。`psin/grid` 输入已经 materialized 到 operator 径向节点，
+因此不拥有 active `psin` profile。active `F` 只由 `PJ2` 要求，因为
+parallel-current source 会使用当前优化的环向场 profile；active `F` 和 active
+`psin` 互斥。`PQ` 对环向场 profile 也更严格: 它从 `q` 和边界值 `R0 * B0`
+解出 `F` 或 `F^2`，因此不接受 active `F` profile。
 
 ## Constraints 与 Scaling
 

@@ -67,7 +67,9 @@ class SourceExecutionABI:
 
     route_key: RouteKey
     psin_active_length: int
+    f_active_length: int
     requires_optimized_psin_profile: bool
+    requires_optimized_f_profile: bool
     requires_psin_query_workspace: bool
     requires_source_parameter_query: bool
     requires_target_root_fields: bool
@@ -129,32 +131,39 @@ def build_source_execution_abi(
         raise ValueError("psin is active but has no active profile slot")
     if F_active_length > 0 and F_active_slot < 0:
         raise ValueError("F is active but has no active profile slot")
-    if route_key[0] == "PQ" and F_active_length > 0:
-        raise ValueError("PQ strict routes do not accept an active F profile")
+    requires_optimized_psin_profile = route_key in PROFILE_OWNED_PSIN_ROUTE_KEYS
+    requires_optimized_f_profile = route_key[0] == "PJ2"
+
+    if F_active_length > 0 and not requires_optimized_f_profile:
+        raise ValueError(
+            f"{route_key[0]} does not accept an active F profile; "
+            "active F is only supported for PJ2"
+        )
+    if requires_optimized_f_profile and F_active_length <= 0:
+        raise ValueError(f"{route_key[0]} requires an active F profile")
+    if F_active_length > 0 and psin_active_length > 0:
+        raise ValueError("Active F and active psin profiles are mutually exclusive")
 
     # In psin-coordinate routes, exactly one layer owns psin: either the packed
     # optimizer profile, or the source kernel. Mixing the two would make the
     # source query stale or double-count an optimized flux coordinate.
-    requires_optimized_psin_profile = route_key in PROFILE_OWNED_PSIN_ROUTE_KEYS
     if requires_optimized_psin_profile and psin_active_length <= 0:
         raise ValueError(
             f"{route_key[0]} {route_key[1]}/{route_key[2]} requires an active psin profile"
         )
-    if (
-        source_plan.coordinate == "psin"
-        and not requires_optimized_psin_profile
-        and psin_active_length > 0
-    ):
+    if not requires_optimized_psin_profile and psin_active_length > 0:
         raise ValueError(
             f"{route_key[0]} {route_key[1]}/{route_key[2]} does not accept an active psin "
-            "profile because psin is source-owned"
+            "profile"
         )
 
     is_pj2_psin_uniform = route_key == ("PJ2", "psin", "uniform")
     return SourceExecutionABI(
         route_key=route_key,
         psin_active_length=psin_active_length,
+        f_active_length=F_active_length,
         requires_optimized_psin_profile=requires_optimized_psin_profile,
+        requires_optimized_f_profile=requires_optimized_f_profile,
         requires_psin_query_workspace=(requires_optimized_psin_profile or is_pj2_psin_uniform),
         requires_source_parameter_query=bool(
             source_plan.coordinate == "psin" and source_plan.parameterization != "identity"
@@ -241,8 +250,9 @@ class FusedSourceEvalABI:
     """Array and kernel bundle required by fused source evaluation.
 
     Source kernels are flat Numba callables.  This object supplies the selected
-    kernel plus the geometry/source/profile arrays needed to call it without
-    reaching back into Python objects.
+    kernel plus the geometry/source arrays needed to call it without reaching
+    back into Python objects. Route-specific optimized profile fields are bound
+    by the caller so this generic ABI does not imply profile ownership.
     """
 
     source_kernel: Callable
@@ -255,7 +265,6 @@ class FusedSourceEvalABI:
     n_axis_fix: int
     radial_fields: np.ndarray
     surface_fields: np.ndarray
-    f_profile_u: np.ndarray
     Ip: float
     beta: float
     source_scratch_1d: np.ndarray
@@ -353,7 +362,6 @@ def build_fused_source_eval_abi(
     *,
     source_plan: SourcePlan,
     grid_workspace: GridWorkspace,
-    profile_workspace: ProfileWorkspace,
     geometry_workspace: GeometryWorkspace,
     source_workspace: SourceWorkspace,
     B0: float,
@@ -380,7 +388,6 @@ def build_fused_source_eval_abi(
         n_axis_fix=n_axis_fix,
         radial_fields=geometry_workspace.radial_fields,
         surface_fields=geometry_workspace.surface_fields,
-        f_profile_u=profile_workspace.values_for("F"),
         Ip=float(source_plan.Ip),
         beta=float(source_plan.beta),
         source_scratch_1d=source_workspace.scratch_1d,
