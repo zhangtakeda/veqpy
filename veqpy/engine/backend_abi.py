@@ -228,11 +228,10 @@ class FusedResidualPackABI:
     active_residual_block_radial_powers: np.ndarray
     active_coeff_index_rows: np.ndarray
     active_lengths: np.ndarray
-    sin_mtheta: np.ndarray
-    cos_mtheta: np.ndarray
-    rho_powers: np.ndarray
-    y: np.ndarray
-    T: np.ndarray
+    grid_radial_fields: np.ndarray
+    grid_poloidal_fields: np.ndarray
+    grid_k_max: int
+    grid_l_max: int
     weights: np.ndarray
     a: float
     R0: float
@@ -334,11 +333,10 @@ def build_fused_residual_pack_abi(
         ),
         active_coeff_index_rows=profile_workspace.active_coeff_index_rows,
         active_lengths=profile_workspace.active_lengths,
-        sin_mtheta=grid_workspace.sin_mtheta,
-        cos_mtheta=grid_workspace.cos_mtheta,
-        rho_powers=grid_workspace.rho_powers,
-        y=grid_workspace.y,
-        T=grid_workspace.T,
+        grid_radial_fields=grid_workspace.radial_fields,
+        grid_poloidal_fields=grid_workspace.poloidal_fields,
+        grid_k_max=int(grid_workspace.K_max),
+        grid_l_max=int(grid_workspace.L_max),
         weights=grid_workspace.weights,
         a=a,
         R0=R0,

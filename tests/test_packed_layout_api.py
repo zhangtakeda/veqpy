@@ -187,15 +187,10 @@ def test_residual_auto_packer_matches_legacy_high_block_path() -> None:
     block_radial_powers = np.array([0, 0, 0, 0, 1, 1, 0, 0], dtype=np.int64)
     coeff_index_rows = np.arange(block_count, dtype=np.int64).reshape(block_count, 1)
     lengths = np.ones(block_count, dtype=np.int64)
-    theta = np.linspace(0.0, 2.0 * np.pi, nt, endpoint=False)
-    orders = np.arange(4, dtype=np.float64)[:, None]
-    sin_mtheta = np.ascontiguousarray(np.sin(orders * theta[None, :]))
-    cos_mtheta = np.ascontiguousarray(np.cos(orders * theta[None, :]))
-    rho = np.linspace(0.0, 1.0, nr, dtype=np.float64)
-    rho_powers = np.ascontiguousarray(np.vstack([rho**i for i in range(4)]))
-    y = np.linspace(1.0, 1.4, nr, dtype=np.float64)
-    T = np.ascontiguousarray(rng.normal(size=(1, nr)))
-    weights = np.linspace(0.1, 0.3, nr, dtype=np.float64)
+    grid_workspace = GridWorkspace.from_grid(
+        Grid(Nr=nr, Nt=nt, L_max=0, M_max=3, K_max=2, quadrature_scheme="legendre")
+    )
+    weights = grid_workspace.weights
     out_legacy = np.zeros(block_count, dtype=np.float64)
     out_auto = np.zeros(block_count, dtype=np.float64)
 
@@ -208,11 +203,10 @@ def test_residual_auto_packer_matches_legacy_high_block_path() -> None:
         coeff_index_rows,
         lengths,
         residual_workspace,
-        sin_mtheta,
-        cos_mtheta,
-        rho_powers,
-        y,
-        T,
+        grid_workspace.radial_fields,
+        grid_workspace.poloidal_fields,
+        grid_workspace.K_max,
+        grid_workspace.L_max,
         weights,
         0.4,
         1.7,
@@ -228,11 +222,10 @@ def test_residual_auto_packer_matches_legacy_high_block_path() -> None:
         coeff_index_rows,
         lengths,
         residual_workspace,
-        sin_mtheta,
-        cos_mtheta,
-        rho_powers,
-        y,
-        T,
+        grid_workspace.radial_fields,
+        grid_workspace.poloidal_fields,
+        grid_workspace.K_max,
+        grid_workspace.L_max,
         weights,
         0.4,
         1.7,
