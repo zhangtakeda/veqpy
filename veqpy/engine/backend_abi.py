@@ -200,14 +200,8 @@ class FusedHotRuntimeABI:
     s_family_source_profile_ids: np.ndarray
     geometry_surface_fields: np.ndarray
     geometry_radial_fields: np.ndarray
-    rho: np.ndarray
-    theta: np.ndarray
-    cos_mtheta: np.ndarray
-    sin_mtheta: np.ndarray
-    m_cos_mtheta: np.ndarray
-    m_sin_mtheta: np.ndarray
-    m2_cos_mtheta: np.ndarray
-    m2_sin_mtheta: np.ndarray
+    grid_radial_fields: np.ndarray
+    grid_poloidal_fields: np.ndarray
     h_fields: np.ndarray
     v_fields: np.ndarray
     k_fields: np.ndarray
@@ -267,8 +261,8 @@ class FusedSourceEvalABI:
     surface_fields: np.ndarray
     Ip: float
     beta: float
-    source_scratch_1d: np.ndarray
-    source_scratch_2d: np.ndarray
+    array_scratch: np.ndarray
+    matrix_scratch: np.ndarray
     B0: float
 
 
@@ -305,14 +299,8 @@ def build_fused_hot_runtime_abi(
         s_family_source_profile_ids=profile_workspace.s_family_source_profile_ids,
         geometry_surface_fields=geometry_workspace.surface_fields,
         geometry_radial_fields=geometry_workspace.radial_fields,
-        rho=grid_workspace.rho,
-        theta=grid_workspace.theta,
-        cos_mtheta=grid_workspace.cos_mtheta,
-        sin_mtheta=grid_workspace.sin_mtheta,
-        m_cos_mtheta=grid_workspace.m_cos_mtheta,
-        m_sin_mtheta=grid_workspace.m_sin_mtheta,
-        m2_cos_mtheta=grid_workspace.m2_cos_mtheta,
-        m2_sin_mtheta=grid_workspace.m2_sin_mtheta,
+        grid_radial_fields=grid_workspace.radial_fields,
+        grid_poloidal_fields=grid_workspace.poloidal_fields,
         h_fields=profile_workspace.fields_for("h"),
         v_fields=profile_workspace.fields_for("v"),
         k_fields=profile_workspace.fields_for("k"),
@@ -390,8 +378,8 @@ def build_fused_source_eval_abi(
         surface_fields=geometry_workspace.surface_fields,
         Ip=float(source_plan.Ip),
         beta=float(source_plan.beta),
-        source_scratch_1d=source_workspace.scratch_1d,
-        source_scratch_2d=source_workspace.scratch_2d,
+        array_scratch=source_workspace.array_scratch,
+        matrix_scratch=source_workspace.matrix_scratch,
         B0=B0,
     )
 

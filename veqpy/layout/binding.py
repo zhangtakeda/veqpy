@@ -95,14 +95,8 @@ def build_operator_layout(
         Z0=case.Z0,
         surface_fields=geometry_workspace.surface_fields,
         radial_fields=geometry_workspace.radial_fields,
-        rho=plan.grid_workspace.rho,
-        theta=plan.grid_workspace.theta,
-        cos_mtheta=plan.grid_workspace.cos_mtheta,
-        sin_mtheta=plan.grid_workspace.sin_mtheta,
-        m_cos_mtheta=plan.grid_workspace.m_cos_mtheta,
-        m_sin_mtheta=plan.grid_workspace.m_sin_mtheta,
-        m2_cos_mtheta=plan.grid_workspace.m2_cos_mtheta,
-        m2_sin_mtheta=plan.grid_workspace.m2_sin_mtheta,
+        grid_radial_fields=plan.grid_workspace.radial_fields,
+        grid_poloidal_fields=plan.grid_workspace.poloidal_fields,
     )
     source_eval_runner = numba_operator.bind_source_eval_runner(
         source_plan=plan.source_plan,

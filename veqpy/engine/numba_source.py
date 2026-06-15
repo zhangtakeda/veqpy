@@ -103,7 +103,7 @@ SOURCE_PARAMETERIZATION_SQRT_PSIN = "sqrt_psin"
 SOURCE_PARAMETERIZATION_CODE_IDENTITY = 0
 SOURCE_PARAMETERIZATION_CODE_SQRT_PSIN = 1
 
-# Scratch slot indices into SourceWorkspace.scratch_1d (7 + Nr rows × Nr).  These
+# Scratch slot indices into SourceWorkspace.array_scratch (7 + Nr rows × Nr).  These
 # symbolic names are part of the hot-kernel ABI with SourceWorkspace; changing
 # the row order requires updating the allocator at the same time.
 _SLOT_INTEGRAND = 0
@@ -1169,14 +1169,14 @@ def _update_pf_from_rho_inputs_with_scratch(
     F_fields: np.ndarray,
     Ip: float,
     beta: float,
-    source_scratch_1d: np.ndarray,
-    source_scratch_2d: np.ndarray,
+    array_scratch: np.ndarray,
+    matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
     V_r, Kn, _, Ln_r, _, R, JdivR = _source_geometry_workspace_views(radial_fields, surface_fields)
     has_Ip = not np.isnan(Ip)
     has_beta = not np.isnan(beta)
-    integrand = source_scratch_1d[_SLOT_INTEGRAND]
+    integrand = array_scratch[_SLOT_INTEGRAND]
     _fill_pf_rho_integrand(integrand, Kn, current_input, Ln_r, V_r, heat_input)
     full_integration(out_psin_r, integrand, accumulator)
     out_psin_r *= -2.0
@@ -1210,7 +1210,7 @@ def _update_pf_from_rho_inputs_with_scratch(
         return alpha1, alpha2
     c2 = integral_prof * integral_prof
     if has_Ip and (not has_beta):
-        g1n_integrand = source_scratch_2d[0]
+        g1n_integrand = matrix_scratch[0]
         _fill_g1n_rho_integrand(
             g1n_integrand,
             JdivR,
@@ -1220,7 +1220,7 @@ def _update_pf_from_rho_inputs_with_scratch(
             out_psin_r,
             psi_square_sign,
         )
-        radial_scratch = source_scratch_1d[_SLOT_AUX0]
+        radial_scratch = array_scratch[_SLOT_AUX0]
         nt = g1n_integrand.shape[1]
         for j in range(nt):
             s = 0.0
@@ -1233,7 +1233,7 @@ def _update_pf_from_rho_inputs_with_scratch(
         G1n_integral = (2.0 * np.pi / nt) * G1n_integral
         alpha1 = -Ip / G1n_integral
     elif has_beta and (not has_Ip):
-        scratch_aux = source_scratch_1d[_SLOT_AUX0]
+        scratch_aux = array_scratch[_SLOT_AUX0]
         _compute_Pn_out(scratch_aux, heat_input, accumulator, weights)
         c1 = 0.5 * beta * B0**2 * dot(V_r, weights) / weighted_dot(scratch_aux, V_r, weights)
         alpha1 = _signed_sqrt_ratio(c1, c2)
@@ -1267,14 +1267,14 @@ def _update_pf_from_psin_uniform_inputs_with_scratch(
     F_fields: np.ndarray,
     Ip: float,
     beta: float,
-    source_scratch_1d: np.ndarray,
-    source_scratch_2d: np.ndarray,
+    array_scratch: np.ndarray,
+    matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
     V_r, Kn, _, Ln_r, _, R, JdivR = _source_geometry_workspace_views(radial_fields, surface_fields)
     has_Ip = not np.isnan(Ip)
     has_beta = not np.isnan(beta)
-    integrand = source_scratch_1d[_SLOT_INTEGRAND]
+    integrand = array_scratch[_SLOT_INTEGRAND]
     _fill_pf_psin_integrand(integrand, current_input, Ln_r, V_r, heat_input)
     full_integration(out_psin_r, integrand, accumulator)
     out_psin_r *= -1.0
@@ -1289,7 +1289,7 @@ def _update_pf_from_psin_uniform_inputs_with_scratch(
     _update_psin_coordinate(out_psin, out_psin_r, accumulator)
     if (not has_Ip) and (not has_beta):
         alpha2 = psi_scale_sign * integral_prof
-        pressure_profile = source_scratch_1d[_SLOT_AUX0]
+        pressure_profile = array_scratch[_SLOT_AUX0]
         product_into(pressure_profile, heat_input, out_psin_r)
         alpha1 = -dot(pressure_profile, weights)
         scale_into(out_Pn_psin, heat_input, 1.0 / alpha1)
@@ -1301,9 +1301,9 @@ def _update_pf_from_psin_uniform_inputs_with_scratch(
     copy_into(out_FFn_psin, current_input)
     _regularize_ffn_psin(out_FFn_psin, rho, n_axis_fix)
     if has_Ip and (not has_beta):
-        g1n_integrand = source_scratch_2d[0]
+        g1n_integrand = matrix_scratch[0]
         _fill_g1n_psin_integrand(g1n_integrand, JdivR, out_FFn_psin, R, out_Pn_psin)
-        radial_scratch = source_scratch_1d[_SLOT_AUX0]
+        radial_scratch = array_scratch[_SLOT_AUX0]
         nt = g1n_integrand.shape[1]
         for j in range(nt):
             s = 0.0
@@ -1316,9 +1316,9 @@ def _update_pf_from_psin_uniform_inputs_with_scratch(
         G1n_integral = (2.0 * np.pi / nt) * G1n_integral
         alpha1 = -Ip / G1n_integral
     elif has_beta and (not has_Ip):
-        scratch_Pn_r = source_scratch_1d[_SLOT_PNr]
+        scratch_Pn_r = array_scratch[_SLOT_PNr]
         product_into(scratch_Pn_r, out_Pn_psin, out_psin_r)
-        scratch_aux = source_scratch_1d[_SLOT_AUX1]
+        scratch_aux = array_scratch[_SLOT_AUX1]
         _compute_Pn_out(scratch_aux, scratch_Pn_r, accumulator, weights)
         c1 = 0.5 * beta * B0**2 * dot(V_r, weights) / weighted_dot(scratch_aux, V_r, weights)
         alpha1 = _signed_sqrt_ratio(c1, c2)
@@ -1349,14 +1349,14 @@ def _update_pf_from_psin_grid_inputs_with_scratch(
     F_fields: np.ndarray,
     Ip: float,
     beta: float,
-    source_scratch_1d: np.ndarray,
-    source_scratch_2d: np.ndarray,
+    array_scratch: np.ndarray,
+    matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
     V_r, Kn, _, Ln_r, _, R, JdivR = _source_geometry_workspace_views(radial_fields, surface_fields)
     has_Ip = not np.isnan(Ip)
     has_beta = not np.isnan(beta)
-    integrand = source_scratch_1d[_SLOT_INTEGRAND]
+    integrand = array_scratch[_SLOT_INTEGRAND]
     _fill_pf_psin_integrand(integrand, current_input, Ln_r, V_r, heat_input)
     full_integration(out_psin_r, integrand, accumulator)
     out_psin_r *= -1.0
@@ -1371,7 +1371,7 @@ def _update_pf_from_psin_grid_inputs_with_scratch(
     _update_psin_coordinate(out_psin, out_psin_r, accumulator)
     if (not has_Ip) and (not has_beta):
         alpha2 = psi_scale_sign * integral_prof
-        pressure_profile = source_scratch_1d[_SLOT_AUX0]
+        pressure_profile = array_scratch[_SLOT_AUX0]
         product_into(pressure_profile, heat_input, out_psin_r)
         alpha1 = -dot(pressure_profile, weights)
         scale_into(out_Pn_psin, heat_input, 1.0 / alpha1)
@@ -1383,9 +1383,9 @@ def _update_pf_from_psin_grid_inputs_with_scratch(
     copy_into(out_FFn_psin, current_input)
     _regularize_ffn_psin(out_FFn_psin, rho, n_axis_fix)
     if has_Ip and (not has_beta):
-        g1n_integrand = source_scratch_2d[0]
+        g1n_integrand = matrix_scratch[0]
         _fill_g1n_psin_integrand(g1n_integrand, JdivR, out_FFn_psin, R, out_Pn_psin)
-        radial_scratch = source_scratch_1d[_SLOT_AUX0]
+        radial_scratch = array_scratch[_SLOT_AUX0]
         nt = g1n_integrand.shape[1]
         for j in range(nt):
             s = 0.0
@@ -1398,9 +1398,9 @@ def _update_pf_from_psin_grid_inputs_with_scratch(
         G1n_integral = (2.0 * np.pi / nt) * G1n_integral
         alpha1 = -Ip / G1n_integral
     elif has_beta and (not has_Ip):
-        scratch_Pn_r = source_scratch_1d[_SLOT_PNr]
+        scratch_Pn_r = array_scratch[_SLOT_PNr]
         product_into(scratch_Pn_r, out_Pn_psin, out_psin_r)
-        scratch_aux = source_scratch_1d[_SLOT_AUX1]
+        scratch_aux = array_scratch[_SLOT_AUX1]
         _compute_Pn_out(scratch_aux, scratch_Pn_r, accumulator, weights)
         c1 = 0.5 * beta * B0**2 * dot(V_r, weights) / weighted_dot(scratch_aux, V_r, weights)
         alpha1 = _signed_sqrt_ratio(c1, c2)
@@ -1434,8 +1434,8 @@ def _update_pp_from_rho_inputs_with_scratch(
     F_fields: np.ndarray,
     Ip: float,
     beta: float,
-    source_scratch_1d: np.ndarray,
-    source_scratch_2d: np.ndarray,
+    array_scratch: np.ndarray,
+    matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
     V_r, Kn, Kn_r, Ln_r, S_r, R, JdivR = _source_geometry_workspace_views(
@@ -1457,9 +1457,9 @@ def _update_pp_from_rho_inputs_with_scratch(
     _update_psin_coordinate(out_psin, out_psin_r, accumulator)
     if has_beta:
         scaled_ratio_into(out_Pn_psin, heat_input, out_psin_r, 1.0)
-        scratch_Pn_r = source_scratch_1d[_SLOT_PNr]
+        scratch_Pn_r = array_scratch[_SLOT_PNr]
         product_into(scratch_Pn_r, out_Pn_psin, out_psin_r)
-        scratch_aux = source_scratch_1d[_SLOT_AUX0]
+        scratch_aux = array_scratch[_SLOT_AUX0]
         _compute_Pn_out(scratch_aux, scratch_Pn_r, accumulator, weights)
         alpha1 = (
             0.5
@@ -1470,7 +1470,7 @@ def _update_pp_from_rho_inputs_with_scratch(
             / weighted_dot(scratch_aux, V_r, weights)
         )
     else:
-        scratch_Pr = source_scratch_1d[_SLOT_Pr]
+        scratch_Pr = array_scratch[_SLOT_Pr]
         copy_into(scratch_Pr, heat_input)
         alpha1 = -dot(scratch_Pr, weights) / alpha2
         scaled_ratio_into(out_Pn_psin, scratch_Pr, out_psin_r, 1.0 / (alpha1 * alpha2))
@@ -1510,8 +1510,8 @@ def _update_pp_from_psin_uniform_inputs_with_scratch(
     F_fields: np.ndarray,
     Ip: float,
     beta: float,
-    source_scratch_1d: np.ndarray,
-    source_scratch_2d: np.ndarray,
+    array_scratch: np.ndarray,
+    matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
     V_r, Kn, Kn_r, Ln_r, S_r, R, JdivR = _source_geometry_workspace_views(
@@ -1530,9 +1530,9 @@ def _update_pp_from_psin_uniform_inputs_with_scratch(
     _update_psin_coordinate(out_psin, out_psin_r, accumulator)
     if has_beta:
         copy_into(out_Pn_psin, heat_input)
-        scratch_Pn_r = source_scratch_1d[_SLOT_PNr]
+        scratch_Pn_r = array_scratch[_SLOT_PNr]
         product_into(scratch_Pn_r, out_Pn_psin, out_psin_r)
-        scratch_aux = source_scratch_1d[_SLOT_AUX0]
+        scratch_aux = array_scratch[_SLOT_AUX0]
         _compute_Pn_out(scratch_aux, scratch_Pn_r, accumulator, weights)
         alpha1 = (
             0.5
@@ -1543,7 +1543,7 @@ def _update_pp_from_psin_uniform_inputs_with_scratch(
             / weighted_dot(scratch_aux, V_r, weights)
         )
     else:
-        scratch_Pr = source_scratch_1d[_SLOT_Pr]
+        scratch_Pr = array_scratch[_SLOT_Pr]
         scaled_product_into(scratch_Pr, heat_input, out_psin_r, alpha2)
         alpha1 = -dot(scratch_Pr, weights) / alpha2
         scaled_ratio_into(out_Pn_psin, scratch_Pr, out_psin_r, 1.0 / (alpha1 * alpha2))
@@ -1583,8 +1583,8 @@ def _update_pp_from_psin_grid_inputs_with_scratch(
     F_fields: np.ndarray,
     Ip: float,
     beta: float,
-    source_scratch_1d: np.ndarray,
-    source_scratch_2d: np.ndarray,
+    array_scratch: np.ndarray,
+    matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
     V_r, Kn, Kn_r, Ln_r, S_r, R, JdivR = _source_geometry_workspace_views(
@@ -1603,9 +1603,9 @@ def _update_pp_from_psin_grid_inputs_with_scratch(
     _update_psin_coordinate(out_psin, out_psin_r, accumulator)
     if has_beta:
         copy_into(out_Pn_psin, heat_input)
-        scratch_Pn_r = source_scratch_1d[_SLOT_PNr]
+        scratch_Pn_r = array_scratch[_SLOT_PNr]
         product_into(scratch_Pn_r, out_Pn_psin, out_psin_r)
-        scratch_aux = source_scratch_1d[_SLOT_AUX0]
+        scratch_aux = array_scratch[_SLOT_AUX0]
         _compute_Pn_out(scratch_aux, scratch_Pn_r, accumulator, weights)
         alpha1 = (
             0.5
@@ -1616,7 +1616,7 @@ def _update_pp_from_psin_grid_inputs_with_scratch(
             / weighted_dot(scratch_aux, V_r, weights)
         )
     else:
-        scratch_Pr = source_scratch_1d[_SLOT_Pr]
+        scratch_Pr = array_scratch[_SLOT_Pr]
         scaled_product_into(scratch_Pr, heat_input, out_psin_r, alpha2)
         alpha1 = -dot(scratch_Pr, weights) / alpha2
         scaled_ratio_into(out_Pn_psin, scratch_Pr, out_psin_r, 1.0 / (alpha1 * alpha2))
@@ -1659,8 +1659,8 @@ def _update_pi_from_rho_inputs_with_scratch(
     F_fields: np.ndarray,
     Ip: float,
     beta: float,
-    source_scratch_1d: np.ndarray,
-    source_scratch_2d: np.ndarray,
+    array_scratch: np.ndarray,
+    matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
     V_r, Kn, Kn_r, Ln_r, S_r, R, JdivR = _source_geometry_workspace_views(
@@ -1668,7 +1668,7 @@ def _update_pi_from_rho_inputs_with_scratch(
     )
     has_Ip = not np.isnan(Ip)
     has_beta = not np.isnan(beta)
-    Itor = source_scratch_1d[_SLOT_AUX0]
+    Itor = array_scratch[_SLOT_AUX0]
     if has_Ip:
         # PI source profiles represent cumulative toroidal current.  Rescale the
         # whole primitive when Ip is prescribed, then differentiate only after
@@ -1677,21 +1677,21 @@ def _update_pi_from_rho_inputs_with_scratch(
     else:
         copy_into(Itor, current_input)
     _floor_signed_current_primitive(Itor)
-    itor_over_kn = source_scratch_1d[_SLOT_INTEGRAND]
+    itor_over_kn = array_scratch[_SLOT_INTEGRAND]
     scaled_ratio_into(itor_over_kn, Itor, Kn, 1.0 / (2.0 * np.pi))
     alpha2 = dot(itor_over_kn, weights)
     scaled_ratio_into(out_psin_r, Itor, Kn, 1.0 / (2.0 * np.pi * alpha2))
     _regularize_psin_r(out_psin_r, rho, n_axis_fix)
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
     _update_psin_coordinate(out_psin, out_psin_r, accumulator)
-    Itor_r = source_scratch_1d[_SLOT_AUX1]
+    Itor_r = array_scratch[_SLOT_AUX1]
     full_differentiation(Itor_r, Itor, differentiator)
     _regularize_axis_linear(Itor_r, rho, n_axis_fix)
     if has_beta:
         scaled_ratio_into(out_Pn_psin, heat_input, out_psin_r, 1.0)
-        scratch_Pn_r = source_scratch_1d[_SLOT_PNr]
+        scratch_Pn_r = array_scratch[_SLOT_PNr]
         product_into(scratch_Pn_r, out_Pn_psin, out_psin_r)
-        scratch_aux = source_scratch_1d[_SLOT_AUX2]
+        scratch_aux = array_scratch[_SLOT_AUX2]
         _compute_Pn_out(scratch_aux, scratch_Pn_r, accumulator, weights)
         alpha1 = (
             0.5
@@ -1702,7 +1702,7 @@ def _update_pi_from_rho_inputs_with_scratch(
             / weighted_dot(scratch_aux, V_r, weights)
         )
     else:
-        scratch_Pr = source_scratch_1d[_SLOT_Pr]
+        scratch_Pr = array_scratch[_SLOT_Pr]
         copy_into(scratch_Pr, heat_input)
         alpha1 = -dot(scratch_Pr, weights) / alpha2
         scaled_ratio_into(out_Pn_psin, scratch_Pr, out_psin_r, 1.0 / (alpha1 * alpha2))
@@ -1732,8 +1732,8 @@ def _update_pi_from_psin_uniform_inputs_with_scratch(
     F_fields: np.ndarray,
     Ip: float,
     beta: float,
-    source_scratch_1d: np.ndarray,
-    source_scratch_2d: np.ndarray,
+    array_scratch: np.ndarray,
+    matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
     V_r, Kn, Kn_r, Ln_r, S_r, R, JdivR = _source_geometry_workspace_views(
@@ -1741,27 +1741,27 @@ def _update_pi_from_psin_uniform_inputs_with_scratch(
     )
     has_Ip = not np.isnan(Ip)
     has_beta = not np.isnan(beta)
-    Itor = source_scratch_1d[_SLOT_AUX0]
+    Itor = array_scratch[_SLOT_AUX0]
     if has_Ip:
         scale_into(Itor, current_input, Ip / current_input[-1])
     else:
         copy_into(Itor, current_input)
     _floor_signed_current_primitive(Itor)
-    itor_over_kn = source_scratch_1d[_SLOT_INTEGRAND]
+    itor_over_kn = array_scratch[_SLOT_INTEGRAND]
     scaled_ratio_into(itor_over_kn, Itor, Kn, 1.0 / (2.0 * np.pi))
     alpha2 = dot(itor_over_kn, weights)
     scaled_ratio_into(out_psin_r, Itor, Kn, 1.0 / (2.0 * np.pi * alpha2))
     _regularize_psin_r(out_psin_r, rho, n_axis_fix)
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
     _update_psin_coordinate(out_psin, out_psin_r, accumulator)
-    Itor_r = source_scratch_1d[_SLOT_AUX1]
+    Itor_r = array_scratch[_SLOT_AUX1]
     full_differentiation(Itor_r, Itor, differentiator)
     _regularize_axis_linear(Itor_r, rho, n_axis_fix)
     if has_beta:
         copy_into(out_Pn_psin, heat_input)
-        scratch_Pn_r = source_scratch_1d[_SLOT_PNr]
+        scratch_Pn_r = array_scratch[_SLOT_PNr]
         product_into(scratch_Pn_r, out_Pn_psin, out_psin_r)
-        scratch_aux = source_scratch_1d[_SLOT_AUX2]
+        scratch_aux = array_scratch[_SLOT_AUX2]
         _compute_Pn_out(scratch_aux, scratch_Pn_r, accumulator, weights)
         alpha1 = (
             0.5
@@ -1772,7 +1772,7 @@ def _update_pi_from_psin_uniform_inputs_with_scratch(
             / weighted_dot(scratch_aux, V_r, weights)
         )
     else:
-        scratch_Pr = source_scratch_1d[_SLOT_Pr]
+        scratch_Pr = array_scratch[_SLOT_Pr]
         scaled_product_into(scratch_Pr, heat_input, out_psin_r, alpha2)
         alpha1 = -dot(scratch_Pr, weights) / alpha2
         scaled_ratio_into(out_Pn_psin, scratch_Pr, out_psin_r, 1.0 / (alpha1 * alpha2))
@@ -1802,8 +1802,8 @@ def _update_pi_from_psin_grid_inputs_with_scratch(
     F_fields: np.ndarray,
     Ip: float,
     beta: float,
-    source_scratch_1d: np.ndarray,
-    source_scratch_2d: np.ndarray,
+    array_scratch: np.ndarray,
+    matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
     V_r, Kn, Kn_r, Ln_r, S_r, R, JdivR = _source_geometry_workspace_views(
@@ -1811,27 +1811,27 @@ def _update_pi_from_psin_grid_inputs_with_scratch(
     )
     has_Ip = not np.isnan(Ip)
     has_beta = not np.isnan(beta)
-    Itor = source_scratch_1d[_SLOT_AUX0]
+    Itor = array_scratch[_SLOT_AUX0]
     if has_Ip:
         scale_into(Itor, current_input, Ip / current_input[-1])
     else:
         copy_into(Itor, current_input)
     _floor_signed_current_primitive(Itor)
-    itor_over_kn = source_scratch_1d[_SLOT_INTEGRAND]
+    itor_over_kn = array_scratch[_SLOT_INTEGRAND]
     scaled_ratio_into(itor_over_kn, Itor, Kn, 1.0 / (2.0 * np.pi))
     alpha2 = dot(itor_over_kn, weights)
     scaled_ratio_into(out_psin_r, Itor, Kn, 1.0 / (2.0 * np.pi * alpha2))
     _regularize_psin_r(out_psin_r, rho, n_axis_fix)
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
     _update_psin_coordinate(out_psin, out_psin_r, accumulator)
-    Itor_r = source_scratch_1d[_SLOT_AUX1]
+    Itor_r = array_scratch[_SLOT_AUX1]
     full_differentiation(Itor_r, Itor, differentiator)
     _regularize_axis_linear(Itor_r, rho, n_axis_fix)
     if has_beta:
         copy_into(out_Pn_psin, heat_input)
-        scratch_Pn_r = source_scratch_1d[_SLOT_PNr]
+        scratch_Pn_r = array_scratch[_SLOT_PNr]
         product_into(scratch_Pn_r, out_Pn_psin, out_psin_r)
-        scratch_aux = source_scratch_1d[_SLOT_AUX2]
+        scratch_aux = array_scratch[_SLOT_AUX2]
         _compute_Pn_out(scratch_aux, scratch_Pn_r, accumulator, weights)
         alpha1 = (
             0.5
@@ -1842,7 +1842,7 @@ def _update_pi_from_psin_grid_inputs_with_scratch(
             / weighted_dot(scratch_aux, V_r, weights)
         )
     else:
-        scratch_Pr = source_scratch_1d[_SLOT_Pr]
+        scratch_Pr = array_scratch[_SLOT_Pr]
         scaled_product_into(scratch_Pr, heat_input, out_psin_r, alpha2)
         alpha1 = -dot(scratch_Pr, weights) / alpha2
         scaled_ratio_into(out_Pn_psin, scratch_Pr, out_psin_r, 1.0 / (alpha1 * alpha2))
@@ -1875,8 +1875,8 @@ def _update_pj1_from_rho_inputs_with_scratch(
     F_fields: np.ndarray,
     Ip: float,
     beta: float,
-    source_scratch_1d: np.ndarray,
-    source_scratch_2d: np.ndarray,
+    array_scratch: np.ndarray,
+    matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
     V_r, Kn, Kn_r, Ln_r, S_r, R, JdivR = _source_geometry_workspace_views(
@@ -1884,13 +1884,13 @@ def _update_pj1_from_rho_inputs_with_scratch(
     )
     has_Ip = not np.isnan(Ip)
     has_beta = not np.isnan(beta)
-    integrand_j = source_scratch_1d[_SLOT_INTEGRAND]
+    integrand_j = array_scratch[_SLOT_INTEGRAND]
     product_into(integrand_j, current_input, S_r)
     full_integration(out_psin_r, integrand_j, accumulator)
-    I_tor_prof = source_scratch_1d[_SLOT_AUX0]
+    I_tor_prof = array_scratch[_SLOT_AUX0]
     copy_into(I_tor_prof, out_psin_r)
-    I_tor = source_scratch_1d[_SLOT_AUX1]
-    jtor = source_scratch_1d[_SLOT_AUX2]
+    I_tor = array_scratch[_SLOT_AUX1]
+    jtor = array_scratch[_SLOT_AUX2]
     if has_Ip:
         # PJ1 integrates a current-density-like input into I_tor first; the same
         # Ip scale must be applied to the primitive and to the local jtor profile.
@@ -1901,7 +1901,7 @@ def _update_pj1_from_rho_inputs_with_scratch(
         copy_into(jtor, current_input)
     _enforce_axis_even_profile(jtor, rho)
     _floor_signed_current_primitive(I_tor)
-    itor_over_kn = source_scratch_1d[_SLOT_INTEGRAND]
+    itor_over_kn = array_scratch[_SLOT_INTEGRAND]
     scaled_ratio_into(itor_over_kn, I_tor, Kn, 1.0 / (2.0 * np.pi))
     alpha2 = dot(itor_over_kn, weights)
     scaled_ratio_into(out_psin_r, I_tor, Kn, 1.0 / (2.0 * np.pi * alpha2))
@@ -1910,9 +1910,9 @@ def _update_pj1_from_rho_inputs_with_scratch(
     _update_psin_coordinate(out_psin, out_psin_r, accumulator)
     if has_beta:
         scaled_ratio_into(out_Pn_psin, heat_input, out_psin_r, 1.0)
-        scratch_Pn_r = source_scratch_1d[_SLOT_PNr]
+        scratch_Pn_r = array_scratch[_SLOT_PNr]
         product_into(scratch_Pn_r, out_Pn_psin, out_psin_r)
-        scratch_aux = source_scratch_1d[_SLOT_INTEGRAND]
+        scratch_aux = array_scratch[_SLOT_INTEGRAND]
         _compute_Pn_out(scratch_aux, scratch_Pn_r, accumulator, weights)
         alpha1 = (
             0.5
@@ -1923,7 +1923,7 @@ def _update_pj1_from_rho_inputs_with_scratch(
             / weighted_dot(scratch_aux, V_r, weights)
         )
     else:
-        scratch_Pr = source_scratch_1d[_SLOT_Pr]
+        scratch_Pr = array_scratch[_SLOT_Pr]
         copy_into(scratch_Pr, heat_input)
         alpha1 = -dot(scratch_Pr, weights) / alpha2
         scaled_ratio_into(out_Pn_psin, scratch_Pr, out_psin_r, 1.0 / (alpha1 * alpha2))
@@ -1962,8 +1962,8 @@ def _update_pj1_from_psin_uniform_inputs_with_scratch(
     F_fields: np.ndarray,
     Ip: float,
     beta: float,
-    source_scratch_1d: np.ndarray,
-    source_scratch_2d: np.ndarray,
+    array_scratch: np.ndarray,
+    matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
     V_r, Kn, Kn_r, Ln_r, S_r, R, JdivR = _source_geometry_workspace_views(
@@ -1971,13 +1971,13 @@ def _update_pj1_from_psin_uniform_inputs_with_scratch(
     )
     has_Ip = not np.isnan(Ip)
     has_beta = not np.isnan(beta)
-    integrand_j = source_scratch_1d[_SLOT_INTEGRAND]
+    integrand_j = array_scratch[_SLOT_INTEGRAND]
     product_into(integrand_j, current_input, S_r)
     full_integration(out_psin_r, integrand_j, accumulator)
-    I_tor_prof = source_scratch_1d[_SLOT_AUX0]
+    I_tor_prof = array_scratch[_SLOT_AUX0]
     copy_into(I_tor_prof, out_psin_r)
-    I_tor = source_scratch_1d[_SLOT_AUX1]
-    jtor = source_scratch_1d[_SLOT_AUX2]
+    I_tor = array_scratch[_SLOT_AUX1]
+    jtor = array_scratch[_SLOT_AUX2]
     if has_Ip:
         scale_into(I_tor, I_tor_prof, Ip / I_tor_prof[-1])
         scale_into(jtor, current_input, Ip / I_tor_prof[-1])
@@ -1986,7 +1986,7 @@ def _update_pj1_from_psin_uniform_inputs_with_scratch(
         copy_into(jtor, current_input)
     _enforce_axis_even_profile(jtor, rho)
     _floor_signed_current_primitive(I_tor)
-    itor_over_kn = source_scratch_1d[_SLOT_INTEGRAND]
+    itor_over_kn = array_scratch[_SLOT_INTEGRAND]
     scaled_ratio_into(itor_over_kn, I_tor, Kn, 1.0 / (2.0 * np.pi))
     alpha2 = dot(itor_over_kn, weights)
     scaled_ratio_into(out_psin_r, I_tor, Kn, 1.0 / (2.0 * np.pi * alpha2))
@@ -1995,9 +1995,9 @@ def _update_pj1_from_psin_uniform_inputs_with_scratch(
     _update_psin_coordinate(out_psin, out_psin_r, accumulator)
     if has_beta:
         copy_into(out_Pn_psin, heat_input)
-        scratch_Pn_r = source_scratch_1d[_SLOT_PNr]
+        scratch_Pn_r = array_scratch[_SLOT_PNr]
         product_into(scratch_Pn_r, out_Pn_psin, out_psin_r)
-        scratch_aux = source_scratch_1d[_SLOT_INTEGRAND]
+        scratch_aux = array_scratch[_SLOT_INTEGRAND]
         _compute_Pn_out(scratch_aux, scratch_Pn_r, accumulator, weights)
         alpha1 = (
             0.5
@@ -2008,7 +2008,7 @@ def _update_pj1_from_psin_uniform_inputs_with_scratch(
             / weighted_dot(scratch_aux, V_r, weights)
         )
     else:
-        scratch_Pr = source_scratch_1d[_SLOT_Pr]
+        scratch_Pr = array_scratch[_SLOT_Pr]
         scaled_product_into(scratch_Pr, heat_input, out_psin_r, alpha2)
         alpha1 = -dot(scratch_Pr, weights) / alpha2
         scaled_ratio_into(out_Pn_psin, scratch_Pr, out_psin_r, 1.0 / (alpha1 * alpha2))
@@ -2047,8 +2047,8 @@ def _update_pj1_from_psin_grid_inputs_with_scratch(
     F_fields: np.ndarray,
     Ip: float,
     beta: float,
-    source_scratch_1d: np.ndarray,
-    source_scratch_2d: np.ndarray,
+    array_scratch: np.ndarray,
+    matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
     V_r, Kn, Kn_r, Ln_r, S_r, R, JdivR = _source_geometry_workspace_views(
@@ -2056,13 +2056,13 @@ def _update_pj1_from_psin_grid_inputs_with_scratch(
     )
     has_Ip = not np.isnan(Ip)
     has_beta = not np.isnan(beta)
-    integrand_j = source_scratch_1d[_SLOT_INTEGRAND]
+    integrand_j = array_scratch[_SLOT_INTEGRAND]
     product_into(integrand_j, current_input, S_r)
     full_integration(out_psin_r, integrand_j, accumulator)
-    I_tor_prof = source_scratch_1d[_SLOT_AUX0]
+    I_tor_prof = array_scratch[_SLOT_AUX0]
     copy_into(I_tor_prof, out_psin_r)
-    I_tor = source_scratch_1d[_SLOT_AUX1]
-    jtor = source_scratch_1d[_SLOT_AUX2]
+    I_tor = array_scratch[_SLOT_AUX1]
+    jtor = array_scratch[_SLOT_AUX2]
     if has_Ip:
         scale_into(I_tor, I_tor_prof, Ip / I_tor_prof[-1])
         scale_into(jtor, current_input, Ip / I_tor_prof[-1])
@@ -2071,7 +2071,7 @@ def _update_pj1_from_psin_grid_inputs_with_scratch(
         copy_into(jtor, current_input)
     _enforce_axis_even_profile(jtor, rho)
     _floor_signed_current_primitive(I_tor)
-    itor_over_kn = source_scratch_1d[_SLOT_INTEGRAND]
+    itor_over_kn = array_scratch[_SLOT_INTEGRAND]
     scaled_ratio_into(itor_over_kn, I_tor, Kn, 1.0 / (2.0 * np.pi))
     alpha2 = dot(itor_over_kn, weights)
     scaled_ratio_into(out_psin_r, I_tor, Kn, 1.0 / (2.0 * np.pi * alpha2))
@@ -2080,9 +2080,9 @@ def _update_pj1_from_psin_grid_inputs_with_scratch(
     _update_psin_coordinate(out_psin, out_psin_r, accumulator)
     if has_beta:
         copy_into(out_Pn_psin, heat_input)
-        scratch_Pn_r = source_scratch_1d[_SLOT_PNr]
+        scratch_Pn_r = array_scratch[_SLOT_PNr]
         product_into(scratch_Pn_r, out_Pn_psin, out_psin_r)
-        scratch_aux = source_scratch_1d[_SLOT_INTEGRAND]
+        scratch_aux = array_scratch[_SLOT_INTEGRAND]
         _compute_Pn_out(scratch_aux, scratch_Pn_r, accumulator, weights)
         alpha1 = (
             0.5
@@ -2093,7 +2093,7 @@ def _update_pj1_from_psin_grid_inputs_with_scratch(
             / weighted_dot(scratch_aux, V_r, weights)
         )
     else:
-        scratch_Pr = source_scratch_1d[_SLOT_Pr]
+        scratch_Pr = array_scratch[_SLOT_Pr]
         scaled_product_into(scratch_Pr, heat_input, out_psin_r, alpha2)
         alpha1 = -dot(scratch_Pr, weights) / alpha2
         scaled_ratio_into(out_Pn_psin, scratch_Pr, out_psin_r, 1.0 / (alpha1 * alpha2))
@@ -2132,8 +2132,8 @@ def _update_pj2_from_psin_uniform_inputs_with_scratch(
     F_fields: np.ndarray,
     Ip: float,
     beta: float,
-    source_scratch_1d: np.ndarray,
-    source_scratch_2d: np.ndarray,
+    array_scratch: np.ndarray,
+    matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
     V_r, Kn, _, Ln_r, _, _, _ = _source_geometry_workspace_views(radial_fields, surface_fields)
@@ -2141,11 +2141,11 @@ def _update_pj2_from_psin_uniform_inputs_with_scratch(
     F_r = F_fields[1]
     has_Ip = not np.isnan(Ip)
     has_beta = not np.isnan(beta)
-    integrand = source_scratch_1d[_SLOT_INTEGRAND]
-    integral_val = source_scratch_1d[_SLOT_AUX0]
-    I_tor = source_scratch_1d[_SLOT_AUX1]
-    scratch_Pn_r = source_scratch_1d[_SLOT_PNr]
-    scratch_aux = source_scratch_1d[_SLOT_AUX2]
+    integrand = array_scratch[_SLOT_INTEGRAND]
+    integral_val = array_scratch[_SLOT_AUX0]
+    I_tor = array_scratch[_SLOT_AUX1]
+    scratch_Pn_r = array_scratch[_SLOT_PNr]
+    scratch_aux = array_scratch[_SLOT_AUX2]
 
     scaled_product_ratio_into(integrand, Ln_r, current_input, F, 1.0)
     full_integration(out_psin_r, integrand, accumulator)
@@ -2211,8 +2211,8 @@ def _update_pj2_from_psin_grid_inputs_with_scratch(
     F_fields: np.ndarray,
     Ip: float,
     beta: float,
-    source_scratch_1d: np.ndarray,
-    source_scratch_2d: np.ndarray,
+    array_scratch: np.ndarray,
+    matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
     V_r, Kn, _, Ln_r, _, _, _ = _source_geometry_workspace_views(radial_fields, surface_fields)
@@ -2220,11 +2220,11 @@ def _update_pj2_from_psin_grid_inputs_with_scratch(
     F_r = F_fields[1]
     has_Ip = not np.isnan(Ip)
     has_beta = not np.isnan(beta)
-    integrand = source_scratch_1d[_SLOT_INTEGRAND]
-    integral_val = source_scratch_1d[_SLOT_AUX0]
-    I_tor = source_scratch_1d[_SLOT_AUX1]
-    scratch_Pn_r = source_scratch_1d[_SLOT_PNr]
-    scratch_aux = source_scratch_1d[_SLOT_AUX2]
+    integrand = array_scratch[_SLOT_INTEGRAND]
+    integral_val = array_scratch[_SLOT_AUX0]
+    I_tor = array_scratch[_SLOT_AUX1]
+    scratch_Pn_r = array_scratch[_SLOT_PNr]
+    scratch_aux = array_scratch[_SLOT_AUX2]
 
     scaled_product_ratio_into(integrand, Ln_r, current_input, F, 1.0)
     full_integration(out_psin_r, integrand, accumulator)
@@ -2291,8 +2291,8 @@ def _update_pj2_from_rho_inputs_with_scratch(
     F_fields: np.ndarray,
     Ip: float,
     beta: float,
-    source_scratch_1d: np.ndarray,
-    source_scratch_2d: np.ndarray,
+    array_scratch: np.ndarray,
+    matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
     V_r, Kn, Kn_r, Ln_r, S_r, R, JdivR = _source_geometry_workspace_views(
@@ -2302,17 +2302,17 @@ def _update_pj2_from_rho_inputs_with_scratch(
     F_r = F_fields[1]
     has_Ip = not np.isnan(Ip)
     has_beta = not np.isnan(beta)
-    integrand = source_scratch_1d[_SLOT_INTEGRAND]
+    integrand = array_scratch[_SLOT_INTEGRAND]
     scaled_product_ratio_into(integrand, Ln_r, current_input, F, 1.0)
     full_integration(out_psin_r, integrand, accumulator)
-    integral_val = source_scratch_1d[_SLOT_AUX0]
+    integral_val = array_scratch[_SLOT_AUX0]
     copy_into(integral_val, out_psin_r)
-    I_tor = source_scratch_1d[_SLOT_AUX1]
+    I_tor = array_scratch[_SLOT_AUX1]
     if has_Ip:
         scaled_product_into(I_tor, F, integral_val, Ip / (F[-1] * integral_val[-1]))
     else:
         scaled_product_into(I_tor, F, integral_val, 2.0 * np.pi)
-    itor_over_kn = source_scratch_1d[_SLOT_INTEGRAND]
+    itor_over_kn = array_scratch[_SLOT_INTEGRAND]
     scaled_ratio_into(itor_over_kn, I_tor, Kn, 1.0 / (2.0 * np.pi))
     alpha2 = dot(itor_over_kn, weights)
     scaled_ratio_into(out_psin_r, I_tor, Kn, 1.0 / (2.0 * np.pi * alpha2))
@@ -2321,9 +2321,9 @@ def _update_pj2_from_rho_inputs_with_scratch(
     _update_psin_coordinate(out_psin, out_psin_r, accumulator)
     if has_beta:
         scaled_ratio_into(out_Pn_psin, heat_input, out_psin_r, 1.0)
-        scratch_Pn_r = source_scratch_1d[_SLOT_PNr]
+        scratch_Pn_r = array_scratch[_SLOT_PNr]
         product_into(scratch_Pn_r, out_Pn_psin, out_psin_r)
-        scratch_aux = source_scratch_1d[_SLOT_AUX2]
+        scratch_aux = array_scratch[_SLOT_AUX2]
         _compute_Pn_out(scratch_aux, scratch_Pn_r, accumulator, weights)
         alpha1 = (
             0.5
@@ -2334,7 +2334,7 @@ def _update_pj2_from_rho_inputs_with_scratch(
             / weighted_dot(scratch_aux, V_r, weights)
         )
     else:
-        scratch_Pr = source_scratch_1d[_SLOT_Pr]
+        scratch_Pr = array_scratch[_SLOT_Pr]
         copy_into(scratch_Pr, heat_input)
         alpha1 = -dot(scratch_Pr, weights) / alpha2
         scaled_ratio_into(out_Pn_psin, scratch_Pr, out_psin_r, 1.0 / (alpha1 * alpha2))
@@ -2365,8 +2365,8 @@ def _update_pq_from_psin_uniform_inputs_with_scratch(
     F_fields: np.ndarray,
     Ip: float,
     beta: float,
-    source_scratch_1d: np.ndarray,
-    source_scratch_2d: np.ndarray,
+    array_scratch: np.ndarray,
+    matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
     V_r, Kn, _, Ln_r, _, _, _ = _source_geometry_workspace_views(radial_fields, surface_fields)
@@ -2375,14 +2375,14 @@ def _update_pq_from_psin_uniform_inputs_with_scratch(
     if not np.isfinite(edge_F) or abs(edge_F) <= 1.0e-14:
         raise ValueError("PQ/psin strict solve received invalid edge F")
 
-    W = source_scratch_1d[_SLOT_INTEGRAND]
-    q_prof = source_scratch_1d[_SLOT_AUX0]
-    coeff_d = source_scratch_1d[_SLOT_AUX1]
-    coeff_y = source_scratch_1d[_SLOT_AUX2]
-    rhs = source_scratch_1d[_SLOT_PNr]
-    F_solved = source_scratch_1d[_SLOT_Pr]
-    F_r = source_scratch_1d[_SLOT_Fr]
-    A = source_scratch_1d[_SLOT_PQ_MATRIX : _SLOT_PQ_MATRIX + n, :]
+    W = array_scratch[_SLOT_INTEGRAND]
+    q_prof = array_scratch[_SLOT_AUX0]
+    coeff_d = array_scratch[_SLOT_AUX1]
+    coeff_y = array_scratch[_SLOT_AUX2]
+    rhs = array_scratch[_SLOT_PNr]
+    F_solved = array_scratch[_SLOT_Pr]
+    F_r = array_scratch[_SLOT_Fr]
+    A = array_scratch[_SLOT_PQ_MATRIX : _SLOT_PQ_MATRIX + n, :]
 
     _fill_pq_q_profile(q_prof, current_input, Kn, Ln_r, edge_F, Ip)
     _fill_pq_W_and_derivative(W, F_r, Kn, Ln_r, q_prof, differentiator)
@@ -2500,8 +2500,8 @@ def _update_pq_from_psin_grid_inputs_with_scratch(
     F_fields: np.ndarray,
     Ip: float,
     beta: float,
-    source_scratch_1d: np.ndarray,
-    source_scratch_2d: np.ndarray,
+    array_scratch: np.ndarray,
+    matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
     V_r, Kn, _, Ln_r, _, _, _ = _source_geometry_workspace_views(radial_fields, surface_fields)
@@ -2510,14 +2510,14 @@ def _update_pq_from_psin_grid_inputs_with_scratch(
     if not np.isfinite(edge_F) or abs(edge_F) <= 1.0e-14:
         raise ValueError("PQ/psin strict solve received invalid edge F")
 
-    W = source_scratch_1d[_SLOT_INTEGRAND]
-    q_prof = source_scratch_1d[_SLOT_AUX0]
-    coeff_d = source_scratch_1d[_SLOT_AUX1]
-    coeff_y = source_scratch_1d[_SLOT_AUX2]
-    rhs = source_scratch_1d[_SLOT_PNr]
-    F_solved = source_scratch_1d[_SLOT_Pr]
-    F_r = source_scratch_1d[_SLOT_Fr]
-    A = source_scratch_1d[_SLOT_PQ_MATRIX : _SLOT_PQ_MATRIX + n, :]
+    W = array_scratch[_SLOT_INTEGRAND]
+    q_prof = array_scratch[_SLOT_AUX0]
+    coeff_d = array_scratch[_SLOT_AUX1]
+    coeff_y = array_scratch[_SLOT_AUX2]
+    rhs = array_scratch[_SLOT_PNr]
+    F_solved = array_scratch[_SLOT_Pr]
+    F_r = array_scratch[_SLOT_Fr]
+    A = array_scratch[_SLOT_PQ_MATRIX : _SLOT_PQ_MATRIX + n, :]
 
     _fill_pq_q_profile(q_prof, current_input, Kn, Ln_r, edge_F, Ip)
     _fill_pq_W_and_derivative(W, F_r, Kn, Ln_r, q_prof, differentiator)
@@ -2634,8 +2634,8 @@ def _update_pq_from_rho_inputs_with_scratch(
     F_fields: np.ndarray,
     Ip: float,
     beta: float,
-    source_scratch_1d: np.ndarray,
-    source_scratch_2d: np.ndarray,
+    array_scratch: np.ndarray,
+    matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
     V_r, Kn, _, Ln_r, _, _, _ = _source_geometry_workspace_views(radial_fields, surface_fields)
@@ -2644,14 +2644,14 @@ def _update_pq_from_rho_inputs_with_scratch(
     if not np.isfinite(edge_F) or abs(edge_F) <= 1.0e-14:
         raise ValueError("PQ/rho strict solve received invalid edge F")
 
-    W = source_scratch_1d[_SLOT_INTEGRAND]
-    q_prof = source_scratch_1d[_SLOT_AUX0]
-    coeff_d = source_scratch_1d[_SLOT_AUX1]
-    coeff_y = source_scratch_1d[_SLOT_AUX2]
-    rhs = source_scratch_1d[_SLOT_PNr]
-    Y = source_scratch_1d[_SLOT_Pr]
-    Y_r = source_scratch_1d[_SLOT_Fr]
-    A = source_scratch_1d[_SLOT_PQ_MATRIX : _SLOT_PQ_MATRIX + n, :]
+    W = array_scratch[_SLOT_INTEGRAND]
+    q_prof = array_scratch[_SLOT_AUX0]
+    coeff_d = array_scratch[_SLOT_AUX1]
+    coeff_y = array_scratch[_SLOT_AUX2]
+    rhs = array_scratch[_SLOT_PNr]
+    Y = array_scratch[_SLOT_Pr]
+    Y_r = array_scratch[_SLOT_Fr]
+    A = array_scratch[_SLOT_PQ_MATRIX : _SLOT_PQ_MATRIX + n, :]
 
     _fill_pq_q_profile(q_prof, current_input, Kn, Ln_r, edge_F, Ip)
     _fill_pq_W_and_derivative(W, Y_r, Kn, Ln_r, q_prof, differentiator)

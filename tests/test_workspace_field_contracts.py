@@ -5,10 +5,13 @@ from helpers import tiny_grid
 from numpy.testing import assert_allclose
 
 import veqpy.workspace.field_rows as rows
+from veqpy.engine.backend_abi import SourceExecutionABI
+from veqpy.engine.numba_geometry import update_geometry_hot
 from veqpy.workspace.geometry_workspace import GeometryWorkspace
 from veqpy.workspace.grid_workspace import GridWorkspace
 from veqpy.workspace.profile_workspace import ProfileWorkspace
 from veqpy.workspace.residual_workspace import ResidualWorkspace
+from veqpy.workspace.source_workspace import SourceWorkspace
 
 
 def test_geometry_workspace_properties_alias_field_rows() -> None:
@@ -75,6 +78,25 @@ def test_residual_workspace_properties_alias_field_rows() -> None:
         assert_allclose(workspace.surface_fields[row], float(value))
 
 
+def test_source_workspace_scratch_names_are_vocabulary_aligned() -> None:
+    source_execution = SourceExecutionABI(
+        route_key=("PF", "rho", "grid"),
+        psin_active_length=0,
+        f_active_length=0,
+        requires_optimized_psin_profile=False,
+        requires_optimized_f_profile=False,
+        requires_psin_query_workspace=False,
+        requires_source_parameter_query=False,
+        requires_target_root_fields=False,
+    )
+    workspace = SourceWorkspace(nr=4, nt=3, source_execution=source_execution)
+
+    assert workspace.array_scratch.shape == (11, 4)
+    assert workspace.matrix_scratch.shape == (1, 4, 3)
+    assert not hasattr(workspace, "scratch_1d")
+    assert not hasattr(workspace, "scratch_2d")
+
+
 def test_grid_workspace_properties_alias_static_field_rows() -> None:
     workspace = GridWorkspace.from_grid(tiny_grid())
 
@@ -100,6 +122,37 @@ def test_grid_workspace_properties_alias_static_field_rows() -> None:
     )
     assert not workspace.radial_fields.flags.writeable
     assert not workspace.poloidal_fields.flags.writeable
+
+
+def test_update_geometry_hot_accepts_grid_field_slabs() -> None:
+    grid_workspace = GridWorkspace.from_grid(tiny_grid())
+    geometry_workspace = GeometryWorkspace(nr=grid_workspace.Nr, nt=grid_workspace.Nt)
+    h_fields = np.zeros((3, grid_workspace.Nr), dtype=np.float64)
+    v_fields = np.zeros((3, grid_workspace.Nr), dtype=np.float64)
+    k_fields = np.zeros((3, grid_workspace.Nr), dtype=np.float64)
+    k_fields[rows.PROFILE_VALUE] = 1.0
+    c_fields = np.zeros((grid_workspace.M_max + 1, 3, grid_workspace.Nr), dtype=np.float64)
+    s_fields = np.zeros_like(c_fields)
+
+    update_geometry_hot(
+        geometry_workspace.surface_fields,
+        geometry_workspace.radial_fields,
+        0.5,
+        1.5,
+        0.0,
+        grid_workspace.radial_fields,
+        grid_workspace.poloidal_fields,
+        h_fields,
+        v_fields,
+        k_fields,
+        c_fields,
+        s_fields,
+        0,
+        0,
+    )
+
+    assert np.all(np.isfinite(geometry_workspace.surface_fields))
+    assert np.all(np.isfinite(geometry_workspace.radial_fields))
 
 
 def test_profile_workspace_row_accessors_alias_profile_fields() -> None:

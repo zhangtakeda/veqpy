@@ -33,10 +33,49 @@ from veqpy.workspace.field_rows import (
     GEOMETRY_SURFACE_R_T,
     GEOMETRY_SURFACE_SIN_TB,
     GEOMETRY_SURFACE_Z_T,
+    GRID_POLOIDAL_COS_MTHETA_START,
+    GRID_POLOIDAL_THETA,
+    GRID_RADIAL_RHO,
     PROFILE_R,
     PROFILE_RR,
     PROFILE_VALUE,
 )
+
+
+@njit(cache=True, inline="always")
+def _geometry_grid_radial_views(
+    grid_radial_fields: np.ndarray,
+) -> np.ndarray:
+    return grid_radial_fields[GRID_RADIAL_RHO]
+
+
+@njit(cache=True, inline="always")
+def _geometry_grid_poloidal_views(
+    grid_poloidal_fields: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    block = (grid_poloidal_fields.shape[0] - GRID_POLOIDAL_COS_MTHETA_START) // 6
+    start = GRID_POLOIDAL_COS_MTHETA_START
+    theta = grid_poloidal_fields[GRID_POLOIDAL_THETA]
+    cos_mtheta = grid_poloidal_fields[start : start + block]
+    start += block
+    sin_mtheta = grid_poloidal_fields[start : start + block]
+    start += block
+    m_cos_mtheta = grid_poloidal_fields[start : start + block]
+    start += block
+    m_sin_mtheta = grid_poloidal_fields[start : start + block]
+    start += block
+    m2_cos_mtheta = grid_poloidal_fields[start : start + block]
+    start += block
+    m2_sin_mtheta = grid_poloidal_fields[start : start + block]
+    return (
+        theta,
+        cos_mtheta,
+        sin_mtheta,
+        m_cos_mtheta,
+        m_sin_mtheta,
+        m2_cos_mtheta,
+        m2_sin_mtheta,
+    )
 
 
 @njit(cache=True, fastmath=True, nogil=True)
@@ -46,14 +85,8 @@ def update_geometry_hot(
     a: float,
     R0: float,
     Z0: float,
-    rho: np.ndarray,
-    theta: np.ndarray,
-    cos_mtheta: np.ndarray,
-    sin_mtheta: np.ndarray,
-    m_cos_mtheta: np.ndarray,
-    m_sin_mtheta: np.ndarray,
-    m2_cos_mtheta: np.ndarray,
-    m2_sin_mtheta: np.ndarray,
+    grid_radial_fields: np.ndarray,
+    grid_poloidal_fields: np.ndarray,
     h_fields: np.ndarray,
     v_fields: np.ndarray,
     k_fields: np.ndarray,
@@ -63,6 +96,16 @@ def update_geometry_hot(
     s_active_order: int,
 ) -> None:
     """Materialize only the geometry fields and integrals required by the fused solve hot path."""
+    rho = _geometry_grid_radial_views(grid_radial_fields)
+    (
+        theta,
+        cos_mtheta,
+        sin_mtheta,
+        m_cos_mtheta,
+        m_sin_mtheta,
+        m2_cos_mtheta,
+        m2_sin_mtheta,
+    ) = _geometry_grid_poloidal_views(grid_poloidal_fields)
     sin_tb = surface_fields[GEOMETRY_SURFACE_SIN_TB]
     R_surface = surface_fields[GEOMETRY_SURFACE_R]
     R_t_surface = surface_fields[GEOMETRY_SURFACE_R_T]

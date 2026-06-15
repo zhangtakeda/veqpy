@@ -134,14 +134,8 @@ def _refresh_hot_runtime(
         hot_runtime_binding.a,
         hot_runtime_binding.R0,
         hot_runtime_binding.Z0,
-        hot_runtime_binding.rho,
-        hot_runtime_binding.theta,
-        hot_runtime_binding.cos_mtheta,
-        hot_runtime_binding.sin_mtheta,
-        hot_runtime_binding.m_cos_mtheta,
-        hot_runtime_binding.m_sin_mtheta,
-        hot_runtime_binding.m2_cos_mtheta,
-        hot_runtime_binding.m2_sin_mtheta,
+        hot_runtime_binding.grid_radial_fields,
+        hot_runtime_binding.grid_poloidal_fields,
         hot_runtime_binding.h_fields,
         hot_runtime_binding.v_fields,
         hot_runtime_binding.k_fields,
@@ -208,8 +202,8 @@ def _run_pj2_psin_uniform_spline_with_scratch_impl(
     f_profile_fields: np.ndarray,
     Ip: float,
     beta: float,
-    source_scratch_1d: np.ndarray,
-    source_scratch_2d: np.ndarray,
+    array_scratch: np.ndarray,
+    matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     # Materialize the first source sample on the previous psin query, then let
     # each fixed-point pass update psin and remap heat/current onto the new query.
@@ -242,8 +236,8 @@ def _run_pj2_psin_uniform_spline_with_scratch_impl(
             f_profile_fields,
             Ip,
             beta,
-            source_scratch_1d,
-            source_scratch_2d,
+            array_scratch,
+            matrix_scratch,
         )
         if _update_fixed_point_psin_query_and_spline_uniform_inputs_impl(
             source_psin_query,
@@ -285,8 +279,8 @@ def _run_pj2_psin_uniform_barycentric_with_scratch_impl(
     f_profile_fields: np.ndarray,
     Ip: float,
     beta: float,
-    source_scratch_1d: np.ndarray,
-    source_scratch_2d: np.ndarray,
+    array_scratch: np.ndarray,
+    matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     # Same fixed-point contract as the spline path, but interpolation uses a
     # small local barycentric stencil to avoid building dense remap matrices.
@@ -320,8 +314,8 @@ def _run_pj2_psin_uniform_barycentric_with_scratch_impl(
             f_profile_fields,
             Ip,
             beta,
-            source_scratch_1d,
-            source_scratch_2d,
+            array_scratch,
+            matrix_scratch,
         )
         if _update_fixed_point_psin_query_and_local_barycentric_inputs_impl(
             source_psin_query,
@@ -652,8 +646,8 @@ def _bind_pj2_psin_uniform_residual_runner_core(
     source_psin_query = source_workspace.psin_query
     materialized_heat_input = source_workspace.materialized_heat_input
     materialized_current_input = source_workspace.materialized_current_input
-    source_scratch_1d = source_workspace.scratch_1d
-    source_scratch_2d = source_workspace.scratch_2d
+    array_scratch = source_workspace.array_scratch
+    matrix_scratch = source_workspace.matrix_scratch
     f_profile_fields = profile_workspace.fields_for("F")
     psin_profile_u = profile_workspace.values_for("psin")
     heat_input = source_plan.heat_input
@@ -719,8 +713,8 @@ def _bind_pj2_psin_uniform_residual_runner_core(
                 f_profile_fields,
                 Ip,
                 beta,
-                source_scratch_1d,
-                source_scratch_2d,
+                array_scratch,
+                matrix_scratch,
             )
         else:
             # Spline coefficients are reused across the loop; only query values
@@ -750,8 +744,8 @@ def _bind_pj2_psin_uniform_residual_runner_core(
                 f_profile_fields,
                 Ip,
                 beta,
-                source_scratch_1d,
-                source_scratch_2d,
+                array_scratch,
+                matrix_scratch,
             )
         alpha_state[0] = alpha1
         alpha_state[1] = alpha2
@@ -824,8 +818,8 @@ def _bind_source_eval_runner_for_fused_backend(
             f_profile_fields,
             source_eval_binding.Ip,
             source_eval_binding.beta,
-            source_eval_binding.source_scratch_1d,
-            source_eval_binding.source_scratch_2d,
+            source_eval_binding.array_scratch,
+            source_eval_binding.matrix_scratch,
         )
 
     return runner

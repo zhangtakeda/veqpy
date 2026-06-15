@@ -65,6 +65,21 @@ def test_operator_residual_interfaces_and_in_place_outputs() -> None:
     assert residual_stage.shape == (operator.x_size,)
 
 
+def test_fused_residual_matches_explicit_stage_chain() -> None:
+    fused_operator = tiny_operator()
+    fused_x = fused_operator.encode_initial_state()
+    fused = fused_operator.residual_var(fused_x)
+
+    staged_operator = tiny_operator()
+    staged_x = staged_operator.encode_initial_state()
+    staged_operator.stage_a_profile(staged_x)
+    staged_operator.stage_b_geometry()
+    staged_operator.stage_c_source()
+    staged = staged_operator.stage_d_residual()
+
+    assert_allclose(staged, fused)
+
+
 def test_source_interpolation_default_is_shared() -> None:
     assert normalize_source_interpolation_kind(None) == SOURCE_INTERP_DEFAULT
     source_interpolation_field = Operator.__dataclass_fields__["source_interpolation_kind"]

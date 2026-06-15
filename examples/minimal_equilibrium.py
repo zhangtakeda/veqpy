@@ -149,9 +149,9 @@ def main() -> None:
         route="PF",
         coordinate="psin",
         profile_coeffs={
-            "psin": 5,
+            "psin": 6,
             "h": 3,
-            "k": 5,
+            "k": 6,
             "s1": 3,
         },
         boundary=boundary,
