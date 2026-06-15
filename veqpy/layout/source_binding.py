@@ -113,7 +113,7 @@ def _build_source_stage_runner_shared(
                     source_workspace.heat_spline_coeff,
                     source_workspace.current_spline_coeff,
                     int(parameterization_code),
-                    grid_workspace.rho,
+                    grid_workspace.radial_fields,
                     grid_workspace.differentiator,
                     grid_workspace.accumulator,
                     int(n_axis_fix),

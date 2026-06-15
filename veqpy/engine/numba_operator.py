@@ -194,7 +194,7 @@ def _run_pj2_psin_uniform_spline_with_scratch_impl(
     weights: np.ndarray,
     differentiator: np.ndarray,
     accumulator: np.ndarray,
-    rho: np.ndarray,
+    grid_radial_fields: np.ndarray,
     n_axis_fix: int,
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
@@ -228,7 +228,7 @@ def _run_pj2_psin_uniform_spline_with_scratch_impl(
             weights,
             differentiator,
             accumulator,
-            rho,
+            grid_radial_fields,
             n_axis_fix,
             radial_fields,
             surface_fields,
@@ -271,7 +271,7 @@ def _run_pj2_psin_uniform_barycentric_with_scratch_impl(
     weights: np.ndarray,
     differentiator: np.ndarray,
     accumulator: np.ndarray,
-    rho: np.ndarray,
+    grid_radial_fields: np.ndarray,
     n_axis_fix: int,
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
@@ -306,7 +306,7 @@ def _run_pj2_psin_uniform_barycentric_with_scratch_impl(
             weights,
             differentiator,
             accumulator,
-            rho,
+            grid_radial_fields,
             n_axis_fix,
             radial_fields,
             surface_fields,
@@ -585,7 +585,7 @@ def _bind_profile_owned_psin_residual_runner_core(
             profile_owned_psin_binding.heat_spline_coeff,
             profile_owned_psin_binding.current_spline_coeff,
             profile_owned_psin_binding.parameterization_code,
-            profile_owned_psin_binding.rho,
+            profile_owned_psin_binding.grid_radial_fields,
             profile_owned_psin_binding.differentiator,
             profile_owned_psin_binding.accumulator,
             n_axis_fix,
@@ -636,6 +636,7 @@ def _bind_pj2_psin_uniform_residual_runner_core(
     radial_fields = geometry_workspace.radial_fields
     residual_surface_fields = residual_workspace.surface_fields
     rho = grid_workspace.rho
+    grid_radial_fields = grid_workspace.radial_fields
     weights = grid_workspace.weights
     differentiator = grid_workspace.differentiator
     accumulator = grid_workspace.accumulator
@@ -705,7 +706,7 @@ def _bind_pj2_psin_uniform_residual_runner_core(
                 weights,
                 differentiator,
                 accumulator,
-                rho,
+                grid_radial_fields,
                 n_axis_fix,
                 radial_fields,
                 surface_fields,
@@ -736,7 +737,7 @@ def _bind_pj2_psin_uniform_residual_runner_core(
                 weights,
                 differentiator,
                 accumulator,
-                rho,
+                grid_radial_fields,
                 n_axis_fix,
                 radial_fields,
                 surface_fields,
@@ -810,7 +811,7 @@ def _bind_source_eval_runner_for_fused_backend(
             source_eval_binding.weights,
             source_eval_binding.differentiator,
             source_eval_binding.accumulator,
-            source_eval_binding.rho,
+            source_eval_binding.grid_radial_fields,
             source_eval_binding.n_axis_fix,
             source_eval_binding.radial_fields,
             source_eval_binding.surface_fields,

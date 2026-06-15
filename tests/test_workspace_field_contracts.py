@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import numpy as np
-from helpers import tiny_grid
+from helpers import tiny_boundary, tiny_grid
 from numpy.testing import assert_allclose
 
 import veqpy.workspace.field_rows as rows
-from veqpy.engine.backend_abi import SourceExecutionABI
+from veqpy.engine.backend_abi import SourceExecutionABI, build_fused_source_eval_abi
 from veqpy.engine.numba_geometry import update_geometry_hot
+from veqpy.operator import Operator, OperatorCase
 from veqpy.workspace.geometry_workspace import GeometryWorkspace
 from veqpy.workspace.grid_workspace import GridWorkspace
 from veqpy.workspace.profile_workspace import ProfileWorkspace
@@ -122,6 +123,52 @@ def test_grid_workspace_properties_alias_static_field_rows() -> None:
     )
     assert not workspace.radial_fields.flags.writeable
     assert not workspace.poloidal_fields.flags.writeable
+
+
+def test_rho_source_eval_bindings_use_grid_radial_fields() -> None:
+    grid = tiny_grid()
+
+    def make_operator(route: str) -> Operator:
+        current_input = np.ones(grid.Nr, dtype=np.float64)
+        if route in {"PI", "PJ1", "PJ2"}:
+            current_input = np.full(grid.Nr, 1.0e6, dtype=np.float64)
+        profile_coeffs = {
+            "h": [0.0, 0.0],
+            "k": [0.0, 0.0],
+            "s1": [0.0, 0.0],
+        }
+        if route == "PJ2":
+            profile_coeffs["F"] = [0.0, 0.0]
+        return Operator(
+            grid,
+            OperatorCase(
+                route=route,
+                coordinate="rho",
+                nodes="grid",
+                profile_coeffs=profile_coeffs,
+                boundary=tiny_boundary(),
+                heat_input=np.full(grid.Nr, 1.0e6, dtype=np.float64),
+                current_input=current_input,
+            ),
+        )
+
+    for route in ("PF", "PP", "PI", "PJ1", "PJ2", "PQ"):
+        operator = make_operator(route)
+        binding = build_fused_source_eval_abi(
+            source_plan=operator.plan.source_plan,
+            grid_workspace=operator.plan.grid_workspace,
+            geometry_workspace=operator.geometry_workspace,
+            source_workspace=operator.source_workspace,
+            B0=operator.case.boundary.B0,
+            fix_rho=operator.fix_rho,
+        )
+
+        assert binding.scratch_source_kernel is not None
+        assert np.shares_memory(
+            binding.grid_radial_fields,
+            operator.plan.grid_workspace.radial_fields,
+        )
+        assert np.shares_memory(binding.rho, operator.plan.grid_workspace.rho)
 
 
 def test_update_geometry_hot_accepts_grid_field_slabs() -> None:

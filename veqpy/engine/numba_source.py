@@ -65,6 +65,7 @@ from veqpy.workspace.field_rows import (
     GEOMETRY_RADIAL_V_R,
     GEOMETRY_SURFACE_JDIVR,
     GEOMETRY_SURFACE_R,
+    GRID_RADIAL_RHO,
     RESIDUAL_ROOT_PSIN,
     RESIDUAL_ROOT_PSIN_R,
     RESIDUAL_ROOT_PSIN_RR,
@@ -283,6 +284,11 @@ def _source_geometry_workspace_views(
         surface_fields[GEOMETRY_SURFACE_R],
         surface_fields[GEOMETRY_SURFACE_JDIVR],
     )
+
+
+@njit(cache=True, nogil=True)
+def _source_grid_rho(grid_radial_fields: np.ndarray) -> np.ndarray:
+    return grid_radial_fields[GRID_RADIAL_RHO]
 
 
 @njit(cache=True, nogil=True)
@@ -1162,7 +1168,7 @@ def _update_pf_from_rho_inputs_with_scratch(
     weights: np.ndarray,
     differentiator: np.ndarray,
     accumulator: np.ndarray,
-    rho: np.ndarray,
+    grid_radial_fields: np.ndarray,
     n_axis_fix: int,
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
@@ -1173,6 +1179,7 @@ def _update_pf_from_rho_inputs_with_scratch(
     matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
+    rho = _source_grid_rho(grid_radial_fields)
     V_r, Kn, _, Ln_r, _, R, JdivR = _source_geometry_workspace_views(radial_fields, surface_fields)
     has_Ip = not np.isnan(Ip)
     has_beta = not np.isnan(beta)
@@ -1260,7 +1267,7 @@ def _update_pf_from_psin_uniform_inputs_with_scratch(
     weights: np.ndarray,
     differentiator: np.ndarray,
     accumulator: np.ndarray,
-    rho: np.ndarray,
+    grid_radial_fields: np.ndarray,
     n_axis_fix: int,
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
@@ -1271,6 +1278,7 @@ def _update_pf_from_psin_uniform_inputs_with_scratch(
     matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
+    rho = _source_grid_rho(grid_radial_fields)
     V_r, Kn, _, Ln_r, _, R, JdivR = _source_geometry_workspace_views(radial_fields, surface_fields)
     has_Ip = not np.isnan(Ip)
     has_beta = not np.isnan(beta)
@@ -1342,7 +1350,7 @@ def _update_pf_from_psin_grid_inputs_with_scratch(
     weights: np.ndarray,
     differentiator: np.ndarray,
     accumulator: np.ndarray,
-    rho: np.ndarray,
+    grid_radial_fields: np.ndarray,
     n_axis_fix: int,
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
@@ -1353,6 +1361,7 @@ def _update_pf_from_psin_grid_inputs_with_scratch(
     matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
+    rho = _source_grid_rho(grid_radial_fields)
     V_r, Kn, _, Ln_r, _, R, JdivR = _source_geometry_workspace_views(radial_fields, surface_fields)
     has_Ip = not np.isnan(Ip)
     has_beta = not np.isnan(beta)
@@ -1427,7 +1436,7 @@ def _update_pp_from_rho_inputs_with_scratch(
     weights: np.ndarray,
     differentiator: np.ndarray,
     accumulator: np.ndarray,
-    rho: np.ndarray,
+    grid_radial_fields: np.ndarray,
     n_axis_fix: int,
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
@@ -1438,6 +1447,7 @@ def _update_pp_from_rho_inputs_with_scratch(
     matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
+    rho = _source_grid_rho(grid_radial_fields)
     V_r, Kn, Kn_r, Ln_r, S_r, R, JdivR = _source_geometry_workspace_views(
         radial_fields, surface_fields
     )
@@ -1503,7 +1513,7 @@ def _update_pp_from_psin_uniform_inputs_with_scratch(
     weights: np.ndarray,
     differentiator: np.ndarray,
     accumulator: np.ndarray,
-    rho: np.ndarray,
+    grid_radial_fields: np.ndarray,
     n_axis_fix: int,
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
@@ -1514,6 +1524,7 @@ def _update_pp_from_psin_uniform_inputs_with_scratch(
     matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
+    rho = _source_grid_rho(grid_radial_fields)
     V_r, Kn, Kn_r, Ln_r, S_r, R, JdivR = _source_geometry_workspace_views(
         radial_fields, surface_fields
     )
@@ -1576,7 +1587,7 @@ def _update_pp_from_psin_grid_inputs_with_scratch(
     weights: np.ndarray,
     differentiator: np.ndarray,
     accumulator: np.ndarray,
-    rho: np.ndarray,
+    grid_radial_fields: np.ndarray,
     n_axis_fix: int,
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
@@ -1587,6 +1598,7 @@ def _update_pp_from_psin_grid_inputs_with_scratch(
     matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
+    rho = _source_grid_rho(grid_radial_fields)
     V_r, Kn, Kn_r, Ln_r, S_r, R, JdivR = _source_geometry_workspace_views(
         radial_fields, surface_fields
     )
@@ -1652,7 +1664,7 @@ def _update_pi_from_rho_inputs_with_scratch(
     weights: np.ndarray,
     differentiator: np.ndarray,
     accumulator: np.ndarray,
-    rho: np.ndarray,
+    grid_radial_fields: np.ndarray,
     n_axis_fix: int,
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
@@ -1663,6 +1675,7 @@ def _update_pi_from_rho_inputs_with_scratch(
     matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
+    rho = _source_grid_rho(grid_radial_fields)
     V_r, Kn, Kn_r, Ln_r, S_r, R, JdivR = _source_geometry_workspace_views(
         radial_fields, surface_fields
     )
@@ -1725,7 +1738,7 @@ def _update_pi_from_psin_uniform_inputs_with_scratch(
     weights: np.ndarray,
     differentiator: np.ndarray,
     accumulator: np.ndarray,
-    rho: np.ndarray,
+    grid_radial_fields: np.ndarray,
     n_axis_fix: int,
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
@@ -1736,6 +1749,7 @@ def _update_pi_from_psin_uniform_inputs_with_scratch(
     matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
+    rho = _source_grid_rho(grid_radial_fields)
     V_r, Kn, Kn_r, Ln_r, S_r, R, JdivR = _source_geometry_workspace_views(
         radial_fields, surface_fields
     )
@@ -1795,7 +1809,7 @@ def _update_pi_from_psin_grid_inputs_with_scratch(
     weights: np.ndarray,
     differentiator: np.ndarray,
     accumulator: np.ndarray,
-    rho: np.ndarray,
+    grid_radial_fields: np.ndarray,
     n_axis_fix: int,
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
@@ -1806,6 +1820,7 @@ def _update_pi_from_psin_grid_inputs_with_scratch(
     matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
+    rho = _source_grid_rho(grid_radial_fields)
     V_r, Kn, Kn_r, Ln_r, S_r, R, JdivR = _source_geometry_workspace_views(
         radial_fields, surface_fields
     )
@@ -1868,7 +1883,7 @@ def _update_pj1_from_rho_inputs_with_scratch(
     weights: np.ndarray,
     differentiator: np.ndarray,
     accumulator: np.ndarray,
-    rho: np.ndarray,
+    grid_radial_fields: np.ndarray,
     n_axis_fix: int,
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
@@ -1879,6 +1894,7 @@ def _update_pj1_from_rho_inputs_with_scratch(
     matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
+    rho = _source_grid_rho(grid_radial_fields)
     V_r, Kn, Kn_r, Ln_r, S_r, R, JdivR = _source_geometry_workspace_views(
         radial_fields, surface_fields
     )
@@ -1955,7 +1971,7 @@ def _update_pj1_from_psin_uniform_inputs_with_scratch(
     weights: np.ndarray,
     differentiator: np.ndarray,
     accumulator: np.ndarray,
-    rho: np.ndarray,
+    grid_radial_fields: np.ndarray,
     n_axis_fix: int,
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
@@ -1966,6 +1982,7 @@ def _update_pj1_from_psin_uniform_inputs_with_scratch(
     matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
+    rho = _source_grid_rho(grid_radial_fields)
     V_r, Kn, Kn_r, Ln_r, S_r, R, JdivR = _source_geometry_workspace_views(
         radial_fields, surface_fields
     )
@@ -2040,7 +2057,7 @@ def _update_pj1_from_psin_grid_inputs_with_scratch(
     weights: np.ndarray,
     differentiator: np.ndarray,
     accumulator: np.ndarray,
-    rho: np.ndarray,
+    grid_radial_fields: np.ndarray,
     n_axis_fix: int,
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
@@ -2051,6 +2068,7 @@ def _update_pj1_from_psin_grid_inputs_with_scratch(
     matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
+    rho = _source_grid_rho(grid_radial_fields)
     V_r, Kn, Kn_r, Ln_r, S_r, R, JdivR = _source_geometry_workspace_views(
         radial_fields, surface_fields
     )
@@ -2125,7 +2143,7 @@ def _update_pj2_from_psin_uniform_inputs_with_scratch(
     weights: np.ndarray,
     differentiator: np.ndarray,
     accumulator: np.ndarray,
-    rho: np.ndarray,
+    grid_radial_fields: np.ndarray,
     n_axis_fix: int,
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
@@ -2136,6 +2154,7 @@ def _update_pj2_from_psin_uniform_inputs_with_scratch(
     matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
+    rho = _source_grid_rho(grid_radial_fields)
     V_r, Kn, _, Ln_r, _, _, _ = _source_geometry_workspace_views(radial_fields, surface_fields)
     F = F_fields[0]
     F_r = F_fields[1]
@@ -2204,7 +2223,7 @@ def _update_pj2_from_psin_grid_inputs_with_scratch(
     weights: np.ndarray,
     differentiator: np.ndarray,
     accumulator: np.ndarray,
-    rho: np.ndarray,
+    grid_radial_fields: np.ndarray,
     n_axis_fix: int,
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
@@ -2215,6 +2234,7 @@ def _update_pj2_from_psin_grid_inputs_with_scratch(
     matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
+    rho = _source_grid_rho(grid_radial_fields)
     V_r, Kn, _, Ln_r, _, _, _ = _source_geometry_workspace_views(radial_fields, surface_fields)
     F = F_fields[0]
     F_r = F_fields[1]
@@ -2284,7 +2304,7 @@ def _update_pj2_from_rho_inputs_with_scratch(
     weights: np.ndarray,
     differentiator: np.ndarray,
     accumulator: np.ndarray,
-    rho: np.ndarray,
+    grid_radial_fields: np.ndarray,
     n_axis_fix: int,
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
@@ -2295,6 +2315,7 @@ def _update_pj2_from_rho_inputs_with_scratch(
     matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
+    rho = _source_grid_rho(grid_radial_fields)
     V_r, Kn, Kn_r, Ln_r, S_r, R, JdivR = _source_geometry_workspace_views(
         radial_fields, surface_fields
     )
@@ -2358,7 +2379,7 @@ def _update_pq_from_psin_uniform_inputs_with_scratch(
     weights: np.ndarray,
     differentiator: np.ndarray,
     accumulator: np.ndarray,
-    rho: np.ndarray,
+    grid_radial_fields: np.ndarray,
     n_axis_fix: int,
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
@@ -2369,6 +2390,7 @@ def _update_pq_from_psin_uniform_inputs_with_scratch(
     matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
+    rho = _source_grid_rho(grid_radial_fields)
     V_r, Kn, _, Ln_r, _, _, _ = _source_geometry_workspace_views(radial_fields, surface_fields)
     n = rho.shape[0]
     edge_F = R0 * B0
@@ -2493,7 +2515,7 @@ def _update_pq_from_psin_grid_inputs_with_scratch(
     weights: np.ndarray,
     differentiator: np.ndarray,
     accumulator: np.ndarray,
-    rho: np.ndarray,
+    grid_radial_fields: np.ndarray,
     n_axis_fix: int,
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
@@ -2504,6 +2526,7 @@ def _update_pq_from_psin_grid_inputs_with_scratch(
     matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
+    rho = _source_grid_rho(grid_radial_fields)
     V_r, Kn, _, Ln_r, _, _, _ = _source_geometry_workspace_views(radial_fields, surface_fields)
     n = rho.shape[0]
     edge_F = R0 * B0
@@ -2627,7 +2650,7 @@ def _update_pq_from_rho_inputs_with_scratch(
     weights: np.ndarray,
     differentiator: np.ndarray,
     accumulator: np.ndarray,
-    rho: np.ndarray,
+    grid_radial_fields: np.ndarray,
     n_axis_fix: int,
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
@@ -2638,6 +2661,7 @@ def _update_pq_from_rho_inputs_with_scratch(
     matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
+    rho = _source_grid_rho(grid_radial_fields)
     V_r, Kn, _, Ln_r, _, _, _ = _source_geometry_workspace_views(radial_fields, surface_fields)
     n = rho.shape[0]
     edge_F = R0 * B0
@@ -2904,13 +2928,14 @@ def _materialize_profile_owned_psin_source_impl(
     heat_spline_coeff: np.ndarray,
     current_spline_coeff: np.ndarray,
     parameterization_code: int,
-    rho: np.ndarray,
+    grid_radial_fields: np.ndarray,
     differentiator: np.ndarray,
     accumulator: np.ndarray,
     n_axis_fix: int,
     barycentric_weights: np.ndarray,
     use_barycentric: bool,
 ) -> None:
+    rho = _source_grid_rho(grid_radial_fields)
     # Copy only psin_r from optimized profile fields; psin and psin_rr are
     # reconstructed so all source paths share the same axis regularization and
     # integration conventions.

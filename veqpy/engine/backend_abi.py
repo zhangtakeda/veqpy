@@ -255,6 +255,7 @@ class FusedSourceEvalABI:
     differentiator: np.ndarray
     accumulator: np.ndarray
     rho: np.ndarray
+    grid_radial_fields: np.ndarray
     n_axis_fix: int
     radial_fields: np.ndarray
     surface_fields: np.ndarray
@@ -371,6 +372,7 @@ def build_fused_source_eval_abi(
         differentiator=grid_workspace.differentiator,
         accumulator=grid_workspace.accumulator,
         rho=grid_workspace.rho,
+        grid_radial_fields=grid_workspace.radial_fields,
         n_axis_fix=n_axis_fix,
         radial_fields=geometry_workspace.radial_fields,
         surface_fields=geometry_workspace.surface_fields,
@@ -397,6 +399,7 @@ def build_profile_owned_psin_source_abi(
     return SimpleNamespace(
         source_target_root_fields=source_workspace.target_root_fields,
         rho=grid_workspace.rho,
+        grid_radial_fields=grid_workspace.radial_fields,
         differentiator=grid_workspace.differentiator,
         accumulator=grid_workspace.accumulator,
         source_psin_query=source_workspace.psin_query,
