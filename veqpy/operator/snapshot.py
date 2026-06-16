@@ -23,14 +23,18 @@ from veqpy.operator.packed_layout import decode_packed_blocks
 def snapshot_equilibrium_from_runtime(
     *,
     x: np.ndarray,
-    case: Problem,
+    problem: Problem,
     grid: Grid,
     profile_L: np.ndarray,
     coeff_index: np.ndarray,
     profile_names: tuple[str, ...],
     shape_profile_names: tuple[str, ...],
     profile_index: dict[str, int],
-    profiles_by_name: dict[str, Profile],
+    profile_offsets: np.ndarray,
+    profile_scales: np.ndarray,
+    profile_powers: np.ndarray,
+    profile_envelope_powers: np.ndarray,
+    profile_amplitude_powers: np.ndarray,
     psin: np.ndarray,
     FFn_psin: np.ndarray,
     Pn_psin: np.ndarray,
@@ -41,9 +45,6 @@ def snapshot_equilibrium_from_runtime(
 ) -> Equilibrium:
     """Materialize an Equilibrium snapshot from current Operator runtime arrays."""
 
-    # The packed x supplies only active coefficients.  Passive profile specs come
-    # from profiles_by_name and are copied below so the Equilibrium is detached
-    # from future Operator.refresh_case mutations.
     coeff_values = decode_packed_blocks(
         x,
         profile_L,
@@ -54,13 +55,17 @@ def snapshot_equilibrium_from_runtime(
         coeff_values,
         shape_profile_names=shape_profile_names,
         profile_index=profile_index,
-        profiles_by_name=profiles_by_name,
+        profile_offsets=profile_offsets,
+        profile_scales=profile_scales,
+        profile_powers=profile_powers,
+        profile_envelope_powers=profile_envelope_powers,
+        profile_amplitude_powers=profile_amplitude_powers,
     )
     return Equilibrium(
-        R0=case.R0,
-        Z0=case.Z0,
-        B0=case.B0,
-        a=case.a,
+        R0=problem.R0,
+        Z0=problem.Z0,
+        B0=problem.B0,
+        a=problem.a,
         grid=grid,
         shape_profiles=shape_profiles,
         psin=psin.copy(),
@@ -78,30 +83,50 @@ def snapshot_equilibrium_profiles(
     *,
     shape_profile_names: tuple[str, ...],
     profile_index: dict[str, int],
-    profiles_by_name: dict[str, Profile],
+    profile_offsets: np.ndarray,
+    profile_scales: np.ndarray,
+    profile_powers: np.ndarray,
+    profile_envelope_powers: np.ndarray,
+    profile_amplitude_powers: np.ndarray,
 ) -> dict[str, Profile]:
     """Snapshot passive shape-profile specs using the supplied packed state."""
 
-    return {
+    profiles: dict[str, Profile] = {}
+    for name in shape_profile_names:
+        p = profile_index[name]
         # Shape profiles are the only model profiles needed for geometry
         # reconstruction in Equilibrium; source/F/psin profiles are represented
         # by root fields and source derivatives instead.
-        name: snapshot_profile(profiles_by_name[name], coeff_values[profile_index[name]])
-        for name in shape_profile_names
-    }
+        profiles[name] = snapshot_profile(
+            coeff_values[p],
+            offset=float(profile_offsets[p]),
+            scale=float(profile_scales[p]),
+            power=int(profile_powers[p]),
+            envelope_power=int(profile_envelope_powers[p]),
+            amplitude_power=float(profile_amplitude_powers[p]),
+        )
+    return profiles
 
 
-def snapshot_profile(profile: Profile, coeff_values: np.ndarray | None) -> Profile:
+def snapshot_profile(
+    coeff_values: np.ndarray | None,
+    *,
+    offset: float,
+    scale: float,
+    power: int,
+    envelope_power: int,
+    amplitude_power: float,
+) -> Profile:
     """Copy one passive profile spec and replace its active coefficients."""
 
     # Active shape profiles receive the solved coefficient block; passive ones
     # keep coeff=None and therefore remain pure offset/static profiles.
     coeff = None if coeff_values is None else np.asarray(coeff_values, dtype=np.float64).copy()
     return Profile(
-        scale=profile.scale,
-        power=profile.power,
-        envelope_power=profile.envelope_power,
-        amplitude_power=profile.amplitude_power,
-        offset=profile.offset,
+        scale=scale,
+        power=power,
+        envelope_power=envelope_power,
+        amplitude_power=amplitude_power,
+        offset=offset,
         coeff=coeff,
     )

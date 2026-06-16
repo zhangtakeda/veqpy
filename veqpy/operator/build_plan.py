@@ -8,7 +8,7 @@ Role:
 Public API:
 - OperatorBuildPlan
 - build_operator_plan
-- refresh_operator_plan_for_case
+- refresh_operator_plan_for_problem
 """
 
 from __future__ import annotations
@@ -35,6 +35,7 @@ from veqpy.operator.packed_layout import (
     get_prefix_profile_names,
     packed_size,
 )
+from veqpy.operator.profile_runtime import build_profile_parameter_arrays
 from veqpy.operator.source_plan import (
     SourcePlan,
     build_source_plan,
@@ -56,7 +57,7 @@ class ResidualBindingLayout:
 
 @dataclass(slots=True)
 class OperatorBuildPlan:
-    """Static topology and case-derived runtime binding plan for Operator."""
+    """Static topology and problem-derived runtime binding plan for Operator."""
 
     grid_workspace: GridWorkspace
     prefix_profile_names: tuple[str, ...]
@@ -77,15 +78,20 @@ class OperatorBuildPlan:
     residual_binding_layout: ResidualBindingLayout
     profile_static_kwargs_by_name: dict[str, dict[str, int]]
     profile_offset_specs: dict[str, float | str]
+    profile_offsets: np.ndarray
+    profile_scales: np.ndarray
+    profile_powers: np.ndarray
+    profile_envelope_powers: np.ndarray
+    profile_amplitude_powers: np.ndarray
 
 
 def build_operator_plan(
     *,
     grid: Grid,
-    case: Problem,
+    problem: Problem,
     source_interpolation_kind: str,
 ) -> OperatorBuildPlan:
-    """Build full Operator topology from an initial Grid + case."""
+    """Build full Operator topology from an initial Grid + problem."""
 
     grid_workspace = GridWorkspace.from_grid(grid)
     prefix_profile_names = get_prefix_profile_names()
@@ -97,11 +103,11 @@ def build_operator_plan(
     s_profile_names = tuple(name for name in fourier_profile_names if name.startswith("s"))
 
     profile_L, coeff_index, order_offsets = build_profile_layout(
-        case.profiles,
+        problem.active_profiles,
         profile_names=profile_names,
         prefix_profile_names=prefix_profile_names,
     )
-    # The plan freezes topology from the initial case.  Later case refreshes may
+    # The plan freezes topology from the initial problem.  Later problem refreshes may
     # replace source inputs/routes but not active profile degrees or x_size.
     active_profile_mask, active_profile_ids = build_active_profile_metadata(
         profile_L,
@@ -118,9 +124,22 @@ def build_operator_plan(
         c_profile_names=c_profile_names,
         s_profile_names=s_profile_names,
     )
-    source_route_spec = validate_route(case.route, case.coordinate, case.nodes)
+    (
+        profile_offsets,
+        profile_scales,
+        profile_powers,
+        profile_envelope_powers,
+        profile_amplitude_powers,
+    ) = build_profile_parameter_arrays(
+        problem=problem,
+        grid_workspace=grid_workspace,
+        profile_names=profile_names,
+        profile_static_kwargs_by_name=profile_static_kwargs_by_name,
+        profile_offset_specs=profile_offset_specs,
+    )
+    source_route_spec = validate_route(problem.route, problem.coordinate, problem.nodes)
     source_plan = build_source_plan(
-        case=case,
+        problem=problem,
         source_route_spec=source_route_spec,
         interpolation_kind=source_interpolation_kind,
     )
@@ -136,9 +155,9 @@ def build_operator_plan(
     validate_source_plan_profile_support(
         source_plan=source_plan,
         source_execution=source_execution,
-        case=case,
+        problem=problem,
     )
-    validate_source_inputs(case, grid_workspace.Nr)
+    validate_source_inputs(problem, grid_workspace.Nr)
 
     return OperatorBuildPlan(
         grid_workspace=grid_workspace,
@@ -160,20 +179,25 @@ def build_operator_plan(
         residual_binding_layout=residual_binding_layout,
         profile_static_kwargs_by_name=profile_static_kwargs_by_name,
         profile_offset_specs=profile_offset_specs,
+        profile_offsets=profile_offsets,
+        profile_scales=profile_scales,
+        profile_powers=profile_powers,
+        profile_envelope_powers=profile_envelope_powers,
+        profile_amplitude_powers=profile_amplitude_powers,
     )
 
 
-def refresh_operator_plan_for_case(
+def refresh_operator_plan_for_problem(
     plan: OperatorBuildPlan,
     *,
-    case: Problem,
+    problem: Problem,
     source_interpolation_kind: str,
 ) -> OperatorBuildPlan:
-    """Refresh case-dependent route/source ABI while preserving packed topology."""
+    """Refresh problem-dependent route/source ABI while preserving packed topology."""
 
-    source_route_spec = validate_route(case.route, case.coordinate, case.nodes)
+    source_route_spec = validate_route(problem.route, problem.coordinate, problem.nodes)
     source_plan = build_source_plan(
-        case=case,
+        problem=problem,
         source_route_spec=source_route_spec,
         interpolation_kind=source_interpolation_kind,
     )
@@ -187,7 +211,7 @@ def refresh_operator_plan_for_case(
     validate_source_plan_profile_support(
         source_plan=source_plan,
         source_execution=source_execution,
-        case=case,
+        problem=problem,
     )
     plan.source_route_spec = source_route_spec
     plan.source_plan = source_plan

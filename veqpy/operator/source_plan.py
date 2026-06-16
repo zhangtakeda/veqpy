@@ -106,23 +106,26 @@ SOURCE_PARAMETERIZATION_CODES = {
 
 def build_source_plan(
     *,
-    case: Problem,
+    problem: Problem,
     source_route_spec: object,
     interpolation_kind: str = SOURCE_INTERP_DEFAULT,
 ) -> SourcePlan:
     """Build the immutable source plan for a ``Problem``."""
-    scaled_heat, scaled_current, scaled_Ip, beta = _scaled_source_inputs(case)
+    scaled_heat, scaled_current, scaled_Ip, beta = _scaled_source_inputs(problem)
     # Parameterization is route-specific.  For example PP/psin/uniform samples
     # on sqrt(psin) to bias resolution near the magnetic axis while all kernels
     # still exchange normalized psin/root fields internally.
+    route_key = (
+        str(problem.route).upper(),
+        str(problem.coordinate).lower(),
+        str(problem.nodes).lower(),
+    )
     return SourcePlan(
-        route=str(case.route).upper(),
+        route=str(problem.route).upper(),
         kernel=source_route_spec.implementation,
-        coordinate=str(case.coordinate).lower(),
-        nodes=str(case.nodes).lower(),
-        parameterization=source_parameterization_for_route_key(
-            (str(case.route).upper(), str(case.coordinate).lower(), str(case.nodes).lower())
-        ),
+        coordinate=str(problem.coordinate).lower(),
+        nodes=str(problem.nodes).lower(),
+        parameterization=source_parameterization_for_route_key(route_key),
         source_sample_count=int(scaled_heat.shape[0]),
         scaled_heat=scaled_heat,
         scaled_current=scaled_current,
@@ -132,18 +135,18 @@ def build_source_plan(
             # Grid-node sources are already sampled on operator rho; leave the
             # interpolation slot empty so runtime binding cannot remap them.
             ""
-            if str(case.nodes).lower() == "grid"
+            if str(problem.nodes).lower() == "grid"
             else normalize_source_interpolation_kind(interpolation_kind)
         ),
     )
 
 
-def _scaled_source_inputs(case: Problem) -> tuple[np.ndarray, np.ndarray, float, float]:
-    route = str(case.route).upper()
-    scaled_heat = _scale_pressure_like_input(case.heat_input, name="heat_input")
-    scaled_current = _scale_current_input(case.current_input, route=route)
-    scaled_Ip = _scale_physical_constraint(float(case.Ip), name="Ip")
-    return scaled_heat, scaled_current, scaled_Ip, float(case.beta)
+def _scaled_source_inputs(problem: Problem) -> tuple[np.ndarray, np.ndarray, float, float]:
+    route = str(problem.route).upper()
+    scaled_heat = _scale_pressure_like_input(problem.heat_input, name="heat_input")
+    scaled_current = _scale_current_input(problem.current_input, route=route)
+    scaled_Ip = _scale_physical_constraint(float(problem.Ip), name="Ip")
+    return scaled_heat, scaled_current, scaled_Ip, float(problem.beta)
 
 
 def _scale_pressure_like_input(value: np.ndarray, *, name: str) -> np.ndarray:
@@ -197,7 +200,7 @@ def validate_source_plan_profile_support(
     *,
     source_plan: SourcePlan,
     source_execution: object,
-    case: Problem,
+    problem: Problem,
 ) -> None:
     """Validate source-plan compatibility with active profile ownership."""
     route_key = source_plan.route_key
@@ -212,10 +215,11 @@ def validate_source_plan_profile_support(
     requires_active_F = bool(getattr(source_execution, "requires_optimized_f_profile", False))
     if has_active_F and not requires_active_F:
         raise ValueError(
-            f"{case.route} does not accept an active F profile; active F is only supported for PJ2"
+            f"{problem.route} does not accept an active F profile; "
+            "active F is only supported for PJ2"
         )
     if requires_active_F and not has_active_F:
-        raise ValueError(f"{case.route} requires an active F profile")
+        raise ValueError(f"{problem.route} requires an active F profile")
     if has_active_F and has_active_psin:
         raise ValueError("Active F and active psin profiles are mutually exclusive")
     if (
@@ -224,7 +228,7 @@ def validate_source_plan_profile_support(
     ):
         # PF/PP/PI/PJ1/PQ psin-uniform routes query external source samples at
         # the current optimized psin each residual evaluation.
-        raise ValueError(f"{case.route} requires an active psin profile")
+        raise ValueError(f"{problem.route} requires an active psin profile")
     if (
         source_plan.is_psin_coordinate
         and has_active_psin
@@ -234,22 +238,24 @@ def validate_source_plan_profile_support(
         # active psin profile would create two independent owners of the same
         # root field and stale source queries.
         raise ValueError(
-            f"{case.route} does not accept an active psin profile"
+            f"{problem.route} does not accept an active psin profile"
         )
 
 
-def validate_source_inputs(case: Problem, nr: int) -> None:
+def validate_source_inputs(problem: Problem, nr: int) -> None:
     """Validate source input lengths for grid-owned and sampled routes."""
-    if case.heat_input.shape != case.current_input.shape:
+    if problem.heat_input.shape != problem.current_input.shape:
         raise ValueError(
             "Expected heat_input/current_input to share a shape, "
-            f"got {case.heat_input.shape} and {case.current_input.shape}"
+            f"got {problem.heat_input.shape} and {problem.current_input.shape}"
         )
-    if case.nodes == "grid" and case.heat_input.shape[0] != nr:
+    if problem.nodes == "grid" and problem.heat_input.shape[0] != nr:
         # Grid-node routes skip interpolation entirely, so source samples must
         # already match the operator radial grid.
-        raise ValueError(f"Expected grid inputs to have shape ({nr},), got {case.heat_input.shape}")
-    if case.heat_input.shape[0] < 1:
         raise ValueError(
-            f"Expected {case.coordinate}-coordinate inputs to contain at least one sample"
+            f"Expected grid inputs to have shape ({nr},), got {problem.heat_input.shape}"
+        )
+    if problem.heat_input.shape[0] < 1:
+        raise ValueError(
+            f"Expected {problem.coordinate}-coordinate inputs to contain at least one sample"
         )

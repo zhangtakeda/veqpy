@@ -2,7 +2,7 @@
 Module: operator.operator
 
 Role:
-- Connect case, grid, model runtime, engine kernels, and packed layout.
+- Connect problem, grid, model runtime, engine kernels, and packed layout.
 - Expose stable residual evaluation interfaces.
 
 Public API:
@@ -25,22 +25,20 @@ from veqpy.math.interpolate import SOURCE_INTERP_DEFAULT
 from veqpy.model.equilibrium import Equilibrium
 from veqpy.model.grid import Grid
 from veqpy.model.problem import Problem
-from veqpy.model.profile import Profile
 from veqpy.operator.build_plan import (
     OperatorBuildPlan,
     build_operator_plan,
-    refresh_operator_plan_for_case,
+    refresh_operator_plan_for_problem,
 )
 from veqpy.operator.packed_layout import (
     decode_packed_blocks,
     encode_packed_state,
 )
 from veqpy.operator.profile_runtime import (
-    make_profile,
     refresh_fourier_family_metadata,
     refresh_profile_runtime,
     refresh_stage_a_runtime,
-    validate_case_compatibility,
+    validate_problem_compatibility,
 )
 from veqpy.operator.snapshot import snapshot_equilibrium_from_runtime
 from veqpy.operator.source_plan import (
@@ -54,12 +52,12 @@ from veqpy.workspace.residual_workspace import ResidualWorkspace
 from veqpy.workspace.source_workspace import SourceWorkspace
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, init=False)
 class Operator:
-    """Encapsulate the residual evaluator for a fixed case, grid, and runtime."""
+    """Encapsulate the residual evaluator for a fixed problem, grid, and runtime."""
 
     grid: InitVar[Grid]
-    case: Problem = field(repr=False)
+    problem: Problem = field(repr=False)
     fix_rho: float = 0.05
     source_interpolation_kind: str = SOURCE_INTERP_DEFAULT
     plan: OperatorBuildPlan = field(init=False, repr=False)
@@ -69,25 +67,43 @@ class Operator:
     residual_workspace: ResidualWorkspace = field(init=False, repr=False)
     layout: OperatorLayout = field(init=False, repr=False)
 
-    h_profile: Profile = field(init=False)
-    v_profile: Profile = field(init=False)
-    k_profile: Profile = field(init=False)
-    psin_profile: Profile = field(init=False)
-    F_profile: Profile = field(init=False)
-    profiles_by_name: dict[str, Profile] = field(init=False, repr=False)
-
     c_effective_order: int = field(init=False, repr=False)
     s_effective_order: int = field(init=False, repr=False)
 
+    def __init__(
+        self,
+        grid: Grid,
+        problem: Problem | None = None,
+        *,
+        case: Problem | None = None,
+        fix_rho: float = 0.05,
+        source_interpolation_kind: str = SOURCE_INTERP_DEFAULT,
+    ) -> None:
+        """Bind an operator problem.
+
+        ``case`` is kept as a compatibility alias for existing callers while
+        the public spelling migrates to ``problem``.
+        """
+        if problem is None:
+            if case is None:
+                raise TypeError("Operator requires a problem")
+            problem = case
+        elif case is not None:
+            raise TypeError("Pass either problem or case, not both")
+        self.problem = problem
+        self.fix_rho = float(fix_rho)
+        self.source_interpolation_kind = source_interpolation_kind
+        self.__post_init__(grid)
+
     def __post_init__(self, grid: Grid) -> None:
-        """Build layouts, allocate runtime buffers, and bind the case.
+        """Build layouts, allocate runtime buffers, and bind the problem.
 
         The input grid is lowered to a GridWorkspace snapshot at construction time;
         Operator does not read live Grid state afterwards.
         """
         self.plan = build_operator_plan(
             grid=grid,
-            case=self.case,
+            problem=self.problem,
             source_interpolation_kind=self.source_interpolation_kind,
         )
         self.layout = OperatorLayout.empty(self.plan.x_size)
@@ -117,6 +133,15 @@ class Operator:
     def alpha2(self, value: float) -> None:
         """Update the flux/source normalization in place."""
         self.source_workspace.alpha_state[1] = float(value)
+
+    @property
+    def case(self) -> Problem:
+        """Compatibility alias for ``problem``."""
+        return self.problem
+
+    @case.setter
+    def case(self, problem: Problem) -> None:
+        self.replace_problem(problem)
 
     # Solver-facing plan accessors kept as the public facade; Operator does not
     # mirror these fields as mutable state.
@@ -165,7 +190,7 @@ class Operator:
         pw = self.profile_workspace
         x = np.zeros(self.plan.x_size, dtype=np.float64)
 
-        h0_est = _estimate_h0_from_case(self.case)
+        h0_est = _estimate_h0_from_problem(self.problem)
         if h0_est == 0.0:
             return x  # uniform → pure zeros, skip c/s estimates
 
@@ -176,38 +201,58 @@ class Operator:
             name = pw.profile_names[int(profile_id)]
             idx0 = int(pw.active_coeff_index_rows[slot, 0])
             if name.startswith("c") or name.startswith("s"):
-                profile = self.profiles_by_name[name]
-                offset = float(profile.offset)
+                profile_id_int = int(profile_id)
+                offset = float(self.plan.profile_offsets[profile_id_int])
                 if abs(offset) > 1.0e-14:
-                    x[idx0] = -offset / float(2 * int(profile.power) + 1)
+                    power = int(self.plan.profile_powers[profile_id_int])
+                    x[idx0] = -offset / float(2 * power + 1)
             elif name == "h":
                 x[idx0] = h0_est
         return x
 
-    def replace_case(self, case: Problem) -> None:
-        """Replace the current case without changing the packed layout."""
-        validate_case_compatibility(
-            case,
+    def replace_problem(self, problem: Problem) -> None:
+        """Replace the current problem without changing the packed layout."""
+        validate_problem_compatibility(
+            problem,
             profile_names=self.plan.profile_names,
             prefix_profile_names=self.plan.prefix_profile_names,
             profile_L=self.plan.profile_L,
             coeff_index=self.plan.coeff_index,
             order_offsets=self.plan.order_offsets,
-            validate_source_inputs=lambda next_case: validate_source_inputs(
-                next_case, self.plan.grid_workspace.Nr
+            validate_source_inputs=lambda next_problem: validate_source_inputs(
+                next_problem, self.plan.grid_workspace.Nr
             ),
         )
-        self.case = case
+        self.problem = problem
         self._refresh_runtime_state()
 
-    def encode_initial_state(self) -> np.ndarray:
-        """Encode profile coefficients from the current case into the packed initial state."""
+    def replace_case(self, case: Problem) -> None:
+        """Compatibility alias for ``replace_problem``."""
+        self.replace_problem(case)
+
+    def zero_state(self) -> np.ndarray:
+        """Return the zero packed state for this operator topology."""
+        return np.zeros(self.plan.x_size, dtype=np.float64)
+
+    def pack_coefficients(self, coefficients: dict[str, object]) -> np.ndarray:
+        """Pack named active profile coefficients into the operator state vector."""
         return encode_packed_state(
-            self.case.profiles,
+            coefficients,
             self.plan.profile_L,
             self.plan.coeff_index,
             profile_names=self.plan.profile_names,
         )
+
+    def unpack_coefficients(self, x: np.ndarray) -> dict[str, np.ndarray]:
+        """Decode a packed state vector into active profile coefficient arrays."""
+        blocks = decode_packed_blocks(
+            x, self.plan.profile_L, self.plan.coeff_index, profile_names=self.plan.profile_names
+        )
+        return {
+            name: block
+            for name, block in zip(self.plan.profile_names, blocks, strict=True)
+            if block is not None
+        }
 
     def residual_var(
         self,
@@ -291,18 +336,10 @@ class Operator:
             out_eval = out
         self.layout.run_collocation_into(x_eval, out_eval)
 
-    def build_coeffs(
-        self, x: np.ndarray, *, include_none: bool = True
-    ) -> dict[str, list[float] | None]:
+    def build_coeffs(self, x: np.ndarray, *, include_none: bool = False) -> dict[str, list[float]]:
         """Decode a packed state vector into a profile-coefficient dictionary."""
-        blocks = decode_packed_blocks(
-            x, self.plan.profile_L, self.plan.coeff_index, profile_names=self.plan.profile_names
-        )
-        coeffs: dict[str, list[float] | None] = {}
-        for name, block in zip(self.plan.profile_names, blocks, strict=True):
-            if include_none or block is not None:
-                coeffs[name] = None if block is None else block.tolist()
-        return coeffs
+        del include_none
+        return {name: block.tolist() for name, block in self.unpack_coefficients(x).items()}
 
     def build_equilibrium(self, x: np.ndarray) -> Equilibrium:
         """Build a complete Equilibrium snapshot from a packed state vector."""
@@ -363,7 +400,6 @@ class Operator:
 
     def _setup_runtime_state(self) -> None:
         (
-            profiles_by_name,
             profile_workspace,
             geometry_workspace,
             source_workspace,
@@ -376,34 +412,18 @@ class Operator:
             active_profile_ids=self.plan.active_profile_ids,
             profile_L=self.plan.profile_L,
             x_size=self.plan.x_size,
-            make_profile=lambda name: make_profile(
-                case=self.case,
-                operator_grid=self.plan.grid_workspace,
-                name=name,
-                profile_L=self.plan.profile_L,
-                profile_names=self.plan.profile_names,
-                profile_index=self.plan.profile_index,
-                profile_static_kwargs_by_name=self.plan.profile_static_kwargs_by_name,
-                profile_offset_specs=self.plan.profile_offset_specs,
-            ),
         )
-        self.profiles_by_name = profiles_by_name
-        for name, profile in self.profiles_by_name.items():
-            if hasattr(type(self), f"{name}_profile"):
-                # Keep legacy attribute access (h_profile, psin_profile, ...)
-                # as views of the runtime profile objects, not duplicated state.
-                setattr(self, f"{name}_profile", profile)
         self.profile_workspace = profile_workspace
         self.geometry_workspace = geometry_workspace
         self.source_workspace = source_workspace
         self.residual_workspace = residual_workspace
 
     def _refresh_runtime_state(self) -> None:
-        # Case replacement may change source route semantics but must preserve
-        # the packed topology; compatibility was already checked by replace_case.
-        self.plan = refresh_operator_plan_for_case(
+        # Problem replacement may change source route semantics but must preserve
+        # the packed topology; compatibility was already checked by replace_problem.
+        self.plan = refresh_operator_plan_for_problem(
             self.plan,
-            case=self.case,
+            problem=self.problem,
             source_interpolation_kind=self.source_interpolation_kind,
         )
         self._refresh_profile_runtime()
@@ -421,27 +441,26 @@ class Operator:
         self._refresh_runtime_bindings()
 
     def _refresh_profile_runtime(self) -> None:
-        # Profiles are mutable runtime views over immutable plan topology.  The
-        # refresh updates offsets, passive fields, and active metadata in place.
+        # Profile metadata is flat plan state.  Refresh updates offsets, passive
+        # fields, and active metadata in place without constructing Profile objects.
         refresh_profile_runtime(
-            case=self.case,
+            problem=self.problem,
             operator_grid=self.plan.grid_workspace,
             profile_names=self.plan.profile_names,
-            profile_index=self.plan.profile_index,
-            profile_L=self.plan.profile_L,
-            profiles_by_name=self.profiles_by_name,
             profile_workspace=self.profile_workspace,
+            profile_offsets=self.plan.profile_offsets,
+            profile_scales=self.plan.profile_scales,
+            profile_powers=self.plan.profile_powers,
+            profile_envelope_powers=self.plan.profile_envelope_powers,
+            profile_amplitude_powers=self.plan.profile_amplitude_powers,
             profile_static_kwargs_by_name=self.plan.profile_static_kwargs_by_name,
             profile_offset_specs=self.plan.profile_offset_specs,
         )
-        for name, profile in self.profiles_by_name.items():
-            if hasattr(type(self), f"{name}_profile"):
-                setattr(self, f"{name}_profile", profile)
 
     def _refresh_runtime_bindings(self) -> None:
         self.layout = build_operator_layout(
             plan=self.plan,
-            case=self.case,
+            problem=self.problem,
             profile_workspace=self.profile_workspace,
             geometry_workspace=self.geometry_workspace,
             source_workspace=self.source_workspace,
@@ -463,7 +482,10 @@ class Operator:
             # packed coefficients, so materialize them immediately after binding.
             self.profile_workspace.refresh_profile_fields(
                 profile_id=int(p),
-                profile=self.profiles_by_name[self.plan.profile_names[int(p)]],
+                offset=float(self.plan.profile_offsets[int(p)]),
+                scale=float(self.plan.profile_scales[int(p)]),
+                amplitude_power=float(self.plan.profile_amplitude_powers[int(p)]),
+                coeff=None,
                 grid_workspace=self.plan.grid_workspace,
             )
 
@@ -471,10 +493,11 @@ class Operator:
         profile_workspace = self.profile_workspace
         refresh_stage_a_runtime(
             active_profile_ids=self.plan.active_profile_ids,
-            profile_names=self.plan.profile_names,
-            profiles_by_name=self.profiles_by_name,
             profile_L=self.plan.profile_L,
             coeff_index=self.plan.coeff_index,
+            profile_offsets=self.plan.profile_offsets,
+            profile_scales=self.plan.profile_scales,
+            profile_amplitude_powers=self.plan.profile_amplitude_powers,
             active_offsets=profile_workspace.active_offsets,
             active_scales=profile_workspace.active_scales,
             active_amplitude_powers=profile_workspace.active_amplitude_powers,
@@ -483,14 +506,15 @@ class Operator:
         )
 
     def _refresh_fourier_family_metadata(self) -> None:
-        # Effective order is case-dependent: a coefficient-free high-order
+        # Effective order is problem-dependent: a coefficient-free high-order
         # profile with nonzero boundary offset still contributes to geometry.
         self.c_effective_order, self.s_effective_order = refresh_fourier_family_metadata(
             c_profile_names=self.plan.c_profile_names,
             s_profile_names=self.plan.s_profile_names,
-            profiles=self.case.profiles,
-            c_offsets=self.case.c_offsets,
-            s_offsets=self.case.s_offsets,
+            profile_L=self.plan.profile_L,
+            profile_index=self.plan.profile_index,
+            c_offsets=self.problem.c_offsets,
+            s_offsets=self.problem.s_offsets,
             c_family_fields=self.profile_workspace.c_family_fields,
             s_family_fields=self.profile_workspace.s_family_fields,
         )
@@ -506,14 +530,18 @@ class Operator:
         root_fields = self.residual_workspace.root_fields
         return snapshot_equilibrium_from_runtime(
             x=x,
-            case=self.case,
+            problem=self.problem,
             grid=self.plan.grid_workspace.to_grid(),
             profile_L=self.plan.profile_L,
             coeff_index=self.plan.coeff_index,
             profile_names=self.plan.profile_names,
             shape_profile_names=self.plan.shape_profile_names,
             profile_index=self.plan.profile_index,
-            profiles_by_name=self.profiles_by_name,
+            profile_offsets=self.plan.profile_offsets,
+            profile_scales=self.plan.profile_scales,
+            profile_powers=self.plan.profile_powers,
+            profile_envelope_powers=self.plan.profile_envelope_powers,
+            profile_amplitude_powers=self.plan.profile_amplitude_powers,
             psin=root_fields[0],
             FFn_psin=root_fields[3],
             Pn_psin=root_fields[4],
@@ -524,7 +552,7 @@ class Operator:
         )
 
 
-def _estimate_h0_from_case(case: Problem) -> float:
+def _estimate_h0_from_problem(problem: Problem) -> float:
     """Return Shafranov-shift estimate h0, or 0.0 for uniform profiles.
 
     An H-mode pedestal is detected when ``d|heat_input|/dpsi`` changes
@@ -535,11 +563,11 @@ def _estimate_h0_from_case(case: Problem) -> float:
     profiles (Solovev-like, range / mean < 1e-4) return zero.
     """
     try:
-        a = float(case.boundary.a)
-        R0 = float(case.boundary.R0)
+        a = float(problem.boundary.a)
+        R0 = float(problem.boundary.R0)
     except (AttributeError, TypeError, ValueError):
         return 0.0
-    heat = getattr(case, "heat_input", None)
+    heat = getattr(problem, "heat_input", None)
     if heat is None or not hasattr(heat, "__len__") or len(heat) < 6:
         return 0.66 * a / R0
     try:

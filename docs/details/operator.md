@@ -11,11 +11,12 @@ The relevant source files mainly live in `veqpy/operator/`, `veqpy/layout/`, `ve
 
 ## Problem
 
-`Problem` describes one fixed-boundary solve input: source route, source coordinate, node semantics, profile objects, boundary, heat/current-related inputs, and optional `Ip` or `beta` constraints. It is the public problem-definition type passed into `Operator`.
+`Problem` describes one fixed-boundary solve input: source route, source coordinate, node semantics, active profile lengths, boundary, heat/current-related inputs, and optional `Ip` or `beta` constraints. It is the public problem-definition type passed into `Operator`.
 
-Each entry in `Problem.profiles` is a `Profile`. A profile with `coeff is None`
-is passive; a profile with a one-dimensional coefficient array is active and
-occupies packed state slots.
+`Problem.active_profiles` maps active profile names to coefficient counts.
+Profiles absent from this mapping are passive. `Problem` does not carry initial
+coefficient values; callers that have coefficient arrays pass them to
+`Operator.pack_coefficients(...)` after the operator topology is built.
 
 `route`, `coordinate`, and `nodes` jointly form the source route key:
 
@@ -94,8 +95,8 @@ The default layout is degree-first: all active profiles contribute their low-ord
 
 The shape profiles determine the continuous fixed-boundary surface family.
 `h`, `v`, and `k` carry low-order radial shaping, while `c*` and `s*` carry the
-Fourier harmonics. Optional `psin` and `F` profiles become active when the case
-includes their coefficients; route validation decides whether that ownership is
+Fourier harmonics. Optional `psin` and `F` profiles become active when the problem
+includes their names and lengths; route validation decides whether that ownership is
 physically meaningful for the selected source model.
 
 ## Residual Pipeline
@@ -103,7 +104,7 @@ physically meaningful for the selected source model.
 When an `Operator` is built, the active profile set, coefficient lengths, source
 route, residual blocks, and fixed grid are frozen into one solve topology. If
 the active profile set, coefficient lengths, or route topology changes, the
-operator should be rebuilt. A replacement case may reuse the same operator only
+operator should be rebuilt. A replacement problem may reuse the same operator only
 when it preserves that packed topology.
 
 One residual call has four main stages:

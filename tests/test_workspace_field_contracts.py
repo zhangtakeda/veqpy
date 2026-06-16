@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
-from helpers import profiles, tiny_boundary, tiny_grid, tiny_operator
+from helpers import tiny_boundary, tiny_grid, tiny_operator
 from numpy.testing import assert_allclose
 
 import veqpy.workspace.field_rows as rows
@@ -137,20 +137,16 @@ def test_rho_source_eval_bindings_use_grid_radial_fields() -> None:
         current_input = np.ones(grid.Nr, dtype=np.float64)
         if route in {"PI", "PJ1", "PJ2"}:
             current_input = np.full(grid.Nr, 1.0e6, dtype=np.float64)
-        profile_coeffs = {
-            "h": [0.0, 0.0],
-            "k": [0.0, 0.0],
-            "s1": [0.0, 0.0],
-        }
+        active_profile_lengths = {"h": 2, "k": 2, "s1": 2}
         if route == "PJ2":
-            profile_coeffs["F"] = [0.0, 0.0]
+            active_profile_lengths["F"] = 2
         return Operator(
             grid,
             Problem(
                 route=route,
                 coordinate="rho",
                 nodes="grid",
-                profiles=profiles(profile_coeffs),
+                active_profiles=active_profile_lengths,
                 boundary=tiny_boundary(),
                 heat_input=np.full(grid.Nr, 1.0e6, dtype=np.float64),
                 current_input=current_input,
@@ -164,7 +160,7 @@ def test_rho_source_eval_bindings_use_grid_radial_fields() -> None:
             grid_workspace=operator.plan.grid_workspace,
             geometry_workspace=operator.geometry_workspace,
             source_workspace=operator.source_workspace,
-            B0=operator.case.boundary.B0,
+            B0=operator.problem.boundary.B0,
             fix_rho=operator.fix_rho,
         )
 
@@ -188,9 +184,9 @@ def test_fused_hot_runtime_binding_uses_grid_radial_fields_for_profile_basis() -
         geometry_workspace=operator.geometry_workspace,
         c_active_order=operator.c_effective_order,
         s_active_order=operator.s_effective_order,
-        a=operator.case.a,
-        R0=operator.case.R0,
-        Z0=operator.case.Z0,
+        a=operator.problem.a,
+        R0=operator.problem.R0,
+        Z0=operator.problem.Z0,
     )
 
     assert np.shares_memory(binding.grid_radial_fields, operator.plan.grid_workspace.radial_fields)

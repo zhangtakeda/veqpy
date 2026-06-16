@@ -8,7 +8,7 @@ Public API:
 - Profile
 
 Notes:
-- `Profile` is an immutable model-layer configuration object.
+- `Profile` is an immutable model-layer profile-parameter snapshot.
 - Runtime fields are materialized in `ProfileWorkspace`, not on `Profile`.
 - Does not own packed state, source scaling, or solver orchestration.
 """
@@ -36,8 +36,8 @@ class Profile(Serial):
     coeff: np.ndarray | None = None
 
     def __post_init__(self) -> None:
-        # Profile stores only setup semantics. Derived value/derivative arrays
-        # are allocated in ProfileWorkspace after Operator flattens the setup.
+        # Profile stores only root profile parameters. Derived value/derivative
+        # arrays are allocated in ProfileWorkspace after Operator flattens setup.
         object.__setattr__(self, "scale", float(self.scale))
         object.__setattr__(self, "power", int(self.power))
         object.__setattr__(self, "envelope_power", int(self.envelope_power))

@@ -54,9 +54,10 @@ and easier to reuse than full solver-native equilibrium or reconstruction pipeli
   post-solve snapshots. `Problem` is the public problem definition type.
 - **GEQDSK workflow support**: GEQDSK I/O, fixed-boundary fitting from GEQDSK boundaries,
   snapshot export, flux-surface comparison, and common diagnostics.
-- **Formula-oriented model objects**: `Problem` and `Profile` keep immutable setup
-  semantics, while `Grid` and `Equilibrium` use reactive derived properties to lazily
-  reconstruct geometry and physics diagnostics by formula.
+- **Formula-oriented model objects**: `Problem` stores user-facing solve inputs and
+  active profile lengths, while `Profile` is used for serializable shape-profile
+  snapshots on `Equilibrium`. `Grid` and `Equilibrium` use reactive derived properties
+  to lazily reconstruct geometry and physics diagnostics by formula.
 
 ## Installation
 
@@ -97,7 +98,7 @@ Basic demo:
 .venv/bin/python examples/minimal_equilibrium.py
 ```
 
-This script builds a smooth fixed-boundary case, solves an equilibrium using PF(`psin`)
+This script builds a smooth fixed-boundary problem, solves an equilibrium using PF(`psin`)
 source input, writes an `Equilibrium` JSON snapshot, and generates a flux-surface figure.
 By default, outputs go under `./outputs/minimal_equilibrium`; set
 `VEQPY_OUTPUT_DIR` to choose another directory.

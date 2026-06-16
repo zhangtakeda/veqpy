@@ -30,7 +30,7 @@ from scipy.interpolate import PchipInterpolator, interp1d
 import veqpy.engine.backend_abi as backend_abi
 from veqpy.engine.numba_profile import update_profile
 from veqpy.engine.numba_source import source_parameterization_for_route_key
-from veqpy.model import Boundary, Grid, Problem, Profile
+from veqpy.model import Boundary, Grid, Problem
 from veqpy.operator import (
     Operator,
     build_profile_index,
@@ -258,22 +258,45 @@ def _as_float64_array(values, *, copy: bool = False) -> np.ndarray:
     return arr
 
 
-def _profiles_from_coeffs(
+def _active_profiles_from_coeffs(
     profile_coeffs: dict[str, list[float] | np.ndarray | int | None],
-) -> dict[str, Profile]:
-    profiles: dict[str, Profile] = {}
+) -> dict[str, int]:
+    active_profiles: dict[str, int] = {}
     for name, coeff in profile_coeffs.items():
+        if coeff is None:
+            continue
         if isinstance(coeff, int):
-            profiles[name] = Profile(coeff=np.zeros(coeff, dtype=np.float64))
+            length = int(coeff)
         else:
-            profiles[name] = Profile(coeff=coeff)
-    return profiles
+            length = int(np.asarray(coeff, dtype=np.float64).size)
+        if length > 0:
+            active_profiles[name] = length
+    return active_profiles
 
 
-def _extract_shape_x(profiles: dict[str, Profile], x: np.ndarray) -> np.ndarray:
+def _coefficients_from_coeffs(
+    profile_coeffs: dict[str, list[float] | np.ndarray | int | None],
+) -> dict[str, np.ndarray]:
+    coefficients: dict[str, np.ndarray] = {}
+    for name, coeff in profile_coeffs.items():
+        if coeff is None:
+            continue
+        if isinstance(coeff, int):
+            if coeff <= 0:
+                continue
+            values = np.zeros(int(coeff), dtype=np.float64)
+        else:
+            values = np.asarray(coeff, dtype=np.float64)
+            if values.size <= 0:
+                continue
+        coefficients[name] = values
+    return coefficients
+
+
+def _extract_shape_x(active_profiles: dict[str, int], x: np.ndarray) -> np.ndarray:
     profile_names = build_profile_names(REFERENCE_GRID.M_max)
     profile_index = build_profile_index(profile_names)
-    _, coeff_index, _ = build_profile_layout(profiles, profile_names=profile_names)
+    _, coeff_index, _ = build_profile_layout(active_profiles, profile_names=profile_names)
     shape_values: list[float] = []
     for k in range(coeff_index.shape[1]):
         for name in SHAPE_PROFILE_NAMES:
@@ -406,7 +429,7 @@ def _reference_pf_case() -> Problem:
         route="PF",
         coordinate="rho",
         nodes="uniform",
-        profiles=_profiles_from_coeffs(BASE_COEFFS),
+        active_profiles=_active_profiles_from_coeffs(BASE_COEFFS),
         boundary=BOUNDARY,
         heat_input=Pn_r_src / MU0,
         current_input=FFn_r_src,
@@ -542,6 +565,7 @@ def _solve_reference(*, show_progress: bool = False) -> ReferenceBundle:
 
     solver = Solver(operator=Operator(REFERENCE_GRID, _reference_pf_case()), config=CONFIG)
     solver.solve(
+        x0=solver.operator.pack_coefficients(_coefficients_from_coeffs(BASE_COEFFS)),
         method=CONFIG.method,
         max_residual=CONFIG.max_residual,
         max_evaluations=CONFIG.max_evaluations,
@@ -556,7 +580,7 @@ def _solve_reference(*, show_progress: bool = False) -> ReferenceBundle:
         result=result,
         equilibrium=equilibrium,
         ref_profiles=build_pf_reference_profiles(equilibrium),
-        reference_shape_x=_extract_shape_x(solver.operator.case.profiles, result.x),
+        reference_shape_x=_extract_shape_x(solver.operator.problem.active_profiles, result.x),
         rho_axis=rho_axis,
         psin_axis=psin_axis,
         rho_interp_axis=_prepare_interp_axis(rho_axis),
@@ -682,6 +706,15 @@ def _profile_coeffs_for_case(
     return coeffs
 
 
+def _case_profile_coeffs(spec: BenchmarkCaseSpec) -> dict[str, list[float] | None]:
+    return _profile_coeffs_for_case(
+        spec.mode,
+        spec.coordinate,
+        spec.input_kind,
+        constraint=spec.constraint,
+    )
+
+
 def _make_benchmark_case(spec: BenchmarkCaseSpec, reference: ReferenceBundle) -> Problem:
     """Project the reference solution onto one route/constraint test case."""
     init_kwargs = _build_mode_init_kwargs(
@@ -716,12 +749,7 @@ def _make_benchmark_case(spec: BenchmarkCaseSpec, reference: ReferenceBundle) ->
     )
     return Problem(
         route=spec.mode,
-        profiles=_profiles_from_coeffs(_profile_coeffs_for_case(
-            spec.mode,
-            spec.coordinate,
-            spec.input_kind,
-            constraint=spec.constraint,
-        )),
+        active_profiles=_active_profiles_from_coeffs(_case_profile_coeffs(spec)),
         boundary=BOUNDARY,
         heat_input=heat_input,
         current_input=current_input,
@@ -745,9 +773,13 @@ def _iter_benchmark_specs():
                     )
 
 
-def _solve_once(case: Problem) -> tuple[object, object, np.ndarray]:
-    solver = Solver(operator=Operator(TEST_GRID, case), config=CONFIG)
+def _solve_once(
+    problem: Problem,
+    initial_coeffs: dict[str, list[float] | np.ndarray | int | None],
+) -> tuple[object, object, np.ndarray]:
+    solver = Solver(operator=Operator(TEST_GRID, problem), config=CONFIG)
     solver.solve(
+        x0=solver.operator.pack_coefficients(_coefficients_from_coeffs(initial_coeffs)),
         method=CONFIG.method,
         max_residual=CONFIG.max_residual,
         max_evaluations=CONFIG.max_evaluations,
@@ -758,13 +790,17 @@ def _solve_once(case: Problem) -> tuple[object, object, np.ndarray]:
     if result is None:
         raise RuntimeError("benchmark solve produced no result")
     equilibrium = solver.build_equilibrium()
-    shape_x = _extract_shape_x(case.profiles, result.x)
+    shape_x = _extract_shape_x(problem.active_profiles, result.x)
     return result, equilibrium, shape_x
 
 
-def _solve_with_timing(case: Problem) -> tuple[object, object, np.ndarray, float, float]:
-    solver = Solver(operator=Operator(TEST_GRID, case), config=CONFIG)
+def _solve_with_timing(
+    problem: Problem,
+    initial_coeffs: dict[str, list[float] | np.ndarray | int | None],
+) -> tuple[object, object, np.ndarray, float, float]:
+    solver = Solver(operator=Operator(TEST_GRID, problem), config=CONFIG)
     solver.solve(
+        x0=solver.operator.pack_coefficients(_coefficients_from_coeffs(initial_coeffs)),
         method=CONFIG.method,
         max_residual=CONFIG.max_residual,
         max_evaluations=CONFIG.max_evaluations,
@@ -776,6 +812,7 @@ def _solve_with_timing(case: Problem) -> tuple[object, object, np.ndarray, float
     result = None
     for index in range(BENCHMARK_REPEAT_COUNT):
         solver.solve(
+            x0=solver.operator.pack_coefficients(_coefficients_from_coeffs(initial_coeffs)),
             method=CONFIG.method,
             max_residual=CONFIG.max_residual,
             max_evaluations=CONFIG.max_evaluations,
@@ -789,7 +826,7 @@ def _solve_with_timing(case: Problem) -> tuple[object, object, np.ndarray, float
         raise RuntimeError("benchmark solve produced no result")
 
     equilibrium = solver.build_equilibrium()
-    shape_x = _extract_shape_x(case.profiles, result.x)
+    shape_x = _extract_shape_x(problem.active_profiles, result.x)
     return (
         result,
         equilibrium,
@@ -914,7 +951,9 @@ def _benchmark_case_result(
     spec: BenchmarkCaseSpec, reference: ReferenceBundle
 ) -> BenchmarkCaseResult:
     case = _make_benchmark_case(spec, reference)
-    result, equilibrium, shape_x, avg_ms, std_ms = _solve_with_timing(case)
+    result, equilibrium, shape_x, avg_ms, std_ms = _solve_with_timing(
+        case, _case_profile_coeffs(spec)
+    )
     metrics = _benchmark_case_diagnostics(reference, equilibrium, shape_x)
     return BenchmarkCaseResult(
         spec=spec,
@@ -954,7 +993,7 @@ def _benchmark_baseline_case_row(
     spec: BenchmarkCaseSpec, reference: ReferenceBundle
 ) -> dict[str, object]:
     case = _make_benchmark_case(spec, reference)
-    result, equilibrium, shape_x = _solve_once(case)
+    result, equilibrium, shape_x = _solve_once(case, _case_profile_coeffs(spec))
     metrics = _benchmark_case_diagnostics(reference, equilibrium, shape_x)
     return {
         "case_name": spec.case_name,

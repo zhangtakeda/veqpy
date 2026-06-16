@@ -1,6 +1,6 @@
 # Model
 
-The `model` layer stores interpretable, serializable physical objects in VEQPy. It is not a mirror of the operator runtime; it organizes independent inputs and solved snapshots into a stable API. `Problem` and `Profile` keep immutable setup semantics, while derived grid geometry and equilibrium diagnostics are reconstructed lazily through `Reactive` properties. Files store only root state.
+The `model` layer stores interpretable, serializable physical objects in VEQPy. It is not a mirror of the operator runtime; it organizes independent inputs and solved snapshots into a stable API. `Problem` keeps user-facing source, boundary, and active-profile topology inputs, while `Profile` is the serializable parameter object used by solved shape-profile snapshots. Derived grid geometry and equilibrium diagnostics are reconstructed lazily through `Reactive` properties. Files store only root state.
 
 The main source files live in `veqpy/model/`.
 
@@ -14,7 +14,7 @@ The main source files live in `veqpy/model/`.
 | `Geqdsk` | GEQDSK data loading, storage, and conversion |
 | `Equilibrium` | Solved continuous equilibrium snapshot and diagnostic interface |
 
-`Profile` represents radial profiles with scale, power, envelope, and Chebyshev coefficients. This lets external sources, shape profiles, and solve variables share one compact representation.
+`Profile` represents a one-dimensional radial profile with scale, power, envelope, offset, and optional Chebyshev coefficients. Operator setup lowers active profile topology to flat arrays; `Profile` remains on the model side for `Equilibrium.shape_profiles` and other serializable snapshots.
 
 ## Equilibrium Snapshot
 

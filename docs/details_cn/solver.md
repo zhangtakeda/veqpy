@@ -20,9 +20,10 @@ collocation polish。
 collocation 方法是 `lm`。
 
 Solver 自己持有一个 packed 向量 `Solver.x0`。构造 `Solver` 时，它由
-`Operator.encode_initial_state()` 从 `Problem.profiles` 编码得到。
-每次求解结束后，`Solver.x0` 会被替换为最终 packed 解；后续 warm start 和
-`build_equilibrium()` 都使用这个状态。
+`Operator.zero_state()` 按 operator 拓扑初始化。已有 profile coefficient 的
+调用方可以先用 `Operator.pack_coefficients(...)` 生成显式 `x0` 再传给
+`solve()`。每次求解结束后，`Solver.x0` 会被替换为最终 packed 解；后续 warm
+start 和 `build_equilibrium()` 都使用这个状态。
 
 初值来源按优先级选择:
 
@@ -31,17 +32,18 @@ Solver 自己持有一个 packed 向量 `Solver.x0`。构造 `Solver` 时，它�
 | 显式 `x0` | 由 operator 校验，复制到 `Solver.x0`，并作为本次初值 |
 | `initial_policy="warm"` | 复用当前 solver-owned `Solver.x0` |
 | `initial_policy="zeros"` | 使用全零 packed 向量 |
-| `initial_policy="homothetic"` | 使用边界形状估计 active shape 系数 |
-| 默认 (`initial_policy=None`) | 重新从 `Problem.profiles` 编码 |
+| `initial_policy="geometric"` | 使用边界形状估计 active shape 系数 |
+| 默认 (`initial_policy=None`) | 使用 operator 零状态 |
 
-`homothetic` 初值是一个廉价的几何初猜，面向近似嵌套磁面。它委托给 operator
+`geometric` 初值是一个廉价的几何初猜，面向近似嵌套磁面。它委托给 operator
 的 boundary-slope estimate: active Fourier shaping 系数会从边界 offset 推出
 首项系数，`h` 在 source profile 非均匀时使用 Shafranov-shift 估计。该初值
 使用 operator 侧的一套保守估计，不再暴露额外的 scale factor。
 
-当本次求解使用显式 `x0`、zeros、homothetic 或 case-encoded 初值时，operator
-会在 attempt 前使 route-local source state 失效。`warm` 则保留当前 `x0` 对应
-的 source state。
+`initial_policy="homothetic"` 仍作为 `"geometric"` 的兼容别名被接受。
+
+当本次求解使用显式 `x0`、zeros 或 geometric 初值时，operator 会在 attempt 前使
+route-local source state 失效。`warm` 则保留当前 `x0` 对应的 source state。
 
 ## 求解流程
 
@@ -102,9 +104,11 @@ residual 的权重足以推动系数离开弱形式解。因此 collocation poli
 ## Result 与 History
 
 `SolverResult` 保存初始 packed 向量、最终 packed 向量、成功标志、消息、final
-residual norm、函数/Jacobian/迭代计数和耗时。每次求解后，`Solver.result`
-指向最新结果，`Solver.x0` 更新为最终解。
+residual norm、函数/Jacobian/迭代计数、`elapsed` 求解耗时和 `total_elapsed`
+调用耗时。`elapsed` 从初值构造前开始，覆盖初始化、非线性 attempt 和 final
+residual check；`total_elapsed` 从 `solve()` 入口开始，包含本次 config 合并和求解
+工作。每次求解后，`Solver.result` 指向最新结果，`Solver.x0` 更新为最终解。
 
-开启 history 时，`SolverRecord` 会快照当前 case、本次 config 和 result。
+开启 history 时，`SolverRecord` 会快照当前 problem、本次 config 和 result。
 `clear()` 只清空 history，不改变 `Solver.x0`；`reset()` 会把 `Solver.x0`
 原地置零。

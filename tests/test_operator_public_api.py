@@ -2,7 +2,14 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from helpers import MU0, pf_reference_profiles, profiles, tiny_boundary, tiny_grid, tiny_operator
+from helpers import (
+    MU0,
+    pf_reference_profiles,
+    tiny_boundary,
+    tiny_grid,
+    tiny_operator,
+    tiny_pf_problem,
+)
 from numpy.testing import assert_allclose
 
 from veqpy.engine.numba_source import (
@@ -23,7 +30,7 @@ from veqpy.operator import Operator
 
 def test_operator_residual_interfaces_and_in_place_outputs() -> None:
     operator = tiny_operator()
-    x0 = operator.encode_initial_state()
+    x0 = operator.zero_state()
 
     assert x0.shape == (operator.x_size,)
     assert operator.active_profile_ids.ndim == 1
@@ -67,11 +74,11 @@ def test_operator_residual_interfaces_and_in_place_outputs() -> None:
 
 def test_fused_residual_matches_explicit_stage_chain() -> None:
     fused_operator = tiny_operator()
-    fused_x = fused_operator.encode_initial_state()
+    fused_x = fused_operator.zero_state()
     fused = fused_operator.residual_var(fused_x)
 
     staged_operator = tiny_operator()
-    staged_x = staged_operator.encode_initial_state()
+    staged_x = staged_operator.zero_state()
     staged_operator.stage_a_profile(staged_x)
     staged_operator.stage_b_geometry()
     staged_operator.stage_c_source()
@@ -87,9 +94,29 @@ def test_source_interpolation_default_is_shared() -> None:
     assert ENGINE_LOCAL_BARYCENTRIC_STENCIL == DEFAULT_LOCAL_BARYCENTRIC_STENCIL
 
 
+def test_operator_problem_name_keeps_case_compatibility_aliases() -> None:
+    problem = tiny_pf_problem()
+    operator = Operator(tiny_grid(), case=problem)
+
+    assert operator.problem is problem
+    assert operator.case is problem
+
+    replacement = problem.copy()
+    operator.replace_case(replacement)
+    assert operator.problem is replacement
+    assert operator.case is replacement
+
+    assigned = problem.copy()
+    operator.case = assigned
+    assert operator.problem is assigned
+
+    with pytest.raises(TypeError, match="either problem or case"):
+        Operator(tiny_grid(), problem, case=replacement)
+
+
 def test_operator_validation_and_snapshot_helpers() -> None:
     operator = tiny_operator()
-    x0 = operator.encode_initial_state()
+    x0 = operator.zero_state()
 
     with pytest.raises(ValueError, match="Expected x to have shape"):
         operator.coerce_x(np.zeros(operator.x_size + 1))
@@ -111,7 +138,7 @@ def test_operator_validation_and_snapshot_helpers() -> None:
     assert np.isfinite(equilibrium.Ip)
 
 
-def test_pf_rho_unconstrained_cases_use_positive_flux_branch() -> None:
+def test_pf_rho_unconstrained_problems_use_positive_flux_branch() -> None:
     grid = tiny_grid()
     rho = np.asarray(grid.rho, dtype=np.float64)
     ffn_psin, pn_psin = pf_reference_profiles(rho * rho)
@@ -119,25 +146,25 @@ def test_pf_rho_unconstrained_cases_use_positive_flux_branch() -> None:
         "route": "PF",
         "coordinate": "rho",
         "nodes": "grid",
-        "profiles": profiles({"h": [0.0], "k": [0.0], "s1": [0.0]}),
+        "active_profiles": {"h": 1, "k": 1, "s1": 1},
         "boundary": tiny_boundary(),
         "current_input": ffn_psin * (2.0 * rho),
     }
 
-    null_case = Problem(
+    null_problem = Problem(
         **common_kwargs,
         heat_input=pn_psin * (2.0 * rho) / MU0,
     )
-    null_operator = Operator(grid, null_case)
-    null_eq = null_operator.build_equilibrium(null_operator.encode_initial_state())
+    null_operator = Operator(grid, null_problem)
+    null_eq = null_operator.build_equilibrium(null_operator.zero_state())
 
-    beta_case = Problem(
+    beta_problem = Problem(
         **common_kwargs,
         heat_input=pn_psin * (2.0 * rho) / MU0,
         beta=float(null_eq.beta_t),
     )
-    beta_operator = Operator(grid, beta_case)
-    beta_eq = beta_operator.build_equilibrium(beta_operator.encode_initial_state())
+    beta_operator = Operator(grid, beta_problem)
+    beta_eq = beta_operator.build_equilibrium(beta_operator.zero_state())
 
     assert null_eq.alpha2 > 0.0
     assert beta_eq.alpha2 > 0.0
@@ -152,12 +179,7 @@ def test_active_f_profile_is_only_supported_by_pj2() -> None:
                 route="PF",
                 coordinate="rho",
                 nodes="uniform",
-                profiles=profiles({
-                    "h": [0.0, 0.0],
-                    "k": [0.0, 0.0],
-                    "s1": [0.0, 0.0],
-                    "F": [0.0, 0.0],
-                }),
+                active_profiles={"h": 2, "k": 2, "s1": 2, "F": 2},
                 boundary=tiny_boundary(),
                 heat_input=np.full_like(rho, 1.0e6),
                 current_input=np.ones_like(rho),
@@ -174,11 +196,7 @@ def test_pj2_requires_active_f_profile() -> None:
                 route="PJ2",
                 coordinate="rho",
                 nodes="uniform",
-                profiles=profiles({
-                    "h": [0.0, 0.0],
-                    "k": [0.0, 0.0],
-                    "s1": [0.0, 0.0],
-                }),
+                active_profiles={"h": 2, "k": 2, "s1": 2},
                 boundary=tiny_boundary(),
                 heat_input=np.full_like(rho, 1.0e6),
                 current_input=np.full_like(rho, 1.0e6),
@@ -195,12 +213,7 @@ def test_rho_routes_reject_active_psin_profile() -> None:
                 route="PF",
                 coordinate="rho",
                 nodes="uniform",
-                profiles=profiles({
-                    "h": [0.0, 0.0],
-                    "k": [0.0, 0.0],
-                    "s1": [0.0, 0.0],
-                    "psin": [0.0, 0.0],
-                }),
+                active_profiles={"h": 2, "k": 2, "s1": 2, "psin": 2},
                 boundary=tiny_boundary(),
                 heat_input=np.full_like(rho, 1.0e6),
                 current_input=np.ones_like(rho),
@@ -217,12 +230,7 @@ def test_psin_grid_routes_reject_active_psin_profile() -> None:
                 route="PF",
                 coordinate="psin",
                 nodes="grid",
-                profiles=profiles({
-                    "h": [0.0, 0.0],
-                    "k": [0.0, 0.0],
-                    "s1": [0.0, 0.0],
-                    "psin": [0.0, 0.0],
-                }),
+                active_profiles={"h": 2, "k": 2, "s1": 2, "psin": 2},
                 boundary=tiny_boundary(),
                 heat_input=np.full(grid.Nr, 1.0e6),
                 current_input=np.ones(grid.Nr),
@@ -239,13 +247,7 @@ def test_active_f_and_psin_profiles_are_mutually_exclusive() -> None:
                 route="PJ2",
                 coordinate="rho",
                 nodes="uniform",
-                profiles=profiles({
-                    "h": [0.0, 0.0],
-                    "k": [0.0, 0.0],
-                    "s1": [0.0, 0.0],
-                    "psin": [0.0, 0.0],
-                    "F": [0.0, 0.0],
-                }),
+                active_profiles={"h": 2, "k": 2, "s1": 2, "psin": 2, "F": 2},
                 boundary=tiny_boundary(),
                 heat_input=np.full_like(rho, 1.0e6),
                 current_input=np.full_like(rho, 1.0e6),
@@ -253,21 +255,15 @@ def test_active_f_and_psin_profiles_are_mutually_exclusive() -> None:
         )
 
 
-def test_replace_case_rejects_active_f_on_non_pj2_route() -> None:
+def test_replace_problem_rejects_active_f_on_non_pj2_route() -> None:
     rho = np.linspace(0.0, 1.0, 9, dtype=np.float64)
-    profile_coeffs = {
-        "h": [0.0, 0.0],
-        "k": [0.0, 0.0],
-        "s1": [0.0, 0.0],
-        "F": [0.0, 0.0],
-    }
     operator = Operator(
         tiny_grid(),
         Problem(
             route="PJ2",
             coordinate="rho",
             nodes="uniform",
-            profiles=profiles(profile_coeffs),
+            active_profiles={"h": 2, "k": 2, "s1": 2, "F": 2},
             boundary=tiny_boundary(),
             heat_input=np.full_like(rho, 1.0e6),
             current_input=np.full_like(rho, 1.0e6),
@@ -275,12 +271,12 @@ def test_replace_case_rejects_active_f_on_non_pj2_route() -> None:
     )
 
     with pytest.raises(ValueError, match="active F profile.*only supported for PJ2"):
-        operator.replace_case(
+        operator.replace_problem(
             Problem(
                 route="PF",
                 coordinate="rho",
                 nodes="uniform",
-                profiles=profiles(profile_coeffs),
+                active_profiles={"h": 2, "k": 2, "s1": 2, "F": 2},
                 boundary=tiny_boundary(),
                 heat_input=np.full_like(rho, 1.0e6),
                 current_input=np.ones_like(rho),
@@ -290,29 +286,33 @@ def test_replace_case_rejects_active_f_on_non_pj2_route() -> None:
 
 def test_pj2_uses_profile_f_derivative_for_active_f_profile() -> None:
     grid = Grid(Nr=8, Nt=8, L_max=3, M_max=1, K_max=1, quadrature_scheme="legendre")
-    case = Problem(
+    problem = Problem(
         route="PJ2",
         coordinate="rho",
         nodes="grid",
-        profiles=profiles({
-            "h": [0.0, 0.0],
-            "k": [0.0, 0.0],
-            "s1": [0.0, 0.0],
-            "F": [0.2, -0.1, 0.05, 0.03],
-        }),
+        active_profiles={"h": 2, "k": 2, "s1": 2, "F": 4},
         boundary=tiny_boundary(),
         heat_input=np.full(grid.Nr, 1.0e6),
         current_input=np.full(grid.Nr, 1.0e6),
     )
-    operator = Operator(grid, case)
+    operator = Operator(grid, problem)
 
-    operator.residual_var(operator.encode_initial_state())
+    operator.residual_var(
+        operator.pack_coefficients({
+            "h": [0.0, 0.0],
+            "k": [0.0, 0.0],
+            "s1": [0.0, 0.0],
+            "F": [0.2, -0.1, 0.05, 0.03],
+        })
+    )
 
     root_fields = operator.residual_workspace.root_fields
     f_fields = operator.profile_workspace.fields_for("F")
     psin_r = root_fields[1]
     ffn_psin = root_fields[3]
-    expected_from_profile = f_fields[0] * f_fields[1] / (operator.alpha1 * operator.alpha2 * psin_r)
+    expected_from_profile = (
+        f_fields[0] * f_fields[1] / (operator.alpha1 * operator.alpha2 * psin_r)
+    )
     matrix_f_r = operator.plan.grid_workspace.differentiator @ f_fields[0]
     expected_from_matrix = f_fields[0] * matrix_f_r / (operator.alpha1 * operator.alpha2 * psin_r)
 

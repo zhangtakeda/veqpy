@@ -67,7 +67,7 @@ SUPPORTED_METHODS: dict[str, OptimizeMethod] = {
 DEFAULT_VARIATIONAL_METHOD = "hybr"
 DEFAULT_COLLOCATION_METHOD = "lm"
 DEFAULT_VARIATIONAL_FALLBACK_METHODS = ("lm",)
-SUPPORTED_INITIAL_POLICIES = frozenset(("zeros", "warm", "homothetic"))
+SUPPORTED_INITIAL_POLICIES = frozenset(("zeros", "warm", "geometric"))
 
 
 @dataclass(frozen=True, slots=True)
@@ -152,6 +152,8 @@ class SolverConfig:
             initial_policy = "zeros"
         if initial_policy == "warmstart":
             initial_policy = "warm"
+        if initial_policy == "homothetic":
+            initial_policy = "geometric"
         # Accept the common aliases above, then store only the canonical policy
         # strings consumed by Solver._build_initial_state.
         if initial_policy is not None and initial_policy not in SUPPORTED_INITIAL_POLICIES:

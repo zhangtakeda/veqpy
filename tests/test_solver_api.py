@@ -4,7 +4,7 @@ import inspect
 
 import numpy as np
 import pytest
-from helpers import tiny_operator
+from helpers import tiny_operator, tiny_pf_problem
 
 from veqpy.solver import Solver, SolverConfig, SolverResult
 from veqpy.solver.residual_scale import DEFAULT_RESIDUAL_NORMALIZATION
@@ -22,9 +22,13 @@ def test_solver_config_normalizes_aliases_and_validates_methods() -> None:
     assert config.initial_policy == "warm"
     assert config.fallback_methods == ("lm", "trf")
     assert config.residual_normalization == "block-rms"
+    assert SolverConfig(initial_policy="homothetic").initial_policy == "geometric"
+    assert SolverConfig(initial_policy="geometric").initial_policy == "geometric"
 
     with pytest.raises(ValueError, match="Unsupported solver method"):
         SolverConfig(method="not-a-method")
+    with pytest.raises(ValueError, match="Unsupported initial_policy"):
+        SolverConfig(initial_policy="tangent")
     with pytest.raises(ValueError, match="collocation_weight"):
         SolverConfig(collocation_weight=1.5)
     with pytest.raises(ValueError, match="max_residual"):
@@ -68,6 +72,7 @@ def test_solver_result_copies_input_arrays_and_validates_rank() -> None:
     x[0] = 99.0
     assert result.x0.tolist() == [1.0, 2.0]
     assert result.x.tolist() == [3.0, 4.0]
+    assert result.total_elapsed == result.elapsed
 
     with pytest.raises(ValueError, match="x0 must be 1D"):
         SolverResult(
@@ -99,22 +104,30 @@ def test_solver_facade_initial_state_and_history_lifecycle() -> None:
     assert solver.history == []
 
 
+def test_solver_replace_case_is_problem_compatibility_alias() -> None:
+    solver = Solver(operator=tiny_operator(), config=SolverConfig(enable_history=False))
+    replacement = tiny_pf_problem().copy()
+
+    solver.replace_case(replacement)
+
+    assert solver.operator.problem is replacement
+
+
 def test_solver_attempt_label_reflects_initial_policy() -> None:
     solver = Solver(operator=tiny_operator(), config=SolverConfig(enable_history=False))
     nonzero_guess = np.ones(solver.operator.x_size, dtype=np.float64)
-    zero_guess = np.zeros(solver.operator.x_size, dtype=np.float64)
 
     assert (
         solver._display_start_kind(
             nonzero_guess,
-            solve_config=SolverConfig(initial_policy="homothetic"),
+            solve_config=SolverConfig(initial_policy="geometric"),
             x0_was_provided=False,
         )
-        == "homothetic-start"
+        == "geometric-start"
     )
     assert (
         solver._display_start_kind(
-            zero_guess,
+            nonzero_guess,
             solve_config=SolverConfig(initial_policy="zeros"),
             x0_was_provided=False,
         )
@@ -136,3 +149,62 @@ def test_solver_attempt_label_reflects_initial_policy() -> None:
         )
         == "warm-start"
     )
+
+
+def test_solver_solve_config_initial_policy_override_is_temporary() -> None:
+    solver = Solver(
+        operator=tiny_operator(),
+        config=SolverConfig(initial_policy="geometric", enable_history=False),
+    )
+    base_kwargs = dict(
+        method=None,
+        max_residual=None,
+        max_evaluations=None,
+        enable_fallback=None,
+        fallback_methods=None,
+        enable_verbose=None,
+        enable_history=None,
+        residual_normalization=None,
+        residual_normalization_floor=None,
+        residual_normalization_max_ratio=None,
+        residual_normalization_huber_tau=None,
+        residual_normalization_probe_count=None,
+        residual_normalization_probe_step=None,
+        residual_normalization_sensitivity_lambda=None,
+        enable_collocation=None,
+        collocation_method=None,
+        collocation_weight=None,
+        collocation_max_residual=None,
+        collocation_max_evaluations=None,
+    )
+
+    inherited = solver._resolve_solve_config(initial_policy=None, **base_kwargs)
+    overridden = solver._resolve_solve_config(initial_policy="zeros", **base_kwargs)
+
+    assert inherited.initial_policy == "geometric"
+    assert overridden.initial_policy == "zeros"
+    assert solver.config.initial_policy == "geometric"
+
+
+def test_solver_solve_records_solve_and_total_elapsed_with_geometric_policy(monkeypatch) -> None:
+    solver = Solver(operator=tiny_operator(), config=SolverConfig(enable_history=False))
+
+    def fake_solve_with_fallbacks(
+        x_guess: np.ndarray,
+        *,
+        solve_config: SolverConfig,
+        residual_kind: str,
+        x0_was_provided: bool,
+    ) -> tuple[np.ndarray, bool, str, int, int, int, float]:
+        assert solve_config.initial_policy == "geometric"
+        assert residual_kind == "variational"
+        assert not x0_was_provided
+        return x_guess.copy(), True, "ok", 1, 0, 1, 0.0
+
+    monkeypatch.setattr(solver, "_solve_with_fallbacks", fake_solve_with_fallbacks)
+
+    solver.solve(initial_policy="geometric")
+
+    assert solver.result is not None
+    assert solver.result.elapsed > 0.0
+    assert solver.result.total_elapsed >= solver.result.elapsed

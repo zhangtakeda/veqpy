@@ -21,9 +21,11 @@ fallback is `least_squares(..., method="lm")`. `trf` is also available through
 only, with `lm` as the default collocation method.
 
 The solver owns one packed vector, `Solver.x0`. At construction time, this is
-initialized from `Problem.profiles` through `Operator.encode_initial_state()`.
-After every solve, `Solver.x0` is replaced by the final packed solution. This is
-the state that later warm starts and `build_equilibrium()` use.
+initialized from `Operator.zero_state()` for the operator topology. Callers that
+already have profile coefficients can build an explicit initial vector with
+`Operator.pack_coefficients(...)` and pass it as `x0`. After every solve,
+`Solver.x0` is replaced by the final packed solution. This is the state that
+later warm starts and `build_equilibrium()` use.
 
 Initial values are chosen by priority:
 
@@ -32,19 +34,22 @@ Initial values are chosen by priority:
 | Explicit `x0` | Validated by the operator, copied into `Solver.x0`, and used for this solve |
 | `initial_policy="warm"` | Reuses the current solver-owned `Solver.x0` |
 | `initial_policy="zeros"` | Uses a zero packed vector |
-| `initial_policy="homothetic"` | Uses a boundary-shape estimate for active shape coefficients |
-| Default (`initial_policy=None`) | Re-encodes `Problem.profiles` |
+| `initial_policy="geometric"` | Uses a boundary-shape estimate for active shape coefficients |
+| Default (`initial_policy=None`) | Uses the operator zero state |
 
-The homothetic initializer is meant as a cheap geometry-based guess for nested
+The geometric initializer is meant as a cheap geometry-based guess for nested
 flux surfaces. It delegates to the operator's boundary-slope estimate: active
 Fourier shaping coefficients receive first-coefficient values derived from the
 boundary offsets, and `h` receives a Shafranov-shift estimate when the source
 profile is not uniform. The initializer uses one conservative operator-side
 estimate rather than exposing a separate scale factor.
 
-Whenever the solve starts from an explicit `x0`, zeros, homothetic, or encoded
-case coefficients, the operator invalidates route-local source state before the
-attempt. `warm` keeps the current source state paired with the current `x0`.
+`initial_policy="homothetic"` remains accepted as a compatibility alias for
+`"geometric"`.
+
+Whenever the solve starts from an explicit `x0`, zeros, or geometric state, the
+operator invalidates route-local source state before the attempt. `warm` keeps
+the current source state paired with the current `x0`.
 
 ## Solve Flow
 
@@ -110,10 +115,14 @@ change VEQPy's primary solve definition.
 ## Result and History
 
 `SolverResult` stores the initial packed vector, final packed vector, success
-flag, message, final residual norm, function/Jacobian/iteration counts, and
-elapsed time. After each solve, `Solver.result` points to the newest result and
-`Solver.x0` is updated to the final solution.
+flag, message, final residual norm, function/Jacobian/iteration counts,
+`elapsed` solve time, and `total_elapsed` call time. `elapsed` starts before
+initial-state construction and covers initialization, nonlinear attempts, and
+the final residual check. `total_elapsed` starts at `solve()` entry and includes
+per-call config resolution plus the solve work. After each solve,
+`Solver.result` points to the newest result and `Solver.x0` is updated to the
+final solution.
 
-When history is enabled, `SolverRecord` snapshots the current case, the
+When history is enabled, `SolverRecord` snapshots the current problem, the
 per-solve config, and the result. `clear()` removes this history without
 changing `Solver.x0`; `reset()` zeros `Solver.x0` in place.

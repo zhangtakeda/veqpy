@@ -23,7 +23,6 @@ from veqpy.engine.numba_profile import update_profile
 from veqpy.workspace.field_rows import PROFILE_R, PROFILE_RR, PROFILE_VALUE
 
 if TYPE_CHECKING:
-    from veqpy.model.profile import Profile
     from veqpy.workspace.grid_workspace import GridWorkspace
 
 
@@ -116,10 +115,15 @@ class ProfileWorkspace:
         self,
         *,
         profile_id: int,
-        profile: Profile,
         grid_workspace: GridWorkspace,
+        offset: float,
+        scale: float,
+        power: int,
+        envelope_power: int,
+        amplitude_power: float,
+        coeff: np.ndarray | None,
     ) -> None:
-        """Refresh one workspace-owned profile slot from a passive Profile spec."""
+        """Refresh one workspace-owned profile slot from flat profile metadata."""
 
         p = int(profile_id)
         self.profile_rp_fields.flags.writeable = True
@@ -128,13 +132,13 @@ class ProfileWorkspace:
         env_fields = self.profile_env_fields[p]
         # Power/envelope terms depend only on static profile shape and grid, not
         # on packed coefficients.  Refresh them when the profile spec changes.
-        _fill_power_terms(rp_fields, grid_workspace.rho, int(profile.power))
+        _fill_power_terms(rp_fields, grid_workspace.rho, int(power))
         _fill_envelope_terms(
             env_fields,
             grid_workspace.rho,
             grid_workspace.rho_powers[2],
             grid_workspace.y,
-            int(profile.envelope_power),
+            int(envelope_power),
         )
         self.profile_rp_fields.flags.writeable = False
         self.profile_env_fields.flags.writeable = False
@@ -147,17 +151,20 @@ class ProfileWorkspace:
             grid_workspace.T_rr,
             rp_fields,
             env_fields,
-            float(profile.offset),
-            profile.coeff,
-            float(profile.scale),
-            float(profile.amplitude_power),
+            float(offset),
+            coeff,
+            float(scale),
+            float(amplitude_power),
         )
 
     def refresh_profile_fields(
         self,
         *,
         profile_id: int,
-        profile: Profile,
+        offset: float,
+        scale: float,
+        amplitude_power: float,
+        coeff: np.ndarray | None,
         grid_workspace: GridWorkspace,
     ) -> None:
         """Refresh one workspace-owned value/derivative field set from existing auxiliary fields."""
@@ -170,10 +177,10 @@ class ProfileWorkspace:
             grid_workspace.T_rr,
             self.profile_rp_fields[p],
             self.profile_env_fields[p],
-            float(profile.offset),
-            profile.coeff,
-            float(profile.scale),
-            float(profile.amplitude_power),
+            float(offset),
+            coeff,
+            float(scale),
+            float(amplitude_power),
         )
 
     def profile_id_for(self, name: str) -> int:
@@ -249,36 +256,6 @@ class ProfileWorkspace:
                 )
             )
         return tuple(blocks)
-
-    def build_boundary_slope_initial_state(
-        self,
-        *,
-        x_size: int,
-        profiles_by_name: dict[str, Profile],
-    ) -> np.ndarray:
-        """Build a geometrically-motivated packed x0 for c/s Fourier profiles.
-
-        Uses ``-offset / (2*p + 1)`` which outperforms the original
-        homothetic formula across shaped H-mode, X-point, and D-shaped
-        equilibria.
-        """
-
-        x = np.zeros(x_size, dtype=np.float64)
-        for profile_id, name in enumerate(self.profile_names):
-            if not (name.startswith("c") or name.startswith("s")):
-                continue
-            slot = self.active_slot_for_profile_id(int(profile_id))
-            if slot < 0 or int(self.active_lengths[slot]) <= 0:
-                continue
-            profile = profiles_by_name[name]
-            power = int(profile.power)
-            offset = float(profile.offset)
-            if abs(offset) <= 1.0e-14:
-                continue
-            coeff_index = int(self.active_coeff_index_rows[slot, 0])
-            x[coeff_index] = -offset / float(2 * power + 1)
-        return x
-
 
 def _fill_profile_outputs(
     u_fields: np.ndarray,

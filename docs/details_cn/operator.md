@@ -9,11 +9,12 @@ source route 构造源项剖面，并把强形式 residual 投影到 active 系�
 
 ## Problem
 
-`Problem` 描述一次固定边界求解的输入，包括 source route、source 坐标、节点语义、profile 对象、边界、热源/电流相关输入以及可选 `Ip` 或 `beta` 约束。它是传入 `Operator` 的公开问题定义类型。
+`Problem` 描述一次固定边界求解的输入，包括 source route、source 坐标、节点语义、active profile 长度、边界、热源/电流相关输入以及可选 `Ip` 或 `beta` 约束。它是传入 `Operator` 的公开问题定义类型。
 
-`Problem.profiles` 中的每个条目都是一个 `Profile`。`coeff is None` 表示
-passive profile；一维 coefficient 数组表示 active profile，并会占用 packed
-state 槽位。
+`Problem.active_profiles` 把 active profile 名映射到 coefficient 数量。
+不在这个映射中的 profile 是 passive。`Problem` 不保存初值系数；已有系数数组的
+调用方应在 operator 拓扑构造完成后，通过 `Operator.pack_coefficients(...)`
+生成显式 `x0`。
 
 `route`、`coordinate` 和 `nodes` 共同形成 source route key:
 
@@ -80,15 +81,15 @@ packed layout 定义优化变量 $x$ 中每个系数的位置。当前 profile f
 默认布局是 degree-first: 先放所有 active profile 的低阶系数，再逐阶推进。这样 residual block、profile 更新和 solver 初值都共享同一套索引语义。
 
 形状 profile 决定连续固定边界磁面族。`h`, `v`, `k` 表示低阶径向 shaping，
-`c*` 和 `s*` 表示 Fourier 谐波。可选的 `psin` 与 `F` profile 会在 case 提供
-其系数时进入 active 集合；route validation 决定这种归属对所选 source model
+`c*` 和 `s*` 表示 Fourier 谐波。可选的 `psin` 与 `F` profile 会在 `Problem` 提供
+其名字和长度时进入 active 集合；route validation 决定这种归属对所选 source model
 是否有物理意义。
 
 ## Residual Pipeline
 
 构造 `Operator` 时，active profile 集合、系数长度、source route、residual
 block 和固定网格会被冻结成一次求解拓扑。若 active profile 集合、系数长度或
-route 拓扑改变，应重新构造 `Operator`。替换 case 只有在保持相同 packed
+route 拓扑改变，应重新构造 `Operator`。替换 `Problem` 只有在保持相同 packed
 拓扑时才可以复用同一个 operator。
 
 一次 residual 调用大致分为四段:

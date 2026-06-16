@@ -1,6 +1,6 @@
 # Model
 
-`model` 层保存 VEQPy 中可解释、可序列化的物理对象。它不是 operator runtime 的镜像，而是把独立输入和求解后的快照组织成稳定 API。`Problem` 与 `Profile` 保存不可变 setup 语义，grid 几何量和平衡诊断量由 `Reactive` property 惰性重建，文件中只保存 root state。
+`model` 层保存 VEQPy 中可解释、可序列化的物理对象。它不是 operator runtime 的镜像，而是把独立输入和求解后的快照组织成稳定 API。`Problem` 保存用户侧 source、boundary 和 active-profile topology 输入，`Profile` 是求解后形状剖面快照使用的可序列化参数对象。grid 几何量和平衡诊断量由 `Reactive` property 惰性重建，文件中只保存 root state。
 
 源码位置主要在 `veqpy/model/`。
 
@@ -14,7 +14,7 @@
 | `Geqdsk` | GEQDSK 数据的读取、保存和转换 |
 | `Equilibrium` | 求解后的连续平衡快照与诊断接口 |
 
-`Profile` 使用 scale、power、envelope 和 Chebyshev 系数描述径向剖面。这样外部 source、形状剖面和求解变量可以共享同一种紧凑表示。
+`Profile` 使用 scale、power、envelope、offset 和可选 Chebyshev 系数描述一维径向剖面。operator setup 会把 active profile topology 降成 flat arrays；`Profile` 保留在 model 侧，用于 `Equilibrium.shape_profiles` 等可序列化快照。
 
 ## Equilibrium 快照
 

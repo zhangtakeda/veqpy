@@ -62,7 +62,6 @@ from veqpy.model.boundary import Boundary  # noqa: E402
 from veqpy.model.geqdsk import Geqdsk  # noqa: E402
 from veqpy.model.grid import Grid  # noqa: E402
 from veqpy.model.problem import Problem  # noqa: E402
-from veqpy.model.profile import Profile  # noqa: E402
 from veqpy.operator import Operator  # noqa: E402
 from veqpy.solver import Solver, SolverConfig  # noqa: E402
 
@@ -72,17 +71,40 @@ except Exception:  # pragma: no cover - only exercised on incompatible installs.
     backend_abi = None  # type: ignore[assignment]
 
 
-def _profiles_from_coeffs(
+def _active_profiles_from_coeffs(
     profile_coeffs: Mapping[str, Sequence[float] | np.ndarray | int | None],
-) -> dict[str, Profile]:
-    profiles: dict[str, Profile] = {}
+) -> dict[str, int]:
+    active_profiles: dict[str, int] = {}
     for name, coeff in profile_coeffs.items():
+        if coeff is None:
+            continue
         if isinstance(coeff, int):
-            profiles[name] = Profile(coeff=np.zeros(coeff, dtype=np.float64))
+            length = int(coeff)
         else:
-            profile_coeff = None if coeff is None else np.asarray(coeff, dtype=np.float64)
-            profiles[name] = Profile(coeff=profile_coeff)
-    return profiles
+            length = int(np.asarray(coeff, dtype=np.float64).size)
+        if length > 0:
+            active_profiles[name] = length
+    return active_profiles
+
+
+def _coefficients_from_coeffs(
+    profile_coeffs: Mapping[str, Sequence[float] | np.ndarray | int | None],
+) -> dict[str, np.ndarray]:
+    coefficients: dict[str, np.ndarray] = {}
+    for name, coeff in profile_coeffs.items():
+        if coeff is None:
+            continue
+        if isinstance(coeff, int):
+            length = int(coeff)
+            if length <= 0:
+                continue
+            coeff_array = np.zeros(length, dtype=np.float64)
+        else:
+            coeff_array = np.asarray(coeff, dtype=np.float64)
+            if coeff_array.size <= 0:
+                continue
+        coefficients[name] = coeff_array
+    return coefficients
 
 
 MU0 = 4.0e-7 * math.pi
@@ -151,7 +173,7 @@ PJ2_PSIN_SOURCE_SAMPLE_COUNT = 51
 SOLVER_METHOD = "lm"
 SOLVER_MAX_RESIDUAL = 1.0e-7
 SOLVER_MAX_EVALUATIONS = 2000
-SOLVER_INITIAL_POLICY = "homothetic"
+SOLVER_INITIAL_POLICY = "geometric"
 ROUTE_SOLVER_INITIAL_POLICY: str | None = None
 EQUIVALENCE_SHAPE_REL_RMS_MAX = 1.0e-2
 EQUIVALENCE_PSI_R_REL_RMS_MAX = 5.0e-2
@@ -744,11 +766,11 @@ def build_geqdsk_truth_bundle(
 # ---------------------------------------------------------------------------
 
 
-def _copy_problem(case: Problem) -> Problem:
-    copy_method = getattr(case, "copy", None)
+def _copy_problem(problem: Problem) -> Problem:
+    copy_method = getattr(problem, "copy", None)
     if callable(copy_method):
         return copy_method()
-    return case
+    return problem
 
 
 def _solver_config(
@@ -773,12 +795,17 @@ def _solve_problem(
     *,
     max_evaluations: int = SOLVER_MAX_EVALUATIONS,
     initial_policy: str | None = SOLVER_INITIAL_POLICY,
+    initial_coeffs: Mapping[str, Sequence[float] | np.ndarray | int | None] | None = None,
 ) -> Solver:
     solver = Solver(
         operator=Operator(grid, _copy_problem(problem)),
         config=_solver_config(max_evaluations=max_evaluations, initial_policy=initial_policy),
     )
+    x0 = None
+    if initial_policy is None and initial_coeffs is not None:
+        x0 = solver.operator.pack_coefficients(_coefficients_from_coeffs(initial_coeffs))
     solver.solve(
+        x0=x0,
         enable_verbose=False,
         enable_history=False,
         initial_policy=initial_policy,
@@ -814,18 +841,18 @@ def build_route_source_bundle(
     max_evaluations: int = SOLVER_MAX_EVALUATIONS,
 ) -> RouteSourceBundle:
     reference_grid = _grid(reference_nr, reference_nt, quadrature_scheme="legendre")
-    canonical_case = Problem(
+    canonical_problem = Problem(
         route="PF",
         coordinate="psin",
         nodes="uniform",
-        profiles=_profiles_from_coeffs(GEQDSK_PROFILE_COEFFS),
+        active_profiles=_active_profiles_from_coeffs(GEQDSK_PROFILE_COEFFS),
         boundary=truth.boundary,
         heat_input=np.asarray(truth.geqdsk.P_psi, dtype=np.float64),
         current_input=np.asarray(truth.geqdsk.FF_psi, dtype=np.float64),
         Ip=float(truth.geqdsk.Ip),
     )
     canonical_solver = _solve_problem(
-        canonical_case,
+        canonical_problem,
         reference_grid,
         max_evaluations=max_evaluations,
     )
@@ -1042,7 +1069,9 @@ def build_problem_from_source(
         route=spec.mode,
         coordinate=spec.coordinate,
         nodes=spec.input_kind,
-        profiles=_profiles_from_coeffs(_profile_coeffs_for_case(spec, source.profile_coeffs)),
+        active_profiles=_active_profiles_from_coeffs(
+            _profile_coeffs_for_case(spec, source.profile_coeffs)
+        ),
         boundary=truth.boundary,
         heat_input=heat_input,
         current_input=current_input,
@@ -1456,6 +1485,7 @@ def run_benchmark_case(
     timing_values: list[float] = []
 
     try:
+        case_profile_coeffs = _profile_coeffs_for_case(spec, source.profile_coeffs)
         problem = build_problem_from_source(
             truth,
             source,
@@ -1468,6 +1498,7 @@ def run_benchmark_case(
             solve_grid,
             max_evaluations=max_evaluations,
             initial_policy=ROUTE_SOLVER_INITIAL_POLICY,
+            initial_coeffs=case_profile_coeffs,
         )
         result = solver.result
         if result is None:
@@ -1488,6 +1519,7 @@ def run_benchmark_case(
                 solve_grid,
                 max_evaluations=max_evaluations,
                 initial_policy=ROUTE_SOLVER_INITIAL_POLICY,
+                initial_coeffs=case_profile_coeffs,
             )
             repeat_elapsed = _elapsed_ms(repeat_solver.result)
             if repeat_elapsed is not None:

@@ -34,7 +34,7 @@ VEQPy 适合参数扫描、源项预处理、控制导向迭代、输运耦合�
 - **统一 source route**: 支持 PF、PP、PI、PJ1、PJ2 和 PQ 等路径，将压力梯度、环向场、通量梯度、电流相关量或安全因子信息归约到共同的有限维残差装配。
 - **明确的运行时边界**: `Grid + Problem -> Operator -> Solver -> Equilibrium` 将 packed 系数、运行时 workspace、非线性求解和求解后快照分层处理。`Problem` 是公开的问题定义类型。
 - **GEQDSK 工作流**: 支持 GEQDSK 读写、从 GEQDSK 边界拟合固定边界、快照导出、磁通面比较和常用诊断。
-- **公式化模型对象**: `Problem` 和 `Profile` 保存不可变 setup 语义，`Grid` 与 `Equilibrium` 使用 reactive 派生属性按公式惰性重建几何量和物理诊断量。
+- **公式化模型对象**: `Problem` 保存用户侧求解输入和 active profile 长度，`Profile` 用于 `Equilibrium` 上可序列化的形状剖面快照；`Grid` 与 `Equilibrium` 使用 reactive 派生属性按公式惰性重建几何量和物理诊断量。
 
 ## 安装
 

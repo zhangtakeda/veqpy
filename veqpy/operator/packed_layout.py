@@ -36,8 +36,6 @@ from __future__ import annotations
 
 import numpy as np
 
-from veqpy.model.profile import Profile
-
 RESIDUAL_BLOCK_CODE_BY_NAME = {
     "h": 0,
     "v": 1,
@@ -217,12 +215,12 @@ def build_profile_index(profile_names: tuple[str, ...]) -> dict[str, int]:
 
 
 def build_profile_layout(
-    profiles: dict[str, Profile],
+    active_profiles: dict[str, int],
     *,
     profile_names: tuple[str, ...],
     prefix_profile_names: tuple[str, ...] | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Build the packed state layout from a profile-coefficient dictionary."""
+    """Build the packed state layout from active profile coefficient counts."""
     profile_names = tuple(profile_names)
     if prefix_profile_names is None:
         prefix_profile_names = get_prefix_profile_names()
@@ -231,15 +229,12 @@ def build_profile_layout(
     profile_count = len(profile_names)
     profile_L = np.full(profile_count, -1, dtype=np.int64)
 
-    unknown = set(profiles) - set(profile_index)
+    unknown = set(active_profiles) - set(profile_index)
     if unknown:
         raise KeyError(f"Unknown profile names: {sorted(unknown)}")
 
-    for name, profile in profiles.items():
-        coeff = _coeff_array_from_profile(name, profile, allow_passive=True)
-        if coeff is None:
-            continue
-        profile_L[profile_index[name]] = coeff.size - 1
+    for name, length in active_profiles.items():
+        profile_L[profile_index[name]] = _active_profile_degree(name, length)
 
     # profile_L == -1 marks a passive profile.  Active profiles get a row in
     # coeff_index, with -1 cells left wherever that profile has no coefficient
@@ -326,28 +321,34 @@ def validate_packed_state(x: np.ndarray, coeff_index: np.ndarray) -> np.ndarray:
 
 
 def encode_packed_state(
-    profiles: dict[str, Profile],
+    coefficients: dict[str, object],
     profile_L: np.ndarray,
     coeff_index: np.ndarray,
     *,
     profile_names: tuple[str, ...],
 ) -> np.ndarray:
-    """Encode a profile-coefficient dictionary into a packed state vector."""
+    """Encode named active profile coefficients into a packed state vector."""
     x = np.empty(packed_size(coeff_index), dtype=np.float64)
+    profile_names = tuple(profile_names)
+    active_names = {
+        name for p, name in enumerate(profile_names) if int(profile_L[p]) >= 0
+    }
+    supplied_names = set(coefficients)
+    unknown = supplied_names - set(profile_names)
+    if unknown:
+        raise KeyError(f"Unknown profile names: {sorted(unknown)}")
+    inactive = supplied_names - active_names
+    if inactive:
+        raise ValueError(f"Cannot pack inactive profile coefficients: {sorted(inactive)}")
+    missing = active_names - supplied_names
+    if missing:
+        raise ValueError(f"Missing active profile coefficients: {sorted(missing)}")
 
     for p, name in enumerate(profile_names):
         L = int(profile_L[p])
-        profile = profiles.get(name)
-
         if L < 0:
-            # Passive profiles are reconstructed from offsets/static coeffs; they
-            # intentionally occupy no packed x positions.
             continue
-        if profile is None:
-            raise ValueError(f"{name} is active in layout but Profile is missing")
-        coeff_arr = _coeff_array_from_profile(name, profile, allow_passive=False)
-        if coeff_arr is None:
-            raise ValueError(f"{name} is active in layout but coeff is None")
+        coeff_arr = _coeff_array_from_value(name, coefficients[name])
 
         if coeff_arr.size != L + 1:
             raise ValueError(
@@ -387,22 +388,21 @@ def decode_packed_blocks(
     return tuple(blocks)
 
 
-def _coeff_array_from_profile(
-    name: str,
-    profile: Profile,
-    *,
-    allow_passive: bool,
-) -> np.ndarray | None:
-    """Return the coefficient array from a setup Profile."""
-    if not isinstance(profile, Profile):
-        raise TypeError(f"{name} must be a Profile, got {type(profile).__name__}")
-    coeff = profile.coeff
-    if coeff is None:
-        if allow_passive:
-            return None
-        raise ValueError(f"{name} is active in layout but coeff is None")
-    if coeff.ndim != 1:
-        raise ValueError(f"{name} coeff must be 1D, got {coeff.shape}")
-    if coeff.size == 0:
-        raise ValueError(f"{name} coeff must be non-empty or None")
-    return coeff
+def _active_profile_degree(name: str, length: int) -> int:
+    if isinstance(length, bool) or not isinstance(length, (int, np.integer)):
+        raise TypeError(f"{name} active profile length must be int, got {type(length).__name__}")
+    length_int = int(length)
+    if length_int <= 0:
+        raise ValueError(f"{name} active profile length must be positive, got {length_int}")
+    return length_int - 1
+
+
+def _coeff_array_from_value(name: str, value: object) -> np.ndarray:
+    if value is None:
+        raise TypeError(f"{name} coefficients must be a 1D array, got None")
+    arr = np.asarray(value, dtype=np.float64)
+    if arr.ndim != 1:
+        raise ValueError(f"{name} coeff must be 1D, got {arr.shape}")
+    if arr.size == 0:
+        raise ValueError(f"{name} coeff must be non-empty")
+    return arr

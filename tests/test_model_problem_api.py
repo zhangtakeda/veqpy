@@ -5,7 +5,7 @@ from dataclasses import FrozenInstanceError
 
 import numpy as np
 import pytest
-from helpers import MU0, profiles, tiny_boundary, tiny_grid
+from helpers import MU0, tiny_boundary, tiny_grid
 from numpy.testing import assert_allclose
 
 from veqpy.model import Boundary, Problem, Profile
@@ -71,7 +71,7 @@ def test_problem_is_the_public_problem_definition() -> None:
     problem = Problem(
         route="pf",
         coordinate="RHO",
-        profiles=profiles({"h": 2}),
+        active_profiles={"h": 2},
         boundary=tiny_boundary(),
         heat_input=np.full(3, 1.0e6, dtype=np.float64),
         current_input=np.ones(3, dtype=np.float64),
@@ -81,57 +81,77 @@ def test_problem_is_the_public_problem_definition() -> None:
     assert problem.route == "PF"
     assert problem.coordinate == "rho"
     assert problem.nodes == "uniform"
+    assert problem.active_profiles == {"h": 2}
+
+    with pytest.raises(TypeError, match="length must be int"):
+        Problem(
+            route="pf",
+            coordinate="rho",
+            active_profiles={"h": np.zeros(2, dtype=np.float64)},
+            boundary=tiny_boundary(),
+            heat_input=np.full(3, 1.0e6, dtype=np.float64),
+            current_input=np.ones(3, dtype=np.float64),
+        )
+    with pytest.raises(ValueError, match="length must be positive"):
+        Problem(
+            route="pf",
+            coordinate="rho",
+            active_profiles={"h": 0},
+            boundary=tiny_boundary(),
+            heat_input=np.full(3, 1.0e6, dtype=np.float64),
+            current_input=np.ones(3, dtype=np.float64),
+        )
 
 
 def test_problem_keeps_raw_inputs_and_copy_is_detached() -> None:
     heat_input = np.array([1.0e6, 1.2e6, 1.4e6], dtype=np.float64)
     current_input = np.array([0.0, 2.0e6, 3.0e6], dtype=np.float64)
-    case = Problem(
+    problem = Problem(
         route="pi",
         coordinate="RHO",
         nodes="UNIFORM",
-        profiles=profiles({"h": 2}),
+        active_profiles={"h": 2},
         boundary=tiny_boundary(),
         heat_input=heat_input,
         current_input=current_input,
         Ip=3.0e6,
     )
 
-    assert case.route == "PI"
-    assert case.coordinate == "rho"
-    assert case.nodes == "uniform"
-    assert_allclose(case.heat_input, heat_input)
-    assert_allclose(case.current_input, current_input)
-    assert_allclose(case.Ip, 3.0e6)
-    assert not case.heat_input.flags.writeable
-    assert not case.current_input.flags.writeable
+    assert problem.route == "PI"
+    assert problem.coordinate == "rho"
+    assert problem.nodes == "uniform"
+    assert_allclose(problem.heat_input, heat_input)
+    assert_allclose(problem.current_input, current_input)
+    assert_allclose(problem.Ip, 3.0e6)
+    assert not problem.heat_input.flags.writeable
+    assert not problem.current_input.flags.writeable
 
     heat_input[:] = -1.0
     current_input[:] = -2.0
-    assert_allclose(case.heat_input, [1.0e6, 1.2e6, 1.4e6])
-    assert_allclose(case.current_input, [0.0, 2.0e6, 3.0e6])
+    assert_allclose(problem.heat_input, [1.0e6, 1.2e6, 1.4e6])
+    assert_allclose(problem.current_input, [0.0, 2.0e6, 3.0e6])
 
     with warnings.catch_warnings(record=True) as captured:
         warnings.simplefilter("always")
-        clone = case.copy()
+        clone = problem.copy()
     assert not captured
-    assert clone is not case
-    assert_allclose(clone.current_input, case.current_input)
-    assert not np.shares_memory(clone.current_input, case.current_input)
+    assert clone is not problem
+    assert_allclose(clone.current_input, problem.current_input)
+    assert not np.shares_memory(clone.current_input, problem.current_input)
     assert not clone.current_input.flags.writeable
 
-    operator = Operator(tiny_grid(), case)
+    operator = Operator(tiny_grid(), problem)
     source_plan = operator.plan.source_plan
-    assert_allclose(source_plan.scaled_heat, case.heat_input * MU0)
-    assert_allclose(source_plan.scaled_current, case.current_input * MU0)
-    assert_allclose(source_plan.scaled_Ip, case.Ip * MU0)
+    assert_allclose(source_plan.scaled_heat, problem.heat_input * MU0)
+    assert_allclose(source_plan.scaled_current, problem.current_input * MU0)
+    assert_allclose(source_plan.scaled_Ip, problem.Ip * MU0)
 
 
 def test_source_plan_rejects_ambiguous_setup_magnitudes() -> None:
-    case = Problem(
+    problem = Problem(
         route="PF",
         coordinate="rho",
-        profiles=profiles({"h": 2}),
+        active_profiles={"h": 2},
         boundary=tiny_boundary(),
         heat_input=np.full(3, 1.0e6, dtype=np.float64),
         current_input=np.ones(3, dtype=np.float64),
@@ -141,7 +161,7 @@ def test_source_plan_rejects_ambiguous_setup_magnitudes() -> None:
     with warnings.catch_warnings(record=True) as captured:
         warnings.simplefilter("always")
         with pytest.raises(ValueError, match="Rejected setup input magnitude"):
-            Operator(tiny_grid(), case)
+            Operator(tiny_grid(), problem)
 
     assert any("Pass unnormalized setup values" in str(item.message) for item in captured)
 
@@ -170,7 +190,7 @@ def test_boundary_and_problem_json_roundtrip(tmp_path) -> None:
     problem = Problem(
         route="pf",
         coordinate="rho",
-        profiles=profiles({"h": np.array([0.0, 1.0], dtype=np.float64), "k": None}),
+        active_profiles={"h": 2},
         boundary=boundary,
         heat_input=np.full(3, 1.0e6, dtype=np.float64),
         current_input=np.ones(3, dtype=np.float64),
@@ -183,8 +203,7 @@ def test_boundary_and_problem_json_roundtrip(tmp_path) -> None:
     assert loaded_problem.route == "PF"
     assert loaded_problem.boundary.a == boundary.a
     assert_allclose(loaded_problem.boundary.c_offsets, boundary.c_offsets)
-    assert_allclose(loaded_problem.profiles["h"].coeff, [0.0, 1.0])
-    assert loaded_problem.profiles["k"].coeff is None
+    assert loaded_problem.active_profiles == {"h": 2}
     assert_allclose(loaded_problem.heat_input, problem.heat_input)
     assert_allclose(loaded_problem.current_input, problem.current_input)
     assert_allclose(loaded_problem.Ip, 3.0e6)

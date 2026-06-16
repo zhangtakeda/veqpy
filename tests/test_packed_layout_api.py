@@ -6,7 +6,6 @@ from numpy.testing import assert_allclose
 
 from veqpy.engine import numba_residual
 from veqpy.model import Grid
-from veqpy.model.profile import Profile
 from veqpy.operator.packed_layout import (
     PROFILE_STATIC_KWARGS,
     build_active_profile_metadata,
@@ -55,15 +54,16 @@ def test_f_profile_keeps_edge_value_but_allows_edge_slope() -> None:
         active_profile_ids=np.array([0], dtype=np.int64),
         profile_L=np.array([0], dtype=np.int64),
     )
-    profile = Profile(
-        scale=1.0,
+    workspace.refresh_profile_slot(
+        profile_id=0,
+        grid_workspace=grid_workspace,
         offset=1.0,
-        coeff=np.array([1.0], dtype=np.float64),
+        scale=1.0,
+        power=0,
         envelope_power=PROFILE_STATIC_KWARGS["F"]["envelope_power"],
         amplitude_power=PROFILE_STATIC_KWARGS["F"]["amplitude_power"],
+        coeff=np.array([1.0], dtype=np.float64),
     )
-
-    workspace.refresh_profile_slot(profile_id=0, profile=profile, grid_workspace=grid_workspace)
     f_fields = workspace.fields_for("F")
 
     assert_allclose(f_fields[0, -1], 1.0)
@@ -85,14 +85,6 @@ def test_f_profile_amplitude_power_matches_f_squared_chain_rule() -> None:
         active_profile_ids=np.array([0], dtype=np.int64),
         profile_L=np.array([1], dtype=np.int64),
     )
-    profile = Profile(
-        scale=scale,
-        offset=1.0,
-        coeff=coeff,
-        envelope_power=PROFILE_STATIC_KWARGS["F"]["envelope_power"],
-        amplitude_power=PROFILE_STATIC_KWARGS["F"]["amplitude_power"],
-    )
-
     raw_workspace = ProfileWorkspace(
         nr=grid_workspace.Nr,
         m_max=grid_workspace.M_max,
@@ -101,16 +93,25 @@ def test_f_profile_amplitude_power_matches_f_squared_chain_rule() -> None:
         active_profile_ids=np.array([0], dtype=np.int64),
         profile_L=np.array([1], dtype=np.int64),
     )
-    raw_profile = Profile(
-        scale=1.0,
+    workspace.refresh_profile_slot(
+        profile_id=0,
+        grid_workspace=grid_workspace,
         offset=1.0,
-        coeff=coeff,
+        scale=scale,
+        power=0,
         envelope_power=PROFILE_STATIC_KWARGS["F"]["envelope_power"],
+        amplitude_power=PROFILE_STATIC_KWARGS["F"]["amplitude_power"],
+        coeff=coeff,
     )
-
-    workspace.refresh_profile_slot(profile_id=0, profile=profile, grid_workspace=grid_workspace)
     raw_workspace.refresh_profile_slot(
-        profile_id=0, profile=raw_profile, grid_workspace=grid_workspace
+        profile_id=0,
+        grid_workspace=grid_workspace,
+        offset=1.0,
+        scale=1.0,
+        power=0,
+        envelope_power=PROFILE_STATIC_KWARGS["F"]["envelope_power"],
+        amplitude_power=1.0,
+        coeff=coeff,
     )
 
     f_fields = workspace.fields_for("F")
@@ -131,10 +132,11 @@ def test_f_profile_amplitude_power_matches_f_squared_chain_rule() -> None:
 def test_degree_first_layout_encode_decode_and_active_metadata() -> None:
     profile_names = build_profile_names(2)
     profile_index = build_profile_index(profile_names)
-    active_profiles = {
-        "h": Profile(coeff=np.array([1.0, 2.0], dtype=np.float64)),
-        "k": Profile(coeff=np.zeros(3, dtype=np.float64)),
-        "s1": Profile(coeff=np.array([4.0], dtype=np.float64)),
+    active_profiles = {"h": 2, "k": 3, "s1": 1}
+    coefficients = {
+        "h": np.array([1.0, 2.0], dtype=np.float64),
+        "k": np.zeros(3, dtype=np.float64),
+        "s1": np.array([4.0], dtype=np.float64),
     }
     profile_L, coeff_index, order_offsets = build_profile_layout(
         active_profiles,
@@ -148,7 +150,7 @@ def test_degree_first_layout_encode_decode_and_active_metadata() -> None:
     assert order_offsets.tolist() == [0, 3, 5, 6]
 
     x = encode_packed_state(
-        active_profiles,
+        coefficients,
         profile_L,
         coeff_index,
         profile_names=profile_names,
@@ -169,13 +171,15 @@ def test_packed_layout_validation_errors() -> None:
     profile_names = build_profile_names(1)
     with pytest.raises(KeyError, match="Unknown profile names"):
         build_profile_layout(
-            {"unknown": Profile(coeff=np.array([1.0], dtype=np.float64))},
+            {"unknown": 1},
             profile_names=profile_names,
         )
     with pytest.raises(ValueError, match="At least one active profile"):
-        build_profile_layout({"h": Profile(coeff=None)}, profile_names=profile_names)
-    with pytest.raises(TypeError, match="must be a Profile"):
+        build_profile_layout({}, profile_names=profile_names)
+    with pytest.raises(TypeError, match="length must be int"):
         build_profile_layout({"h": True}, profile_names=profile_names)
+    with pytest.raises(ValueError, match="length must be positive"):
+        build_profile_layout({"h": 0}, profile_names=profile_names)
     with pytest.raises(ValueError, match="shape"):
         validate_packed_state(np.zeros(2), np.array([[0, -1, -1]], dtype=np.int64))
 

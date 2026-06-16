@@ -28,7 +28,7 @@ from veqpy.engine.numba_source import (
 def build_bound_source_stage_runner(
     *,
     plan,
-    case,
+    problem,
     source_workspace,
     profile_workspace,
     residual_workspace,
@@ -43,7 +43,7 @@ def build_bound_source_stage_runner(
         # normal source kernel instead of the shared single-pass runner.
         return _build_pj2_psin_uniform_source_stage_runner(
             plan=plan,
-            case=case,
+            problem=problem,
             source_workspace=source_workspace,
             profile_workspace=profile_workspace,
             residual_workspace=residual_workspace,
@@ -51,7 +51,7 @@ def build_bound_source_stage_runner(
         )
     return _build_source_stage_runner_shared(
         plan=plan,
-        case=case,
+        problem=problem,
         source_workspace=source_workspace,
         profile_workspace=profile_workspace,
         residual_workspace=residual_workspace,
@@ -63,7 +63,7 @@ def build_bound_source_stage_runner(
 def _build_source_stage_runner_shared(
     *,
     plan,
-    case,
+    problem,
     source_workspace,
     profile_workspace,
     residual_workspace,
@@ -81,7 +81,7 @@ def _build_source_stage_runner_shared(
     materialized_heat_input = source_workspace.materialized_heat_input
     materialized_current_input = source_workspace.materialized_current_input
     source_target_root_fields = source_workspace.target_root_fields
-    case_R0 = float(case.R0)
+    problem_R0 = float(problem.R0)
 
     if source_execution.requires_optimized_psin_profile:
         if source_plan.is_psin_coordinate and not source_plan.is_grid_nodes:
@@ -126,7 +126,7 @@ def _build_source_stage_runner_shared(
                     Pn_psin,
                     materialized_heat_input,
                     materialized_current_input,
-                    case_R0,
+                    problem_R0,
                 )
 
             return runner
@@ -178,7 +178,7 @@ def _build_source_stage_runner_shared(
                 Pn_psin,
                 materialized_heat_input,
                 materialized_current_input,
-                case_R0,
+                problem_R0,
             )
 
         return runner
@@ -192,7 +192,7 @@ def _build_source_stage_runner_shared(
             Pn_psin,
             materialized_heat_input,
             materialized_current_input,
-            case_R0,
+            problem_R0,
         )
 
     return runner
@@ -201,7 +201,7 @@ def _build_source_stage_runner_shared(
 def _build_pj2_psin_uniform_source_stage_runner(
     *,
     plan,
-    case,
+    problem,
     source_workspace,
     profile_workspace,
     residual_workspace,
@@ -216,7 +216,7 @@ def _build_pj2_psin_uniform_source_stage_runner(
     psin_rr = root_fields[2]
     FFn_psin = root_fields[3]
     Pn_psin = root_fields[4]
-    case_R0 = float(case.R0)
+    problem_R0 = float(problem.R0)
 
     def runner() -> tuple[float, float]:
         if source_workspace.psin_query[0] < 0.0:
@@ -273,7 +273,7 @@ def _build_pj2_psin_uniform_source_stage_runner(
                 Pn_psin,
                 source_workspace.materialized_heat_input,
                 source_workspace.materialized_current_input,
-                case_R0,
+                problem_R0,
             )
             if bool(
                 _update_fixed_point_psin_query_impl(

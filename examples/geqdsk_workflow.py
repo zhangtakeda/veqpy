@@ -28,7 +28,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.ticker import MultipleLocator
 
-from veqpy.model import Boundary, Geqdsk, Grid, Problem, Profile
+from veqpy.model import Boundary, Geqdsk, Grid, Problem
 from veqpy.model.boundary import _fit_boundary_params
 from veqpy.operator import Operator
 from veqpy.solver import Solver, SolverConfig
@@ -115,7 +115,7 @@ SHAPE_RMS_THETA_SAMPLE_COUNT = 16
 BOUNDARY_MAXTOL = 1.0
 SOLVER_METHOD = "hybr"
 SOLVER_MAXFEV = 2000
-SOLVER_INITIAL_POLICY = "homothetic"
+SOLVER_INITIAL_POLICY = "geometric"
 SOLVER_WARMUP_RUNS = 1
 SOLVER_TIMING_REPEATS = 5
 
@@ -262,11 +262,8 @@ def profile_parameter_count(profile_coeffs: dict[str, list[float]]) -> int:
     return int(sum(len(values) for values in profile_coeffs.values() if values is not None))
 
 
-def profiles_from_coeffs(profile_coeffs: dict[str, list[float]]) -> dict[str, Profile]:
-    return {
-        name: Profile(coeff=np.asarray(values, dtype=np.float64))
-        for name, values in profile_coeffs.items()
-    }
+def active_profiles_from_coeffs(profile_coeffs: dict[str, list[float]]) -> dict[str, int]:
+    return {name: len(values) for name, values in profile_coeffs.items() if len(values) > 0}
 
 
 def infer_case_spec(gfile_path: Path) -> CaseSpec:
@@ -362,7 +359,7 @@ def build_solver_case(
         route=route,
         coordinate="psin",
         nodes="uniform",
-        profiles=profiles_from_coeffs(profile_coeffs),
+        active_profiles=active_profiles_from_coeffs(profile_coeffs),
         boundary=boundary,
         heat_input=np.asarray(geqdsk.P_psi, dtype=np.float64),
         current_input=current_input,
@@ -370,9 +367,9 @@ def build_solver_case(
     )
 
 
-def build_solver(case: Problem, solve_grid: Grid) -> Solver:
+def build_solver(problem: Problem, solve_grid: Grid) -> Solver:
     return Solver(
-        operator=Operator(solve_grid, case.copy()),
+        operator=Operator(solve_grid, problem.copy()),
         config=SolverConfig(
             method=SOLVER_METHOD,
             max_evaluations=SOLVER_MAXFEV,
@@ -396,8 +393,8 @@ def solve_existing_solver_once(solver: Solver) -> tuple[Solver, float]:
     return solver, float(solver.result.elapsed) / 1000.0
 
 
-def solve_once(case: Problem, solve_grid: Grid) -> tuple[Solver, float]:
-    solver = build_solver(case, solve_grid)
+def solve_once(problem: Problem, solve_grid: Grid) -> tuple[Solver, float]:
+    solver = build_solver(problem, solve_grid)
     return solve_existing_solver_once(solver)
 
 
@@ -420,7 +417,7 @@ def build_timing_stats(samples_ms: list[float], *, warmup_runs: int) -> SolveTim
 
 
 def solve_equilibrium(
-    case: Problem,
+    problem: Problem,
     *,
     solve_nr: int = SOLVE_NR,
     solve_nt: int = SOLVE_NT,
@@ -435,12 +432,12 @@ def solve_equilibrium(
     )
 
     for _ in range(SOLVER_WARMUP_RUNS):
-        solve_once(case, solve_grid)
+        solve_once(problem, solve_grid)
 
     timed_samples_ms: list[float] = []
     solver: Solver | None = None
     for _ in range(SOLVER_TIMING_REPEATS):
-        solver, elapsed_ms = solve_once(case, solve_grid)
+        solver, elapsed_ms = solve_once(problem, solve_grid)
         timed_samples_ms.append(elapsed_ms)
 
     if solver is None:
@@ -897,14 +894,14 @@ def build_case_result(case_spec: CaseSpec, *, route: str) -> CaseResult:
         fit_m=case_spec.boundary_fit_m,
         fit_n=case_spec.boundary_fit_n,
     )
-    case = build_solver_case(
+    problem = build_solver_case(
         boundary,
         geqdsk,
         route=route,
         profile_coeffs=case_spec.profile_coeffs,
     )
     solver, equilibrium, plot_equilibrium, timing = solve_equilibrium(
-        case,
+        problem,
         solve_nr=case_spec.solve_nr,
         solve_nt=case_spec.solve_nt,
     )

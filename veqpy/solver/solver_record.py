@@ -8,7 +8,7 @@ Public API:
 - SolverRecord
 
 Notes:
-- `SolverRecord` only packages case, config, and result snapshots.
+- `SolverRecord` only packages problem, config, and result snapshots.
 - Does not execute solves, packed codecs, or numerical kernel updates.
 """
 
@@ -28,13 +28,13 @@ from veqpy.solver.solver_result import SolverResult
 class SolverRecord:
     """Describe the immutable history snapshot after one completed solve."""
 
-    case_snapshot: Problem
+    problem_snapshot: Problem
     config_snapshot: SolverConfig
     result_snapshot: SolverResult
 
     def __rich__(self) -> Tree:
         tree = Tree("[bold blue]SolverRecord[/]")
-        tree.add(self.case_snapshot)
+        tree.add(self.problem_snapshot)
         tree.add(self.config_snapshot)
         tree.add(self.result_snapshot)
         return tree

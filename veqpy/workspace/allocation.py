@@ -2,7 +2,7 @@
 Module: workspace.allocation
 
 Role:
-- Allocate operator profile specs and stage workspaces.
+- Allocate operator stage workspaces.
 - Keep workspace construction coordinated from one entrypoint.
 
 Public API:
@@ -15,7 +15,6 @@ Notes:
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -27,7 +26,6 @@ from veqpy.workspace.source_workspace import SourceWorkspace
 
 if TYPE_CHECKING:
     from veqpy.engine.backend_abi import SourceExecutionABI
-    from veqpy.model.profile import Profile
     from veqpy.workspace.grid_workspace import GridWorkspace
 
 
@@ -40,9 +38,7 @@ def allocate_runtime_state(
     active_profile_ids: np.ndarray,
     profile_L: np.ndarray,
     x_size: int,
-    make_profile: Callable[[str], Profile],
 ) -> tuple[
-    dict[str, Profile],
     ProfileWorkspace,
     GeometryWorkspace,
     SourceWorkspace,
@@ -53,10 +49,6 @@ def allocate_runtime_state(
     nr = grid_workspace.Nr
     nt = grid_workspace.Nt
     m_max = grid_workspace.M_max
-
-    # Build profile objects before workspaces so every stage can share the same
-    # stable profile id/order derived by the operator plan.
-    profiles_by_name = {name: make_profile(name) for name in profile_names}
 
     profile_workspace = ProfileWorkspace(
         nr=nr,
@@ -83,7 +75,6 @@ def allocate_runtime_state(
         active_residual_block_count=int(active_profile_ids.size),
     )
     return (
-        profiles_by_name,
         profile_workspace,
         geometry_workspace,
         source_workspace,

@@ -9,7 +9,7 @@ Public API:
 
 Notes:
 - `SolverResult` is decoupled from caller input arrays.
-- Does not own history management, case replacement, or equilibrium reconstruction.
+- Does not own history management, problem replacement, or equilibrium reconstruction.
 """
 
 from __future__ import annotations
@@ -35,12 +35,17 @@ class SolverResult:
     jacobian_evaluations: int
     iterations: int
     elapsed: float
+    total_elapsed: float | None = None
 
     def __post_init__(self) -> None:
         """Copy packed state arrays to avoid sharing mutable memory with callers."""
 
         object.__setattr__(self, "x0", _as_1d_array(self.x0, name="x0"))
         object.__setattr__(self, "x", _as_1d_array(self.x, name="x"))
+        if self.total_elapsed is None:
+            object.__setattr__(self, "total_elapsed", float(self.elapsed))
+        else:
+            object.__setattr__(self, "total_elapsed", float(self.total_elapsed))
 
     def __rich__(self) -> Tree:
         tree = Tree("[bold blue]SolverResult[/]")
@@ -50,7 +55,8 @@ class SolverResult:
         tree.add(f"function_evaluations: {self.function_evaluations}")
         tree.add(f"jacobian_evaluations: {self.jacobian_evaluations}")
         tree.add(f"iterations: {self.iterations}")
-        tree.add(Text(f"elapsed: {(self.elapsed / 1000):.3f} [ms]"))
+        tree.add(Text(f"solve_elapsed: {(self.elapsed / 1000):.3f} [ms]"))
+        tree.add(Text(f"total_elapsed: {(float(self.total_elapsed) / 1000):.3f} [ms]"))
         tree.add(
             f"x0: shape={self.x0.shape}, min={float(np.min(self.x0)):.3f}, "
             f"max={float(np.max(self.x0)):.3f}"

@@ -69,7 +69,7 @@ class Solver:
         self.config = SolverConfig() if config is None else config
         self.result: SolverResult | None = None
         self.history: list[SolverRecord] = []
-        self.x0 = self.operator.encode_initial_state()
+        self.x0 = self.operator.zero_state()
 
     def reset(self) -> None:
         """Zero the solver-owned x0 in place."""
@@ -81,10 +81,15 @@ class Solver:
 
         self.history.clear()
 
-    def replace_case(self, case: Problem) -> None:
-        """Replace the case with a compatible one."""
+    def replace_problem(self, problem: Problem) -> None:
+        """Replace the problem with a compatible one."""
 
-        self.operator.replace_case(case)
+        self.operator.replace_problem(problem)
+
+    def replace_case(self, case: Problem) -> None:
+        """Compatibility alias for ``replace_problem``."""
+
+        self.replace_problem(case)
 
     def solve(
         self,
@@ -113,6 +118,7 @@ class Solver:
     ) -> np.ndarray:
         """Execute one solve and return the converged packed x."""
 
+        call_started = perf_counter()
         solve_config = self._resolve_solve_config(
             method=method,
             max_residual=max_residual,
@@ -137,6 +143,7 @@ class Solver:
         )
         _validate_stage_solve_config(solve_config, residual_kind="variational")
 
+        solve_started = perf_counter()
         if x0 is not None:
             self.x0 = self.operator.coerce_x(x0).copy()
         elif solve_config.initial_policy == "warm":
@@ -151,7 +158,6 @@ class Solver:
 
         x_guess = self.x0.copy()
 
-        started = perf_counter()
         if solve_config.enable_collocation:
             (
                 x_opt,
@@ -181,7 +187,6 @@ class Solver:
                 residual_kind="variational",
                 x0_was_provided=x0 is not None,
             )
-        elapsed = (perf_counter() - started) * 1e6
 
         x_final = self.operator.coerce_x(x_opt)
         residual_final_exc = None
@@ -208,6 +213,7 @@ class Solver:
                 f"{type(residual_final_exc).__name__}: {residual_final_exc}]"
             )
 
+        elapsed = (perf_counter() - solve_started) * 1e6
         self.result = SolverResult(
             x0=x_guess,
             x=x_final,
@@ -218,10 +224,13 @@ class Solver:
             jacobian_evaluations=int(jacobian_evaluations),
             iterations=int(iterations),
             elapsed=elapsed,
+            total_elapsed=elapsed,
         )
 
+        self.x0 = x_final.copy()
+        self.result = replace(self.result, total_elapsed=(perf_counter() - call_started) * 1e6)
         record = SolverRecord(
-            case_snapshot=self.operator.case.copy(),
+            problem_snapshot=self.operator.problem.copy(),
             config_snapshot=solve_config,
             result_snapshot=self.result,
         )
@@ -232,7 +241,6 @@ class Solver:
         if solve_config.enable_history:
             self.history.append(record)
 
-        self.x0 = x_final.copy()
         return x_final
 
     def build_coeffs(
@@ -682,8 +690,8 @@ class Solver:
     ) -> str:
         if x0_was_provided or solve_config.initial_policy == "warm":
             return "warm-start"
-        if solve_config.initial_policy == "homothetic":
-            return "homothetic-start"
+        if solve_config.initial_policy == "geometric":
+            return "geometric-start"
         if solve_config.initial_policy == "zeros":
             return "zero-start"
         x_eval = self.operator.coerce_x(x_guess)
@@ -1454,10 +1462,10 @@ def _build_initial_state(operator: Operator, solve_config: SolverConfig) -> np.n
 
     initial_policy = solve_config.initial_policy
     if initial_policy is None:
-        return operator.encode_initial_state()
+        return operator.zero_state()
     if initial_policy == "zeros":
         return np.zeros(operator.x_size, dtype=np.float64)
-    if initial_policy == "homothetic":
+    if initial_policy == "geometric":
         return operator.build_boundary_slope_initial_state()
     if initial_policy == "warm":
         raise RuntimeError("_build_initial_state('warm') needs the current solver x0")
