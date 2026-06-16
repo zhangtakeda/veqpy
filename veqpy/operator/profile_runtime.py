@@ -14,8 +14,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from veqpy.engine.numba_source import validate_route
+from veqpy.model.problem import Problem
 from veqpy.model.profile import Profile
-from veqpy.operator.operator_case import OperatorCase
 from veqpy.operator.packed_layout import build_profile_layout, coeff_array_from_list
 from veqpy.workspace import GridWorkspace
 
@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 
 def make_profile(
     *,
-    case: OperatorCase,
+    case: Problem,
     operator_grid: GridWorkspace | None = None,
     name: str,
     profile_L: np.ndarray,
@@ -66,7 +66,8 @@ def make_profile(
 
     p = profile_index[name]
     L = int(profile_L[p])
-    coeff = case.profile_coeffs.get(name)
+    template_profile = case.profiles.get(name)
+    coeff = None if template_profile is None else template_profile.coeff
     # L < 0 marks a passive profile: construct the Profile object but leave its
     # coefficient vector absent so Stage A will not expect packed coefficients.
     kwargs["coeff"] = (
@@ -77,7 +78,7 @@ def make_profile(
 
 def refresh_profile_runtime(
     *,
-    case: OperatorCase,
+    case: Problem,
     operator_grid: GridWorkspace,
     profile_names: tuple[str, ...],
     profile_index: dict[str, int],
@@ -121,7 +122,8 @@ def refresh_profile_runtime(
         profile.scale = _profile_scale(case, name)
         p = profile_index[name]
         L = int(profile_L[p])
-        coeff = case.profile_coeffs.get(name)
+        template_profile = case.profiles.get(name)
+        coeff = None if template_profile is None else template_profile.coeff
         profile.coeff = (
             None if L < 0 or coeff is None else coeff_array_from_list(name, coeff)[: L + 1].copy()
         )
@@ -139,7 +141,7 @@ def refresh_profile_runtime(
     )
 
 
-def _profile_scale(case: OperatorCase, name: str) -> float:
+def _profile_scale(case: Problem, name: str) -> float:
     if name == "F":
         # F coefficients represent the normalized F**2 amplitude; the profile
         # evaluator applies amplitude_power=0.5 and this scale restores F units.
@@ -253,14 +255,14 @@ def refresh_fourier_family_metadata(
 
 
 def validate_case_compatibility(
-    case: OperatorCase,
+    case: Problem,
     *,
     profile_names: tuple[str, ...],
     prefix_profile_names: tuple[str, ...],
     profile_L: np.ndarray,
     coeff_index: np.ndarray,
     order_offsets: np.ndarray,
-    validate_source_inputs: Callable[[OperatorCase], None],
+    validate_source_inputs: Callable[[Problem], None],
 ) -> None:
     """Validate that a replacement case preserves the bound operator layout."""
     validate_route(case.route, case.coordinate, case.nodes)
@@ -285,7 +287,7 @@ def validate_case_compatibility(
 
 def _validate_active_prefix_profile_ownership(
     *,
-    case: OperatorCase,
+    case: Problem,
     profile_names: tuple[str, ...],
     profile_L: np.ndarray,
 ) -> None:

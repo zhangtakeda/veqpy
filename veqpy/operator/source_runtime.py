@@ -24,13 +24,13 @@ from veqpy.math.interpolate import build_uniform_source_interpolation_coefficien
 from veqpy.operator.source_plan import SourcePlan, validate_source_inputs
 
 if TYPE_CHECKING:
-    from veqpy.operator.operator_case import OperatorCase
+    from veqpy.model.problem import Problem
     from veqpy.workspace.source_workspace import SourceWorkspace
 
 
 def refresh_source_runtime(
     *,
-    case: OperatorCase,
+    case: Problem,
     grid_rho: np.ndarray,
     source_plan: SourcePlan,
     source_execution: object,

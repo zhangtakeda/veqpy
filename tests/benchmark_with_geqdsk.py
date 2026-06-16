@@ -61,6 +61,7 @@ if (PROJECT_ROOT / "veqpy").is_dir() and str(PROJECT_ROOT) not in sys.path:
 from veqpy.model.boundary import Boundary  # noqa: E402
 from veqpy.model.geqdsk import Geqdsk  # noqa: E402
 from veqpy.model.grid import Grid  # noqa: E402
+from veqpy.model.profile import Profile  # noqa: E402
 from veqpy.operator import Operator, OperatorCase  # noqa: E402
 from veqpy.solver import Solver, SolverConfig  # noqa: E402
 
@@ -68,6 +69,19 @@ try:  # Optional internal ABI metadata.  The benchmark works without it.
     import veqpy.engine.backend_abi as backend_abi
 except Exception:  # pragma: no cover - only exercised on incompatible installs.
     backend_abi = None  # type: ignore[assignment]
+
+
+def _profiles_from_coeffs(
+    profile_coeffs: Mapping[str, Sequence[float] | np.ndarray | int | None],
+) -> dict[str, Profile]:
+    profiles: dict[str, Profile] = {}
+    for name, coeff in profile_coeffs.items():
+        if isinstance(coeff, int):
+            profiles[name] = Profile(coeff=np.zeros(coeff, dtype=np.float64))
+        else:
+            profile_coeff = None if coeff is None else np.asarray(coeff, dtype=np.float64)
+            profiles[name] = Profile(coeff=profile_coeff)
+    return profiles
 
 
 MU0 = 4.0e-7 * math.pi
@@ -803,7 +817,7 @@ def build_route_source_bundle(
         route="PF",
         coordinate="psin",
         nodes="uniform",
-        profile_coeffs=dict(GEQDSK_PROFILE_COEFFS),
+        profiles=_profiles_from_coeffs(GEQDSK_PROFILE_COEFFS),
         boundary=truth.boundary,
         heat_input=np.asarray(truth.geqdsk.P_psi, dtype=np.float64),
         current_input=np.asarray(truth.geqdsk.FF_psi, dtype=np.float64),
@@ -1027,7 +1041,7 @@ def build_operator_case_from_source(
         route=spec.mode,
         coordinate=spec.coordinate,
         nodes=spec.input_kind,
-        profile_coeffs=_profile_coeffs_for_case(spec, source.profile_coeffs),
+        profiles=_profiles_from_coeffs(_profile_coeffs_for_case(spec, source.profile_coeffs)),
         boundary=truth.boundary,
         heat_input=heat_input,
         current_input=current_input,

@@ -28,9 +28,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.ticker import MultipleLocator
 
-from veqpy.model import Boundary, Geqdsk, Grid
+from veqpy.model import Boundary, Geqdsk, Grid, Problem, Profile
 from veqpy.model.boundary import _fit_boundary_params
-from veqpy.operator import Operator, OperatorCase
+from veqpy.operator import Operator
 from veqpy.solver import Solver, SolverConfig
 
 DEFAULT_GEQDSK = Path("data") / "SOLOVEV.geqdsk"
@@ -262,6 +262,13 @@ def profile_parameter_count(profile_coeffs: dict[str, list[float]]) -> int:
     return int(sum(len(values) for values in profile_coeffs.values() if values is not None))
 
 
+def profiles_from_coeffs(profile_coeffs: dict[str, list[float]]) -> dict[str, Profile]:
+    return {
+        name: Profile(coeff=np.asarray(values, dtype=np.float64))
+        for name, values in profile_coeffs.items()
+    }
+
+
 def infer_case_spec(gfile_path: Path) -> CaseSpec:
     stem = gfile_path.stem.upper()
     if "SOLOVEV" in stem:
@@ -342,7 +349,7 @@ def build_solver_case(
     *,
     route: str,
     profile_coeffs: dict[str, list[float]],
-) -> OperatorCase:
+) -> Problem:
     route = str(route).upper()
     if route == "PF":
         current_input = np.asarray(geqdsk.FF_psi, dtype=np.float64)
@@ -351,11 +358,11 @@ def build_solver_case(
     else:
         raise ValueError(f"Unsupported source route {route!r}; expected one of {SOURCE_ROUTES}")
 
-    return OperatorCase(
+    return Problem(
         route=route,
         coordinate="psin",
         nodes="uniform",
-        profile_coeffs={name: list(values) for name, values in profile_coeffs.items()},
+        profiles=profiles_from_coeffs(profile_coeffs),
         boundary=boundary,
         heat_input=np.asarray(geqdsk.P_psi, dtype=np.float64),
         current_input=current_input,
@@ -363,7 +370,7 @@ def build_solver_case(
     )
 
 
-def build_solver(case: OperatorCase, solve_grid: Grid) -> Solver:
+def build_solver(case: Problem, solve_grid: Grid) -> Solver:
     return Solver(
         operator=Operator(solve_grid, case.copy()),
         config=SolverConfig(
@@ -389,7 +396,7 @@ def solve_existing_solver_once(solver: Solver) -> tuple[Solver, float]:
     return solver, float(solver.result.elapsed) / 1000.0
 
 
-def solve_once(case: OperatorCase, solve_grid: Grid) -> tuple[Solver, float]:
+def solve_once(case: Problem, solve_grid: Grid) -> tuple[Solver, float]:
     solver = build_solver(case, solve_grid)
     return solve_existing_solver_once(solver)
 
@@ -413,7 +420,7 @@ def build_timing_stats(samples_ms: list[float], *, warmup_runs: int) -> SolveTim
 
 
 def solve_equilibrium(
-    case: OperatorCase,
+    case: Problem,
     *,
     solve_nr: int = SOLVE_NR,
     solve_nt: int = SOLVE_NT,

@@ -8,6 +8,7 @@ Public API:
 - Boundary
 - Grid
 - Profile
+- Problem
 - Equilibrium
 - Reactive
 - Serial
@@ -24,6 +25,7 @@ from veqpy.model.boundary import Boundary
 from veqpy.model.equilibrium import Equilibrium
 from veqpy.model.geqdsk import Geqdsk
 from veqpy.model.grid import Grid
+from veqpy.model.problem import Problem
 from veqpy.model.profile import Profile
 
 __all__ = [
@@ -32,6 +34,7 @@ __all__ = [
     "Geqdsk",
     "Boundary",
     "Profile",
+    "Problem",
     "Reactive",
     "Serial",
 ]

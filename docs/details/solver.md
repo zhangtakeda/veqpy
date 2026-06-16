@@ -21,7 +21,7 @@ fallback is `least_squares(..., method="lm")`. `trf` is also available through
 only, with `lm` as the default collocation method.
 
 The solver owns one packed vector, `Solver.x0`. At construction time, this is
-initialized from `OperatorCase.profile_coeffs` through `Operator.encode_initial_state()`.
+initialized from `Problem.profiles` through `Operator.encode_initial_state()`.
 After every solve, `Solver.x0` is replaced by the final packed solution. This is
 the state that later warm starts and `build_equilibrium()` use.
 
@@ -33,7 +33,7 @@ Initial values are chosen by priority:
 | `initial_policy="warm"` | Reuses the current solver-owned `Solver.x0` |
 | `initial_policy="zeros"` | Uses a zero packed vector |
 | `initial_policy="homothetic"` | Uses a boundary-shape estimate for active shape coefficients |
-| Default (`initial_policy=None`) | Re-encodes `OperatorCase.profile_coeffs` |
+| Default (`initial_policy=None`) | Re-encodes `Problem.profiles` |
 
 The homothetic initializer is meant as a cheap geometry-based guess for nested
 flux surfaces. It delegates to the operator's boundary-slope estimate: active

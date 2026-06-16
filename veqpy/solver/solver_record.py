@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from rich.console import Console
 from rich.tree import Tree
 
-from veqpy.operator.operator_case import OperatorCase
+from veqpy.model.problem import Problem
 from veqpy.solver.solver_config import SolverConfig
 from veqpy.solver.solver_result import SolverResult
 
@@ -28,7 +28,7 @@ from veqpy.solver.solver_result import SolverResult
 class SolverRecord:
     """Describe the immutable history snapshot after one completed solve."""
 
-    case_snapshot: OperatorCase
+    case_snapshot: Problem
     config_snapshot: SolverConfig
     result_snapshot: SolverResult
 

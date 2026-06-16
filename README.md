@@ -49,9 +49,10 @@ and easier to reuse than full solver-native equilibrium or reconstruction pipeli
 - **Unified source route layer**: PF, PP, PI, PJ1, PJ2, and PQ routes map pressure-gradient,
   toroidal-field, flux-gradient, current-related, or safety-factor information to one
   finite-dimensional residual assembly.
-- **Explicit runtime boundary**: `Grid + OperatorCase -> Operator -> Solver -> Equilibrium`
+- **Explicit runtime boundary**: `Grid + Problem -> Operator -> Solver -> Equilibrium`
   separates packed coefficients, runtime workspaces, nonlinear solve orchestration, and
-  post-solve snapshots.
+  post-solve snapshots. `OperatorCase` remains available as a compatibility alias for
+  the same problem definition.
 - **GEQDSK workflow support**: GEQDSK I/O, fixed-boundary fitting from GEQDSK boundaries,
   snapshot export, flux-surface comparison, and common diagnostics.
 - **Formula-oriented model objects**: `Grid`, `Profile`, and `Equilibrium` use reactive

@@ -24,13 +24,13 @@ from veqpy.layout.runtime import OperatorLayout
 from veqpy.math.interpolate import SOURCE_INTERP_DEFAULT
 from veqpy.model.equilibrium import Equilibrium
 from veqpy.model.grid import Grid
+from veqpy.model.problem import Problem
 from veqpy.model.profile import Profile
 from veqpy.operator.build_plan import (
     OperatorBuildPlan,
     build_operator_plan,
     refresh_operator_plan_for_case,
 )
-from veqpy.operator.operator_case import OperatorCase
 from veqpy.operator.packed_layout import (
     decode_packed_blocks,
     encode_packed_state,
@@ -60,7 +60,7 @@ class Operator:
     """Encapsulate the residual evaluator for a fixed case, grid, and runtime."""
 
     grid: InitVar[Grid]
-    case: OperatorCase = field(repr=False)
+    case: Problem = field(repr=False)
     fix_rho: float = 0.05
     source_interpolation_kind: str = SOURCE_INTERP_DEFAULT
     plan: OperatorBuildPlan = field(init=False, repr=False)
@@ -191,7 +191,7 @@ class Operator:
                 x[idx0] = h0_est
         return x
 
-    def replace_case(self, case: OperatorCase) -> None:
+    def replace_case(self, case: Problem) -> None:
         """Replace the current case without changing the packed layout."""
         validate_case_compatibility(
             case,
@@ -534,7 +534,7 @@ class Operator:
         )
 
 
-def _estimate_h0_from_case(case: "OperatorCase") -> float:
+def _estimate_h0_from_case(case: Problem) -> float:
     """Return Shafranov-shift estimate h0, or 0.0 for uniform profiles.
 
     An H-mode pedestal is detected when ``d|heat_input|/dpsi`` changes

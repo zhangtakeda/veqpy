@@ -30,7 +30,7 @@ from scipy.interpolate import PchipInterpolator, interp1d
 import veqpy.engine.backend_abi as backend_abi
 from veqpy.engine.numba_profile import update_profile
 from veqpy.engine.numba_source import source_parameterization_for_route_key
-from veqpy.model import Boundary, Grid
+from veqpy.model import Boundary, Grid, Profile
 from veqpy.operator import (
     Operator,
     OperatorCase,
@@ -259,6 +259,18 @@ def _as_float64_array(values, *, copy: bool = False) -> np.ndarray:
     return arr
 
 
+def _profiles_from_coeffs(
+    profile_coeffs: dict[str, list[float] | np.ndarray | int | None],
+) -> dict[str, Profile]:
+    profiles: dict[str, Profile] = {}
+    for name, coeff in profile_coeffs.items():
+        if isinstance(coeff, int):
+            profiles[name] = Profile(coeff=np.zeros(coeff, dtype=np.float64))
+        else:
+            profiles[name] = Profile(coeff=coeff)
+    return profiles
+
+
 def _extract_shape_x(profile_coeffs: dict[str, list[float] | None], x: np.ndarray) -> np.ndarray:
     profile_names = build_profile_names(REFERENCE_GRID.M_max)
     profile_index = build_profile_index(profile_names)
@@ -395,7 +407,7 @@ def _reference_pf_case() -> OperatorCase:
         route="PF",
         coordinate="rho",
         nodes="uniform",
-        profile_coeffs=BASE_COEFFS,
+        profiles=_profiles_from_coeffs(BASE_COEFFS),
         boundary=BOUNDARY,
         heat_input=Pn_r_src / MU0,
         current_input=FFn_r_src,
@@ -705,12 +717,12 @@ def _make_benchmark_case(spec: BenchmarkCaseSpec, reference: ReferenceBundle) ->
     )
     return OperatorCase(
         route=spec.mode,
-        profile_coeffs=_profile_coeffs_for_case(
+        profiles=_profiles_from_coeffs(_profile_coeffs_for_case(
             spec.mode,
             spec.coordinate,
             spec.input_kind,
             constraint=spec.constraint,
-        ),
+        )),
         boundary=BOUNDARY,
         heat_input=heat_input,
         current_input=current_input,

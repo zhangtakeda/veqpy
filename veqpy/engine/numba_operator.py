@@ -661,7 +661,7 @@ def _bind_pj2_psin_uniform_residual_runner_core(
         kind=source_plan.interpolation_kind,
     )
     coordinate_code = int(source_plan.coordinate_code)
-    Ip = float(source_plan.Ip)
+    Ip = float(source_plan.mu0_Ip)
     beta = float(source_plan.beta)
     has_Ip = bool(np.isfinite(Ip))
     use_local_barycentric = bool(source_plan.uses_barycentric_interpolation)

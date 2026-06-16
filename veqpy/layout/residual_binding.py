@@ -21,8 +21,8 @@ import numpy as np
 from veqpy.engine import numba_operator, numba_residual
 
 if TYPE_CHECKING:
+    from veqpy.model.problem import Problem
     from veqpy.operator.build_plan import OperatorBuildPlan, ResidualBindingLayout
-    from veqpy.operator.operator_case import OperatorCase
     from veqpy.workspace.geometry_workspace import GeometryWorkspace
     from veqpy.workspace.grid_workspace import GridWorkspace
     from veqpy.workspace.profile_workspace import ProfileWorkspace
@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 def build_residual_full_stage_runner_into(
     *,
     plan: OperatorBuildPlan,
-    case: OperatorCase,
+    case: Problem,
     profile_workspace: ProfileWorkspace,
     geometry_workspace: GeometryWorkspace,
     residual_workspace: ResidualWorkspace,
@@ -133,7 +133,7 @@ def build_collocation_runner_into(
 def build_fused_residual_runner_into(
     *,
     plan: OperatorBuildPlan,
-    case: OperatorCase,
+    case: Problem,
     grid_workspace: GridWorkspace,
     residual_binding_layout: ResidualBindingLayout,
     profile_workspace: ProfileWorkspace,

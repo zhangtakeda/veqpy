@@ -132,9 +132,10 @@ def test_pf_rho_source_reversal_preserves_solved_shape() -> None:
             case = benchmark._make_benchmark_case(spec, reference)
             result, equilibrium, shape_x = benchmark._solve_once(case)
 
-            reversed_case = case.copy()
-            reversed_case.heat_input *= -1.0
-            reversed_case.current_input *= -1.0
+            reversed_case = case.replace(
+                heat_input=-case.heat_input,
+                current_input=-case.current_input,
+            )
             reversed_result, reversed_equilibrium, reversed_shape_x = benchmark._solve_once(
                 reversed_case
             )

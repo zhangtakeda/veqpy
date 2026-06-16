@@ -1,15 +1,19 @@
 # Operator
 
-`Operator` 是一次固定边界平衡求解的数值中心。它把 `OperatorCase`、
+`Operator` 是一次固定边界平衡求解的数值中心。它把 `Problem`、
 `Grid` 和 packed 系数向量 $x$ 转换成 `Solver` 使用的有限维
 Grad--Shafranov residual。从物理数值层面看，它刷新磁面形状，根据
 source route 构造源项剖面，并把强形式 residual 投影到 active 系数基上。
 
 源码位置主要在 `veqpy/operator/`、`veqpy/layout/`、`veqpy/workspace/` 和 `veqpy/engine/`。
 
-## OperatorCase
+## Problem
 
-`OperatorCase` 描述一次固定边界求解的输入，包括 source route、source 坐标、节点语义、active profile 系数、边界、热源/电流相关输入以及可选 `Ip` 或 `beta` 约束。
+`Problem` 描述一次固定边界求解的输入，包括 source route、source 坐标、节点语义、profile 对象、边界、热源/电流相关输入以及可选 `Ip` 或 `beta` 约束。`OperatorCase` 保留为同一类型的兼容别名。
+
+`Problem.profiles` 中的每个条目都是一个 `Profile`。`coeff is None` 表示
+passive profile；一维 coefficient 数组表示 active profile，并会占用 packed
+state 槽位。
 
 `route`、`coordinate` 和 `nodes` 共同形成 source route key:
 
@@ -19,11 +23,13 @@ source route 构造源项剖面，并把强形式 residual 投影到 active 系�
 
 它决定 source kernel 和输入解释方式。`heat_input` 与 `current_input` 保持为一维数据，具体物理含义由 route 选择。
 
-`heat_input` 总是按 pressure-like setup 数据处理；当它处在预期物理量级
-范围内时，`OperatorCase` 构造阶段会乘以 `mu0`。`Ip` 也采用同样的缩放。
-`current_input` 只有在 current-profile route (`PI`, `PJ1`, `PJ2`) 中会乘以
-`mu0`；在其他 route 中，它已经是归一化量或场派生驱动量，例如 `FF'`、
-`psin_r` 或 `q`。量级明显不符合 setup 约定的输入会在构造 operator 前被拒绝。
+`Problem` 保留用户侧的原始 setup 数组和约束值。构造 `Operator` 时，
+`SourcePlan` 会校验这些量级，并 materialize engine-ready source 输入。
+`heat_input` 总是按 pressure-like setup 数据处理，并在 plan 中存为已经乘过
+`mu0` 的数组。`Ip` 在 plan 中存为 `mu0_Ip`。`current_input` 在 plan 中仍保留
+这个名字；在 current-profile route (`PI`, `PJ1`, `PJ2`) 中它也会乘以 `mu0`，
+而在其他 route 中仍是归一化量或场派生驱动量，例如 `FF'`、`psin_r` 或 `q`。
+量级明显不符合 setup 约定的输入会在构造 source plan 时被拒绝。
 
 ## Source Routes
 

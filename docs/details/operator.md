@@ -1,7 +1,7 @@
 # Operator
 
 `Operator` is the numerical center of one fixed-boundary equilibrium solve. It
-turns an `OperatorCase`, a `Grid`, and a packed coefficient vector $x$ into the
+turns a `Problem`, a `Grid`, and a packed coefficient vector $x$ into the
 finite-dimensional Grad--Shafranov residual used by `Solver`. In physical terms,
 it updates the flux-surface shape, constructs the source profiles implied by the
 chosen source route, and projects the strong-form residual onto the active
@@ -9,9 +9,13 @@ coefficient basis.
 
 The relevant source files mainly live in `veqpy/operator/`, `veqpy/layout/`, `veqpy/workspace/`, and `veqpy/engine/`.
 
-## OperatorCase
+## Problem
 
-`OperatorCase` describes one fixed-boundary solve input: source route, source coordinate, node semantics, active profile coefficients, boundary, heat/current-related inputs, and optional `Ip` or `beta` constraints.
+`Problem` describes one fixed-boundary solve input: source route, source coordinate, node semantics, profile objects, boundary, heat/current-related inputs, and optional `Ip` or `beta` constraints. `OperatorCase` is kept as a compatibility alias for the same type.
+
+Each entry in `Problem.profiles` is a `Profile`. A profile with `coeff is None`
+is passive; a profile with a one-dimensional coefficient array is active and
+occupies packed state slots.
 
 `route`, `coordinate`, and `nodes` jointly form the source route key:
 
@@ -21,13 +25,15 @@ The relevant source files mainly live in `veqpy/operator/`, `veqpy/layout/`, `ve
 
 This key selects the source kernel and the interpretation of the input arrays. `heat_input` and `current_input` remain one-dimensional data; their physical meaning is determined by the selected route.
 
-`heat_input` is always treated as pressure-like setup data and is scaled by
-`mu0` during case construction when it is provided in the expected physical
-setup range. `Ip` is scaled the same way. `current_input` is scaled by `mu0`
-only for current-profile routes (`PI`, `PJ1`, and `PJ2`); in other routes it is
-already a normalized or field-derived driver such as `FF'`, `psin_r`, or `q`.
-Inputs with magnitudes outside the expected setup ranges are rejected before an
-operator is built.
+`Problem` keeps setup arrays and constraints in the raw user-facing convention.
+When an `Operator` is built, `SourcePlan` validates those magnitudes and
+materializes engine-ready source inputs. `heat_input` is always treated as
+pressure-like setup data and is stored in the plan after `mu0` scaling. `Ip` is
+stored as `mu0_Ip`. `current_input` keeps its name in the plan; for
+current-profile routes (`PI`, `PJ1`, and `PJ2`) it is also `mu0`-scaled, while
+in other routes it remains a normalized or field-derived driver such as `FF'`,
+`psin_r`, or `q`. Inputs with magnitudes outside the expected setup ranges are
+rejected while building the source plan.
 
 ## Source Routes
 

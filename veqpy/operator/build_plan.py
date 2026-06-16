@@ -2,7 +2,7 @@
 Module: operator.build_plan
 
 Role:
-- Build the immutable operator topology/configuration plan from Grid + OperatorCase.
+- Build the immutable operator topology/configuration plan from Grid + Problem.
 - Keep packed topology, source route binding, and residual binding construction out of Operator.
 
 Public API:
@@ -20,7 +20,7 @@ import numpy as np
 import veqpy.engine.backend_abi as backend_abi
 from veqpy.engine import validate_route
 from veqpy.model.grid import Grid
-from veqpy.operator.operator_case import OperatorCase
+from veqpy.model.problem import Problem
 from veqpy.operator.packed_layout import (
     PROFILE_OFFSET_SPECS,
     PROFILE_STATIC_KWARGS,
@@ -77,7 +77,7 @@ class OperatorBuildPlan:
 def build_operator_plan(
     *,
     grid: Grid,
-    case: OperatorCase,
+    case: Problem,
     source_interpolation_kind: str,
 ) -> OperatorBuildPlan:
     """Build full Operator topology from an initial Grid + case."""
@@ -155,7 +155,7 @@ def build_operator_plan(
 def refresh_operator_plan_for_case(
     plan: OperatorBuildPlan,
     *,
-    case: OperatorCase,
+    case: Problem,
     source_interpolation_kind: str,
 ) -> OperatorBuildPlan:
     """Refresh case-dependent route/source ABI while preserving packed topology."""

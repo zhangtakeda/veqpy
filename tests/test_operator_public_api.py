@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from helpers import MU0, pf_reference_profiles, tiny_boundary, tiny_grid, tiny_operator
+from helpers import MU0, pf_reference_profiles, profiles, tiny_boundary, tiny_grid, tiny_operator
 from numpy.testing import assert_allclose
 
 from veqpy.engine.numba_source import (
@@ -119,7 +119,7 @@ def test_pf_rho_unconstrained_cases_use_positive_flux_branch() -> None:
         "route": "PF",
         "coordinate": "rho",
         "nodes": "grid",
-        "profile_coeffs": {"h": [0.0], "k": [0.0], "s1": [0.0]},
+        "profiles": profiles({"h": [0.0], "k": [0.0], "s1": [0.0]}),
         "boundary": tiny_boundary(),
         "current_input": ffn_psin * (2.0 * rho),
     }
@@ -152,12 +152,12 @@ def test_active_f_profile_is_only_supported_by_pj2() -> None:
                 route="PF",
                 coordinate="rho",
                 nodes="uniform",
-                profile_coeffs={
+                profiles=profiles({
                     "h": [0.0, 0.0],
                     "k": [0.0, 0.0],
                     "s1": [0.0, 0.0],
                     "F": [0.0, 0.0],
-                },
+                }),
                 boundary=tiny_boundary(),
                 heat_input=np.full_like(rho, 1.0e6),
                 current_input=np.ones_like(rho),
@@ -174,11 +174,11 @@ def test_pj2_requires_active_f_profile() -> None:
                 route="PJ2",
                 coordinate="rho",
                 nodes="uniform",
-                profile_coeffs={
+                profiles=profiles({
                     "h": [0.0, 0.0],
                     "k": [0.0, 0.0],
                     "s1": [0.0, 0.0],
-                },
+                }),
                 boundary=tiny_boundary(),
                 heat_input=np.full_like(rho, 1.0e6),
                 current_input=np.full_like(rho, 1.0e6),
@@ -195,12 +195,12 @@ def test_rho_routes_reject_active_psin_profile() -> None:
                 route="PF",
                 coordinate="rho",
                 nodes="uniform",
-                profile_coeffs={
+                profiles=profiles({
                     "h": [0.0, 0.0],
                     "k": [0.0, 0.0],
                     "s1": [0.0, 0.0],
                     "psin": [0.0, 0.0],
-                },
+                }),
                 boundary=tiny_boundary(),
                 heat_input=np.full_like(rho, 1.0e6),
                 current_input=np.ones_like(rho),
@@ -217,12 +217,12 @@ def test_psin_grid_routes_reject_active_psin_profile() -> None:
                 route="PF",
                 coordinate="psin",
                 nodes="grid",
-                profile_coeffs={
+                profiles=profiles({
                     "h": [0.0, 0.0],
                     "k": [0.0, 0.0],
                     "s1": [0.0, 0.0],
                     "psin": [0.0, 0.0],
-                },
+                }),
                 boundary=tiny_boundary(),
                 heat_input=np.full(grid.Nr, 1.0e6),
                 current_input=np.ones(grid.Nr),
@@ -239,13 +239,13 @@ def test_active_f_and_psin_profiles_are_mutually_exclusive() -> None:
                 route="PJ2",
                 coordinate="rho",
                 nodes="uniform",
-                profile_coeffs={
+                profiles=profiles({
                     "h": [0.0, 0.0],
                     "k": [0.0, 0.0],
                     "s1": [0.0, 0.0],
                     "psin": [0.0, 0.0],
                     "F": [0.0, 0.0],
-                },
+                }),
                 boundary=tiny_boundary(),
                 heat_input=np.full_like(rho, 1.0e6),
                 current_input=np.full_like(rho, 1.0e6),
@@ -267,7 +267,7 @@ def test_replace_case_rejects_active_f_on_non_pj2_route() -> None:
             route="PJ2",
             coordinate="rho",
             nodes="uniform",
-            profile_coeffs=profile_coeffs,
+            profiles=profiles(profile_coeffs),
             boundary=tiny_boundary(),
             heat_input=np.full_like(rho, 1.0e6),
             current_input=np.full_like(rho, 1.0e6),
@@ -280,7 +280,7 @@ def test_replace_case_rejects_active_f_on_non_pj2_route() -> None:
                 route="PF",
                 coordinate="rho",
                 nodes="uniform",
-                profile_coeffs=profile_coeffs,
+                profiles=profiles(profile_coeffs),
                 boundary=tiny_boundary(),
                 heat_input=np.full_like(rho, 1.0e6),
                 current_input=np.ones_like(rho),
@@ -294,12 +294,12 @@ def test_pj2_uses_profile_f_derivative_for_active_f_profile() -> None:
         route="PJ2",
         coordinate="rho",
         nodes="grid",
-        profile_coeffs={
+        profiles=profiles({
             "h": [0.0, 0.0],
             "k": [0.0, 0.0],
             "s1": [0.0, 0.0],
             "F": [0.2, -0.1, 0.05, 0.03],
-        },
+        }),
         boundary=tiny_boundary(),
         heat_input=np.full(grid.Nr, 1.0e6),
         current_input=np.full(grid.Nr, 1.0e6),

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
-from helpers import tiny_boundary, tiny_grid, tiny_operator
+from helpers import profiles, tiny_boundary, tiny_grid, tiny_operator
 from numpy.testing import assert_allclose
 
 import veqpy.workspace.field_rows as rows
@@ -149,7 +149,7 @@ def test_rho_source_eval_bindings_use_grid_radial_fields() -> None:
                 route=route,
                 coordinate="rho",
                 nodes="grid",
-                profile_coeffs=profile_coeffs,
+                profiles=profiles(profile_coeffs),
                 boundary=tiny_boundary(),
                 heat_input=np.full(grid.Nr, 1.0e6, dtype=np.float64),
                 current_input=current_input,

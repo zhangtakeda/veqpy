@@ -25,13 +25,14 @@ from rich.text import Text
 from rich.tree import Tree
 from scipy.optimize import least_squares
 
+from veqpy.base import Serial
 from veqpy.model.geqdsk import Geqdsk
 
 MAX_FOURIER_ORDER = 20
 
 
 @dataclass(slots=True, frozen=True)
-class Boundary:
+class Boundary(Serial):
     """Boundary geometry and magnetic-field parameter aggregate."""
 
     a: float

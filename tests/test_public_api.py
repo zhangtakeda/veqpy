@@ -24,6 +24,7 @@ def test_model_public_exports_are_stable() -> None:
         "Geqdsk",
         "Boundary",
         "Profile",
+        "Problem",
         "Reactive",
         "Serial",
     ]

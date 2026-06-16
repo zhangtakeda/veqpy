@@ -40,7 +40,7 @@ class Profile(Reactive, Serial):
         power: int = 0,
         envelope_power: int = 1,
         amplitude_power: float = 1.0,
-        offset: float | None = 0.0,
+        offset: float = 0.0,
         coeff: np.ndarray | None = None,
     ) -> None:
         super().__init__()
@@ -78,9 +78,9 @@ class Profile(Reactive, Serial):
             case "power" | "envelope_power":
                 return int(value)
             case "offset":
-                # None is accepted for older serialized payloads; internally an
-                # absent offset is just the neutral additive baseline.
-                return 0.0 if value is None else float(value)
+                if value is None:
+                    raise TypeError("offset must be a float, got None")
+                return float(value)
             case "coeff":
                 return _coerce_optional_array(value, copy=False, name="coeff")
         return value

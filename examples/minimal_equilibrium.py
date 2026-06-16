@@ -17,8 +17,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-from veqpy.model import Boundary, Grid
-from veqpy.operator import Operator, OperatorCase
+from veqpy.model import Boundary, Grid, Problem, Profile
+from veqpy.operator import Operator
 from veqpy.solver import Solver, SolverConfig
 
 MU0 = 4.0e-7 * np.pi
@@ -145,14 +145,14 @@ def main() -> None:
     psin = np.linspace(0.0, 1.0, SOURCE_SAMPLE_COUNT, dtype=np.float64)
     current_input, heat_input = pf_reference_profiles(psin)
     pressure_input = heat_input / MU0
-    case = OperatorCase(
+    case = Problem(
         route="PF",
         coordinate="psin",
-        profile_coeffs={
-            "psin": 6,
-            "h": 3,
-            "k": 6,
-            "s1": 3,
+        profiles={
+            "psin": Profile(coeff=np.zeros(6, dtype=np.float64)),
+            "h": Profile(coeff=np.zeros(3, dtype=np.float64)),
+            "k": Profile(coeff=np.zeros(6, dtype=np.float64)),
+            "s1": Profile(coeff=np.zeros(3, dtype=np.float64)),
         },
         boundary=boundary,
         heat_input=pressure_input,

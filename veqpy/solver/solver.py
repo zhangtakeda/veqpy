@@ -24,8 +24,8 @@ import numpy as np
 from rich.console import Console
 
 from veqpy.model.equilibrium import Equilibrium
+from veqpy.model.problem import Problem
 from veqpy.operator.operator import Operator
-from veqpy.operator.operator_case import OperatorCase
 from veqpy.solver.residual_scale import (
     _block_rms_values,
     _build_block_rms_scale,
@@ -81,7 +81,7 @@ class Solver:
 
         self.history.clear()
 
-    def replace_case(self, case: OperatorCase) -> None:
+    def replace_case(self, case: Problem) -> None:
         """Replace the case with a compatible one."""
 
         self.operator.replace_case(case)

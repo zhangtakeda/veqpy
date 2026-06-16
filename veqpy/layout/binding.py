@@ -28,8 +28,8 @@ from veqpy.layout.residual_binding import (
 from veqpy.layout.source_binding import build_bound_source_stage_runner
 
 if TYPE_CHECKING:
+    from veqpy.model.problem import Problem
     from veqpy.operator.build_plan import OperatorBuildPlan, ResidualBindingLayout
-    from veqpy.operator.operator_case import OperatorCase
     from veqpy.workspace.geometry_workspace import GeometryWorkspace
     from veqpy.workspace.grid_workspace import GridWorkspace
     from veqpy.workspace.profile_workspace import ProfileWorkspace
@@ -42,7 +42,7 @@ from .runtime import OperatorLayout
 def build_operator_layout(
     *,
     plan: OperatorBuildPlan,
-    case: OperatorCase,
+    case: Problem,
     profile_workspace: ProfileWorkspace,
     geometry_workspace: GeometryWorkspace,
     source_workspace: SourceWorkspace,

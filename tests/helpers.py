@@ -2,10 +2,20 @@ from __future__ import annotations
 
 import numpy as np
 
-from veqpy.model import Boundary, Grid
+from veqpy.model import Boundary, Grid, Profile
 from veqpy.operator import Operator, OperatorCase
 
 MU0 = 4.0e-7 * np.pi
+
+
+def profiles(coeffs: dict[str, int | list[float] | np.ndarray | None]) -> dict[str, Profile]:
+    result: dict[str, Profile] = {}
+    for name, coeff in coeffs.items():
+        if isinstance(coeff, int):
+            result[name] = Profile(coeff=np.zeros(coeff, dtype=np.float64))
+        else:
+            result[name] = Profile(coeff=coeff)
+    return result
 
 
 def tiny_boundary() -> Boundary:
@@ -37,12 +47,12 @@ def tiny_pf_case() -> OperatorCase:
         route="PF",
         coordinate="psin",
         nodes="uniform",
-        profile_coeffs={
+        profiles=profiles({
             "psin": 3,
             "h": [0.0, 0.0],
             "k": [0.0, 0.0],
             "s1": [0.0, 0.0],
-        },
+        }),
         boundary=tiny_boundary(),
         heat_input=pn_psin / MU0,
         current_input=ffn_psin,

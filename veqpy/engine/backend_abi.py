@@ -388,7 +388,7 @@ def build_fused_source_eval_abi(
         n_axis_fix=n_axis_fix,
         radial_fields=geometry_workspace.radial_fields,
         surface_fields=geometry_workspace.surface_fields,
-        Ip=float(source_plan.Ip),
+        Ip=float(source_plan.mu0_Ip),
         beta=float(source_plan.beta),
         array_scratch=source_workspace.array_scratch,
         matrix_scratch=source_workspace.matrix_scratch,

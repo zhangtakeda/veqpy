@@ -15,15 +15,15 @@ import numpy as np
 
 from veqpy.model.equilibrium import Equilibrium
 from veqpy.model.grid import Grid
+from veqpy.model.problem import Problem
 from veqpy.model.profile import Profile
-from veqpy.operator.operator_case import OperatorCase
 from veqpy.operator.packed_layout import decode_packed_blocks
 
 
 def snapshot_equilibrium_from_runtime(
     *,
     x: np.ndarray,
-    case: OperatorCase,
+    case: Problem,
     grid: Grid,
     profile_L: np.ndarray,
     coeff_index: np.ndarray,
