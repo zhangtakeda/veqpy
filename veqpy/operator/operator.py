@@ -30,6 +30,12 @@ from veqpy.operator.build_plan import (
     build_operator_plan,
     refresh_operator_plan_for_problem,
 )
+from veqpy.operator.initialize import (
+    build_boundary_slope_initial_state as build_operator_initial_state,
+)
+from veqpy.operator.initialize import (
+    build_legacy_boundary_slope_initial_state as build_legacy_operator_initial_state,
+)
 from veqpy.operator.packed_layout import (
     decode_packed_blocks,
     encode_packed_state,
@@ -177,37 +183,29 @@ class Operator:
 
         return self.profile_workspace.active_profile_blocks()
 
-    def build_boundary_slope_initial_state(self) -> np.ndarray:
-        """Build a geometrically-motivated packed x0 in a single pass.
+    def build_boundary_slope_initial_state(self, *, include_active_psin: bool = True) -> np.ndarray:
+        """Build a geometrically-motivated packed x0 in a single pass."""
 
-        c/s Fourier profiles use ``-offset / (2*p + 1)``.
-        ``h`` uses the Shafranov-shift estimate ``0.66 * a / R0``.
-        For uniform profiles (Solovev-like) all coefficients are left
-        at zero — the toroidal correction is small and boundary-based
-        shaping estimates are unreliable for analytic equilibria.
-        """
+        x = build_operator_initial_state(
+            problem=self.problem,
+            plan=self.plan,
+            profile_workspace=self.profile_workspace,
+            source_psin_target=(
+                self._source_psin_target_for_initial_state if include_active_psin else None
+            ),
+        )
+        self.invalidate_source_state()
+        return x
 
-        pw = self.profile_workspace
-        x = np.zeros(self.plan.x_size, dtype=np.float64)
+    def build_legacy_boundary_slope_initial_state(self) -> np.ndarray:
+        """Build the legacy geometrically-motivated packed x0."""
 
-        h0_est = _estimate_h0_from_problem(self.problem)
-        if h0_est == 0.0:
-            return x  # uniform → pure zeros, skip c/s estimates
-
-        for slot, profile_id in enumerate(pw.active_profile_ids):
-            length = int(pw.active_lengths[slot])
-            if length <= 0:
-                continue
-            name = pw.profile_names[int(profile_id)]
-            idx0 = int(pw.active_coeff_index_rows[slot, 0])
-            if name.startswith("c") or name.startswith("s"):
-                profile_id_int = int(profile_id)
-                offset = float(self.plan.profile_offsets[profile_id_int])
-                if abs(offset) > 1.0e-14:
-                    power = int(self.plan.profile_powers[profile_id_int])
-                    x[idx0] = -offset / float(2 * power + 1)
-            elif name == "h":
-                x[idx0] = h0_est
+        x = build_legacy_operator_initial_state(
+            problem=self.problem,
+            plan=self.plan,
+            profile_workspace=self.profile_workspace,
+        )
+        self.invalidate_source_state()
         return x
 
     def replace_problem(self, problem: Problem) -> None:
@@ -526,6 +524,19 @@ class Operator:
             # its query from the current psin profile instead of stale psin.
             self.source_workspace.psin_query.fill(-1.0)
 
+    def _source_psin_target_for_initial_state(self, x: np.ndarray) -> np.ndarray | None:
+        """Return the source-owned psin target produced by one residual refresh."""
+
+        if not bool(self.plan.source_execution.requires_optimized_psin_profile):
+            return None
+        target_root_fields = self.source_workspace.target_root_fields
+        if target_root_fields.shape[1] == 0:
+            return None
+        self.layout.run_profile(x)
+        self.layout.run_geometry()
+        self.layout.run_source()
+        return target_root_fields[0]
+
     def _snapshot_equilibrium_from_runtime(self, x: np.ndarray) -> Equilibrium:
         root_fields = self.residual_workspace.root_fields
         return snapshot_equilibrium_from_runtime(
@@ -550,70 +561,3 @@ class Operator:
             alpha1=self.alpha1,
             alpha2=self.alpha2,
         )
-
-
-def _estimate_h0_from_problem(problem: Problem) -> float:
-    """Return Shafranov-shift estimate h0, or 0.0 for uniform profiles.
-
-    An H-mode pedestal is detected when ``d|heat_input|/dpsi`` changes
-    from negative to positive in the outer 30 % of the profile (the
-    pedestal rise).  If no pedestal is found but the profile has
-    significant radial structure it is treated as core-peaked H-mode
-    and the toroidal estimate is kept.  Only perfectly uniform
-    profiles (Solovev-like, range / mean < 1e-4) return zero.
-    """
-    try:
-        a = float(problem.boundary.a)
-        R0 = float(problem.boundary.R0)
-    except (AttributeError, TypeError, ValueError):
-        return 0.0
-    heat = getattr(problem, "heat_input", None)
-    if heat is None or not hasattr(heat, "__len__") or len(heat) < 6:
-        return 0.66 * a / R0
-    try:
-        n = len(heat)
-        # single-pass: min, max, mean of |heat|, plus edge-derivative scan
-        v0 = float(heat[0])
-        h_min = v0 if v0 >= 0.0 else -v0
-        h_max = h_min
-        total = h_min
-        edge_start = int(n * 0.7)
-        if edge_start < 3:
-            edge_start = 3
-        prev_edge = 0.0
-        prev_edge_diff = 0.0
-        edge_mean = 0.0
-        has_pedestal = False
-        for i in range(1, n):
-            v = float(heat[i])
-            av = v if v >= 0.0 else -v
-            total += av
-            if av < h_min:
-                h_min = av
-            if av > h_max:
-                h_max = av
-            if i >= edge_start:
-                # A sign change in the outer derivative is a coarse pedestal
-                # detector; it only affects the initial guess, not physics.
-                edge_mean += av
-                cur_diff = av - prev_edge
-                if prev_edge_diff < 0.0 and cur_diff > 0.0:
-                    has_pedestal = True
-                prev_edge = av
-                prev_edge_diff = cur_diff
-        h_mean = total / float(n)
-        if h_mean < 1.0e-30:
-            return 0.0
-        # uniform (Solovev-like) → zero
-        if (h_max - h_min) / h_mean < 1.0e-4:
-            return 0.0
-        # pedestal or structured → toroidal estimate
-        if has_pedestal:
-            edge_mean /= float(n - edge_start)
-            if edge_mean > 1.0e-30:
-                return 0.66 * a / R0
-        # Even without a resolved pedestal, any nonuniform source benefits from
-        # the same small Shafranov-shift seed used for shaped cases.
-        return 0.66 * a / R0  # structured, no clear pedestal
-    except (TypeError, ValueError):
-        return 0.66 * a / R0

@@ -52,6 +52,28 @@ _X_SCALE_FOURIER_PROFILE_PRIOR = 5.0e-2
 _X_SCALE_F_PROFILE_PRIOR = 2.5e-1
 _X_SCALE_KAPPA_PROFILE_PRIOR = 1.0
 _X_SCALE_OFFSETLESS_PROFILES = frozenset({"h", "v", "psin"})
+_AUTO_CURVE_STRAIN_THRESHOLD = 0.20
+_AUTO_CURVE_STRAIN_SAMPLES = 32
+_AUTO_CURVE_STRAIN_MAX_ORDER = 32
+_AUTO_CURVE_STRAIN_THETA = np.linspace(
+    0.0,
+    2.0 * np.pi,
+    _AUTO_CURVE_STRAIN_SAMPLES,
+    endpoint=False,
+    dtype=np.float64,
+)
+_AUTO_CURVE_STRAIN_SIN_THETA = np.sin(_AUTO_CURVE_STRAIN_THETA)
+_AUTO_CURVE_STRAIN_COS_THETA = np.cos(_AUTO_CURVE_STRAIN_THETA)
+_AUTO_CURVE_STRAIN_ORDERS = np.arange(
+    1,
+    _AUTO_CURVE_STRAIN_MAX_ORDER + 1,
+    dtype=np.float64,
+)
+_AUTO_CURVE_STRAIN_ORDER_THETA = (
+    _AUTO_CURVE_STRAIN_ORDERS[:, np.newaxis] * _AUTO_CURVE_STRAIN_THETA[np.newaxis, :]
+)
+_AUTO_CURVE_STRAIN_SIN_ORDER_THETA = np.sin(_AUTO_CURVE_STRAIN_ORDER_THETA)
+_AUTO_CURVE_STRAIN_COS_ORDER_THETA = np.cos(_AUTO_CURVE_STRAIN_ORDER_THETA)
 
 
 class Solver:
@@ -692,6 +714,12 @@ class Solver:
             return "warm-start"
         if solve_config.initial_policy == "geometric":
             return "geometric-start"
+        if solve_config.initial_policy == "geometric-refined":
+            return "geometric-refined-start"
+        if solve_config.initial_policy == "legacy-geometric":
+            return "legacy-geometric-start"
+        if solve_config.initial_policy == "auto":
+            return "auto-start"
         if solve_config.initial_policy == "zeros":
             return "zero-start"
         x_eval = self.operator.coerce_x(x_guess)
@@ -810,11 +838,7 @@ class Solver:
         message = str(opt.message)
         if not bool(opt.success) and accepted:
             message = f"{message} [accepted by residual]"
-        if (
-            bool(opt.success)
-            and not accepted
-            and residual_kind == "variational"
-        ):
+        if bool(opt.success) and not accepted and residual_kind == "variational":
             message = f"{message} [rejected by residual={residual_norm:.6e}]"
         return (
             x_opt,
@@ -1164,9 +1188,7 @@ class Solver:
                 x_scale=_build_x_block_scale_vector(self.operator, x_scale_guess),
                 probe_count=int(solve_config.residual_normalization_probe_count),
                 probe_step=float(solve_config.residual_normalization_probe_step),
-                sensitivity_lambda=float(
-                    solve_config.residual_normalization_sensitivity_lambda
-                ),
+                sensitivity_lambda=float(solve_config.residual_normalization_sensitivity_lambda),
             )
 
         if initial_residual is None and not _mode_is_block_rms(mode):
@@ -1466,10 +1488,87 @@ def _build_initial_state(operator: Operator, solve_config: SolverConfig) -> np.n
     if initial_policy == "zeros":
         return np.zeros(operator.x_size, dtype=np.float64)
     if initial_policy == "geometric":
+        return operator.build_boundary_slope_initial_state(include_active_psin=False)
+    if initial_policy == "geometric-refined":
         return operator.build_boundary_slope_initial_state()
+    if initial_policy == "legacy-geometric":
+        return operator.build_legacy_boundary_slope_initial_state()
+    if initial_policy == "auto":
+        if _boundary_curve_strain(operator.problem.boundary) >= _AUTO_CURVE_STRAIN_THRESHOLD:
+            return operator.build_boundary_slope_initial_state()
+        return np.zeros(operator.x_size, dtype=np.float64)
     if initial_policy == "warm":
         raise RuntimeError("_build_initial_state('warm') needs the current solver x0")
     raise ValueError(f"Unsupported initial_policy {initial_policy!r}")
+
+
+def _boundary_curve_strain(boundary: object) -> float:
+    c_offsets = _boundary_offset_array(getattr(boundary, "c_offsets", None))
+    s_offsets = _boundary_offset_array(getattr(boundary, "s_offsets", None))
+    if c_offsets is None or s_offsets is None:
+        return float("inf")
+    has_c_shape = c_offsets.size > 0 and bool(np.any(c_offsets != 0.0))
+    has_s_shape = s_offsets.size > 1 and bool(np.any(s_offsets[1:] != 0.0))
+    if not has_c_shape and not has_s_shape:
+        return 0.0
+
+    try:
+        kappa = abs(float(getattr(boundary, "ka", 1.0)))
+    except (TypeError, ValueError):
+        return float("inf")
+    if not np.isfinite(kappa):
+        return float("inf")
+
+    theta = _AUTO_CURVE_STRAIN_THETA
+    eta = np.zeros_like(_AUTO_CURVE_STRAIN_THETA)
+    eta_prime = np.zeros_like(_AUTO_CURVE_STRAIN_THETA)
+    if c_offsets.size:
+        eta += c_offsets[0]
+
+    c_fast_count = min(max(c_offsets.size - 1, 0), _AUTO_CURVE_STRAIN_MAX_ORDER)
+    if c_fast_count:
+        c_tail = c_offsets[1 : c_fast_count + 1]
+        eta += c_tail @ _AUTO_CURVE_STRAIN_COS_ORDER_THETA[:c_fast_count]
+        eta_prime -= (
+            _AUTO_CURVE_STRAIN_ORDERS[:c_fast_count] * c_tail
+        ) @ _AUTO_CURVE_STRAIN_SIN_ORDER_THETA[:c_fast_count]
+    for order in range(c_fast_count + 1, c_offsets.size):
+        order_theta = float(order) * theta
+        eta += c_offsets[order] * np.cos(order_theta)
+        eta_prime -= float(order) * c_offsets[order] * np.sin(order_theta)
+
+    s_fast_count = min(max(s_offsets.size - 1, 0), _AUTO_CURVE_STRAIN_MAX_ORDER)
+    if s_fast_count:
+        s_tail = s_offsets[1 : s_fast_count + 1]
+        eta += s_tail @ _AUTO_CURVE_STRAIN_SIN_ORDER_THETA[:s_fast_count]
+        eta_prime += (
+            _AUTO_CURVE_STRAIN_ORDERS[:s_fast_count] * s_tail
+        ) @ _AUTO_CURVE_STRAIN_COS_ORDER_THETA[:s_fast_count]
+    for order in range(s_fast_count + 1, s_offsets.size):
+        order_theta = float(order) * theta
+        eta += s_offsets[order] * np.sin(order_theta)
+        eta_prime += float(order) * s_offsets[order] * np.cos(order_theta)
+
+    speed_boundary = np.sqrt(
+        (np.sin(theta + eta) * (1.0 + eta_prime)) ** 2 + (kappa * _AUTO_CURVE_STRAIN_COS_THETA) ** 2
+    )
+    speed_ellipse = np.sqrt(
+        _AUTO_CURVE_STRAIN_SIN_THETA**2 + (kappa * _AUTO_CURVE_STRAIN_COS_THETA) ** 2
+    )
+    strain = (speed_boundary - speed_ellipse) / np.maximum(speed_ellipse, 1.0e-12)
+    return float(np.sqrt(np.mean(strain * strain)))
+
+
+def _boundary_offset_array(value: object) -> np.ndarray | None:
+    if value is None:
+        return np.zeros(1, dtype=np.float64)
+    try:
+        offsets = np.asarray(value, dtype=np.float64).reshape(-1)
+    except (TypeError, ValueError):
+        return None
+    if offsets.size == 0 or not bool(np.all(np.isfinite(offsets))):
+        return None
+    return offsets
 
 
 def _residual_within_acceptance(residual_norm: float | None, solve_config: SolverConfig) -> bool:
@@ -1530,11 +1629,7 @@ def _build_x_block_scale_vector(operator, x_guess: np.ndarray) -> np.ndarray | N
             return None
         block_guess = x_eval[coeff_indices]
         guess_rms = float(np.linalg.norm(block_guess) / np.sqrt(length))
-        offset_scale = (
-            0.0
-            if profile_name in _X_SCALE_OFFSETLESS_PROFILES
-            else abs(float(offset))
-        )
+        offset_scale = 0.0 if profile_name in _X_SCALE_OFFSETLESS_PROFILES else abs(float(offset))
         profile_scale = abs(float(profile_scale))
         profile_prior = _x_scale_profile_prior(profile_name)
         if abs(profile_scale - 1.0) <= 1.0e-12:

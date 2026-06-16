@@ -34,22 +34,40 @@ Initial values are chosen by priority:
 | Explicit `x0` | Validated by the operator, copied into `Solver.x0`, and used for this solve |
 | `initial_policy="warm"` | Reuses the current solver-owned `Solver.x0` |
 | `initial_policy="zeros"` | Uses a zero packed vector |
-| `initial_policy="geometric"` | Uses a boundary-shape estimate for active shape coefficients |
+| `initial_policy="geometric"` | Uses geometric shape/axis estimates without source/profile refinement |
+| `initial_policy="geometric-refined"` | Adds source-implied low-order active-profile seeds to the geometric estimate |
+| `initial_policy="legacy-geometric"` | Uses the legacy `0.66 * a / R0` axis-shift estimate and geometric shaping terms |
+| `initial_policy="auto"` | Uses zeros below the boundary curve-strain threshold, otherwise `geometric-refined` |
 | Default (`initial_policy=None`) | Uses the operator zero state |
 
 The geometric initializer is meant as a cheap geometry-based guess for nested
 flux surfaces. It delegates to the operator's boundary-slope estimate: active
 Fourier shaping coefficients receive first-coefficient values derived from the
-boundary offsets, and `h` receives a Shafranov-shift estimate when the source
-profile is not uniform. The initializer uses one conservative operator-side
-estimate rather than exposing a separate scale factor.
+boundary offsets, and `h` receives a continuous Shafranov-shift estimate from
+pressure/current source roughness moments. Small source structure and small axis
+shifts are treated as zero, so uniform Solovev-like sources decay smoothly to
+zero instead of taking a separate branch. The initializer uses one conservative
+operator-side estimate rather than exposing a separate scale factor.
 
-`initial_policy="homothetic"` remains accepted as a compatibility alias for
-`"geometric"`.
+The refined geometric policy starts from the same geometric estimate and adds
+cheap low-order active-profile predictions from source-implied targets. At
+present this projects the normalized flux target onto only the first active
+`psin` basis term when the operator route owns an active `psin` profile. This
+remains a scalar weighted least-squares correction, applies a conservative
+half-step seed, and clips the coefficient to preserve positive `psin_r` for the
+initialized profile.
 
-Whenever the solve starts from an explicit `x0`, zeros, or geometric state, the
-operator invalidates route-local source state before the attempt. `warm` keeps
-the current source state paired with the current `x0`.
+The `auto` policy is a cheap boundary-geometry gate. It samples the boundary
+curve implied by the Fourier angle correction, compares its arclength speed
+`ds/dtheta` with the ellipse using the same `a/R0/Z0/ka`, and computes the RMS
+relative curve strain. Values below the built-in threshold `0.32` use a zero
+packed initial vector; stronger non-elliptic boundary curves use
+`geometric-refined`. The elongation `ka` is part of the reference ellipse and
+does not trigger the refined path by itself.
+
+Whenever the solve starts from an explicit `x0`, zeros, or any internally built
+geometric state, the operator invalidates route-local source state before the
+attempt. `warm` keeps the current source state paired with the current `x0`.
 
 ## Solve Flow
 
@@ -116,10 +134,12 @@ change VEQPy's primary solve definition.
 
 `SolverResult` stores the initial packed vector, final packed vector, success
 flag, message, final residual norm, function/Jacobian/iteration counts,
-`elapsed` solve time, and `total_elapsed` call time. `elapsed` starts before
-initial-state construction and covers initialization, nonlinear attempts, and
-the final residual check. `total_elapsed` starts at `solve()` entry and includes
-per-call config resolution plus the solve work. After each solve,
+`elapsed` solve time, and `total_elapsed` call time. For built-in initial
+policies, `elapsed` starts before initial-state construction and covers
+initialization, nonlinear attempts, and the final residual check. If the caller
+passes an explicit `x0`, caller-side construction of that vector is naturally
+outside `SolverResult.elapsed`. `total_elapsed` starts at `solve()` entry and
+includes per-call config resolution plus the solve work. After each solve,
 `Solver.result` points to the newest result and `Solver.x0` is updated to the
 final solution.
 

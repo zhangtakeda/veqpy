@@ -32,18 +32,34 @@ start 和 `build_equilibrium()` 都使用这个状态。
 | 显式 `x0` | 由 operator 校验，复制到 `Solver.x0`，并作为本次初值 |
 | `initial_policy="warm"` | 复用当前 solver-owned `Solver.x0` |
 | `initial_policy="zeros"` | 使用全零 packed 向量 |
-| `initial_policy="geometric"` | 使用边界形状估计 active shape 系数 |
+| `initial_policy="geometric"` | 使用几何 shape/axis 估计，不加入 source/profile 修正 |
+| `initial_policy="geometric-refined"` | 在几何估计上加入低阶 active-profile source-implied seed |
+| `initial_policy="legacy-geometric"` | 使用旧的 `0.66 * a / R0` 磁轴位移估计和几何 shaping 项 |
+| `initial_policy="auto"` | 低于边界曲线 strain 阈值时使用 zeros，否则使用 `geometric-refined` |
 | 默认 (`initial_policy=None`) | 使用 operator 零状态 |
 
 `geometric` 初值是一个廉价的几何初猜，面向近似嵌套磁面。它委托给 operator
 的 boundary-slope estimate: active Fourier shaping 系数会从边界 offset 推出
-首项系数，`h` 在 source profile 非均匀时使用 Shafranov-shift 估计。该初值
-使用 operator 侧的一套保守估计，不再暴露额外的 scale factor。
+首项系数，`h` 使用由 pressure/current source roughness moment 给出的连续
+Shafranov-shift 估计。很小的 source structure 和很小的 axis shift 会按零处理，
+因此 Uniform/Solovev-like source 会平滑退化到零，而不是走单独分支。该初值使用
+operator 侧的一套保守估计，不再暴露额外的 scale factor。
 
-`initial_policy="homothetic"` 仍作为 `"geometric"` 的兼容别名被接受。
+`geometric-refined` 从同一几何估计出发，再使用 source-implied target 做廉价的
+低阶 active-profile 预测。目前如果当前 route 拥有 active `psin` profile，它会把
+source-implied normalized flux target 只投影到第一个 active `psin` basis 项上。
+这个修正仍是标量 weighted least-squares，使用保守 half-step seed，并会裁剪系数
+以保持初始化 profile 的 `psin_r` 为正。
 
-当本次求解使用显式 `x0`、zeros 或 geometric 初值时，operator 会在 attempt 前使
-route-local source state 失效。`warm` 则保留当前 `x0` 对应的 source state。
+`auto` 是一个廉价的边界几何 gate。它采样 Fourier 角度修正给出的边界曲线，将其
+弧长速度 `ds/dtheta` 与同一组 `a/R0/Z0/ka` 给出的椭圆比较，并计算相对 curve
+strain 的 RMS。该值低于内置阈值 `0.32` 时使用全零 packed 初值；非椭圆曲线形变
+更强时使用 `geometric-refined`。伸长率 `ka` 属于参考椭圆本身，不会单独触发
+refined 路径。
+
+当本次求解使用显式 `x0`、zeros 或任何内部构造的 geometric 初值时，operator 会在
+attempt 前使 route-local source state 失效。`warm` 则保留当前 `x0` 对应的
+source state。
 
 ## 求解流程
 
@@ -105,9 +121,11 @@ residual 的权重足以推动系数离开弱形式解。因此 collocation poli
 
 `SolverResult` 保存初始 packed 向量、最终 packed 向量、成功标志、消息、final
 residual norm、函数/Jacobian/迭代计数、`elapsed` 求解耗时和 `total_elapsed`
-调用耗时。`elapsed` 从初值构造前开始，覆盖初始化、非线性 attempt 和 final
-residual check；`total_elapsed` 从 `solve()` 入口开始，包含本次 config 合并和求解
-工作。每次求解后，`Solver.result` 指向最新结果，`Solver.x0` 更新为最终解。
+调用耗时。对于内置 `initial_policy`，`elapsed` 从初值构造前开始，覆盖初始化、
+非线性 attempt 和 final residual check；如果调用方传入显式 `x0`，这个向量在
+solver 外部的构造成本自然不计入 `SolverResult.elapsed`。`total_elapsed` 从
+`solve()` 入口开始，包含本次 config 合并和求解工作。每次求解后，
+`Solver.result` 指向最新结果，`Solver.x0` 更新为最终解。
 
 开启 history 时，`SolverRecord` 会快照当前 problem、本次 config 和 result。
 `clear()` 只清空 history，不改变 `Solver.x0`；`reset()` 会把 `Solver.x0`
