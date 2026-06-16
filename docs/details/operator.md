@@ -11,7 +11,7 @@ The relevant source files mainly live in `veqpy/operator/`, `veqpy/layout/`, `ve
 
 ## Problem
 
-`Problem` describes one fixed-boundary solve input: source route, source coordinate, node semantics, profile objects, boundary, heat/current-related inputs, and optional `Ip` or `beta` constraints. `OperatorCase` is kept as a compatibility alias for the same type.
+`Problem` describes one fixed-boundary solve input: source route, source coordinate, node semantics, profile objects, boundary, heat/current-related inputs, and optional `Ip` or `beta` constraints. It is the public problem-definition type passed into `Operator`.
 
 Each entry in `Problem.profiles` is a `Profile`. A profile with `coeff is None`
 is passive; a profile with a one-dimensional coefficient array is active and
@@ -27,13 +27,13 @@ This key selects the source kernel and the interpretation of the input arrays. `
 
 `Problem` keeps setup arrays and constraints in the raw user-facing convention.
 When an `Operator` is built, `SourcePlan` validates those magnitudes and
-materializes engine-ready source inputs. `heat_input` is always treated as
-pressure-like setup data and is stored in the plan after `mu0` scaling. `Ip` is
-stored as `mu0_Ip`. `current_input` keeps its name in the plan; for
-current-profile routes (`PI`, `PJ1`, and `PJ2`) it is also `mu0`-scaled, while
-in other routes it remains a normalized or field-derived driver such as `FF'`,
-`psin_r`, or `q`. Inputs with magnitudes outside the expected setup ranges are
-rejected while building the source plan.
+materializes plan-ready source inputs. `scaled_heat` is always pressure-like
+setup data after `mu0` scaling. `scaled_Ip` stores the `mu0 * Ip` constraint.
+`scaled_current` is the plan-ready current/source driver; for current-profile
+routes (`PI`, `PJ1`, and `PJ2`) it is also `mu0`-scaled, while in other routes it
+remains a normalized or field-derived driver such as `FF'`, `psin_r`, or `q`.
+Inputs with magnitudes outside the expected setup ranges are rejected while
+building the source plan.
 
 ## Source Routes
 

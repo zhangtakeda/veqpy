@@ -47,11 +47,10 @@ class SourcePlan:
     """Describe the read-only source semantics and runner binding plan.
 
     This is the semantic layer: route, coordinate, node layout, interpolation
-    choice, engine-ready input arrays, and global constraints.  ``heat_input``
-    is stored after pressure-like setup scaling.  ``current_input`` keeps its
-    public name; for current-profile routes it may already have been scaled by
-    ``mu0``.  Runtime ownership decisions are derived later in
-    ``SourceExecutionABI``.
+    choice, plan-ready input arrays, and global constraints. ``scaled_heat``,
+    ``scaled_current``, and ``scaled_Ip`` are the arrays/scalars consumed by
+    layout binding after setup validation. Runtime ownership decisions are
+    derived later in ``SourceExecutionABI``.
     """
 
     route: str
@@ -60,9 +59,9 @@ class SourcePlan:
     nodes: str
     parameterization: str
     source_sample_count: int
-    heat_input: np.ndarray
-    current_input: np.ndarray
-    mu0_Ip: float
+    scaled_heat: np.ndarray
+    scaled_current: np.ndarray
+    scaled_Ip: float
     beta: float
     interpolation_kind: str
 
@@ -112,7 +111,7 @@ def build_source_plan(
     interpolation_kind: str = SOURCE_INTERP_DEFAULT,
 ) -> SourcePlan:
     """Build the immutable source plan for a ``Problem``."""
-    heat_input, current_input, mu0_Ip, beta = _engine_source_inputs(case)
+    scaled_heat, scaled_current, scaled_Ip, beta = _scaled_source_inputs(case)
     # Parameterization is route-specific.  For example PP/psin/uniform samples
     # on sqrt(psin) to bias resolution near the magnetic axis while all kernels
     # still exchange normalized psin/root fields internally.
@@ -124,10 +123,10 @@ def build_source_plan(
         parameterization=source_parameterization_for_route_key(
             (str(case.route).upper(), str(case.coordinate).lower(), str(case.nodes).lower())
         ),
-        source_sample_count=int(heat_input.shape[0]),
-        heat_input=heat_input,
-        current_input=current_input,
-        mu0_Ip=mu0_Ip,
+        source_sample_count=int(scaled_heat.shape[0]),
+        scaled_heat=scaled_heat,
+        scaled_current=scaled_current,
+        scaled_Ip=scaled_Ip,
         beta=beta,
         interpolation_kind=(
             # Grid-node sources are already sampled on operator rho; leave the
@@ -139,12 +138,12 @@ def build_source_plan(
     )
 
 
-def _engine_source_inputs(case: Problem) -> tuple[np.ndarray, np.ndarray, float, float]:
+def _scaled_source_inputs(case: Problem) -> tuple[np.ndarray, np.ndarray, float, float]:
     route = str(case.route).upper()
-    heat_input = _scale_pressure_like_input(case.heat_input, name="heat_input")
-    current_input = _scale_current_input(case.current_input, route=route)
-    mu0_Ip = _scale_physical_constraint(float(case.Ip), name="Ip")
-    return heat_input, current_input, mu0_Ip, float(case.beta)
+    scaled_heat = _scale_pressure_like_input(case.heat_input, name="heat_input")
+    scaled_current = _scale_current_input(case.current_input, route=route)
+    scaled_Ip = _scale_physical_constraint(float(case.Ip), name="Ip")
+    return scaled_heat, scaled_current, scaled_Ip, float(case.beta)
 
 
 def _scale_pressure_like_input(value: np.ndarray, *, name: str) -> np.ndarray:

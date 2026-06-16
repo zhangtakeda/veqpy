@@ -890,6 +890,8 @@ def _build_resampled_equilibrium(
         alpha1=equilibrium.alpha1,
         alpha2=equilibrium.alpha2,
     )
+
+
 def _render_equilibrium_summary(
     *,
     surface_equilibrium: Equilibrium,

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from veqpy.model import Boundary, Grid, Profile
-from veqpy.operator import Operator, OperatorCase
+from veqpy.model import Boundary, Grid, Problem, Profile
+from veqpy.operator import Operator
 
 MU0 = 4.0e-7 * np.pi
 
@@ -40,10 +40,10 @@ def pf_reference_profiles(psin: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return current_input.astype(np.float64), heat_input.astype(np.float64)
 
 
-def tiny_pf_case() -> OperatorCase:
+def tiny_pf_case() -> Problem:
     psin = np.linspace(0.0, 1.0, 9, dtype=np.float64)
     ffn_psin, pn_psin = pf_reference_profiles(psin)
-    return OperatorCase(
+    return Problem(
         route="PF",
         coordinate="psin",
         nodes="uniform",

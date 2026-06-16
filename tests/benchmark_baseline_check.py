@@ -87,7 +87,7 @@ def test_benchmark_non_timing_matches_baseline() -> None:
         "grid",
         "source_sample_count",
         "Ip",
-        "mu0_Ip",
+        "scaled_Ip",
         "function_evaluations",
         "jacobian_evaluations",
         "iterations",

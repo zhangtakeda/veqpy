@@ -1,6 +1,6 @@
 # Model
 
-The `model` layer stores interpretable, serializable physical objects in VEQPy. It is not a mirror of the operator runtime; it organizes independent inputs and solved snapshots into a stable API. Derived geometry and diagnostics are reconstructed lazily through `Reactive` properties, while files store only root state.
+The `model` layer stores interpretable, serializable physical objects in VEQPy. It is not a mirror of the operator runtime; it organizes independent inputs and solved snapshots into a stable API. `Problem` and `Profile` keep immutable setup semantics, while derived grid geometry and equilibrium diagnostics are reconstructed lazily through `Reactive` properties. Files store only root state.
 
 The main source files live in `veqpy/model/`.
 

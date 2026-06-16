@@ -17,8 +17,8 @@ from veqpy.math import (
     SOURCE_INTERP_DEFAULT,
     normalize_source_interpolation_kind,
 )
-from veqpy.model import Grid
-from veqpy.operator import Operator, OperatorCase
+from veqpy.model import Grid, Problem
+from veqpy.operator import Operator
 
 
 def test_operator_residual_interfaces_and_in_place_outputs() -> None:
@@ -124,14 +124,14 @@ def test_pf_rho_unconstrained_cases_use_positive_flux_branch() -> None:
         "current_input": ffn_psin * (2.0 * rho),
     }
 
-    null_case = OperatorCase(
+    null_case = Problem(
         **common_kwargs,
         heat_input=pn_psin * (2.0 * rho) / MU0,
     )
     null_operator = Operator(grid, null_case)
     null_eq = null_operator.build_equilibrium(null_operator.encode_initial_state())
 
-    beta_case = OperatorCase(
+    beta_case = Problem(
         **common_kwargs,
         heat_input=pn_psin * (2.0 * rho) / MU0,
         beta=float(null_eq.beta_t),
@@ -148,7 +148,7 @@ def test_active_f_profile_is_only_supported_by_pj2() -> None:
     with pytest.raises(ValueError, match="active F profile.*only supported for PJ2"):
         Operator(
             tiny_grid(),
-            OperatorCase(
+            Problem(
                 route="PF",
                 coordinate="rho",
                 nodes="uniform",
@@ -170,7 +170,7 @@ def test_pj2_requires_active_f_profile() -> None:
     with pytest.raises(ValueError, match="PJ2 requires an active F profile"):
         Operator(
             tiny_grid(),
-            OperatorCase(
+            Problem(
                 route="PJ2",
                 coordinate="rho",
                 nodes="uniform",
@@ -191,7 +191,7 @@ def test_rho_routes_reject_active_psin_profile() -> None:
     with pytest.raises(ValueError, match="rho/uniform does not accept an active psin profile"):
         Operator(
             tiny_grid(),
-            OperatorCase(
+            Problem(
                 route="PF",
                 coordinate="rho",
                 nodes="uniform",
@@ -213,7 +213,7 @@ def test_psin_grid_routes_reject_active_psin_profile() -> None:
     with pytest.raises(ValueError, match="psin/grid does not accept an active psin profile"):
         Operator(
             grid,
-            OperatorCase(
+            Problem(
                 route="PF",
                 coordinate="psin",
                 nodes="grid",
@@ -235,7 +235,7 @@ def test_active_f_and_psin_profiles_are_mutually_exclusive() -> None:
     with pytest.raises(ValueError, match="F and active psin profiles are mutually exclusive"):
         Operator(
             tiny_grid(),
-            OperatorCase(
+            Problem(
                 route="PJ2",
                 coordinate="rho",
                 nodes="uniform",
@@ -263,7 +263,7 @@ def test_replace_case_rejects_active_f_on_non_pj2_route() -> None:
     }
     operator = Operator(
         tiny_grid(),
-        OperatorCase(
+        Problem(
             route="PJ2",
             coordinate="rho",
             nodes="uniform",
@@ -276,7 +276,7 @@ def test_replace_case_rejects_active_f_on_non_pj2_route() -> None:
 
     with pytest.raises(ValueError, match="active F profile.*only supported for PJ2"):
         operator.replace_case(
-            OperatorCase(
+            Problem(
                 route="PF",
                 coordinate="rho",
                 nodes="uniform",
@@ -290,7 +290,7 @@ def test_replace_case_rejects_active_f_on_non_pj2_route() -> None:
 
 def test_pj2_uses_profile_f_derivative_for_active_f_profile() -> None:
     grid = Grid(Nr=8, Nt=8, L_max=3, M_max=1, K_max=1, quadrature_scheme="legendre")
-    case = OperatorCase(
+    case = Problem(
         route="PJ2",
         coordinate="rho",
         nodes="grid",

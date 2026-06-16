@@ -15,7 +15,6 @@ from veqpy.operator.packed_layout import (
     build_profile_layout,
     build_profile_names,
     build_shape_profile_names,
-    coeff_array_from_list,
     decode_packed_blocks,
     encode_packed_state,
     get_prefix_profile_names,
@@ -132,8 +131,13 @@ def test_f_profile_amplitude_power_matches_f_squared_chain_rule() -> None:
 def test_degree_first_layout_encode_decode_and_active_metadata() -> None:
     profile_names = build_profile_names(2)
     profile_index = build_profile_index(profile_names)
+    active_profiles = {
+        "h": Profile(coeff=np.array([1.0, 2.0], dtype=np.float64)),
+        "k": Profile(coeff=np.zeros(3, dtype=np.float64)),
+        "s1": Profile(coeff=np.array([4.0], dtype=np.float64)),
+    }
     profile_L, coeff_index, order_offsets = build_profile_layout(
-        {"h": [1.0, 2.0], "k": 3, "s1": [4.0]},
+        active_profiles,
         profile_names=profile_names,
     )
 
@@ -144,7 +148,7 @@ def test_degree_first_layout_encode_decode_and_active_metadata() -> None:
     assert order_offsets.tolist() == [0, 3, 5, 6]
 
     x = encode_packed_state(
-        {"h": [1.0, 2.0], "k": 3, "s1": [4.0]},
+        active_profiles,
         profile_L,
         coeff_index,
         profile_names=profile_names,
@@ -164,11 +168,14 @@ def test_degree_first_layout_encode_decode_and_active_metadata() -> None:
 def test_packed_layout_validation_errors() -> None:
     profile_names = build_profile_names(1)
     with pytest.raises(KeyError, match="Unknown profile names"):
-        build_profile_layout({"unknown": [1.0]}, profile_names=profile_names)
+        build_profile_layout(
+            {"unknown": Profile(coeff=np.array([1.0], dtype=np.float64))},
+            profile_names=profile_names,
+        )
     with pytest.raises(ValueError, match="At least one active profile"):
-        build_profile_layout({"h": None}, profile_names=profile_names)
-    with pytest.raises(TypeError, match="length indicator"):
-        coeff_array_from_list("h", True)
+        build_profile_layout({"h": Profile(coeff=None)}, profile_names=profile_names)
+    with pytest.raises(TypeError, match="must be a Profile"):
+        build_profile_layout({"h": True}, profile_names=profile_names)
     with pytest.raises(ValueError, match="shape"):
         validate_packed_state(np.zeros(2), np.array([[0, -1, -1]], dtype=np.int64))
 

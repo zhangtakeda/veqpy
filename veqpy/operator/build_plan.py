@@ -2,7 +2,7 @@
 Module: operator.build_plan
 
 Role:
-- Build the immutable operator topology/configuration plan from Grid + Problem.
+- Build the operator topology/configuration plan from Grid + Problem.
 - Keep packed topology, source route binding, and residual binding construction out of Operator.
 
 Public API:
@@ -13,7 +13,7 @@ Public API:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -35,7 +35,12 @@ from veqpy.operator.packed_layout import (
     get_prefix_profile_names,
     packed_size,
 )
-from veqpy.operator.source_plan import SourcePlan, build_source_plan
+from veqpy.operator.source_plan import (
+    SourcePlan,
+    build_source_plan,
+    validate_source_inputs,
+    validate_source_plan_profile_support,
+)
 from veqpy.workspace import GridWorkspace
 
 
@@ -49,7 +54,7 @@ class ResidualBindingLayout:
     active_residual_block_radial_powers: np.ndarray
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class OperatorBuildPlan:
     """Static topology and case-derived runtime binding plan for Operator."""
 
@@ -92,7 +97,7 @@ def build_operator_plan(
     s_profile_names = tuple(name for name in fourier_profile_names if name.startswith("s"))
 
     profile_L, coeff_index, order_offsets = build_profile_layout(
-        case.profile_coeffs,
+        case.profiles,
         profile_names=profile_names,
         prefix_profile_names=prefix_profile_names,
     )
@@ -128,6 +133,12 @@ def build_operator_plan(
         coeff_index=coeff_index,
         active_profile_ids=active_profile_ids,
     )
+    validate_source_plan_profile_support(
+        source_plan=source_plan,
+        source_execution=source_execution,
+        case=case,
+    )
+    validate_source_inputs(case, grid_workspace.Nr)
 
     return OperatorBuildPlan(
         grid_workspace=grid_workspace,
@@ -173,12 +184,15 @@ def refresh_operator_plan_for_case(
         coeff_index=plan.coeff_index,
         active_profile_ids=plan.active_profile_ids,
     )
-    return replace(
-        plan,
-        source_route_spec=source_route_spec,
+    validate_source_plan_profile_support(
         source_plan=source_plan,
         source_execution=source_execution,
+        case=case,
     )
+    plan.source_route_spec = source_route_spec
+    plan.source_plan = source_plan
+    plan.source_execution = source_execution
+    return plan
 
 
 def build_residual_binding_layout(

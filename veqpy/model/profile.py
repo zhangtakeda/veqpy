@@ -8,51 +8,44 @@ Public API:
 - Profile
 
 Notes:
-- `Profile` is a reactive model-layer configuration object.
+- `Profile` is an immutable model-layer configuration object.
 - Runtime fields are materialized in `ProfileWorkspace`, not on `Profile`.
 - Does not own packed state, source scaling, or solver orchestration.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Self
 
 import numpy as np
 
-from veqpy.base import Reactive, Serial
+from veqpy.base import Serial
+from veqpy.base.serial import SERIAL_TYPE_REGISTRY
 
 
-class Profile(Reactive, Serial):
-    """Reactive passive root-parameter specification for one one-dimensional profile."""
+@dataclass(frozen=True, slots=True)
+class Profile(Serial):
+    """Immutable root-parameter specification for one one-dimensional profile."""
 
-    root_properties = {
-        "scale",
-        "power",
-        "envelope_power",
-        "amplitude_power",
-        "offset",
-        "coeff",
-    }
+    scale: float = 1.0
+    power: int = 0
+    envelope_power: int = 1
+    amplitude_power: float = 1.0
+    offset: float = 0.0
+    coeff: np.ndarray | None = None
 
-    def __init__(
-        self,
-        scale: float = 1.0,
-        power: int = 0,
-        envelope_power: int = 1,
-        amplitude_power: float = 1.0,
-        offset: float = 0.0,
-        coeff: np.ndarray | None = None,
-    ) -> None:
-        super().__init__()
-        # Profile stores only the root parameters.  Derived value/derivative
-        # arrays are allocated in ProfileWorkspace so one Profile can be reused
-        # across grids and case refreshes.
-        self.scale = scale
-        self.power = power
-        self.envelope_power = envelope_power
-        self.amplitude_power = amplitude_power
-        self.offset = offset
-        self.coeff = coeff
+    def __post_init__(self) -> None:
+        # Profile stores only setup semantics. Derived value/derivative arrays
+        # are allocated in ProfileWorkspace after Operator flattens the setup.
+        object.__setattr__(self, "scale", float(self.scale))
+        object.__setattr__(self, "power", int(self.power))
+        object.__setattr__(self, "envelope_power", int(self.envelope_power))
+        object.__setattr__(self, "amplitude_power", float(self.amplitude_power))
+        if self.offset is None:
+            raise TypeError("offset must be a float, got None")
+        object.__setattr__(self, "offset", float(self.offset))
+        object.__setattr__(self, "coeff", _coerce_optional_array(self.coeff, name="coeff"))
 
     @classmethod
     def serial_attributes(cls) -> dict[str, type]:
@@ -66,56 +59,25 @@ class Profile(Reactive, Serial):
             "coeff": np.ndarray | None,
         }
 
-    @classmethod
-    def reactive_inspections(cls, name: str, value: object) -> object:
-        """Normalize root writes while keeping Profile free of runtime fields."""
-
-        match name:
-            case "scale":
-                return float(value)
-            case "amplitude_power":
-                return float(value)
-            case "power" | "envelope_power":
-                return int(value)
-            case "offset":
-                if value is None:
-                    raise TypeError("offset must be a float, got None")
-                return float(value)
-            case "coeff":
-                return _coerce_optional_array(value, copy=False, name="coeff")
-        return value
-
     def check(self) -> None:
         """Validate root parameters and serializable fields."""
-        for key, expected in type(self).serial_attributes().items():
-            value = getattr(self, key)
-            if value is None:
-                continue
-            if expected in {float, int} and not isinstance(value, (expected, np.generic)):
-                raise TypeError(
-                    f"Attribute '{key}' must be {expected.__name__}, got {type(value).__name__}"
-                )
-            if isinstance(value, np.ndarray) and value.ndim != 1:
-                raise ValueError(f"Attribute '{key}' must be 1D, got {value.shape}")
+        Serial.check(self)
+        if self.coeff is not None and self.coeff.ndim != 1:
+            raise ValueError(f"Attribute 'coeff' must be 1D, got {self.coeff.shape}")
 
     def copy(self) -> Self:
         """Copy root parameters."""
-        kwargs = {
-            "scale": self.scale,
-            "power": self.power,
-            "envelope_power": self.envelope_power,
-            "offset": self.offset,
-            "coeff": None if self.coeff is None else self.coeff.copy(),
-        }
-        amplitude_power = self.amplitude_power
-        if amplitude_power is not None:
-            kwargs["amplitude_power"] = amplitude_power
-        return Profile(
-            **kwargs,
+        return type(self)(
+            scale=self.scale,
+            power=self.power,
+            envelope_power=self.envelope_power,
+            amplitude_power=self.amplitude_power,
+            offset=self.offset,
+            coeff=None if self.coeff is None else self.coeff.copy(),
         )
 
 
-def _coerce_optional_array(value, *, copy: bool, name: str = "array") -> np.ndarray | None:
+def _coerce_optional_array(value, *, name: str = "array") -> np.ndarray | None:
     if value is None:
         return None
     if isinstance(value, np.ndarray) and value.ndim == 0:
@@ -127,4 +89,11 @@ def _coerce_optional_array(value, *, copy: bool, name: str = "array") -> np.ndar
     arr = np.asarray(value, dtype=np.float64)
     if arr.ndim != 1:
         raise ValueError(f"{name} must be 1D, got {arr.shape}")
-    return arr.copy() if copy else arr
+    if arr.size == 0:
+        raise ValueError(f"{name} must be non-empty or None")
+    out = arr.copy()
+    out.setflags(write=False)
+    return out
+
+
+SERIAL_TYPE_REGISTRY[Profile.__name__] = Profile

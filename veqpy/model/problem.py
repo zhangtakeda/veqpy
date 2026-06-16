@@ -128,12 +128,6 @@ class Problem(Serial):
         return dataclass_replace(self, **kwargs)
 
     @property
-    def profile_coeffs(self) -> dict[str, np.ndarray | None]:
-        """Compatibility view of active profile coefficients keyed by profile name."""
-
-        return {name: profile.coeff for name, profile in self.profiles.items()}
-
-    @property
     def a(self) -> float:
         return self.boundary.a
 

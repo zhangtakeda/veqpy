@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import warnings
+from dataclasses import FrozenInstanceError
 
 import numpy as np
 import pytest
@@ -8,7 +9,7 @@ from helpers import MU0, profiles, tiny_boundary, tiny_grid
 from numpy.testing import assert_allclose
 
 from veqpy.model import Boundary, Problem, Profile
-from veqpy.operator import Operator, OperatorCase
+from veqpy.operator import Operator
 
 
 def test_boundary_normalizes_offsets_and_forces_s0_to_zero() -> None:
@@ -40,7 +41,9 @@ def test_profile_normalization_validation_and_copy_independence() -> None:
     assert profile.power == 3
     assert profile.amplitude_power == 1.0
     assert profile.offset == 0.0
-    assert profile.coeff is coeff
+    assert profile.coeff is not coeff
+    assert not np.shares_memory(profile.coeff, coeff)
+    assert not profile.coeff.flags.writeable
     profile.check()
 
     clone = profile.copy()
@@ -48,8 +51,8 @@ def test_profile_normalization_validation_and_copy_independence() -> None:
     assert not np.shares_memory(clone.coeff, profile.coeff)
     assert not clone.coeff.flags.writeable
 
-    object.__delattr__(profile, "cached_amplitude_power")
-    assert profile.copy().amplitude_power == 1.0
+    with pytest.raises(FrozenInstanceError):
+        profile.scale = 3.0
 
     with pytest.raises(TypeError):
         Profile(amplitude_power=None)
@@ -60,11 +63,11 @@ def test_profile_normalization_validation_and_copy_independence() -> None:
 
     with pytest.raises(ValueError, match="coeff must be 1D"):
         Profile(coeff=np.ones((1, 1)))
+    with pytest.raises(ValueError, match="coeff must be non-empty"):
+        Profile(coeff=np.array([], dtype=np.float64))
 
 
-def test_problem_is_the_operator_case_implementation() -> None:
-    assert OperatorCase is Problem
-
+def test_problem_is_the_public_problem_definition() -> None:
     problem = Problem(
         route="pf",
         coordinate="RHO",
@@ -83,7 +86,7 @@ def test_problem_is_the_operator_case_implementation() -> None:
 def test_problem_keeps_raw_inputs_and_copy_is_detached() -> None:
     heat_input = np.array([1.0e6, 1.2e6, 1.4e6], dtype=np.float64)
     current_input = np.array([0.0, 2.0e6, 3.0e6], dtype=np.float64)
-    case = OperatorCase(
+    case = Problem(
         route="pi",
         coordinate="RHO",
         nodes="UNIFORM",
@@ -119,13 +122,13 @@ def test_problem_keeps_raw_inputs_and_copy_is_detached() -> None:
 
     operator = Operator(tiny_grid(), case)
     source_plan = operator.plan.source_plan
-    assert_allclose(source_plan.heat_input, case.heat_input * MU0)
-    assert_allclose(source_plan.current_input, case.current_input * MU0)
-    assert_allclose(source_plan.mu0_Ip, case.Ip * MU0)
+    assert_allclose(source_plan.scaled_heat, case.heat_input * MU0)
+    assert_allclose(source_plan.scaled_current, case.current_input * MU0)
+    assert_allclose(source_plan.scaled_Ip, case.Ip * MU0)
 
 
 def test_source_plan_rejects_ambiguous_setup_magnitudes() -> None:
-    case = OperatorCase(
+    case = Problem(
         route="PF",
         coordinate="rho",
         profiles=profiles({"h": 2}),

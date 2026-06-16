@@ -45,7 +45,6 @@ from veqpy.operator.profile_runtime import (
 from veqpy.operator.snapshot import snapshot_equilibrium_from_runtime
 from veqpy.operator.source_plan import (
     validate_source_inputs,
-    validate_source_plan_profile_support,
 )
 from veqpy.operator.source_runtime import refresh_source_runtime
 from veqpy.workspace import allocate_runtime_state
@@ -91,12 +90,6 @@ class Operator:
             case=self.case,
             source_interpolation_kind=self.source_interpolation_kind,
         )
-        validate_source_plan_profile_support(
-            source_plan=self.plan.source_plan,
-            source_execution=self.plan.source_execution,
-            case=self.case,
-        )
-
         self.layout = OperatorLayout.empty(self.plan.x_size)
         self._setup_runtime_state()
         self._refresh_runtime_state()
@@ -210,7 +203,7 @@ class Operator:
     def encode_initial_state(self) -> np.ndarray:
         """Encode profile coefficients from the current case into the packed initial state."""
         return encode_packed_state(
-            self.case.profile_coeffs,
+            self.case.profiles,
             self.plan.profile_L,
             self.plan.coeff_index,
             profile_names=self.plan.profile_names,
@@ -413,17 +406,11 @@ class Operator:
             case=self.case,
             source_interpolation_kind=self.source_interpolation_kind,
         )
-        validate_source_plan_profile_support(
-            source_plan=self.plan.source_plan,
-            source_execution=self.plan.source_execution,
-            case=self.case,
-        )
         self._refresh_profile_runtime()
         self._refresh_fourier_family_metadata()
         # Source runtime refresh happens after profile metadata because some
         # routes decide whether psin is source-owned or optimized-profile-owned.
         refresh_source_runtime(
-            case=self.case,
             grid_rho=self.plan.grid_workspace.rho,
             source_plan=self.plan.source_plan,
             source_execution=self.plan.source_execution,
@@ -447,6 +434,9 @@ class Operator:
             profile_static_kwargs_by_name=self.plan.profile_static_kwargs_by_name,
             profile_offset_specs=self.plan.profile_offset_specs,
         )
+        for name, profile in self.profiles_by_name.items():
+            if hasattr(type(self), f"{name}_profile"):
+                setattr(self, f"{name}_profile", profile)
 
     def _refresh_runtime_bindings(self) -> None:
         self.layout = build_operator_layout(
@@ -498,7 +488,7 @@ class Operator:
         self.c_effective_order, self.s_effective_order = refresh_fourier_family_metadata(
             c_profile_names=self.plan.c_profile_names,
             s_profile_names=self.plan.s_profile_names,
-            profile_coeffs=self.case.profile_coeffs,
+            profiles=self.case.profiles,
             c_offsets=self.case.c_offsets,
             s_offsets=self.case.s_offsets,
             c_family_fields=self.profile_workspace.c_family_fields,

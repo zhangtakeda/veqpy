@@ -51,13 +51,12 @@ and easier to reuse than full solver-native equilibrium or reconstruction pipeli
   finite-dimensional residual assembly.
 - **Explicit runtime boundary**: `Grid + Problem -> Operator -> Solver -> Equilibrium`
   separates packed coefficients, runtime workspaces, nonlinear solve orchestration, and
-  post-solve snapshots. `OperatorCase` remains available as a compatibility alias for
-  the same problem definition.
+  post-solve snapshots. `Problem` is the public problem definition type.
 - **GEQDSK workflow support**: GEQDSK I/O, fixed-boundary fitting from GEQDSK boundaries,
   snapshot export, flux-surface comparison, and common diagnostics.
-- **Formula-oriented model objects**: `Grid`, `Profile`, and `Equilibrium` use reactive
-  derived properties to store minimal root state and lazily reconstruct geometry and
-  physics diagnostics by formula.
+- **Formula-oriented model objects**: `Problem` and `Profile` keep immutable setup
+  semantics, while `Grid` and `Equilibrium` use reactive derived properties to lazily
+  reconstruct geometry and physics diagnostics by formula.
 
 ## Installation
 

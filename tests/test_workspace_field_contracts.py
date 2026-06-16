@@ -11,7 +11,8 @@ from veqpy.engine.backend_abi import (
     build_fused_source_eval_abi,
 )
 from veqpy.engine.numba_geometry import update_geometry_hot
-from veqpy.operator import Operator, OperatorCase
+from veqpy.model import Problem
+from veqpy.operator import Operator
 from veqpy.workspace.geometry_workspace import GeometryWorkspace
 from veqpy.workspace.grid_workspace import GridWorkspace
 from veqpy.workspace.profile_workspace import ProfileWorkspace
@@ -145,7 +146,7 @@ def test_rho_source_eval_bindings_use_grid_radial_fields() -> None:
             profile_coeffs["F"] = [0.0, 0.0]
         return Operator(
             grid,
-            OperatorCase(
+            Problem(
                 route=route,
                 coordinate="rho",
                 nodes="grid",

@@ -7,8 +7,8 @@ import pytest
 from helpers import profiles
 from numpy.testing import assert_allclose
 
-from veqpy.model import Boundary, Grid
-from veqpy.operator import Operator, OperatorCase
+from veqpy.model import Boundary, Grid, Problem
+from veqpy.operator import Operator
 
 MU0 = 4.0e-7 * np.pi
 
@@ -27,7 +27,7 @@ def test_physical_ip_pressure_and_current_inputs_are_mu0_scaled() -> None:
 
     with warnings.catch_warnings(record=True) as captured:
         warnings.simplefilter("always")
-        case = OperatorCase(
+        case = Problem(
             route="PI",
             coordinate="rho",
             profiles=profiles({"h": 2}),
@@ -41,16 +41,16 @@ def test_physical_ip_pressure_and_current_inputs_are_mu0_scaled() -> None:
     assert_allclose(case.heat_input, heat_input)
     assert_allclose(case.current_input, current_input)
     assert_allclose(case.Ip, 3.0e6)
-    assert_allclose(source_plan.heat_input, heat_input * MU0)
-    assert_allclose(source_plan.current_input, current_input * MU0)
-    assert_allclose(source_plan.mu0_Ip, 3.0e6 * MU0)
+    assert_allclose(source_plan.scaled_heat, heat_input * MU0)
+    assert_allclose(source_plan.scaled_current, current_input * MU0)
+    assert_allclose(source_plan.scaled_Ip, 3.0e6 * MU0)
     assert not captured
 
 
 def test_physical_ip_in_normal_setup_range_does_not_warn() -> None:
     with warnings.catch_warnings(record=True) as captured:
         warnings.simplefilter("always")
-        case = OperatorCase(
+        case = Problem(
             route="PF",
             coordinate="rho",
             profiles=profiles({"h": 2}),
@@ -62,14 +62,14 @@ def test_physical_ip_in_normal_setup_range_does_not_warn() -> None:
         source_plan = Operator(_grid(), case).plan.source_plan
 
     assert_allclose(case.Ip, 3.0e6)
-    assert_allclose(source_plan.mu0_Ip, MU0 * 3.0e6)
-    assert_allclose(source_plan.heat_input, MU0 * np.full(3, 1.0e6, dtype=np.float64))
-    assert_allclose(source_plan.current_input, np.ones(3, dtype=np.float64))
+    assert_allclose(source_plan.scaled_Ip, MU0 * 3.0e6)
+    assert_allclose(source_plan.scaled_heat, MU0 * np.full(3, 1.0e6, dtype=np.float64))
+    assert_allclose(source_plan.scaled_current, np.ones(3, dtype=np.float64))
     assert not captured
 
 
 def test_mu0_scaled_ip_setup_input_is_rejected() -> None:
-    case = OperatorCase(
+    case = Problem(
         route="PF",
         coordinate="rho",
         profiles=profiles({"h": 2}),
@@ -92,7 +92,7 @@ def test_mu0_scaled_ip_setup_input_is_rejected() -> None:
 
 
 def test_non_current_profile_outside_setup_range_is_rejected() -> None:
-    case = OperatorCase(
+    case = Problem(
         route="PF",
         coordinate="rho",
         profiles=profiles({"h": 2}),

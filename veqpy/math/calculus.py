@@ -52,6 +52,26 @@ def make_calculus(
     return calculus_generator[scheme](nodes)
 
 
+def apply_differentiation(
+    out: np.ndarray,
+    arr: np.ndarray,
+    differentiator: np.ndarray,
+) -> np.ndarray:
+    """Apply a radial differentiation matrix to a 1D field."""
+    np.matmul(differentiator, arr, out=out)
+    return out
+
+
+def apply_accumulation(
+    out: np.ndarray,
+    arr: np.ndarray,
+    accumulator: np.ndarray,
+) -> np.ndarray:
+    """Apply a radial prefix-integration matrix to a 1D field."""
+    np.matmul(accumulator, arr, out=out)
+    return out
+
+
 @calculus_generator("spectral")
 def spectral_calculus(nodes: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Build base integration/differentiation matrices for the spectral scheme."""

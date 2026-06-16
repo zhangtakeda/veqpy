@@ -34,7 +34,6 @@ def test_model_public_exports_are_stable() -> None:
 def test_operator_public_exports_are_stable() -> None:
     assert operator.__all__ == [
         "Operator",
-        "OperatorCase",
         "PACKED_LAYOUT_PROFILE_FIRST",
         "build_active_profile_metadata",
         "build_fourier_profile_names",

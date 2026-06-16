@@ -580,8 +580,8 @@ def _bind_profile_owned_psin_residual_runner_core(
             profile_owned_psin_binding.materialized_heat_input,
             profile_owned_psin_binding.materialized_current_input,
             profile_owned_psin_binding.psin_profile_fields,
-            profile_owned_psin_binding.heat_input,
-            profile_owned_psin_binding.current_input,
+            profile_owned_psin_binding.scaled_heat,
+            profile_owned_psin_binding.scaled_current,
             profile_owned_psin_binding.heat_spline_coeff,
             profile_owned_psin_binding.current_spline_coeff,
             profile_owned_psin_binding.parameterization_code,
@@ -650,8 +650,8 @@ def _bind_pj2_psin_uniform_residual_runner_core(
     matrix_scratch = source_workspace.matrix_scratch
     f_profile_fields = profile_workspace.fields_for("F")
     psin_profile_u = profile_workspace.values_for("psin")
-    heat_input = source_plan.heat_input
-    current_input = source_plan.current_input
+    heat_input = source_plan.scaled_heat
+    current_input = source_plan.scaled_current
     heat_spline_coeff = build_uniform_source_interpolation_coefficients(
         heat_input,
         kind=source_plan.interpolation_kind,
@@ -661,7 +661,7 @@ def _bind_pj2_psin_uniform_residual_runner_core(
         kind=source_plan.interpolation_kind,
     )
     coordinate_code = int(source_plan.coordinate_code)
-    Ip = float(source_plan.mu0_Ip)
+    Ip = float(source_plan.scaled_Ip)
     beta = float(source_plan.beta)
     has_Ip = bool(np.isfinite(Ip))
     use_local_barycentric = bool(source_plan.uses_barycentric_interpolation)
@@ -793,7 +793,7 @@ def _bind_source_eval_runner_for_fused_backend(
             source_eval_binding.radial_fields,
             source_eval_binding.surface_fields,
             f_profile_fields,
-            source_eval_binding.Ip,
+            source_eval_binding.scaled_Ip,
             source_eval_binding.beta,
             source_eval_binding.array_scratch,
             source_eval_binding.matrix_scratch,

@@ -16,7 +16,7 @@ import numpy as np
 from veqpy.engine.numba_source import validate_route
 from veqpy.model.problem import Problem
 from veqpy.model.profile import Profile
-from veqpy.operator.packed_layout import build_profile_layout, coeff_array_from_list
+from veqpy.operator.packed_layout import build_profile_layout
 from veqpy.workspace import GridWorkspace
 
 if TYPE_CHECKING:
@@ -70,9 +70,7 @@ def make_profile(
     coeff = None if template_profile is None else template_profile.coeff
     # L < 0 marks a passive profile: construct the Profile object but leave its
     # coefficient vector absent so Stage A will not expect packed coefficients.
-    kwargs["coeff"] = (
-        None if L < 0 or coeff is None else coeff_array_from_list(name, coeff)[: L + 1].copy()
-    )
+    kwargs["coeff"] = None if L < 0 or coeff is None else coeff[: L + 1].copy()
     return Profile(**kwargs)
 
 
@@ -90,43 +88,18 @@ def refresh_profile_runtime(
 ) -> None:
     """Refresh profile objects and workspace slots from a replacement case."""
     for name in profile_names:
-        profile = profiles_by_name[name]
-        static_kwargs = profile_static_kwargs_by_name.get(name)
-        if static_kwargs is None and name.startswith(("c", "s")) and name[1:].isdigit():
-            order = int(name[1:])
-            # Repeat make_profile's static-field rule during case replacement so
-            # reused Profile instances stay synchronized with grid topology.
-            static_kwargs = {} if order == 0 else {"power": int(operator_grid.K_values[order])}
-        elif static_kwargs is None:
-            static_kwargs = {}
-        profile.power = int(static_kwargs.get("power", 0))
-        profile.envelope_power = int(static_kwargs.get("envelope_power", 1))
-        profile.amplitude_power = float(static_kwargs.get("amplitude_power", 1.0))
-        if name.startswith("c") and name[1:].isdigit():
-            order = int(name[1:])
-            profile.offset = (
-                0.0 if order >= case.c_offsets.shape[0] else float(case.c_offsets[order])
-            )
-        elif name.startswith("s") and name[1:].isdigit():
-            order = int(name[1:])
-            profile.offset = (
-                0.0 if order >= case.s_offsets.shape[0] else float(case.s_offsets[order])
-            )
-        else:
-            offset_spec = profile_offset_specs[name]
-            profile.offset = (
-                float(getattr(case, offset_spec))
-                if isinstance(offset_spec, str)
-                else float(offset_spec)
-            )
-        profile.scale = _profile_scale(case, name)
         p = profile_index[name]
-        L = int(profile_L[p])
-        template_profile = case.profiles.get(name)
-        coeff = None if template_profile is None else template_profile.coeff
-        profile.coeff = (
-            None if L < 0 or coeff is None else coeff_array_from_list(name, coeff)[: L + 1].copy()
+        profile = make_profile(
+            case=case,
+            operator_grid=operator_grid,
+            name=name,
+            profile_L=profile_L,
+            profile_names=profile_names,
+            profile_index=profile_index,
+            profile_static_kwargs_by_name=profile_static_kwargs_by_name,
+            profile_offset_specs=profile_offset_specs,
         )
+        profiles_by_name[name] = profile
         profile_workspace.refresh_profile_slot(
             profile_id=p,
             profile=profile,
@@ -211,7 +184,7 @@ def refresh_fourier_family_metadata(
     *,
     c_profile_names: tuple[str, ...],
     s_profile_names: tuple[str, ...],
-    profile_coeffs: dict[str, list[float] | np.ndarray | int | None],
+    profiles: dict[str, Profile],
     c_offsets: np.ndarray | None,
     s_offsets: np.ndarray | None,
     c_family_fields: np.ndarray,
@@ -221,7 +194,8 @@ def refresh_fourier_family_metadata(
     c_effective_order = 0
     for name in c_profile_names:
         order = int(name[1:])
-        if profile_coeffs.get(name) is not None:
+        profile = profiles.get(name)
+        if profile is not None and profile.coeff is not None:
             c_effective_order = max(c_effective_order, order)
             continue
         if (
@@ -234,7 +208,8 @@ def refresh_fourier_family_metadata(
     s_effective_order = 0
     for name in s_profile_names:
         order = int(name[1:])
-        if profile_coeffs.get(name) is not None:
+        profile = profiles.get(name)
+        if profile is not None and profile.coeff is not None:
             s_effective_order = max(s_effective_order, order)
             continue
         if (
@@ -267,7 +242,7 @@ def validate_case_compatibility(
     """Validate that a replacement case preserves the bound operator layout."""
     validate_route(case.route, case.coordinate, case.nodes)
     next_profile_L, next_coeff_index, next_order_offsets = build_profile_layout(
-        case.profile_coeffs,
+        case.profiles,
         profile_names=profile_names,
         prefix_profile_names=prefix_profile_names,
     )

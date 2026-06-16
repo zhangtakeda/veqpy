@@ -15,13 +15,12 @@ from __future__ import annotations
 from veqpy.engine.numba_source import (
     COORDINATE_NAMES,
     PSIN_COORDINATE,
-    RHO_AXIS,
     RHO_COORDINATE,
-    THETA_AXIS,
     full_differentiation,
     full_integration,
     validate_route,
 )
+from veqpy.math import RHO_AXIS, THETA_AXIS
 
 __all__ = [
     "RHO_AXIS",

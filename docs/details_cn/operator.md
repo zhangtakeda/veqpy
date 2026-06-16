@@ -9,7 +9,7 @@ source route 构造源项剖面，并把强形式 residual 投影到 active 系�
 
 ## Problem
 
-`Problem` 描述一次固定边界求解的输入，包括 source route、source 坐标、节点语义、profile 对象、边界、热源/电流相关输入以及可选 `Ip` 或 `beta` 约束。`OperatorCase` 保留为同一类型的兼容别名。
+`Problem` 描述一次固定边界求解的输入，包括 source route、source 坐标、节点语义、profile 对象、边界、热源/电流相关输入以及可选 `Ip` 或 `beta` 约束。它是传入 `Operator` 的公开问题定义类型。
 
 `Problem.profiles` 中的每个条目都是一个 `Profile`。`coeff is None` 表示
 passive profile；一维 coefficient 数组表示 active profile，并会占用 packed
@@ -24,12 +24,12 @@ state 槽位。
 它决定 source kernel 和输入解释方式。`heat_input` 与 `current_input` 保持为一维数据，具体物理含义由 route 选择。
 
 `Problem` 保留用户侧的原始 setup 数组和约束值。构造 `Operator` 时，
-`SourcePlan` 会校验这些量级，并 materialize engine-ready source 输入。
-`heat_input` 总是按 pressure-like setup 数据处理，并在 plan 中存为已经乘过
-`mu0` 的数组。`Ip` 在 plan 中存为 `mu0_Ip`。`current_input` 在 plan 中仍保留
-这个名字；在 current-profile route (`PI`, `PJ1`, `PJ2`) 中它也会乘以 `mu0`，
-而在其他 route 中仍是归一化量或场派生驱动量，例如 `FF'`、`psin_r` 或 `q`。
-量级明显不符合 setup 约定的输入会在构造 source plan 时被拒绝。
+`SourcePlan` 会校验这些量级，并 materialize plan-ready source 输入。
+`scaled_heat` 总是按 pressure-like setup 数据处理，并表示已经乘过 `mu0`
+的数组。`scaled_Ip` 表示 `mu0 * Ip` 约束。`scaled_current` 是 plan-ready
+current/source driver；在 current-profile route (`PI`, `PJ1`, `PJ2`) 中它也会
+乘以 `mu0`，而在其他 route 中仍是归一化量或场派生驱动量，例如 `FF'`、
+`psin_r` 或 `q`。量级明显不符合 setup 约定的输入会在构造 source plan 时被拒绝。
 
 ## Source Routes
 

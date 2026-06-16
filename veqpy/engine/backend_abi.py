@@ -257,7 +257,7 @@ class FusedSourceEvalABI:
     n_axis_fix: int
     radial_fields: np.ndarray
     surface_fields: np.ndarray
-    Ip: float
+    scaled_Ip: float
     beta: float
     array_scratch: np.ndarray
     matrix_scratch: np.ndarray
@@ -282,8 +282,8 @@ class _ProfileOwnedPsinSourceABI:
     materialized_current_input: np.ndarray
     psin_profile_fields: np.ndarray
     parameterization_code: int
-    heat_input: np.ndarray
-    current_input: np.ndarray
+    scaled_heat: np.ndarray
+    scaled_current: np.ndarray
 
 
 def build_fused_hot_runtime_abi(
@@ -388,7 +388,7 @@ def build_fused_source_eval_abi(
         n_axis_fix=n_axis_fix,
         radial_fields=geometry_workspace.radial_fields,
         surface_fields=geometry_workspace.surface_fields,
-        Ip=float(source_plan.mu0_Ip),
+        scaled_Ip=float(source_plan.scaled_Ip),
         beta=float(source_plan.beta),
         array_scratch=source_workspace.array_scratch,
         matrix_scratch=source_workspace.matrix_scratch,
@@ -423,6 +423,6 @@ def build_profile_owned_psin_source_abi(
         materialized_current_input=source_workspace.materialized_current_input,
         psin_profile_fields=profile_workspace.fields_for("psin"),
         parameterization_code=int(source_plan.parameterization_code),
-        heat_input=source_plan.heat_input,
-        current_input=source_plan.current_input,
+        scaled_heat=source_plan.scaled_heat,
+        scaled_current=source_plan.scaled_current,
     )

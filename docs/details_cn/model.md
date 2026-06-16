@@ -1,6 +1,6 @@
 # Model
 
-`model` 层保存 VEQPy 中可解释、可序列化的物理对象。它不是 operator runtime 的镜像，而是把独立输入和求解后的快照组织成稳定 API。派生几何量和诊断量由 `Reactive` property 惰性重建，文件中只保存 root state。
+`model` 层保存 VEQPy 中可解释、可序列化的物理对象。它不是 operator runtime 的镜像，而是把独立输入和求解后的快照组织成稳定 API。`Problem` 与 `Profile` 保存不可变 setup 语义，grid 几何量和平衡诊断量由 `Reactive` property 惰性重建，文件中只保存 root state。
 
 源码位置主要在 `veqpy/model/`。
 

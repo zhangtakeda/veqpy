@@ -21,11 +21,11 @@ from rich.console import Console
 from rich.tree import Tree
 
 from veqpy.base import Reactive, Serial
-from veqpy.engine import (
+from veqpy.math import (
     RHO_AXIS,
     THETA_AXIS,
-    full_differentiation,
-    full_integration,
+    apply_accumulation,
+    apply_differentiation,
 )
 from veqpy.math.calculus import DEFAULT_CALCULUS, make_calculus
 from veqpy.math.fast import colwise_weighted_sum_into, dot, rowwise_sum_into
@@ -188,9 +188,7 @@ class Grid(Reactive, Serial):
         """Apply spectral differentiation to a 1D field on this Grid."""
         if out is None:
             out = np.empty_like(f_1D)
-        # Delegate to the same engine helper used by source kernels so model
-        # diagnostics and hot-path residuals share derivative conventions.
-        return full_differentiation(out, f_1D, self.differentiator)
+        return apply_differentiation(out, f_1D, self.differentiator)
 
     def accumulate(
         self,
@@ -203,7 +201,7 @@ class Grid(Reactive, Serial):
             out = np.empty_like(f_1D)
         # Prefix integration preserves the radial node shape; it is not the same
         # operation as integrate(), which contracts a dimension.
-        return full_integration(out, f_1D, self.accumulator)
+        return apply_accumulation(out, f_1D, self.accumulator)
 
     def integrate(
         self,
