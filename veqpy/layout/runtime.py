@@ -31,12 +31,10 @@ class ProfileLayout:
     """Executable profile stage layout."""
 
     run_stage: Callable[[np.ndarray], None]
-    run_postprocess: Callable[[], None]
 
     def run(self, x: np.ndarray) -> None:
-        """Run profile coefficient refresh followed by profile postprocessing."""
+        """Run profile coefficient refresh."""
         self.run_stage(x)
-        self.run_postprocess()
 
 
 @dataclass(slots=True)
@@ -96,7 +94,6 @@ class OperatorLayout:
         # interface usable but returns zeros until real binding replaces it.
         return cls.from_callables(
             profile_stage_runner=lambda x: None,
-            profile_postprocess_runner=lambda: None,
             geometry_stage_runner=lambda: None,
             source_stage_runner=lambda: (0.0, 0.0),
             residual_full_stage_runner_into=lambda out: out.fill(0.0),
@@ -109,7 +106,6 @@ class OperatorLayout:
         cls,
         *,
         profile_stage_runner: Callable[[np.ndarray], None],
-        profile_postprocess_runner: Callable[[], None],
         geometry_stage_runner: Callable[[], None],
         source_stage_runner: Callable[[], tuple[float, float]],
         residual_full_stage_runner_into: Callable[[np.ndarray], None],
@@ -118,10 +114,7 @@ class OperatorLayout:
     ) -> Self:
         """Compose stage callables into an executable operator layout."""
         return cls(
-            profile=ProfileLayout(
-                run_stage=profile_stage_runner,
-                run_postprocess=profile_postprocess_runner,
-            ),
+            profile=ProfileLayout(run_stage=profile_stage_runner),
             geometry=GeometryLayout(run_stage=geometry_stage_runner),
             source=SourceLayout(run_stage=source_stage_runner),
             residual=ResidualLayout(

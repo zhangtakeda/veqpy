@@ -47,7 +47,6 @@ from veqpy.engine.numba_source import (
     uniform_barycentric_weights,
 )
 from veqpy.math.interpolate import build_uniform_source_interpolation_coefficients
-from veqpy.workspace.field_rows import GRID_RADIAL_RHO
 
 if TYPE_CHECKING:
     from veqpy.operator.build_plan import ResidualBindingLayout
@@ -777,31 +776,7 @@ def _bind_source_eval_runner_for_fused_backend(
         current_input: np.ndarray,
         R0: float,
     ) -> tuple[float, float]:
-        if source_eval_binding.scratch_source_kernel is None:
-            # Non-scratch kernels are retained for registry compatibility; new
-            # hot routes should normally expose the scratch variant.
-            legacy_rho = source_eval_binding.grid_radial_fields[GRID_RADIAL_RHO]
-            return source_eval_binding.source_kernel(
-                out_root_fields,
-                out_FFn_psin,
-                out_Pn_psin,
-                heat_input,
-                current_input,
-                source_eval_binding.coordinate_code,
-                R0,
-                source_eval_binding.B0,
-                source_eval_binding.weights,
-                source_eval_binding.differentiator,
-                source_eval_binding.accumulator,
-                legacy_rho,
-                source_eval_binding.n_axis_fix,
-                source_eval_binding.radial_fields,
-                source_eval_binding.surface_fields,
-                f_profile_fields,
-                source_eval_binding.Ip,
-                source_eval_binding.beta,
-            )
-        return source_eval_binding.scratch_source_kernel(
+        return source_eval_binding.source_kernel(
             out_root_fields,
             out_FFn_psin,
             out_Pn_psin,

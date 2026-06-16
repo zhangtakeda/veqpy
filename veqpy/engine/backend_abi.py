@@ -4,6 +4,8 @@ Module: engine.backend_abi
 Role:
 - Define explicit ABI binding contracts used by the numba fused backend.
 - Move bind-time data selection out of numba implementation into the engine ABI module.
+- Keep Python-side bundles coarse: sampled data travels as field slabs, while
+  operators, metadata, scratch buffers, and state keep distinct names.
 
 Public API:
 - SourceExecutionABI
@@ -25,7 +27,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from veqpy.engine.numba_source import SOURCE_ROUTE_KEYS, resolve_source_scratch_kernel
+from veqpy.engine.numba_source import SOURCE_ROUTE_KEYS
 
 if TYPE_CHECKING:
     from veqpy.operator.build_plan import ResidualBindingLayout
@@ -241,13 +243,12 @@ class FusedSourceEvalABI:
     """Array and kernel bundle required by fused source evaluation.
 
     Source kernels are flat Numba callables.  This object supplies the selected
-    kernel plus the geometry/source arrays needed to call it without reaching
-    back into Python objects. Route-specific optimized profile fields are bound
-    by the caller so this generic ABI does not imply profile ownership.
+    slab kernel plus the geometry/source arrays needed to call it without
+    reaching back into Python objects. Route-specific optimized profile fields
+    are bound by the caller so this generic ABI does not imply profile ownership.
     """
 
     source_kernel: Callable
-    scratch_source_kernel: Callable | None
     coordinate_code: int
     weights: np.ndarray
     differentiator: np.ndarray
@@ -373,18 +374,12 @@ def build_fused_source_eval_abi(
     fix_rho: float,
 ) -> FusedSourceEvalABI:
     """Collect arrays and constants required by fused source evaluation."""
-    source_kernel = source_plan.kernel
-
     # ``fix_rho`` is lowered once at bind time; source kernels only need the
     # integer cutoff for axis regularization.
     n_axis_fix = int(np.searchsorted(grid_workspace.rho, fix_rho))
-    # The scratch kernel is the zero-allocation hot-path implementation.  If a
-    # legacy route lacks one, numba_operator can still call the registered kernel
-    # through the same ABI.
 
     return FusedSourceEvalABI(
-        source_kernel=source_kernel,
-        scratch_source_kernel=resolve_source_scratch_kernel(source_kernel),
+        source_kernel=source_plan.kernel,
         coordinate_code=int(source_plan.coordinate_code),
         weights=grid_workspace.weights,
         differentiator=grid_workspace.differentiator,

@@ -167,7 +167,7 @@ def test_rho_source_eval_bindings_use_grid_radial_fields() -> None:
             fix_rho=operator.fix_rho,
         )
 
-        assert binding.scratch_source_kernel is not None
+        assert binding.source_kernel is operator.plan.source_plan.kernel
         assert np.shares_memory(
             binding.grid_radial_fields,
             operator.plan.grid_workspace.radial_fields,

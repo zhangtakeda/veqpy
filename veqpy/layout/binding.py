@@ -74,8 +74,6 @@ def build_operator_layout(
         active_lengths=profile_workspace.active_lengths,
         update_profiles_packed_bulk=numba_profile.update_profiles_packed_bulk,
     )
-    def profile_postprocess_runner() -> None:
-        return None
 
     geometry_stage_runner = build_geometry_stage_runner(
         c_family_fields=profile_workspace.c_family_fields,
@@ -164,7 +162,6 @@ def build_operator_layout(
     )
     return OperatorLayout.from_callables(
         profile_stage_runner=profile_stage_runner,
-        profile_postprocess_runner=profile_postprocess_runner,
         geometry_stage_runner=geometry_stage_runner,
         source_stage_runner=source_stage_runner,
         residual_full_stage_runner_into=residual_full_stage_runner_into,

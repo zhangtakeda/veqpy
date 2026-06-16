@@ -12,6 +12,8 @@ Public API:
 Notes:
 - update_profile is used for one explicit-coefficient profile.
 - update_profiles_packed_bulk is used for packed runtime updates in Stage A.
+- Packed runtime updates derive Chebyshev basis rows from ``grid_radial_fields``
+  so the hot ABI carries one grid slab plus explicit grid metadata.
 """
 
 from __future__ import annotations

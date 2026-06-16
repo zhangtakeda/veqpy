@@ -43,7 +43,6 @@ class SourceWorkspace:
 
     barycentric_weights: np.ndarray
     fixed_remap_matrix: np.ndarray
-    endpoint_blend: np.ndarray
     heat_spline_coeff: np.ndarray
     current_spline_coeff: np.ndarray
 
@@ -65,9 +64,6 @@ class SourceWorkspace:
 
         self.barycentric_weights = np.empty(0, dtype=np.float64)
         self.fixed_remap_matrix = np.empty((0, 0), dtype=np.float64)
-        # endpoint_blend supports source remapping near psin endpoints where
-        # interpolation and fixed-point updates need deterministic edge handling.
-        self.endpoint_blend = np.linspace(0.0, 1.0, nr, dtype=np.float64)
         self.heat_spline_coeff = np.empty((0, 4), dtype=np.float64)
         self.current_spline_coeff = np.empty((0, 4), dtype=np.float64)
 

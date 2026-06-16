@@ -2745,15 +2745,6 @@ def _update_pq_from_rho_inputs_with_scratch(
     return alpha1, alpha2
 
 
-def resolve_source_scratch_kernel(operator_kernel: Callable) -> Callable | None:
-    """Return the zero-allocation kernel for a registered concrete source route."""
-
-    for registered_kernel in SOURCE_ROUTE_KERNELS.registry.values():
-        if operator_kernel is registered_kernel:
-            return registered_kernel
-    return None
-
-
 def update_fourier_family_fields(
     out_c_fields: np.ndarray,
     out_s_fields: np.ndarray,

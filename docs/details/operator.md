@@ -119,6 +119,24 @@ residual on every `(rho, theta)` grid point and returns a vector of length
 `Nr * Nt`. This is a diagnostic or post-processing objective; it does not
 replace the Galerkin residual as the primary solve definition.
 
+## Runtime Memory Vocabulary
+
+The mutable operator runtime uses a narrow vocabulary so engine bindings remain
+explicit without exposing Python workspace objects to Numba kernels.
+`*_fields` names mean sampled slabs whose rows or axes carry physical or
+numerical samples, such as grid radial tables, geometry surface rows, residual
+root rows, and profile value/derivative rows. `*_operators` names are linear
+maps such as radial differentiation or accumulation matrices. `*_metadata`
+names are layout decisions: route codes, profile ids, block codes, coefficient
+index rows, active lengths, and grid size metadata. `*_scratch` buffers are
+temporary workspaces with no persistent physical meaning after a kernel call,
+while small mutable vectors such as `alpha_state` are state.
+
+Hot-path engine calls receive field slabs, operators, scalar constants, and
+metadata directly. Workspace properties such as `GridWorkspace.T` or
+`GeometryWorkspace.R_surface` are view accessors for debug and row-contract
+documentation; they are not required by the main fused runtime ABI.
+
 ## Snapshot Boundary
 
 After the solve, `build_equilibrium(x)` refreshes the runtime with the final solution and writes only snapshot-relevant root fields and shape profiles into `Equilibrium`. Runtime buffers are not transferred into the model object. This boundary keeps the operator in a high-throughput mutable form while making `Equilibrium` a serializable, interpretable physical snapshot.

@@ -10,6 +10,8 @@ Public API:
 Notes:
 - ``GridWorkspace`` lowers ``Grid`` data into packed array views.
 - Grid construction remains outside hot runtime kernels.
+- Hot-path bindings consume ``radial_fields`` / ``poloidal_fields`` plus grid
+  metadata; row properties are semantic views for debugging and row contracts.
 """
 
 from __future__ import annotations

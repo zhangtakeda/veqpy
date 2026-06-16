@@ -6,7 +6,7 @@ Role:
 - Update geometry integrals at the same time.
 
 Public API:
-- update_geometry
+- update_geometry_hot
 
 Notes:
 - Inputs and outputs use packed-field semantics.

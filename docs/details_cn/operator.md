@@ -103,6 +103,22 @@ pointwise residual。它在每个 `(rho, theta)` 网格点上评估局部强形�
 residual，返回长度为 `Nr * Nt` 的向量。这个量是诊断或后处理目标；它不替代
 Galerkin residual 作为主要求解定义。
 
+## Runtime Memory 词表
+
+可变 operator runtime 使用一套窄词表，让 engine binding 保持显式，同时避免
+Numba kernel 接收 Python workspace object。`*_fields` 表示采样 slab，其行或轴
+承载物理/数值采样值，例如 grid radial tables、geometry surface rows、residual
+root rows 和 profile value/derivative rows。`*_operators` 表示径向微分、积分等
+线性算子。`*_metadata` 表示 layout 决策，包括 route code、profile id、block
+code、coefficient index rows、active lengths 和 grid size metadata。
+`*_scratch` 是 kernel 调用内复用的临时工作区，调用结束后没有持久物理意义；
+`alpha_state` 这类小型可变向量属于 state。
+
+热路径 engine 调用直接接收 field slabs、operators、标量常数和 metadata。
+`GridWorkspace.T` 或 `GeometryWorkspace.R_surface` 这类 workspace property 是
+用于 debug 和 row-contract 文档化的 view accessor；主 fused runtime ABI 不依赖
+这些 property。
+
 ## Snapshot 边界
 
 求解完成后，`build_equilibrium(x)` 会用最终解刷新 runtime，然后只把快照需要的 root fields 和形状剖面写入 `Equilibrium`。runtime buffer 不会转移到模型对象中。这个边界让 operator 保持高吞吐的可变计算形态，同时让 `Equilibrium` 成为可序列化、可解释的物理快照。
