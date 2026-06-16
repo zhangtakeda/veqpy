@@ -4,6 +4,8 @@ Module: engine.backend_abi
 Role:
 - Define explicit ABI binding contracts used by the numba fused backend.
 - Move bind-time data selection out of numba implementation into the engine ABI module.
+- Keep Python-side bundles coarse: sampled data travels as field slabs, while
+  operators, metadata, scratch buffers, and state keep distinct names.
 
 Public API:
 - SourceExecutionABI
@@ -21,12 +23,11 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import numpy as np
 
-from veqpy.engine.numba_source import SOURCE_ROUTE_KEYS, resolve_source_scratch_kernel
+from veqpy.engine.numba_source import SOURCE_ROUTE_KEYS
 
 if TYPE_CHECKING:
     from veqpy.operator.build_plan import ResidualBindingLayout
@@ -67,8 +68,9 @@ class SourceExecutionABI:
 
     route_key: RouteKey
     psin_active_length: int
-    has_active_f_profile: bool
+    f_active_length: int
     requires_optimized_psin_profile: bool
+    requires_optimized_f_profile: bool
     requires_psin_query_workspace: bool
     requires_source_parameter_query: bool
     requires_target_root_fields: bool
@@ -130,33 +132,39 @@ def build_source_execution_abi(
         raise ValueError("psin is active but has no active profile slot")
     if F_active_length > 0 and F_active_slot < 0:
         raise ValueError("F is active but has no active profile slot")
-    if route_key[0] == "PQ" and F_active_length > 0:
-        raise ValueError("PQ strict routes do not accept an active F profile")
+    requires_optimized_psin_profile = route_key in PROFILE_OWNED_PSIN_ROUTE_KEYS
+    requires_optimized_f_profile = route_key[0] == "PJ2"
+
+    if F_active_length > 0 and not requires_optimized_f_profile:
+        raise ValueError(
+            f"{route_key[0]} does not accept an active F profile; "
+            "active F is only supported for PJ2"
+        )
+    if requires_optimized_f_profile and F_active_length <= 0:
+        raise ValueError(f"{route_key[0]} requires an active F profile")
+    if F_active_length > 0 and psin_active_length > 0:
+        raise ValueError("Active F and active psin profiles are mutually exclusive")
 
     # In psin-coordinate routes, exactly one layer owns psin: either the packed
     # optimizer profile, or the source kernel. Mixing the two would make the
     # source query stale or double-count an optimized flux coordinate.
-    requires_optimized_psin_profile = route_key in PROFILE_OWNED_PSIN_ROUTE_KEYS
     if requires_optimized_psin_profile and psin_active_length <= 0:
         raise ValueError(
             f"{route_key[0]} {route_key[1]}/{route_key[2]} requires an active psin profile"
         )
-    if (
-        source_plan.coordinate == "psin"
-        and not requires_optimized_psin_profile
-        and psin_active_length > 0
-    ):
+    if not requires_optimized_psin_profile and psin_active_length > 0:
         raise ValueError(
             f"{route_key[0]} {route_key[1]}/{route_key[2]} does not accept an active psin "
-            "profile because psin is source-owned"
+            "profile"
         )
 
     is_pj2_psin_uniform = route_key == ("PJ2", "psin", "uniform")
     return SourceExecutionABI(
         route_key=route_key,
         psin_active_length=psin_active_length,
-        has_active_f_profile=F_active_length > 0,
+        f_active_length=F_active_length,
         requires_optimized_psin_profile=requires_optimized_psin_profile,
+        requires_optimized_f_profile=requires_optimized_f_profile,
         requires_psin_query_workspace=(requires_optimized_psin_profile or is_pj2_psin_uniform),
         requires_source_parameter_query=bool(
             source_plan.coordinate == "psin" and source_plan.parameterization != "identity"
@@ -177,11 +185,12 @@ class FusedHotRuntimeABI:
     profile_rp_fields: np.ndarray
     profile_env_fields: np.ndarray
     active_profile_ids: np.ndarray
-    T: np.ndarray
-    T_r: np.ndarray
-    T_rr: np.ndarray
+    grid_radial_fields: np.ndarray
+    grid_k_max: int
+    grid_l_max: int
     active_offsets: np.ndarray
     active_scales: np.ndarray
+    active_amplitude_powers: np.ndarray
     active_coeff_index_rows: np.ndarray
     active_lengths: np.ndarray
     c_family_fields: np.ndarray
@@ -192,19 +201,10 @@ class FusedHotRuntimeABI:
     s_family_source_profile_ids: np.ndarray
     geometry_surface_fields: np.ndarray
     geometry_radial_fields: np.ndarray
-    rho: np.ndarray
-    theta: np.ndarray
-    cos_mtheta: np.ndarray
-    sin_mtheta: np.ndarray
-    m_cos_mtheta: np.ndarray
-    m_sin_mtheta: np.ndarray
-    m2_cos_mtheta: np.ndarray
-    m2_sin_mtheta: np.ndarray
+    grid_poloidal_fields: np.ndarray
     h_fields: np.ndarray
     v_fields: np.ndarray
     k_fields: np.ndarray
-    f_profile_fields: np.ndarray
-    has_active_f_profile: bool
     c_active_order: int
     s_active_order: int
     a: float
@@ -228,11 +228,10 @@ class FusedResidualPackABI:
     active_residual_block_radial_powers: np.ndarray
     active_coeff_index_rows: np.ndarray
     active_lengths: np.ndarray
-    sin_mtheta: np.ndarray
-    cos_mtheta: np.ndarray
-    rho_powers: np.ndarray
-    y: np.ndarray
-    T: np.ndarray
+    grid_radial_fields: np.ndarray
+    grid_poloidal_fields: np.ndarray
+    grid_k_max: int
+    grid_l_max: int
     weights: np.ndarray
     a: float
     R0: float
@@ -244,26 +243,47 @@ class FusedSourceEvalABI:
     """Array and kernel bundle required by fused source evaluation.
 
     Source kernels are flat Numba callables.  This object supplies the selected
-    kernel plus the geometry/source/profile arrays needed to call it without
-    reaching back into Python objects.
+    slab kernel plus the geometry/source arrays needed to call it without
+    reaching back into Python objects. Route-specific optimized profile fields
+    are bound by the caller so this generic ABI does not imply profile ownership.
     """
 
     source_kernel: Callable
-    scratch_source_kernel: Callable | None
     coordinate_code: int
     weights: np.ndarray
     differentiator: np.ndarray
     accumulator: np.ndarray
-    rho: np.ndarray
+    grid_radial_fields: np.ndarray
     n_axis_fix: int
     radial_fields: np.ndarray
     surface_fields: np.ndarray
-    f_profile_u: np.ndarray
-    Ip: float
+    scaled_Ip: float
     beta: float
-    source_scratch_1d: np.ndarray
-    source_scratch_2d: np.ndarray
+    array_scratch: np.ndarray
+    matrix_scratch: np.ndarray
     B0: float
+
+
+@dataclass(frozen=True, slots=True)
+class _ProfileOwnedPsinSourceABI:
+    """Python-side source materialization bundle for optimized-psin routes."""
+
+    source_target_root_fields: np.ndarray
+    grid_radial_fields: np.ndarray
+    differentiator: np.ndarray
+    accumulator: np.ndarray
+    source_psin_query: np.ndarray
+    source_parameter_query: np.ndarray
+    heat_spline_coeff: np.ndarray
+    current_spline_coeff: np.ndarray
+    barycentric_weights: np.ndarray
+    use_barycentric: bool
+    materialized_heat_input: np.ndarray
+    materialized_current_input: np.ndarray
+    psin_profile_fields: np.ndarray
+    parameterization_code: int
+    scaled_heat: np.ndarray
+    scaled_current: np.ndarray
 
 
 def build_fused_hot_runtime_abi(
@@ -271,7 +291,6 @@ def build_fused_hot_runtime_abi(
     grid_workspace: GridWorkspace,
     profile_workspace: ProfileWorkspace,
     geometry_workspace: GeometryWorkspace,
-    source_execution: SourceExecutionABI,
     c_active_order: int,
     s_active_order: int,
     a: float,
@@ -284,11 +303,12 @@ def build_fused_hot_runtime_abi(
         profile_rp_fields=profile_workspace.profile_rp_fields,
         profile_env_fields=profile_workspace.profile_env_fields,
         active_profile_ids=profile_workspace.active_profile_ids,
-        T=grid_workspace.T,
-        T_r=grid_workspace.T_r,
-        T_rr=grid_workspace.T_rr,
+        grid_radial_fields=grid_workspace.radial_fields,
+        grid_k_max=int(grid_workspace.K_max),
+        grid_l_max=int(grid_workspace.L_max),
         active_offsets=profile_workspace.active_offsets,
         active_scales=profile_workspace.active_scales,
+        active_amplitude_powers=profile_workspace.active_amplitude_powers,
         active_coeff_index_rows=profile_workspace.active_coeff_index_rows,
         active_lengths=profile_workspace.active_lengths,
         c_family_fields=profile_workspace.c_family_fields,
@@ -299,19 +319,10 @@ def build_fused_hot_runtime_abi(
         s_family_source_profile_ids=profile_workspace.s_family_source_profile_ids,
         geometry_surface_fields=geometry_workspace.surface_fields,
         geometry_radial_fields=geometry_workspace.radial_fields,
-        rho=grid_workspace.rho,
-        theta=grid_workspace.theta,
-        cos_mtheta=grid_workspace.cos_mtheta,
-        sin_mtheta=grid_workspace.sin_mtheta,
-        m_cos_mtheta=grid_workspace.m_cos_mtheta,
-        m_sin_mtheta=grid_workspace.m_sin_mtheta,
-        m2_cos_mtheta=grid_workspace.m2_cos_mtheta,
-        m2_sin_mtheta=grid_workspace.m2_sin_mtheta,
+        grid_poloidal_fields=grid_workspace.poloidal_fields,
         h_fields=profile_workspace.fields_for("h"),
         v_fields=profile_workspace.fields_for("v"),
         k_fields=profile_workspace.fields_for("k"),
-        f_profile_fields=profile_workspace.fields_for("F"),
-        has_active_f_profile=bool(source_execution.has_active_f_profile),
         c_active_order=c_active_order,
         s_active_order=s_active_order,
         a=a,
@@ -342,11 +353,10 @@ def build_fused_residual_pack_abi(
         ),
         active_coeff_index_rows=profile_workspace.active_coeff_index_rows,
         active_lengths=profile_workspace.active_lengths,
-        sin_mtheta=grid_workspace.sin_mtheta,
-        cos_mtheta=grid_workspace.cos_mtheta,
-        rho_powers=grid_workspace.rho_powers,
-        y=grid_workspace.y,
-        T=grid_workspace.T,
+        grid_radial_fields=grid_workspace.radial_fields,
+        grid_poloidal_fields=grid_workspace.poloidal_fields,
+        grid_k_max=int(grid_workspace.K_max),
+        grid_l_max=int(grid_workspace.L_max),
         weights=grid_workspace.weights,
         a=a,
         R0=R0,
@@ -358,38 +368,30 @@ def build_fused_source_eval_abi(
     *,
     source_plan: SourcePlan,
     grid_workspace: GridWorkspace,
-    profile_workspace: ProfileWorkspace,
     geometry_workspace: GeometryWorkspace,
     source_workspace: SourceWorkspace,
     B0: float,
     fix_rho: float,
 ) -> FusedSourceEvalABI:
     """Collect arrays and constants required by fused source evaluation."""
-    source_kernel = source_plan.kernel
-
     # ``fix_rho`` is lowered once at bind time; source kernels only need the
     # integer cutoff for axis regularization.
     n_axis_fix = int(np.searchsorted(grid_workspace.rho, fix_rho))
-    # The scratch kernel is the zero-allocation hot-path implementation.  If a
-    # legacy route lacks one, numba_operator can still call the registered kernel
-    # through the same ABI.
 
     return FusedSourceEvalABI(
-        source_kernel=source_kernel,
-        scratch_source_kernel=resolve_source_scratch_kernel(source_kernel),
+        source_kernel=source_plan.kernel,
         coordinate_code=int(source_plan.coordinate_code),
         weights=grid_workspace.weights,
         differentiator=grid_workspace.differentiator,
         accumulator=grid_workspace.accumulator,
-        rho=grid_workspace.rho,
+        grid_radial_fields=grid_workspace.radial_fields,
         n_axis_fix=n_axis_fix,
         radial_fields=geometry_workspace.radial_fields,
         surface_fields=geometry_workspace.surface_fields,
-        f_profile_u=profile_workspace.values_for("F"),
-        Ip=float(source_plan.Ip),
+        scaled_Ip=float(source_plan.scaled_Ip),
         beta=float(source_plan.beta),
-        source_scratch_1d=source_workspace.scratch_1d,
-        source_scratch_2d=source_workspace.scratch_2d,
+        array_scratch=source_workspace.array_scratch,
+        matrix_scratch=source_workspace.matrix_scratch,
         B0=B0,
     )
 
@@ -401,14 +403,14 @@ def build_profile_owned_psin_source_abi(
     grid_workspace: GridWorkspace,
     profile_workspace: ProfileWorkspace,
     source_workspace: SourceWorkspace,
-) -> SimpleNamespace:
+) -> _ProfileOwnedPsinSourceABI:
     """Collect scratch arrays for routes where psin is an optimized profile."""
     del source_execution
-    # Keep this as a SimpleNamespace because it is consumed only by Python-side
-    # runner binding; the Numba call itself receives the individual arrays.
-    return SimpleNamespace(
+    # This bundle is consumed only by Python-side runner binding; Numba kernels
+    # still receive the individual arrays, not the dataclass object.
+    return _ProfileOwnedPsinSourceABI(
         source_target_root_fields=source_workspace.target_root_fields,
-        rho=grid_workspace.rho,
+        grid_radial_fields=grid_workspace.radial_fields,
         differentiator=grid_workspace.differentiator,
         accumulator=grid_workspace.accumulator,
         source_psin_query=source_workspace.psin_query,
@@ -417,11 +419,10 @@ def build_profile_owned_psin_source_abi(
         current_spline_coeff=source_workspace.current_spline_coeff,
         barycentric_weights=source_workspace.barycentric_weights,
         use_barycentric=bool(source_plan.uses_barycentric_interpolation),
-        endpoint_blend=source_workspace.endpoint_blend,
         materialized_heat_input=source_workspace.materialized_heat_input,
         materialized_current_input=source_workspace.materialized_current_input,
         psin_profile_fields=profile_workspace.fields_for("psin"),
         parameterization_code=int(source_plan.parameterization_code),
-        heat_input=source_plan.heat_input,
-        current_input=source_plan.current_input,
+        scaled_heat=source_plan.scaled_heat,
+        scaled_current=source_plan.scaled_current,
     )

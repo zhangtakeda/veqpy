@@ -21,7 +21,6 @@ Public API:
 - validate_packed_state
 - encode_packed_state
 - decode_packed_blocks
-- coeff_array_from_list
 
 Notes:
 - Profile family ordering and residual block metadata are declared here.
@@ -35,11 +34,9 @@ Notes:
 
 from __future__ import annotations
 
-from numbers import Integral
-
 import numpy as np
 
-ProfileCoeffValue = list[float] | np.ndarray | int
+from veqpy.model.profile import Profile
 
 RESIDUAL_BLOCK_CODE_BY_NAME = {
     "h": 0,
@@ -60,11 +57,11 @@ PREFIX_PROFILE_FAMILIES = ("psin", "F")
 SHAPE_PROFILE_FAMILIES = ("h", "v", "k", "c0", "c", "s")
 ALL_PROFILE_FAMILIES = SHAPE_PROFILE_FAMILIES + PREFIX_PROFILE_FAMILIES
 
-PROFILE_STATIC_KWARGS: dict[str, dict[str, int]] = {
+PROFILE_STATIC_KWARGS: dict[str, dict[str, float | int]] = {
     "psin": {"power": 2},
-    # PJ2 recovers FF_psi from F * dF/drho.  Keep the edge F value fixed while
-    # leaving the edge slope free; envelope_power=2 would force dF/drho=0 there.
-    "F": {"envelope_power": 1},
+    # F coefficients parameterize the dimensionless F**2 amplitude.  The generic
+    # profile evaluator takes the square root before source kernels consume F.
+    "F": {"envelope_power": 1, "amplitude_power": 0.5},
 }
 PROFILE_OFFSET_SPECS: dict[str, float | str] = {
     "h": 0.0,
@@ -207,9 +204,7 @@ def build_residual_block_radial_powers(
 
 # Global packed-vector ordering switch.
 # True  -> profile/name-first: h[0:L], v[0:L], ..., psin[0:L], F[0:L].
-# False -> degree-first: all active profile 0th coefficients, then 1st coefficients, ... .
-# Default remains degree-first because Zhang2026 script 06 was faster for all three
-# high-order reconstruction cases in the local A/B benchmark.
+# False -> degree-first: all active profile 0th coefficients, then 1st coefficients, etc.
 PACKED_LAYOUT_PROFILE_FIRST = False
 
 # Backwards-readable alias for the previous degree-first switch name.
@@ -222,7 +217,7 @@ def build_profile_index(profile_names: tuple[str, ...]) -> dict[str, int]:
 
 
 def build_profile_layout(
-    profile_coeffs: dict[str, ProfileCoeffValue | None],
+    profiles: dict[str, Profile],
     *,
     profile_names: tuple[str, ...],
     prefix_profile_names: tuple[str, ...] | None = None,
@@ -236,14 +231,15 @@ def build_profile_layout(
     profile_count = len(profile_names)
     profile_L = np.full(profile_count, -1, dtype=np.int64)
 
-    unknown = set(profile_coeffs) - set(profile_index)
+    unknown = set(profiles) - set(profile_index)
     if unknown:
         raise KeyError(f"Unknown profile names: {sorted(unknown)}")
 
-    for name, coeff in profile_coeffs.items():
+    for name, profile in profiles.items():
+        coeff = _coeff_array_from_profile(name, profile, allow_passive=True)
         if coeff is None:
             continue
-        profile_L[profile_index[name]] = coeff_array_from_list(name, coeff).size - 1
+        profile_L[profile_index[name]] = coeff.size - 1
 
     # profile_L == -1 marks a passive profile.  Active profiles get a row in
     # coeff_index, with -1 cells left wherever that profile has no coefficient
@@ -330,7 +326,7 @@ def validate_packed_state(x: np.ndarray, coeff_index: np.ndarray) -> np.ndarray:
 
 
 def encode_packed_state(
-    profile_coeffs: dict[str, ProfileCoeffValue | None],
+    profiles: dict[str, Profile],
     profile_L: np.ndarray,
     coeff_index: np.ndarray,
     *,
@@ -341,16 +337,18 @@ def encode_packed_state(
 
     for p, name in enumerate(profile_names):
         L = int(profile_L[p])
-        coeff = profile_coeffs.get(name)
+        profile = profiles.get(name)
 
         if L < 0:
             # Passive profiles are reconstructed from offsets/static coeffs; they
             # intentionally occupy no packed x positions.
             continue
-        if coeff is None:
+        if profile is None:
+            raise ValueError(f"{name} is active in layout but Profile is missing")
+        coeff_arr = _coeff_array_from_profile(name, profile, allow_passive=False)
+        if coeff_arr is None:
             raise ValueError(f"{name} is active in layout but coeff is None")
 
-        coeff_arr = coeff_array_from_list(name, coeff)
         if coeff_arr.size != L + 1:
             raise ValueError(
                 f"{name} coeff shape mismatch: expected {(L + 1,)}, got {coeff_arr.shape}"
@@ -389,20 +387,22 @@ def decode_packed_blocks(
     return tuple(blocks)
 
 
-def coeff_array_from_list(name: str, coeff: ProfileCoeffValue) -> np.ndarray:
-    """Convert profile coefficient input into a constrained one-dimensional array."""
-    if isinstance(coeff, bool):
-        raise TypeError(f"{name} coeff length indicator must be an integer, got bool")
-    if isinstance(coeff, Integral):
-        length = int(coeff)
-        if length <= 0:
-            raise ValueError(f"{name} coeff length indicator must be positive, got {coeff}")
-        return np.zeros(length, dtype=np.float64)
-    if not isinstance(coeff, (list, np.ndarray)):
-        raise TypeError(f"Invalid {name} coeff type {type(coeff).__name__}")
-    coeff_arr = np.asarray(coeff, dtype=np.float64)
-    if coeff_arr.ndim != 1:
-        raise ValueError(f"{name} coeff must be 1D, got {coeff_arr.shape}")
-    if coeff_arr.size == 0:
+def _coeff_array_from_profile(
+    name: str,
+    profile: Profile,
+    *,
+    allow_passive: bool,
+) -> np.ndarray | None:
+    """Return the coefficient array from a setup Profile."""
+    if not isinstance(profile, Profile):
+        raise TypeError(f"{name} must be a Profile, got {type(profile).__name__}")
+    coeff = profile.coeff
+    if coeff is None:
+        if allow_passive:
+            return None
+        raise ValueError(f"{name} is active in layout but coeff is None")
+    if coeff.ndim != 1:
+        raise ValueError(f"{name} coeff must be 1D, got {coeff.shape}")
+    if coeff.size == 0:
         raise ValueError(f"{name} coeff must be non-empty or None")
-    return coeff_arr
+    return coeff

@@ -20,7 +20,7 @@ collocation polish。
 collocation 方法是 `lm`。
 
 Solver 自己持有一个 packed 向量 `Solver.x0`。构造 `Solver` 时，它由
-`Operator.encode_initial_state()` 从 `OperatorCase.profile_coeffs` 编码得到。
+`Operator.encode_initial_state()` 从 `Problem.profiles` 编码得到。
 每次求解结束后，`Solver.x0` 会被替换为最终 packed 解；后续 warm start 和
 `build_equilibrium()` 都使用这个状态。
 
@@ -32,7 +32,7 @@ Solver 自己持有一个 packed 向量 `Solver.x0`。构造 `Solver` 时，它�
 | `initial_policy="warm"` | 复用当前 solver-owned `Solver.x0` |
 | `initial_policy="zeros"` | 使用全零 packed 向量 |
 | `initial_policy="homothetic"` | 使用边界形状估计 active shape 系数 |
-| 默认 (`initial_policy=None`) | 重新从 `OperatorCase.profile_coeffs` 编码 |
+| 默认 (`initial_policy=None`) | 重新从 `Problem.profiles` 编码 |
 
 `homothetic` 初值是一个廉价的几何初猜，面向近似嵌套磁面。它委托给 operator
 的 boundary-slope estimate: active Fourier shaping 系数会从边界 offset 推出

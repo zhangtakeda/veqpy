@@ -1399,7 +1399,7 @@
     },
     "iterations": 0,
     "jacobian_evaluations": 0,
-    "mu0_Ip": 3.7699111843077517,
+    "scaled_Ip": 3.7699111843077517,
     "residual_norm_final": 4.872445422962216e-10,
     "source_sample_count": 51
   },

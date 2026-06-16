@@ -40,6 +40,7 @@ from veqpy.engine.numba_profile import update_profile
 from veqpy.model.geqdsk import Geqdsk
 from veqpy.model.grid import Grid
 from veqpy.model.profile import Profile
+from veqpy.workspace.grid_workspace import GridWorkspace
 
 plt.style.use("seaborn-v0_8-paper")
 plt.rcParams.update(
@@ -889,6 +890,8 @@ def _build_resampled_equilibrium(
         alpha1=equilibrium.alpha1,
         alpha2=equilibrium.alpha2,
     )
+
+
 def _render_equilibrium_summary(
     *,
     surface_equilibrium: Equilibrium,
@@ -1201,20 +1204,15 @@ def _materialized_geometry_from_profile_fields(
 ) -> tuple[np.ndarray, np.ndarray]:
     surface_fields = np.empty((9, grid.Nr, grid.Nt), dtype=np.float64)
     radial_fields = np.empty((5, grid.Nr), dtype=np.float64)
+    grid_workspace = GridWorkspace.from_grid(grid)
     update_geometry_hot(
         surface_fields,
         radial_fields,
         float(a),
         float(R0),
         0.0,  # Z0 is irrelevant for derivative-only surface/radial fields.
-        grid.rho,
-        grid.theta,
-        grid.cos_mtheta,
-        grid.sin_mtheta,
-        grid.m_cos_mtheta,
-        grid.m_sin_mtheta,
-        grid.m2_cos_mtheta,
-        grid.m2_sin_mtheta,
+        grid_workspace.radial_fields,
+        grid_workspace.poloidal_fields,
         h_fields,
         v_fields,
         k_fields,
@@ -1254,6 +1252,7 @@ def _evaluate_profile_fields(profile: Profile, grid: Grid) -> np.ndarray:
         env_fields,
         float(profile.offset),
         profile.coeff,
+        float(profile.amplitude_power),
     )
     scale = float(profile.scale)
     if scale != 1.0:

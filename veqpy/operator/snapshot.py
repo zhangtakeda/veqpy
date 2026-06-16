@@ -15,15 +15,15 @@ import numpy as np
 
 from veqpy.model.equilibrium import Equilibrium
 from veqpy.model.grid import Grid
+from veqpy.model.problem import Problem
 from veqpy.model.profile import Profile
-from veqpy.operator.operator_case import OperatorCase
 from veqpy.operator.packed_layout import decode_packed_blocks
 
 
 def snapshot_equilibrium_from_runtime(
     *,
     x: np.ndarray,
-    case: OperatorCase,
+    case: Problem,
     grid: Grid,
     profile_L: np.ndarray,
     coeff_index: np.ndarray,
@@ -94,10 +94,14 @@ def snapshot_equilibrium_profiles(
 def snapshot_profile(profile: Profile, coeff_values: np.ndarray | None) -> Profile:
     """Copy one passive profile spec and replace its active coefficients."""
 
-    copied = profile.copy()
     # Active shape profiles receive the solved coefficient block; passive ones
     # keep coeff=None and therefore remain pure offset/static profiles.
-    copied.coeff = (
-        None if coeff_values is None else np.asarray(coeff_values, dtype=np.float64).copy()
+    coeff = None if coeff_values is None else np.asarray(coeff_values, dtype=np.float64).copy()
+    return Profile(
+        scale=profile.scale,
+        power=profile.power,
+        envelope_power=profile.envelope_power,
+        amplitude_power=profile.amplitude_power,
+        offset=profile.offset,
+        coeff=coeff,
     )
-    return copied

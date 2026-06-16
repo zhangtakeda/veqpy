@@ -1,15 +1,19 @@
 # Operator
 
-`Operator` 是一次固定边界平衡求解的数值中心。它把 `OperatorCase`、
+`Operator` 是一次固定边界平衡求解的数值中心。它把 `Problem`、
 `Grid` 和 packed 系数向量 $x$ 转换成 `Solver` 使用的有限维
 Grad--Shafranov residual。从物理数值层面看，它刷新磁面形状，根据
 source route 构造源项剖面，并把强形式 residual 投影到 active 系数基上。
 
 源码位置主要在 `veqpy/operator/`、`veqpy/layout/`、`veqpy/workspace/` 和 `veqpy/engine/`。
 
-## OperatorCase
+## Problem
 
-`OperatorCase` 描述一次固定边界求解的输入，包括 source route、source 坐标、节点语义、active profile 系数、边界、热源/电流相关输入以及可选 `Ip` 或 `beta` 约束。
+`Problem` 描述一次固定边界求解的输入，包括 source route、source 坐标、节点语义、profile 对象、边界、热源/电流相关输入以及可选 `Ip` 或 `beta` 约束。它是传入 `Operator` 的公开问题定义类型。
+
+`Problem.profiles` 中的每个条目都是一个 `Profile`。`coeff is None` 表示
+passive profile；一维 coefficient 数组表示 active profile，并会占用 packed
+state 槽位。
 
 `route`、`coordinate` 和 `nodes` 共同形成 source route key:
 
@@ -19,11 +23,13 @@ source route 构造源项剖面，并把强形式 residual 投影到 active 系�
 
 它决定 source kernel 和输入解释方式。`heat_input` 与 `current_input` 保持为一维数据，具体物理含义由 route 选择。
 
-`heat_input` 总是按 pressure-like setup 数据处理；当它处在预期物理量级
-范围内时，`OperatorCase` 构造阶段会乘以 `mu0`。`Ip` 也采用同样的缩放。
-`current_input` 只有在 current-profile route (`PI`, `PJ1`, `PJ2`) 中会乘以
-`mu0`；在其他 route 中，它已经是归一化量或场派生驱动量，例如 `FF'`、
-`psin_r` 或 `q`。量级明显不符合 setup 约定的输入会在构造 operator 前被拒绝。
+`Problem` 保留用户侧的原始 setup 数组和约束值。构造 `Operator` 时，
+`SourcePlan` 会校验这些量级，并 materialize plan-ready source 输入。
+`scaled_heat` 总是按 pressure-like setup 数据处理，并表示已经乘过 `mu0`
+的数组。`scaled_Ip` 表示 `mu0 * Ip` 约束。`scaled_current` 是 plan-ready
+current/source driver；在 current-profile route (`PI`, `PJ1`, `PJ2`) 中它也会
+乘以 `mu0`，而在其他 route 中仍是归一化量或场派生驱动量，例如 `FF'`、
+`psin_r` 或 `q`。量级明显不符合 setup 约定的输入会在构造 source plan 时被拒绝。
 
 ## Source Routes
 
@@ -51,12 +57,13 @@ route 的差别在于这些场如何由一维输入重构:
 `PP/psin/uniform` route 使用 `sqrt(psin)` 作为均匀 source 参数化，使边缘附近
 的输入采样更均匀。
 
-对于 flux profile 参与求解的 `psin/uniform` route (`PF`, `PP`, `PI`, `PJ1`,
-`PQ`)，`psin` 必须是 active optimized profile，因为每次 residual 评估都要用
-当前磁通坐标查询 source 样本。`PJ2/psin/uniform` 是特例: 它不把 `psin` 当作
-active unknown，而是通过 fixed-point 迭代更新 source query。`PQ` 对环向场
-profile 也更严格: 它从 `q` 和边界值 `R0 * B0` 解出 `F` 或 `F^2`，因此不接受
-active `F` profile。
+对于非 `PJ2` 的 `psin/uniform` route (`PF`, `PP`, `PI`, `PJ1`, `PQ`)，
+`psin` 必须是 active optimized profile，因为每次 residual 评估都要用当前磁通
+坐标查询 source 样本。`psin/grid` 输入已经 materialized 到 operator 径向节点，
+因此不拥有 active `psin` profile。active `F` 只由 `PJ2` 要求，因为
+parallel-current source 会使用当前优化的环向场 profile；active `F` 和 active
+`psin` 互斥。`PQ` 对环向场 profile 也更严格: 它从 `q` 和边界值 `R0 * B0`
+解出 `F` 或 `F^2`，因此不接受 active `F` profile。
 
 ## Constraints 与 Scaling
 
@@ -101,6 +108,22 @@ VEQPy 的主要求解方程。
 pointwise residual。它在每个 `(rho, theta)` 网格点上评估局部强形式力平衡
 residual，返回长度为 `Nr * Nt` 的向量。这个量是诊断或后处理目标；它不替代
 Galerkin residual 作为主要求解定义。
+
+## Runtime Memory 词表
+
+可变 operator runtime 使用一套窄词表，让 engine binding 保持显式，同时避免
+Numba kernel 接收 Python workspace object。`*_fields` 表示采样 slab，其行或轴
+承载物理/数值采样值，例如 grid radial tables、geometry surface rows、residual
+root rows 和 profile value/derivative rows。`*_operators` 表示径向微分、积分等
+线性算子。`*_metadata` 表示 layout 决策，包括 route code、profile id、block
+code、coefficient index rows、active lengths 和 grid size metadata。
+`*_scratch` 是 kernel 调用内复用的临时工作区，调用结束后没有持久物理意义；
+`alpha_state` 这类小型可变向量属于 state。
+
+热路径 engine 调用直接接收 field slabs、operators、标量常数和 metadata。
+`GridWorkspace.T` 或 `GeometryWorkspace.R_surface` 这类 workspace property 是
+用于 debug 和 row-contract 文档化的 view accessor；主 fused runtime ABI 不依赖
+这些 property。
 
 ## Snapshot 边界
 

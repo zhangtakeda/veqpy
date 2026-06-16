@@ -30,10 +30,9 @@ from scipy.interpolate import PchipInterpolator, interp1d
 import veqpy.engine.backend_abi as backend_abi
 from veqpy.engine.numba_profile import update_profile
 from veqpy.engine.numba_source import source_parameterization_for_route_key
-from veqpy.model import Boundary, Grid
+from veqpy.model import Boundary, Grid, Problem, Profile
 from veqpy.operator import (
     Operator,
-    OperatorCase,
     build_profile_index,
     build_profile_layout,
     build_profile_names,
@@ -259,10 +258,22 @@ def _as_float64_array(values, *, copy: bool = False) -> np.ndarray:
     return arr
 
 
-def _extract_shape_x(profile_coeffs: dict[str, list[float] | None], x: np.ndarray) -> np.ndarray:
+def _profiles_from_coeffs(
+    profile_coeffs: dict[str, list[float] | np.ndarray | int | None],
+) -> dict[str, Profile]:
+    profiles: dict[str, Profile] = {}
+    for name, coeff in profile_coeffs.items():
+        if isinstance(coeff, int):
+            profiles[name] = Profile(coeff=np.zeros(coeff, dtype=np.float64))
+        else:
+            profiles[name] = Profile(coeff=coeff)
+    return profiles
+
+
+def _extract_shape_x(profiles: dict[str, Profile], x: np.ndarray) -> np.ndarray:
     profile_names = build_profile_names(REFERENCE_GRID.M_max)
     profile_index = build_profile_index(profile_names)
-    _, coeff_index, _ = build_profile_layout(profile_coeffs, profile_names=profile_names)
+    _, coeff_index, _ = build_profile_layout(profiles, profile_names=profile_names)
     shape_values: list[float] = []
     for k in range(coeff_index.shape[1]):
         for name in SHAPE_PROFILE_NAMES:
@@ -378,12 +389,12 @@ def build_pf_reference_profiles(equilibrium) -> dict[str, np.ndarray | float]:
         "mu0_jpara": mu0_jpara,
         "qn": q * 0.1,
         "q": q,
-        "mu0_Ip": float(MU0 * equilibrium.Ip),
+        "scaled_Ip": float(MU0 * equilibrium.Ip),
         "beta_constraint": float(equilibrium.beta_t),
     }
 
 
-def _reference_pf_case() -> OperatorCase:
+def _reference_pf_case() -> Problem:
     # Start from a stable PF/rho/uniform case, then reuse its solved profiles
     # to build the wider route/constraint benchmark matrix.
     rho_src = np.linspace(0.0, 1.0, REFERENCE_SOURCE_SAMPLE_COUNT)
@@ -391,11 +402,11 @@ def _reference_pf_case() -> OperatorCase:
     FFn_psin_src, Pn_psin_src = pf_reference_profiles(psin_src)
     FFn_r_src = FFn_psin_src * (2.0 * rho_src)
     Pn_r_src = Pn_psin_src * (2.0 * rho_src)
-    return OperatorCase(
+    return Problem(
         route="PF",
         coordinate="rho",
         nodes="uniform",
-        profile_coeffs=BASE_COEFFS,
+        profiles=_profiles_from_coeffs(BASE_COEFFS),
         boundary=BOUNDARY,
         heat_input=Pn_r_src / MU0,
         current_input=FFn_r_src,
@@ -545,7 +556,7 @@ def _solve_reference(*, show_progress: bool = False) -> ReferenceBundle:
         result=result,
         equilibrium=equilibrium,
         ref_profiles=build_pf_reference_profiles(equilibrium),
-        reference_shape_x=_extract_shape_x(solver.operator.case.profile_coeffs, result.x),
+        reference_shape_x=_extract_shape_x(solver.operator.case.profiles, result.x),
         rho_axis=rho_axis,
         psin_axis=psin_axis,
         rho_interp_axis=_prepare_interp_axis(rho_axis),
@@ -671,7 +682,7 @@ def _profile_coeffs_for_case(
     return coeffs
 
 
-def _make_benchmark_case(spec: BenchmarkCaseSpec, reference: ReferenceBundle) -> OperatorCase:
+def _make_benchmark_case(spec: BenchmarkCaseSpec, reference: ReferenceBundle) -> Problem:
     """Project the reference solution onto one route/constraint test case."""
     init_kwargs = _build_mode_init_kwargs(
         spec.mode, spec.coordinate, spec.constraint, reference.ref_profiles
@@ -703,14 +714,14 @@ def _make_benchmark_case(spec: BenchmarkCaseSpec, reference: ReferenceBundle) ->
         if spec.constraint in {"beta", "Ip_beta"}
         else None
     )
-    return OperatorCase(
+    return Problem(
         route=spec.mode,
-        profile_coeffs=_profile_coeffs_for_case(
+        profiles=_profiles_from_coeffs(_profile_coeffs_for_case(
             spec.mode,
             spec.coordinate,
             spec.input_kind,
             constraint=spec.constraint,
-        ),
+        )),
         boundary=BOUNDARY,
         heat_input=heat_input,
         current_input=current_input,
@@ -734,7 +745,7 @@ def _iter_benchmark_specs():
                     )
 
 
-def _solve_once(case: OperatorCase) -> tuple[object, object, np.ndarray]:
+def _solve_once(case: Problem) -> tuple[object, object, np.ndarray]:
     solver = Solver(operator=Operator(TEST_GRID, case), config=CONFIG)
     solver.solve(
         method=CONFIG.method,
@@ -747,11 +758,11 @@ def _solve_once(case: OperatorCase) -> tuple[object, object, np.ndarray]:
     if result is None:
         raise RuntimeError("benchmark solve produced no result")
     equilibrium = solver.build_equilibrium()
-    shape_x = _extract_shape_x(case.profile_coeffs, result.x)
+    shape_x = _extract_shape_x(case.profiles, result.x)
     return result, equilibrium, shape_x
 
 
-def _solve_with_timing(case: OperatorCase) -> tuple[object, object, np.ndarray, float, float]:
+def _solve_with_timing(case: Problem) -> tuple[object, object, np.ndarray, float, float]:
     solver = Solver(operator=Operator(TEST_GRID, case), config=CONFIG)
     solver.solve(
         method=CONFIG.method,
@@ -778,7 +789,7 @@ def _solve_with_timing(case: OperatorCase) -> tuple[object, object, np.ndarray, 
         raise RuntimeError("benchmark solve produced no result")
 
     equilibrium = solver.build_equilibrium()
-    shape_x = _extract_shape_x(case.profile_coeffs, result.x)
+    shape_x = _extract_shape_x(case.profiles, result.x)
     return (
         result,
         equilibrium,
@@ -994,7 +1005,7 @@ def build_benchmark_baseline_payload(*, show_progress: bool = False) -> dict[str
             "grid": _grid_metadata(REFERENCE_GRID),
             "source_sample_count": int(REFERENCE_SOURCE_SAMPLE_COUNT),
             "Ip": float(REFERENCE_IP),
-            "mu0_Ip": float(REFERENCE_MU0_IP),
+            "scaled_Ip": float(REFERENCE_MU0_IP),
             "residual_norm_final": float(reference.result.residual_norm_final),
             "function_evaluations": int(reference.result.function_evaluations),
             "jacobian_evaluations": int(reference.result.jacobian_evaluations),
@@ -1511,6 +1522,7 @@ def _compare_shape_profile_values(equilibrium: object, name: str) -> np.ndarray:
         _compare_envelope_terms(grid, int(profile.envelope_power)),
         float(profile.offset),
         np.asarray(profile.coeff, dtype=np.float64),
+        float(profile.amplitude_power),
     )
     scale = float(profile.scale)
     return fields[0] if scale == 1.0 else fields[0] * scale

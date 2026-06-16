@@ -21,8 +21,8 @@ import numpy as np
 from veqpy.engine import numba_operator, numba_residual
 
 if TYPE_CHECKING:
+    from veqpy.model.problem import Problem
     from veqpy.operator.build_plan import OperatorBuildPlan, ResidualBindingLayout
-    from veqpy.operator.operator_case import OperatorCase
     from veqpy.workspace.geometry_workspace import GeometryWorkspace
     from veqpy.workspace.grid_workspace import GridWorkspace
     from veqpy.workspace.profile_workspace import ProfileWorkspace
@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 def build_residual_full_stage_runner_into(
     *,
     plan: OperatorBuildPlan,
-    case: OperatorCase,
+    case: Problem,
     profile_workspace: ProfileWorkspace,
     geometry_workspace: GeometryWorkspace,
     residual_workspace: ResidualWorkspace,
@@ -45,11 +45,10 @@ def build_residual_full_stage_runner_into(
     residual_surface_fields = residual_workspace.surface_fields
     residual_pack_scratch = residual_workspace.pack_scratch
     residual_pack_scratch_rows = residual_workspace.pack_scratch_rows
-    sin_mtheta = plan.grid_workspace.sin_mtheta
-    cos_mtheta = plan.grid_workspace.cos_mtheta
-    rho_powers = plan.grid_workspace.rho_powers
-    y = plan.grid_workspace.y
-    T = plan.grid_workspace.T
+    grid_radial_fields = plan.grid_workspace.radial_fields
+    grid_poloidal_fields = plan.grid_workspace.poloidal_fields
+    grid_k_max = int(plan.grid_workspace.K_max)
+    grid_l_max = int(plan.grid_workspace.L_max)
     weights = plan.grid_workspace.weights
     a = case.a
     R0 = case.R0
@@ -79,11 +78,10 @@ def build_residual_full_stage_runner_into(
             profile_workspace.active_coeff_index_rows,
             profile_workspace.active_lengths,
             residual_surface_fields,
-            sin_mtheta,
-            cos_mtheta,
-            rho_powers,
-            y,
-            T,
+            grid_radial_fields,
+            grid_poloidal_fields,
+            grid_k_max,
+            grid_l_max,
             weights,
             a,
             R0,
@@ -135,7 +133,7 @@ def build_collocation_runner_into(
 def build_fused_residual_runner_into(
     *,
     plan: OperatorBuildPlan,
-    case: OperatorCase,
+    case: Problem,
     grid_workspace: GridWorkspace,
     residual_binding_layout: ResidualBindingLayout,
     profile_workspace: ProfileWorkspace,

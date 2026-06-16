@@ -26,6 +26,54 @@ from veqpy.math.fast import (
     rowwise_sum_into,
     rowwise_weighted_sum_into,
 )
+from veqpy.workspace.field_rows import (
+    GEOMETRY_SURFACE_GRTDIVJR_T,
+    GEOMETRY_SURFACE_GTTDIVJR,
+    GEOMETRY_SURFACE_GTTDIVJR_R,
+    GEOMETRY_SURFACE_J,
+    GEOMETRY_SURFACE_JDIVR,
+    GEOMETRY_SURFACE_R,
+    GEOMETRY_SURFACE_R_T,
+    GEOMETRY_SURFACE_SIN_TB,
+    GEOMETRY_SURFACE_Z_T,
+    GRID_POLOIDAL_COS_MTHETA_START,
+    GRID_RADIAL_RHO_POWERS_START,
+    GRID_RADIAL_Y,
+    RESIDUAL_ROOT_FFN_PSIN,
+    RESIDUAL_ROOT_PN_PSIN,
+    RESIDUAL_ROOT_PSIN_R,
+    RESIDUAL_ROOT_PSIN_RR,
+    RESIDUAL_SURFACE_G,
+    RESIDUAL_SURFACE_GPSIN_R,
+    RESIDUAL_SURFACE_GPSIN_R_SIN_TB,
+    RESIDUAL_SURFACE_GPSIN_Z,
+)
+
+
+@njit(cache=True, inline="always")
+def _residual_grid_radial_views(
+    grid_radial_fields: np.ndarray,
+    grid_k_max: int,
+    grid_l_max: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    rho_start = GRID_RADIAL_RHO_POWERS_START
+    rho_powers = grid_radial_fields[rho_start : rho_start + grid_k_max + 2]
+    T_start = rho_start + grid_k_max + 2
+    T = grid_radial_fields[T_start : T_start + grid_l_max + 1]
+    y = grid_radial_fields[GRID_RADIAL_Y]
+    return rho_powers, y, T
+
+
+@njit(cache=True, inline="always")
+def _residual_grid_poloidal_views(
+    grid_poloidal_fields: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    block = (grid_poloidal_fields.shape[0] - GRID_POLOIDAL_COS_MTHETA_START) // 6
+    cos_start = GRID_POLOIDAL_COS_MTHETA_START
+    sin_start = cos_start + block
+    cos_mtheta = grid_poloidal_fields[cos_start:sin_start]
+    sin_mtheta = grid_poloidal_fields[sin_start : sin_start + block]
+    return sin_mtheta, cos_mtheta
 
 
 @njit(cache=True, fastmath=True, nogil=True)
@@ -37,24 +85,24 @@ def update_residual_compact(
     geometry_surface_fields: np.ndarray,
 ) -> None:
     """Update residual-related 2D fields in place from compact geometry fields."""
-    out_G = out_workspace[0]
-    out_Gpsin_R = out_workspace[1]
-    out_Gpsin_Z = out_workspace[2]
-    out_Gpsin_R_sin_tb = out_workspace[3]
-    sin_tb_surface = geometry_surface_fields[0]
-    R_surface = geometry_surface_fields[1]
-    R_t_surface = geometry_surface_fields[2]
-    Z_t_surface = geometry_surface_fields[3]
-    J_surface = geometry_surface_fields[4]
-    JdivR_surface = geometry_surface_fields[5]
-    grtdivJR_t_surface = geometry_surface_fields[6]
-    gttdivJR_surface = geometry_surface_fields[7]
-    gttdivJR_r_surface = geometry_surface_fields[8]
+    out_G = out_workspace[RESIDUAL_SURFACE_G]
+    out_Gpsin_R = out_workspace[RESIDUAL_SURFACE_GPSIN_R]
+    out_Gpsin_Z = out_workspace[RESIDUAL_SURFACE_GPSIN_Z]
+    out_Gpsin_R_sin_tb = out_workspace[RESIDUAL_SURFACE_GPSIN_R_SIN_TB]
+    sin_tb_surface = geometry_surface_fields[GEOMETRY_SURFACE_SIN_TB]
+    R_surface = geometry_surface_fields[GEOMETRY_SURFACE_R]
+    R_t_surface = geometry_surface_fields[GEOMETRY_SURFACE_R_T]
+    Z_t_surface = geometry_surface_fields[GEOMETRY_SURFACE_Z_T]
+    J_surface = geometry_surface_fields[GEOMETRY_SURFACE_J]
+    JdivR_surface = geometry_surface_fields[GEOMETRY_SURFACE_JDIVR]
+    grtdivJR_t_surface = geometry_surface_fields[GEOMETRY_SURFACE_GRTDIVJR_T]
+    gttdivJR_surface = geometry_surface_fields[GEOMETRY_SURFACE_GTTDIVJR]
+    gttdivJR_r_surface = geometry_surface_fields[GEOMETRY_SURFACE_GTTDIVJR_R]
 
-    psin_r = root_fields[1]
-    psin_rr = root_fields[2]
-    FFn_psin = root_fields[3]
-    Pn_psin = root_fields[4]
+    psin_r = root_fields[RESIDUAL_ROOT_PSIN_R]
+    psin_rr = root_fields[RESIDUAL_ROOT_PSIN_RR]
+    FFn_psin = root_fields[RESIDUAL_ROOT_FFN_PSIN]
+    Pn_psin = root_fields[RESIDUAL_ROOT_PN_PSIN]
 
     nr, nt = out_G.shape
     for i in range(nr):
@@ -132,20 +180,23 @@ def run_residual_blocks_packed_precomputed(
     coeff_index_rows: np.ndarray,
     lengths: np.ndarray,
     residual_workspace: np.ndarray,
-    sin_mtheta: np.ndarray,
-    cos_mtheta: np.ndarray,
-    rho_powers: np.ndarray,
-    y: np.ndarray,
-    T: np.ndarray,
+    grid_radial_fields: np.ndarray,
+    grid_poloidal_fields: np.ndarray,
+    grid_k_max: int,
+    grid_l_max: int,
     weights: np.ndarray,
     a: float,
     R0: float,
     B0: float,
 ) -> None:
-    G = residual_workspace[0]
-    Gpsin_R = residual_workspace[1]
-    Gpsin_Z = residual_workspace[2]
-    Gpsin_R_sin_tb = residual_workspace[3]
+    G = residual_workspace[RESIDUAL_SURFACE_G]
+    Gpsin_R = residual_workspace[RESIDUAL_SURFACE_GPSIN_R]
+    Gpsin_Z = residual_workspace[RESIDUAL_SURFACE_GPSIN_Z]
+    Gpsin_R_sin_tb = residual_workspace[RESIDUAL_SURFACE_GPSIN_R_SIN_TB]
+    rho_powers, y, T = _residual_grid_radial_views(
+        grid_radial_fields, grid_k_max, grid_l_max
+    )
+    sin_mtheta, cos_mtheta = _residual_grid_poloidal_views(grid_poloidal_fields)
     sin_theta = sin_mtheta[1]
     rho = rho_powers[1]
     rho2 = rho_powers[2]
@@ -241,11 +292,10 @@ def run_residual_blocks_packed_precomputed_auto(
     coeff_index_rows: np.ndarray,
     lengths: np.ndarray,
     residual_workspace: np.ndarray,
-    sin_mtheta: np.ndarray,
-    cos_mtheta: np.ndarray,
-    rho_powers: np.ndarray,
-    y: np.ndarray,
-    T: np.ndarray,
+    grid_radial_fields: np.ndarray,
+    grid_poloidal_fields: np.ndarray,
+    grid_k_max: int,
+    grid_l_max: int,
     weights: np.ndarray,
     a: float,
     R0: float,
@@ -283,11 +333,10 @@ def run_residual_blocks_packed_precomputed_auto(
             coeff_index_rows,
             lengths,
             residual_workspace,
-            sin_mtheta,
-            cos_mtheta,
-            rho_powers,
-            y,
-            T,
+            grid_radial_fields,
+            grid_poloidal_fields,
+            grid_k_max,
+            grid_l_max,
             weights,
             a,
             R0,
@@ -295,10 +344,14 @@ def run_residual_blocks_packed_precomputed_auto(
         )
         return
 
-    G = residual_workspace[0]
-    Gpsin_R = residual_workspace[1]
-    Gpsin_Z = residual_workspace[2]
-    Gpsin_R_sin_tb = residual_workspace[3]
+    G = residual_workspace[RESIDUAL_SURFACE_G]
+    Gpsin_R = residual_workspace[RESIDUAL_SURFACE_GPSIN_R]
+    Gpsin_Z = residual_workspace[RESIDUAL_SURFACE_GPSIN_Z]
+    Gpsin_R_sin_tb = residual_workspace[RESIDUAL_SURFACE_GPSIN_R_SIN_TB]
+    rho_powers, y, T = _residual_grid_radial_views(
+        grid_radial_fields, grid_k_max, grid_l_max
+    )
+    sin_mtheta, cos_mtheta = _residual_grid_poloidal_views(grid_poloidal_fields)
     sin_theta = sin_mtheta[1]
     rho = rho_powers[1]
     rho2 = rho_powers[2]
@@ -395,8 +448,8 @@ def write_weighted_scaled_g_collocation_field_into(
     offset: int,
 ) -> None:
     """Write collocation-scaled Grad-Shafranov residual samples into ``out``."""
-    R_surface = geometry_surface_fields[1]
-    J_surface = geometry_surface_fields[4]
+    R_surface = geometry_surface_fields[GEOMETRY_SURFACE_R]
+    J_surface = geometry_surface_fields[GEOMETRY_SURFACE_J]
     nr, nt = G.shape
     cursor = offset
     for i in range(nr):

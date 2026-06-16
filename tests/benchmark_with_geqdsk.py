@@ -61,13 +61,28 @@ if (PROJECT_ROOT / "veqpy").is_dir() and str(PROJECT_ROOT) not in sys.path:
 from veqpy.model.boundary import Boundary  # noqa: E402
 from veqpy.model.geqdsk import Geqdsk  # noqa: E402
 from veqpy.model.grid import Grid  # noqa: E402
-from veqpy.operator import Operator, OperatorCase  # noqa: E402
+from veqpy.model.problem import Problem  # noqa: E402
+from veqpy.model.profile import Profile  # noqa: E402
+from veqpy.operator import Operator  # noqa: E402
 from veqpy.solver import Solver, SolverConfig  # noqa: E402
 
 try:  # Optional internal ABI metadata.  The benchmark works without it.
     import veqpy.engine.backend_abi as backend_abi
 except Exception:  # pragma: no cover - only exercised on incompatible installs.
     backend_abi = None  # type: ignore[assignment]
+
+
+def _profiles_from_coeffs(
+    profile_coeffs: Mapping[str, Sequence[float] | np.ndarray | int | None],
+) -> dict[str, Profile]:
+    profiles: dict[str, Profile] = {}
+    for name, coeff in profile_coeffs.items():
+        if isinstance(coeff, int):
+            profiles[name] = Profile(coeff=np.zeros(coeff, dtype=np.float64))
+        else:
+            profile_coeff = None if coeff is None else np.asarray(coeff, dtype=np.float64)
+            profiles[name] = Profile(coeff=profile_coeff)
+    return profiles
 
 
 MU0 = 4.0e-7 * math.pi
@@ -729,7 +744,7 @@ def build_geqdsk_truth_bundle(
 # ---------------------------------------------------------------------------
 
 
-def _copy_operator_case(case: OperatorCase) -> OperatorCase:
+def _copy_problem(case: Problem) -> Problem:
     copy_method = getattr(case, "copy", None)
     if callable(copy_method):
         return copy_method()
@@ -752,15 +767,15 @@ def _solver_config(
     )
 
 
-def _solve_operator_case(
-    operator_case: OperatorCase,
+def _solve_problem(
+    problem: Problem,
     grid: Grid,
     *,
     max_evaluations: int = SOLVER_MAX_EVALUATIONS,
     initial_policy: str | None = SOLVER_INITIAL_POLICY,
 ) -> Solver:
     solver = Solver(
-        operator=Operator(grid, _copy_operator_case(operator_case)),
+        operator=Operator(grid, _copy_problem(problem)),
         config=_solver_config(max_evaluations=max_evaluations, initial_policy=initial_policy),
     )
     solver.solve(
@@ -799,17 +814,17 @@ def build_route_source_bundle(
     max_evaluations: int = SOLVER_MAX_EVALUATIONS,
 ) -> RouteSourceBundle:
     reference_grid = _grid(reference_nr, reference_nt, quadrature_scheme="legendre")
-    canonical_case = OperatorCase(
+    canonical_case = Problem(
         route="PF",
         coordinate="psin",
         nodes="uniform",
-        profile_coeffs=dict(GEQDSK_PROFILE_COEFFS),
+        profiles=_profiles_from_coeffs(GEQDSK_PROFILE_COEFFS),
         boundary=truth.boundary,
         heat_input=np.asarray(truth.geqdsk.P_psi, dtype=np.float64),
         current_input=np.asarray(truth.geqdsk.FF_psi, dtype=np.float64),
         Ip=float(truth.geqdsk.Ip),
     )
-    canonical_solver = _solve_operator_case(
+    canonical_solver = _solve_problem(
         canonical_case,
         reference_grid,
         max_evaluations=max_evaluations,
@@ -903,11 +918,11 @@ def _profile_coeffs_for_case(
 ) -> dict[str, list[float]]:
     coeffs = {key: list(values) for key, values in GEQDSK_PROFILE_COEFFS.items()}
 
-    # ``psin`` is not universally accepted as an active profile.  In develop,
-    # psin-coordinate PF/PP/PI/PJ1/PQ require it, while PJ2(psin) owns its psin
-    # source internally and rejects an active psin profile.  Rho-coordinate routes
-    # do not need it.  Use backend ABI metadata when available and fall back to
-    # the known develop route set otherwise.
+    # ``psin`` is not universally accepted as an active profile.  Only non-PJ2
+    # psin/uniform routes need it to query source samples at the current optimized
+    # flux coordinate; psin/grid inputs are already materialized on operator nodes.
+    # Use backend ABI metadata when available and fall back to the known develop
+    # route set otherwise.
     route_key = (spec.mode, spec.coordinate, spec.input_kind)
     if backend_abi is not None:
         psin_required_keys = getattr(
@@ -1008,13 +1023,13 @@ def _source_sample_count_for_case(spec: GeqdskBenchmarkSpec, sample_count: int) 
     return int(sample_count)
 
 
-def build_operator_case_from_source(
+def build_problem_from_source(
     truth: GeqdskTruthBundle,
     source: RouteSourceBundle,
     spec: GeqdskBenchmarkSpec,
     *,
     source_sample_count: int = SOURCE_SAMPLE_COUNT,
-) -> OperatorCase:
+) -> Problem:
     heat_profile, current_profile, ip, beta = _build_mode_input_profiles(source, spec)
     source_axis = source.rho_axis if spec.coordinate == "rho" else source.psin_axis
     case_sample_count = _source_sample_count_for_case(spec, source_sample_count)
@@ -1023,11 +1038,11 @@ def build_operator_case_from_source(
     heat_input = _profile_interp(source_axis, heat_profile, target_axis)
     current_input = _profile_interp(source_axis, current_profile, target_axis)
 
-    return OperatorCase(
+    return Problem(
         route=spec.mode,
         coordinate=spec.coordinate,
         nodes=spec.input_kind,
-        profile_coeffs=_profile_coeffs_for_case(spec, source.profile_coeffs),
+        profiles=_profiles_from_coeffs(_profile_coeffs_for_case(spec, source.profile_coeffs)),
         boundary=truth.boundary,
         heat_input=heat_input,
         current_input=current_input,
@@ -1441,15 +1456,15 @@ def run_benchmark_case(
     timing_values: list[float] = []
 
     try:
-        operator_case = build_operator_case_from_source(
+        problem = build_problem_from_source(
             truth,
             source,
             spec,
             source_sample_count=source_sample_count,
         )
 
-        solver = _solve_operator_case(
-            operator_case,
+        solver = _solve_problem(
+            problem,
             solve_grid,
             max_evaluations=max_evaluations,
             initial_policy=ROUTE_SOLVER_INITIAL_POLICY,
@@ -1468,8 +1483,8 @@ def run_benchmark_case(
         # not hide regressions.  Metrics are computed from the first successful
         # run to keep the payload deterministic.
         for _ in range(max(int(timing_repeats), 0)):
-            repeat_solver = _solve_operator_case(
-                operator_case,
+            repeat_solver = _solve_problem(
+                problem,
                 solve_grid,
                 max_evaluations=max_evaluations,
                 initial_policy=ROUTE_SOLVER_INITIAL_POLICY,

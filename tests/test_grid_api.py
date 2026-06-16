@@ -4,8 +4,7 @@ import numpy as np
 import pytest
 from numpy.testing import assert_allclose
 
-from veqpy.engine import RHO_AXIS, THETA_AXIS
-from veqpy.math import DEFAULT_CALCULUS, DEFAULT_QUADRATURE
+from veqpy.math import DEFAULT_CALCULUS, DEFAULT_QUADRATURE, RHO_AXIS, THETA_AXIS
 from veqpy.model import Grid
 
 

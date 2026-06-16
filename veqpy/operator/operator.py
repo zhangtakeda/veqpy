@@ -24,13 +24,13 @@ from veqpy.layout.runtime import OperatorLayout
 from veqpy.math.interpolate import SOURCE_INTERP_DEFAULT
 from veqpy.model.equilibrium import Equilibrium
 from veqpy.model.grid import Grid
+from veqpy.model.problem import Problem
 from veqpy.model.profile import Profile
 from veqpy.operator.build_plan import (
     OperatorBuildPlan,
     build_operator_plan,
     refresh_operator_plan_for_case,
 )
-from veqpy.operator.operator_case import OperatorCase
 from veqpy.operator.packed_layout import (
     decode_packed_blocks,
     encode_packed_state,
@@ -45,7 +45,6 @@ from veqpy.operator.profile_runtime import (
 from veqpy.operator.snapshot import snapshot_equilibrium_from_runtime
 from veqpy.operator.source_plan import (
     validate_source_inputs,
-    validate_source_plan_profile_support,
 )
 from veqpy.operator.source_runtime import refresh_source_runtime
 from veqpy.workspace import allocate_runtime_state
@@ -60,7 +59,7 @@ class Operator:
     """Encapsulate the residual evaluator for a fixed case, grid, and runtime."""
 
     grid: InitVar[Grid]
-    case: OperatorCase = field(repr=False)
+    case: Problem = field(repr=False)
     fix_rho: float = 0.05
     source_interpolation_kind: str = SOURCE_INTERP_DEFAULT
     plan: OperatorBuildPlan = field(init=False, repr=False)
@@ -91,12 +90,6 @@ class Operator:
             case=self.case,
             source_interpolation_kind=self.source_interpolation_kind,
         )
-        validate_source_plan_profile_support(
-            source_plan=self.plan.source_plan,
-            source_execution=self.plan.source_execution,
-            case=self.case,
-        )
-
         self.layout = OperatorLayout.empty(self.plan.x_size)
         self._setup_runtime_state()
         self._refresh_runtime_state()
@@ -191,7 +184,7 @@ class Operator:
                 x[idx0] = h0_est
         return x
 
-    def replace_case(self, case: OperatorCase) -> None:
+    def replace_case(self, case: Problem) -> None:
         """Replace the current case without changing the packed layout."""
         validate_case_compatibility(
             case,
@@ -210,7 +203,7 @@ class Operator:
     def encode_initial_state(self) -> np.ndarray:
         """Encode profile coefficients from the current case into the packed initial state."""
         return encode_packed_state(
-            self.case.profile_coeffs,
+            self.case.profiles,
             self.plan.profile_L,
             self.plan.coeff_index,
             profile_names=self.plan.profile_names,
@@ -413,17 +406,11 @@ class Operator:
             case=self.case,
             source_interpolation_kind=self.source_interpolation_kind,
         )
-        validate_source_plan_profile_support(
-            source_plan=self.plan.source_plan,
-            source_execution=self.plan.source_execution,
-            case=self.case,
-        )
         self._refresh_profile_runtime()
         self._refresh_fourier_family_metadata()
         # Source runtime refresh happens after profile metadata because some
         # routes decide whether psin is source-owned or optimized-profile-owned.
         refresh_source_runtime(
-            case=self.case,
             grid_rho=self.plan.grid_workspace.rho,
             source_plan=self.plan.source_plan,
             source_execution=self.plan.source_execution,
@@ -447,6 +434,9 @@ class Operator:
             profile_static_kwargs_by_name=self.plan.profile_static_kwargs_by_name,
             profile_offset_specs=self.plan.profile_offset_specs,
         )
+        for name, profile in self.profiles_by_name.items():
+            if hasattr(type(self), f"{name}_profile"):
+                setattr(self, f"{name}_profile", profile)
 
     def _refresh_runtime_bindings(self) -> None:
         self.layout = build_operator_layout(
@@ -476,11 +466,6 @@ class Operator:
                 profile=self.profiles_by_name[self.plan.profile_names[int(p)]],
                 grid_workspace=self.plan.grid_workspace,
             )
-        f_profile_id = self.plan.profile_index.get("F", -1)
-        if f_profile_id >= 0 and not bool(self.plan.active_profile_mask[f_profile_id]):
-            # Passive F is stored as F**2 for the same postprocess contract as
-            # active F; convert once so source kernels always see F fields.
-            self.layout.profile.run_postprocess()
 
     def _refresh_stage_a_runtime(self) -> None:
         profile_workspace = self.profile_workspace
@@ -492,6 +477,7 @@ class Operator:
             coeff_index=self.plan.coeff_index,
             active_offsets=profile_workspace.active_offsets,
             active_scales=profile_workspace.active_scales,
+            active_amplitude_powers=profile_workspace.active_amplitude_powers,
             active_lengths=profile_workspace.active_lengths,
             active_coeff_index_rows=profile_workspace.active_coeff_index_rows,
         )
@@ -502,7 +488,7 @@ class Operator:
         self.c_effective_order, self.s_effective_order = refresh_fourier_family_metadata(
             c_profile_names=self.plan.c_profile_names,
             s_profile_names=self.plan.s_profile_names,
-            profile_coeffs=self.case.profile_coeffs,
+            profiles=self.case.profiles,
             c_offsets=self.case.c_offsets,
             s_offsets=self.case.s_offsets,
             c_family_fields=self.profile_workspace.c_family_fields,
@@ -538,7 +524,7 @@ class Operator:
         )
 
 
-def _estimate_h0_from_case(case: "OperatorCase") -> float:
+def _estimate_h0_from_case(case: Problem) -> float:
     """Return Shafranov-shift estimate h0, or 0.0 for uniform profiles.
 
     An H-mode pedestal is detected when ``d|heat_input|/dpsi`` changes

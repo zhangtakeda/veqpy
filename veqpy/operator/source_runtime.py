@@ -21,16 +21,14 @@ from veqpy.engine.numba_source import (
     resolve_source_inputs,
 )
 from veqpy.math.interpolate import build_uniform_source_interpolation_coefficients
-from veqpy.operator.source_plan import SourcePlan, validate_source_inputs
+from veqpy.operator.source_plan import SourcePlan
 
 if TYPE_CHECKING:
-    from veqpy.operator.operator_case import OperatorCase
     from veqpy.workspace.source_workspace import SourceWorkspace
 
 
 def refresh_source_runtime(
     *,
-    case: OperatorCase,
     grid_rho: np.ndarray,
     source_plan: SourcePlan,
     source_execution: object,
@@ -38,7 +36,6 @@ def refresh_source_runtime(
     psin: np.ndarray,
 ) -> None:
     """Refresh source interpolation caches and materialized source arrays."""
-    validate_source_inputs(case, int(grid_rho.shape[0]))
     case_key = (
         source_plan.coordinate,
         source_plan.nodes,
@@ -74,25 +71,25 @@ def refresh_source_runtime(
     else:
         # Coefficients depend on source values even when the remap cache does not.
         source_workspace.heat_spline_coeff = build_uniform_source_interpolation_coefficients(
-            source_plan.heat_input,
+            source_plan.scaled_heat,
             kind=source_plan.interpolation_kind,
         )
         source_workspace.current_spline_coeff = build_uniform_source_interpolation_coefficients(
-            source_plan.current_input,
+            source_plan.scaled_current,
             kind=source_plan.interpolation_kind,
         )
     if source_plan.is_grid_nodes or not source_plan.is_psin_coordinate:
         if source_plan.is_grid_nodes:
-            np.copyto(source_workspace.materialized_heat_input, source_plan.heat_input)
-            np.copyto(source_workspace.materialized_current_input, source_plan.current_input)
+            np.copyto(source_workspace.materialized_heat_input, source_plan.scaled_heat)
+            np.copyto(source_workspace.materialized_current_input, source_plan.scaled_current)
         else:
             # Rho-coordinate uniform samples can be materialized during refresh
             # because the query is fixed by grid_rho.
             resolve_source_inputs(
                 source_workspace.materialized_heat_input,
                 source_workspace.materialized_current_input,
-                source_plan.heat_input,
-                source_plan.current_input,
+                source_plan.scaled_heat,
+                source_plan.scaled_current,
                 source_plan.coordinate_code,
                 source_plan.source_sample_count,
                 source_workspace.barycentric_weights,

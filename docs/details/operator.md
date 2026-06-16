@@ -1,7 +1,7 @@
 # Operator
 
 `Operator` is the numerical center of one fixed-boundary equilibrium solve. It
-turns an `OperatorCase`, a `Grid`, and a packed coefficient vector $x$ into the
+turns a `Problem`, a `Grid`, and a packed coefficient vector $x$ into the
 finite-dimensional Grad--Shafranov residual used by `Solver`. In physical terms,
 it updates the flux-surface shape, constructs the source profiles implied by the
 chosen source route, and projects the strong-form residual onto the active
@@ -9,9 +9,13 @@ coefficient basis.
 
 The relevant source files mainly live in `veqpy/operator/`, `veqpy/layout/`, `veqpy/workspace/`, and `veqpy/engine/`.
 
-## OperatorCase
+## Problem
 
-`OperatorCase` describes one fixed-boundary solve input: source route, source coordinate, node semantics, active profile coefficients, boundary, heat/current-related inputs, and optional `Ip` or `beta` constraints.
+`Problem` describes one fixed-boundary solve input: source route, source coordinate, node semantics, profile objects, boundary, heat/current-related inputs, and optional `Ip` or `beta` constraints. It is the public problem-definition type passed into `Operator`.
+
+Each entry in `Problem.profiles` is a `Profile`. A profile with `coeff is None`
+is passive; a profile with a one-dimensional coefficient array is active and
+occupies packed state slots.
 
 `route`, `coordinate`, and `nodes` jointly form the source route key:
 
@@ -21,13 +25,15 @@ The relevant source files mainly live in `veqpy/operator/`, `veqpy/layout/`, `ve
 
 This key selects the source kernel and the interpretation of the input arrays. `heat_input` and `current_input` remain one-dimensional data; their physical meaning is determined by the selected route.
 
-`heat_input` is always treated as pressure-like setup data and is scaled by
-`mu0` during case construction when it is provided in the expected physical
-setup range. `Ip` is scaled the same way. `current_input` is scaled by `mu0`
-only for current-profile routes (`PI`, `PJ1`, and `PJ2`); in other routes it is
-already a normalized or field-derived driver such as `FF'`, `psin_r`, or `q`.
-Inputs with magnitudes outside the expected setup ranges are rejected before an
-operator is built.
+`Problem` keeps setup arrays and constraints in the raw user-facing convention.
+When an `Operator` is built, `SourcePlan` validates those magnitudes and
+materializes plan-ready source inputs. `scaled_heat` is always pressure-like
+setup data after `mu0` scaling. `scaled_Ip` stores the `mu0 * Ip` constraint.
+`scaled_current` is the plan-ready current/source driver; for current-profile
+routes (`PI`, `PJ1`, and `PJ2`) it is also `mu0`-scaled, while in other routes it
+remains a normalized or field-derived driver such as `FF'`, `psin_r`, or `q`.
+Inputs with magnitudes outside the expected setup ranges are rejected while
+building the source plan.
 
 ## Source Routes
 
@@ -59,14 +65,15 @@ flux. `nodes="grid"` means the arrays already live on the operator radial grid;
 `PP/psin/uniform` route uses a `sqrt(psin)` uniform source parameterization so
 edge-resolved input can be sampled more evenly.
 
-For `psin/uniform` routes where the flux profile is part of the solve (`PF`,
-`PP`, `PI`, `PJ1`, and `PQ`), `psin` must be an active optimized profile because
-the source samples need the current flux coordinate during every residual
-evaluation. `PJ2/psin/uniform` is the special case: it updates the source query
-by a fixed-point iteration instead of taking `psin` as an active unknown. `PQ`
-is also strict about the toroidal-field profile: it solves the `F` or `F^2`
-profile from `q` and the edge value `R0 * B0`, so an active `F` profile is not
-accepted.
+For non-`PJ2` `psin/uniform` routes (`PF`, `PP`, `PI`, `PJ1`, and `PQ`), `psin`
+must be an active optimized profile because the source samples need the current
+flux coordinate during every residual evaluation. `psin/grid` inputs are already
+materialized on the operator radial nodes, so they do not own an active `psin`
+profile. Active `F` is required only by `PJ2`, where the parallel-current source
+uses the current optimized toroidal-field profile; active `F` and active `psin`
+are mutually exclusive. `PQ` is also strict about the toroidal-field profile: it
+solves the `F` or `F^2` profile from `q` and the edge value `R0 * B0`, so an
+active `F` profile is not accepted.
 
 ## Constraints and Scaling
 
@@ -117,6 +124,24 @@ for collocation polish. It evaluates the local strong-form force-balance
 residual on every `(rho, theta)` grid point and returns a vector of length
 `Nr * Nt`. This is a diagnostic or post-processing objective; it does not
 replace the Galerkin residual as the primary solve definition.
+
+## Runtime Memory Vocabulary
+
+The mutable operator runtime uses a narrow vocabulary so engine bindings remain
+explicit without exposing Python workspace objects to Numba kernels.
+`*_fields` names mean sampled slabs whose rows or axes carry physical or
+numerical samples, such as grid radial tables, geometry surface rows, residual
+root rows, and profile value/derivative rows. `*_operators` names are linear
+maps such as radial differentiation or accumulation matrices. `*_metadata`
+names are layout decisions: route codes, profile ids, block codes, coefficient
+index rows, active lengths, and grid size metadata. `*_scratch` buffers are
+temporary workspaces with no persistent physical meaning after a kernel call,
+while small mutable vectors such as `alpha_state` are state.
+
+Hot-path engine calls receive field slabs, operators, scalar constants, and
+metadata directly. Workspace properties such as `GridWorkspace.T` or
+`GeometryWorkspace.R_surface` are view accessors for debug and row-contract
+documentation; they are not required by the main fused runtime ABI.
 
 ## Snapshot Boundary
 

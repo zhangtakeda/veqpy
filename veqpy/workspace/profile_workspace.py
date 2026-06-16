@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from veqpy.engine.numba_profile import update_profile
+from veqpy.workspace.field_rows import PROFILE_R, PROFILE_RR, PROFILE_VALUE
 
 if TYPE_CHECKING:
     from veqpy.model.profile import Profile
@@ -50,6 +51,7 @@ class ProfileWorkspace:
     active_profile_ids: np.ndarray
     active_offsets: np.ndarray
     active_scales: np.ndarray
+    active_amplitude_powers: np.ndarray
     active_lengths: np.ndarray
     active_coeff_index_rows: np.ndarray
     c_family_fields: np.ndarray
@@ -87,6 +89,7 @@ class ProfileWorkspace:
         self.active_profile_ids = np.asarray(active_profile_ids, dtype=np.int64)
         self.active_offsets = np.empty(n_active, dtype=np.float64)
         self.active_scales = np.empty(n_active, dtype=np.float64)
+        self.active_amplitude_powers = np.empty(n_active, dtype=np.float64)
         self.active_lengths = np.empty(n_active, dtype=np.int64)
         self.active_coeff_index_rows = np.full((n_active, max_active_len), -1, dtype=np.int64)
 
@@ -147,6 +150,7 @@ class ProfileWorkspace:
             float(profile.offset),
             profile.coeff,
             float(profile.scale),
+            float(profile.amplitude_power),
         )
 
     def refresh_profile_fields(
@@ -169,6 +173,7 @@ class ProfileWorkspace:
             float(profile.offset),
             profile.coeff,
             float(profile.scale),
+            float(profile.amplitude_power),
         )
 
     def profile_id_for(self, name: str) -> int:
@@ -187,7 +192,17 @@ class ProfileWorkspace:
     def values_for(self, name: str) -> np.ndarray:
         """Return workspace-owned value row for ``name``."""
 
-        return self.fields_for(name)[0]
+        return self.fields_for(name)[PROFILE_VALUE]
+
+    def radial_derivative_for(self, name: str) -> np.ndarray:
+        """Return workspace-owned first radial derivative row for ``name``."""
+
+        return self.fields_for(name)[PROFILE_R]
+
+    def radial_second_derivative_for(self, name: str) -> np.ndarray:
+        """Return workspace-owned second radial derivative row for ``name``."""
+
+        return self.fields_for(name)[PROFILE_RR]
 
     def has_fields_for(self, name: str) -> bool:
         """Return whether a named profile has a workspace field slot."""
@@ -217,13 +232,20 @@ class ProfileWorkspace:
             if length <= 0:
                 continue
             p = int(profile_id)
+            profile_scale = float(self.active_scales[slot])
+            amplitude_power = float(self.active_amplitude_powers[slot])
+            if amplitude_power != 1.0 and profile_scale != 0.0:
+                # Solver x-scale is a coefficient-space conditioning hint.  When
+                # the physical profile output applies an amplitude power, undo it
+                # so F coefficients still scale like the F**2 amplitude they own.
+                profile_scale = abs(profile_scale) ** (1.0 / amplitude_power)
             blocks.append(
                 (
                     p,
                     self.profile_names[p],
                     self.active_coeff_index_rows[slot, :length].copy(),
                     float(self.active_offsets[slot]),
-                    float(self.active_scales[slot]),
+                    profile_scale,
                 )
             )
         return tuple(blocks)
@@ -268,13 +290,24 @@ def _fill_profile_outputs(
     offset: float,
     coeff: np.ndarray | None,
     scale: float,
+    amplitude_power: float,
 ) -> None:
     """Refresh one profile field set from coefficients."""
 
-    update_profile(u_fields, T, T_r, T_rr, rp_fields, env_fields, offset, coeff)
+    update_profile(
+        u_fields,
+        T,
+        T_r,
+        T_rr,
+        rp_fields,
+        env_fields,
+        offset,
+        coeff,
+        amplitude_power,
+    )
     if scale != 1.0:
-        # Scale is applied uniformly to value and derivative rows; for F this is
-        # how normalized coefficients become physical F**2 fields.
+        # Scale is applied uniformly to value and derivative rows after any
+        # amplitude transform; for F this restores physical F units.
         np.multiply(u_fields, scale, out=u_fields)
 
 

@@ -7,7 +7,13 @@ Role:
 
 from __future__ import annotations
 
-from veqpy.math.calculus import DEFAULT_CALCULUS, make_calculus
+from veqpy.math.axes import RHO_AXIS, THETA_AXIS
+from veqpy.math.calculus import (
+    DEFAULT_CALCULUS,
+    apply_accumulation,
+    apply_differentiation,
+    make_calculus,
+)
 from veqpy.math.interpolate import (
     DEFAULT_LOCAL_BARYCENTRIC_STENCIL,
     SOURCE_INTERP_DEFAULT,
@@ -25,6 +31,10 @@ __all__ = [
     "DEFAULT_LOCAL_BARYCENTRIC_STENCIL",
     "DEFAULT_QUADRATURE",
     "SOURCE_INTERP_DEFAULT",
+    "RHO_AXIS",
+    "THETA_AXIS",
+    "apply_accumulation",
+    "apply_differentiation",
     "barycentric_log_weights",
     "build_uniform_source_interpolation_coefficients",
     "build_uniform_source_interpolation_matrix",

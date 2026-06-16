@@ -2,7 +2,7 @@
 Module: operator.build_plan
 
 Role:
-- Build the immutable operator topology/configuration plan from Grid + OperatorCase.
+- Build the operator topology/configuration plan from Grid + Problem.
 - Keep packed topology, source route binding, and residual binding construction out of Operator.
 
 Public API:
@@ -13,14 +13,14 @@ Public API:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 
 import numpy as np
 
 import veqpy.engine.backend_abi as backend_abi
 from veqpy.engine import validate_route
 from veqpy.model.grid import Grid
-from veqpy.operator.operator_case import OperatorCase
+from veqpy.model.problem import Problem
 from veqpy.operator.packed_layout import (
     PROFILE_OFFSET_SPECS,
     PROFILE_STATIC_KWARGS,
@@ -35,7 +35,12 @@ from veqpy.operator.packed_layout import (
     get_prefix_profile_names,
     packed_size,
 )
-from veqpy.operator.source_plan import SourcePlan, build_source_plan
+from veqpy.operator.source_plan import (
+    SourcePlan,
+    build_source_plan,
+    validate_source_inputs,
+    validate_source_plan_profile_support,
+)
 from veqpy.workspace import GridWorkspace
 
 
@@ -49,7 +54,7 @@ class ResidualBindingLayout:
     active_residual_block_radial_powers: np.ndarray
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class OperatorBuildPlan:
     """Static topology and case-derived runtime binding plan for Operator."""
 
@@ -77,7 +82,7 @@ class OperatorBuildPlan:
 def build_operator_plan(
     *,
     grid: Grid,
-    case: OperatorCase,
+    case: Problem,
     source_interpolation_kind: str,
 ) -> OperatorBuildPlan:
     """Build full Operator topology from an initial Grid + case."""
@@ -92,7 +97,7 @@ def build_operator_plan(
     s_profile_names = tuple(name for name in fourier_profile_names if name.startswith("s"))
 
     profile_L, coeff_index, order_offsets = build_profile_layout(
-        case.profile_coeffs,
+        case.profiles,
         profile_names=profile_names,
         prefix_profile_names=prefix_profile_names,
     )
@@ -128,6 +133,12 @@ def build_operator_plan(
         coeff_index=coeff_index,
         active_profile_ids=active_profile_ids,
     )
+    validate_source_plan_profile_support(
+        source_plan=source_plan,
+        source_execution=source_execution,
+        case=case,
+    )
+    validate_source_inputs(case, grid_workspace.Nr)
 
     return OperatorBuildPlan(
         grid_workspace=grid_workspace,
@@ -155,7 +166,7 @@ def build_operator_plan(
 def refresh_operator_plan_for_case(
     plan: OperatorBuildPlan,
     *,
-    case: OperatorCase,
+    case: Problem,
     source_interpolation_kind: str,
 ) -> OperatorBuildPlan:
     """Refresh case-dependent route/source ABI while preserving packed topology."""
@@ -173,12 +184,15 @@ def refresh_operator_plan_for_case(
         coeff_index=plan.coeff_index,
         active_profile_ids=plan.active_profile_ids,
     )
-    return replace(
-        plan,
-        source_route_spec=source_route_spec,
+    validate_source_plan_profile_support(
         source_plan=source_plan,
         source_execution=source_execution,
+        case=case,
     )
+    plan.source_route_spec = source_route_spec
+    plan.source_plan = source_plan
+    plan.source_execution = source_execution
+    return plan
 
 
 def build_residual_binding_layout(
@@ -210,7 +224,7 @@ def build_profile_config(
     grid_workspace: GridWorkspace,
     c_profile_names: tuple[str, ...],
     s_profile_names: tuple[str, ...],
-) -> tuple[dict[str, dict[str, int]], dict[str, float | str]]:
+) -> tuple[dict[str, dict[str, float | int]], dict[str, float | str]]:
     """Build profile construction kwargs and offset specs from static topology."""
 
     profile_static_kwargs_by_name = {

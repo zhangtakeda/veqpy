@@ -28,8 +28,8 @@ from veqpy.layout.residual_binding import (
 from veqpy.layout.source_binding import build_bound_source_stage_runner
 
 if TYPE_CHECKING:
+    from veqpy.model.problem import Problem
     from veqpy.operator.build_plan import OperatorBuildPlan, ResidualBindingLayout
-    from veqpy.operator.operator_case import OperatorCase
     from veqpy.workspace.geometry_workspace import GeometryWorkspace
     from veqpy.workspace.grid_workspace import GridWorkspace
     from veqpy.workspace.profile_workspace import ProfileWorkspace
@@ -42,7 +42,7 @@ from .runtime import OperatorLayout
 def build_operator_layout(
     *,
     plan: OperatorBuildPlan,
-    case: OperatorCase,
+    case: Problem,
     profile_workspace: ProfileWorkspace,
     geometry_workspace: GeometryWorkspace,
     source_workspace: SourceWorkspace,
@@ -64,21 +64,16 @@ def build_operator_layout(
         profile_fields=profile_workspace.profile_fields,
         profile_rp_fields=profile_workspace.profile_rp_fields,
         profile_env_fields=profile_workspace.profile_env_fields,
-        T=plan.grid_workspace.T,
-        T_r=plan.grid_workspace.T_r,
-        T_rr=plan.grid_workspace.T_rr,
+        grid_radial_fields=plan.grid_workspace.radial_fields,
+        grid_k_max=int(plan.grid_workspace.K_max),
+        grid_l_max=int(plan.grid_workspace.L_max),
         active_offsets=profile_workspace.active_offsets,
         active_scales=profile_workspace.active_scales,
+        active_amplitude_powers=profile_workspace.active_amplitude_powers,
         active_coeff_index_rows=profile_workspace.active_coeff_index_rows,
         active_lengths=profile_workspace.active_lengths,
         update_profiles_packed_bulk=numba_profile.update_profiles_packed_bulk,
     )
-    f_fields = profile_workspace.fields_for("F")
-
-    def profile_postprocess_runner() -> None:
-        # F profiles are packed as F**2 for positivity during Stage A; source
-        # and diagnostics consume F and dF/drho, so convert after every refresh.
-        numba_operator.convert_f_squared_fields_to_f(f_fields, eps=1.0e-10)
 
     geometry_stage_runner = build_geometry_stage_runner(
         c_family_fields=profile_workspace.c_family_fields,
@@ -98,14 +93,8 @@ def build_operator_layout(
         Z0=case.Z0,
         surface_fields=geometry_workspace.surface_fields,
         radial_fields=geometry_workspace.radial_fields,
-        rho=plan.grid_workspace.rho,
-        theta=plan.grid_workspace.theta,
-        cos_mtheta=plan.grid_workspace.cos_mtheta,
-        sin_mtheta=plan.grid_workspace.sin_mtheta,
-        m_cos_mtheta=plan.grid_workspace.m_cos_mtheta,
-        m_sin_mtheta=plan.grid_workspace.m_sin_mtheta,
-        m2_cos_mtheta=plan.grid_workspace.m2_cos_mtheta,
-        m2_sin_mtheta=plan.grid_workspace.m2_sin_mtheta,
+        grid_radial_fields=plan.grid_workspace.radial_fields,
+        grid_poloidal_fields=plan.grid_workspace.poloidal_fields,
     )
     source_eval_runner = numba_operator.bind_source_eval_runner(
         source_plan=plan.source_plan,
@@ -173,7 +162,6 @@ def build_operator_layout(
     )
     return OperatorLayout.from_callables(
         profile_stage_runner=profile_stage_runner,
-        profile_postprocess_runner=profile_postprocess_runner,
         geometry_stage_runner=geometry_stage_runner,
         source_stage_runner=source_stage_runner,
         residual_full_stage_runner_into=residual_full_stage_runner_into,

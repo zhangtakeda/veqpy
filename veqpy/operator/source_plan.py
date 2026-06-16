@@ -6,12 +6,13 @@ Role:
 - Keep user/model compatibility at bind-time, before runtime memory refresh and engine calls.
 
 Notes:
-- This module builds immutable plans from ``OperatorCase`` and resolved route specs.
+- This module builds immutable plans from ``Problem`` and resolved route specs.
 - It does not allocate runtime arrays, run source kernels, or implement source mathematics.
 """
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -29,9 +30,16 @@ from veqpy.math.interpolate import (
 )
 
 if TYPE_CHECKING:
-    from veqpy.operator.operator_case import OperatorCase
+    from veqpy.model.problem import Problem
 
 RouteKey = tuple[str, str, str]
+
+MU0 = 4.0e-7 * np.pi
+SETUP_NORMALIZED_ABS_MIN = 1.0e-3
+SETUP_NORMALIZED_ABS_MAX = 1.0e3
+SETUP_PHYSICAL_ABS_MIN = SETUP_NORMALIZED_ABS_MIN / MU0
+SETUP_PHYSICAL_ABS_MAX = SETUP_NORMALIZED_ABS_MAX / MU0
+CURRENT_PROFILE_ROUTES = frozenset({"PI", "PJ1", "PJ2"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,8 +47,10 @@ class SourcePlan:
     """Describe the read-only source semantics and runner binding plan.
 
     This is the semantic layer: route, coordinate, node layout, interpolation
-    choice, input arrays, and global constraints.  Runtime ownership decisions
-    are derived later in ``SourceExecutionABI``.
+    choice, plan-ready input arrays, and global constraints. ``scaled_heat``,
+    ``scaled_current``, and ``scaled_Ip`` are the arrays/scalars consumed by
+    layout binding after setup validation. Runtime ownership decisions are
+    derived later in ``SourceExecutionABI``.
     """
 
     route: str
@@ -49,9 +59,9 @@ class SourcePlan:
     nodes: str
     parameterization: str
     source_sample_count: int
-    heat_input: np.ndarray
-    current_input: np.ndarray
-    Ip: float
+    scaled_heat: np.ndarray
+    scaled_current: np.ndarray
+    scaled_Ip: float
     beta: float
     interpolation_kind: str
 
@@ -96,11 +106,12 @@ SOURCE_PARAMETERIZATION_CODES = {
 
 def build_source_plan(
     *,
-    case: OperatorCase,
+    case: Problem,
     source_route_spec: object,
     interpolation_kind: str = SOURCE_INTERP_DEFAULT,
 ) -> SourcePlan:
-    """Build the immutable source plan for an ``OperatorCase``."""
+    """Build the immutable source plan for a ``Problem``."""
+    scaled_heat, scaled_current, scaled_Ip, beta = _scaled_source_inputs(case)
     # Parameterization is route-specific.  For example PP/psin/uniform samples
     # on sqrt(psin) to bias resolution near the magnetic axis while all kernels
     # still exchange normalized psin/root fields internally.
@@ -112,11 +123,11 @@ def build_source_plan(
         parameterization=source_parameterization_for_route_key(
             (str(case.route).upper(), str(case.coordinate).lower(), str(case.nodes).lower())
         ),
-        source_sample_count=int(case.heat_input.shape[0]),
-        heat_input=case.heat_input,
-        current_input=case.current_input,
-        Ip=float(case.Ip),
-        beta=float(case.beta),
+        source_sample_count=int(scaled_heat.shape[0]),
+        scaled_heat=scaled_heat,
+        scaled_current=scaled_current,
+        scaled_Ip=scaled_Ip,
+        beta=beta,
         interpolation_kind=(
             # Grid-node sources are already sampled on operator rho; leave the
             # interpolation slot empty so runtime binding cannot remap them.
@@ -127,11 +138,66 @@ def build_source_plan(
     )
 
 
+def _scaled_source_inputs(case: Problem) -> tuple[np.ndarray, np.ndarray, float, float]:
+    route = str(case.route).upper()
+    scaled_heat = _scale_pressure_like_input(case.heat_input, name="heat_input")
+    scaled_current = _scale_current_input(case.current_input, route=route)
+    scaled_Ip = _scale_physical_constraint(float(case.Ip), name="Ip")
+    return scaled_heat, scaled_current, scaled_Ip, float(case.beta)
+
+
+def _scale_pressure_like_input(value: np.ndarray, *, name: str) -> np.ndarray:
+    max_abs = float(np.max(np.abs(value))) if value.size else 0.0
+    if not _in_closed_range(max_abs, SETUP_PHYSICAL_ABS_MIN, SETUP_PHYSICAL_ABS_MAX):
+        _reject_setup_magnitude(name=name, max_abs=max_abs)
+    return _readonly_array(value * MU0)
+
+
+def _scale_current_input(value: np.ndarray, *, route: str) -> np.ndarray:
+    max_abs = float(np.max(np.abs(value))) if value.size else 0.0
+    if route in CURRENT_PROFILE_ROUTES:
+        if not _in_closed_range(max_abs, SETUP_PHYSICAL_ABS_MIN, SETUP_PHYSICAL_ABS_MAX):
+            _reject_setup_magnitude(name="current_input", max_abs=max_abs)
+        return _readonly_array(value * MU0)
+    if not _in_closed_range(max_abs, SETUP_NORMALIZED_ABS_MIN, SETUP_NORMALIZED_ABS_MAX):
+        _reject_setup_magnitude(name="current_input", max_abs=max_abs)
+    return _readonly_array(value)
+
+
+def _scale_physical_constraint(value: float, *, name: str) -> float:
+    if not np.isfinite(value):
+        return value
+    max_abs = abs(float(value))
+    if not _in_closed_range(max_abs, SETUP_PHYSICAL_ABS_MIN, SETUP_PHYSICAL_ABS_MAX):
+        _reject_setup_magnitude(name=name, max_abs=max_abs)
+    return float(value) * MU0
+
+
+def _reject_setup_magnitude(*, name: str, max_abs: float) -> None:
+    magnitude_label = f"{name} abs" if name == "Ip" else f"{name} max_abs"
+    message = (
+        f"Rejected setup input magnitude: {magnitude_label}={max_abs:.6g}. "
+        "Pass unnormalized setup values to Problem; SourcePlan applies mu0 scaling once."
+    )
+    warnings.warn(message, RuntimeWarning, stacklevel=3)
+    raise ValueError(message)
+
+
+def _in_closed_range(value: float, lower: float, upper: float) -> bool:
+    return lower <= value <= upper
+
+
+def _readonly_array(value: np.ndarray) -> np.ndarray:
+    arr = np.asarray(value, dtype=np.float64).copy()
+    arr.setflags(write=False)
+    return arr
+
+
 def validate_source_plan_profile_support(
     *,
     source_plan: SourcePlan,
     source_execution: object,
-    case: OperatorCase,
+    case: Problem,
 ) -> None:
     """Validate source-plan compatibility with active profile ownership."""
     route_key = source_plan.route_key
@@ -142,6 +208,16 @@ def validate_source_plan_profile_support(
         )
 
     has_active_psin = int(getattr(source_execution, "psin_active_length", 0)) > 0
+    has_active_F = int(getattr(source_execution, "f_active_length", 0)) > 0
+    requires_active_F = bool(getattr(source_execution, "requires_optimized_f_profile", False))
+    if has_active_F and not requires_active_F:
+        raise ValueError(
+            f"{case.route} does not accept an active F profile; active F is only supported for PJ2"
+        )
+    if requires_active_F and not has_active_F:
+        raise ValueError(f"{case.route} requires an active F profile")
+    if has_active_F and has_active_psin:
+        raise ValueError("Active F and active psin profiles are mutually exclusive")
     if (
         bool(getattr(source_execution, "requires_optimized_psin_profile", False))
         and not has_active_psin
@@ -158,11 +234,11 @@ def validate_source_plan_profile_support(
         # active psin profile would create two independent owners of the same
         # root field and stale source queries.
         raise ValueError(
-            f"{case.route} does not accept an active psin profile because psin is source-owned"
+            f"{case.route} does not accept an active psin profile"
         )
 
 
-def validate_source_inputs(case: OperatorCase, nr: int) -> None:
+def validate_source_inputs(case: Problem, nr: int) -> None:
     """Validate source input lengths for grid-owned and sampled routes."""
     if case.heat_input.shape != case.current_input.shape:
         raise ValueError(

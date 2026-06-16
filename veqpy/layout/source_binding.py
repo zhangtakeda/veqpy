@@ -88,8 +88,8 @@ def _build_source_stage_runner_shared(
             source_psin_query = source_workspace.psin_query
             source_parameter_query = source_workspace.parameter_query
             psin_profile_fields = profile_workspace.fields_for("psin")
-            heat_input = source_plan.heat_input
-            current_input = source_plan.current_input
+            heat_input = source_plan.scaled_heat
+            current_input = source_plan.scaled_current
             parameterization_code = source_plan.parameterization_code
             grid_workspace = plan.grid_workspace
             n_axis_fix = int(np.searchsorted(grid_workspace.rho, fix_rho))
@@ -113,7 +113,7 @@ def _build_source_stage_runner_shared(
                     source_workspace.heat_spline_coeff,
                     source_workspace.current_spline_coeff,
                     int(parameterization_code),
-                    grid_workspace.rho,
+                    grid_workspace.radial_fields,
                     grid_workspace.differentiator,
                     grid_workspace.accumulator,
                     int(n_axis_fix),
@@ -161,8 +161,8 @@ def _build_source_stage_runner_shared(
             _resolve_source_inputs_prepared(
                 source_workspace.materialized_heat_input,
                 source_workspace.materialized_current_input,
-                source_plan.heat_input,
-                source_plan.current_input,
+                source_plan.scaled_heat,
+                source_plan.scaled_current,
                 source_plan.coordinate_code,
                 source_plan.source_sample_count,
                 source_workspace.barycentric_weights,
@@ -256,8 +256,8 @@ def _build_pj2_psin_uniform_source_stage_runner(
             _resolve_source_inputs_prepared(
                 source_workspace.materialized_heat_input,
                 source_workspace.materialized_current_input,
-                source_plan.heat_input,
-                source_plan.current_input,
+                source_plan.scaled_heat,
+                source_plan.scaled_current,
                 source_plan.coordinate_code,
                 source_plan.source_sample_count,
                 source_workspace.barycentric_weights,

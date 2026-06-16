@@ -73,37 +73,13 @@ def bind_source_eval_runner(
         source_eval_binding=backend_abi.build_fused_source_eval_abi(
             source_plan=source_plan,
             grid_workspace=grid_workspace,
-            profile_workspace=profile_workspace,
             geometry_workspace=geometry_workspace,
             source_workspace=source_workspace,
             B0=B0,
             fix_rho=fix_rho,
-        )
+        ),
+        f_profile_fields=profile_workspace.fields_for("F"),
     )
-
-
-@njit(cache=True, fastmath=True, nogil=True)
-def _convert_f_squared_fields_to_f_impl(fields: np.ndarray, eps: float = 1.0e-10) -> None:
-    nr = fields.shape[1]
-    for i in range(nr):
-        F2 = fields[0, i]
-        F2_r = fields[1, i]
-        F2_rr = fields[2, i]
-        if F2 < eps:
-            F2 = eps
-        F = np.sqrt(F2)
-        inv_F = 1.0 / F
-        inv_F3 = inv_F / F2
-        # Active F is optimized as F**2 to avoid sign changes; source kernels
-        # consume F, F_r, F_rr, so convert the derivative rows by the chain rule.
-        fields[0, i] = F
-        fields[1, i] = 0.5 * F2_r * inv_F
-        fields[2, i] = 0.5 * F2_rr * inv_F - 0.25 * F2_r * F2_r * inv_F3
-
-
-def convert_f_squared_fields_to_f(fields: np.ndarray, eps: float = 1.0e-10) -> None:
-    """Convert packed ``F**2`` profile fields to ``F`` fields in place."""
-    _convert_f_squared_fields_to_f_impl(fields, eps=eps)
 
 
 def _normalize_psin_query(out: np.ndarray, source: np.ndarray) -> None:
@@ -131,17 +107,16 @@ def _refresh_hot_runtime(
         hot_runtime_binding.profile_rp_fields,
         hot_runtime_binding.profile_env_fields,
         hot_runtime_binding.active_profile_ids,
-        hot_runtime_binding.T,
-        hot_runtime_binding.T_r,
-        hot_runtime_binding.T_rr,
+        hot_runtime_binding.grid_radial_fields,
+        hot_runtime_binding.grid_k_max,
+        hot_runtime_binding.grid_l_max,
         hot_runtime_binding.active_offsets,
         hot_runtime_binding.active_scales,
+        hot_runtime_binding.active_amplitude_powers,
         x,
         hot_runtime_binding.active_coeff_index_rows,
         hot_runtime_binding.active_lengths,
     )
-    if hot_runtime_binding.has_active_f_profile:
-        _convert_f_squared_fields_to_f_impl(hot_runtime_binding.f_profile_fields)
     _update_fourier_family_fields_impl(
         hot_runtime_binding.c_family_fields,
         hot_runtime_binding.s_family_fields,
@@ -159,14 +134,8 @@ def _refresh_hot_runtime(
         hot_runtime_binding.a,
         hot_runtime_binding.R0,
         hot_runtime_binding.Z0,
-        hot_runtime_binding.rho,
-        hot_runtime_binding.theta,
-        hot_runtime_binding.cos_mtheta,
-        hot_runtime_binding.sin_mtheta,
-        hot_runtime_binding.m_cos_mtheta,
-        hot_runtime_binding.m_sin_mtheta,
-        hot_runtime_binding.m2_cos_mtheta,
-        hot_runtime_binding.m2_sin_mtheta,
+        hot_runtime_binding.grid_radial_fields,
+        hot_runtime_binding.grid_poloidal_fields,
         hot_runtime_binding.h_fields,
         hot_runtime_binding.v_fields,
         hot_runtime_binding.k_fields,
@@ -195,11 +164,10 @@ def _pack_residual_output_into(
         residual_pack_binding.active_coeff_index_rows,
         residual_pack_binding.active_lengths,
         residual_pack_binding.residual_surface_fields,
-        residual_pack_binding.sin_mtheta,
-        residual_pack_binding.cos_mtheta,
-        residual_pack_binding.rho_powers,
-        residual_pack_binding.y,
-        residual_pack_binding.T,
+        residual_pack_binding.grid_radial_fields,
+        residual_pack_binding.grid_poloidal_fields,
+        residual_pack_binding.grid_k_max,
+        residual_pack_binding.grid_l_max,
         residual_pack_binding.weights,
         residual_pack_binding.a,
         residual_pack_binding.R0,
@@ -226,15 +194,15 @@ def _run_pj2_psin_uniform_spline_with_scratch_impl(
     weights: np.ndarray,
     differentiator: np.ndarray,
     accumulator: np.ndarray,
-    rho: np.ndarray,
+    grid_radial_fields: np.ndarray,
     n_axis_fix: int,
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
-    f_profile_u: np.ndarray,
+    f_profile_fields: np.ndarray,
     Ip: float,
     beta: float,
-    source_scratch_1d: np.ndarray,
-    source_scratch_2d: np.ndarray,
+    array_scratch: np.ndarray,
+    matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     # Materialize the first source sample on the previous psin query, then let
     # each fixed-point pass update psin and remap heat/current onto the new query.
@@ -260,15 +228,15 @@ def _run_pj2_psin_uniform_spline_with_scratch_impl(
             weights,
             differentiator,
             accumulator,
-            rho,
+            grid_radial_fields,
             n_axis_fix,
             radial_fields,
             surface_fields,
-            f_profile_u,
+            f_profile_fields,
             Ip,
             beta,
-            source_scratch_1d,
-            source_scratch_2d,
+            array_scratch,
+            matrix_scratch,
         )
         if _update_fixed_point_psin_query_and_spline_uniform_inputs_impl(
             source_psin_query,
@@ -303,15 +271,15 @@ def _run_pj2_psin_uniform_barycentric_with_scratch_impl(
     weights: np.ndarray,
     differentiator: np.ndarray,
     accumulator: np.ndarray,
-    rho: np.ndarray,
+    grid_radial_fields: np.ndarray,
     n_axis_fix: int,
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
-    f_profile_u: np.ndarray,
+    f_profile_fields: np.ndarray,
     Ip: float,
     beta: float,
-    source_scratch_1d: np.ndarray,
-    source_scratch_2d: np.ndarray,
+    array_scratch: np.ndarray,
+    matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     # Same fixed-point contract as the spline path, but interpolation uses a
     # small local barycentric stencil to avoid building dense remap matrices.
@@ -338,15 +306,15 @@ def _run_pj2_psin_uniform_barycentric_with_scratch_impl(
             weights,
             differentiator,
             accumulator,
-            rho,
+            grid_radial_fields,
             n_axis_fix,
             radial_fields,
             surface_fields,
-            f_profile_u,
+            f_profile_fields,
             Ip,
             beta,
-            source_scratch_1d,
-            source_scratch_2d,
+            array_scratch,
+            matrix_scratch,
         )
         if _update_fixed_point_psin_query_and_local_barycentric_inputs_impl(
             source_psin_query,
@@ -443,7 +411,6 @@ def bind_fused_residual_runner_into(
         grid_workspace=grid_workspace,
         profile_workspace=profile_workspace,
         geometry_workspace=geometry_workspace,
-        source_execution=source_execution,
         c_active_order=c_active_order,
         s_active_order=s_active_order,
         a=a,
@@ -613,12 +580,12 @@ def _bind_profile_owned_psin_residual_runner_core(
             profile_owned_psin_binding.materialized_heat_input,
             profile_owned_psin_binding.materialized_current_input,
             profile_owned_psin_binding.psin_profile_fields,
-            profile_owned_psin_binding.heat_input,
-            profile_owned_psin_binding.current_input,
+            profile_owned_psin_binding.scaled_heat,
+            profile_owned_psin_binding.scaled_current,
             profile_owned_psin_binding.heat_spline_coeff,
             profile_owned_psin_binding.current_spline_coeff,
             profile_owned_psin_binding.parameterization_code,
-            profile_owned_psin_binding.rho,
+            profile_owned_psin_binding.grid_radial_fields,
             profile_owned_psin_binding.differentiator,
             profile_owned_psin_binding.accumulator,
             n_axis_fix,
@@ -669,6 +636,7 @@ def _bind_pj2_psin_uniform_residual_runner_core(
     radial_fields = geometry_workspace.radial_fields
     residual_surface_fields = residual_workspace.surface_fields
     rho = grid_workspace.rho
+    grid_radial_fields = grid_workspace.radial_fields
     weights = grid_workspace.weights
     differentiator = grid_workspace.differentiator
     accumulator = grid_workspace.accumulator
@@ -678,12 +646,12 @@ def _bind_pj2_psin_uniform_residual_runner_core(
     source_psin_query = source_workspace.psin_query
     materialized_heat_input = source_workspace.materialized_heat_input
     materialized_current_input = source_workspace.materialized_current_input
-    source_scratch_1d = source_workspace.scratch_1d
-    source_scratch_2d = source_workspace.scratch_2d
-    f_profile_u = profile_workspace.values_for("F")
+    array_scratch = source_workspace.array_scratch
+    matrix_scratch = source_workspace.matrix_scratch
+    f_profile_fields = profile_workspace.fields_for("F")
     psin_profile_u = profile_workspace.values_for("psin")
-    heat_input = source_plan.heat_input
-    current_input = source_plan.current_input
+    heat_input = source_plan.scaled_heat
+    current_input = source_plan.scaled_current
     heat_spline_coeff = build_uniform_source_interpolation_coefficients(
         heat_input,
         kind=source_plan.interpolation_kind,
@@ -693,7 +661,7 @@ def _bind_pj2_psin_uniform_residual_runner_core(
         kind=source_plan.interpolation_kind,
     )
     coordinate_code = int(source_plan.coordinate_code)
-    Ip = float(source_plan.Ip)
+    Ip = float(source_plan.scaled_Ip)
     beta = float(source_plan.beta)
     has_Ip = bool(np.isfinite(Ip))
     use_local_barycentric = bool(source_plan.uses_barycentric_interpolation)
@@ -738,15 +706,15 @@ def _bind_pj2_psin_uniform_residual_runner_core(
                 weights,
                 differentiator,
                 accumulator,
-                rho,
+                grid_radial_fields,
                 n_axis_fix,
                 radial_fields,
                 surface_fields,
-                f_profile_u,
+                f_profile_fields,
                 Ip,
                 beta,
-                source_scratch_1d,
-                source_scratch_2d,
+                array_scratch,
+                matrix_scratch,
             )
         else:
             # Spline coefficients are reused across the loop; only query values
@@ -769,15 +737,15 @@ def _bind_pj2_psin_uniform_residual_runner_core(
                 weights,
                 differentiator,
                 accumulator,
-                rho,
+                grid_radial_fields,
                 n_axis_fix,
                 radial_fields,
                 surface_fields,
-                f_profile_u,
+                f_profile_fields,
                 Ip,
                 beta,
-                source_scratch_1d,
-                source_scratch_2d,
+                array_scratch,
+                matrix_scratch,
             )
         alpha_state[0] = alpha1
         alpha_state[1] = alpha2
@@ -798,6 +766,7 @@ def _bind_pj2_psin_uniform_residual_runner_core(
 def _bind_source_eval_runner_for_fused_backend(
     *,
     source_eval_binding: backend_abi.FusedSourceEvalABI,
+    f_profile_fields: np.ndarray,
 ) -> Callable:
     def runner(
         out_root_fields: np.ndarray,
@@ -807,30 +776,7 @@ def _bind_source_eval_runner_for_fused_backend(
         current_input: np.ndarray,
         R0: float,
     ) -> tuple[float, float]:
-        if source_eval_binding.scratch_source_kernel is None:
-            # Non-scratch kernels are retained for registry compatibility; new
-            # hot routes should normally expose the scratch variant.
-            return source_eval_binding.source_kernel(
-                out_root_fields,
-                out_FFn_psin,
-                out_Pn_psin,
-                heat_input,
-                current_input,
-                source_eval_binding.coordinate_code,
-                R0,
-                source_eval_binding.B0,
-                source_eval_binding.weights,
-                source_eval_binding.differentiator,
-                source_eval_binding.accumulator,
-                source_eval_binding.rho,
-                source_eval_binding.n_axis_fix,
-                source_eval_binding.radial_fields,
-                source_eval_binding.surface_fields,
-                source_eval_binding.f_profile_u,
-                source_eval_binding.Ip,
-                source_eval_binding.beta,
-            )
-        return source_eval_binding.scratch_source_kernel(
+        return source_eval_binding.source_kernel(
             out_root_fields,
             out_FFn_psin,
             out_Pn_psin,
@@ -842,15 +788,15 @@ def _bind_source_eval_runner_for_fused_backend(
             source_eval_binding.weights,
             source_eval_binding.differentiator,
             source_eval_binding.accumulator,
-            source_eval_binding.rho,
+            source_eval_binding.grid_radial_fields,
             source_eval_binding.n_axis_fix,
             source_eval_binding.radial_fields,
             source_eval_binding.surface_fields,
-            source_eval_binding.f_profile_u,
-            source_eval_binding.Ip,
+            f_profile_fields,
+            source_eval_binding.scaled_Ip,
             source_eval_binding.beta,
-            source_eval_binding.source_scratch_1d,
-            source_eval_binding.source_scratch_2d,
+            source_eval_binding.array_scratch,
+            source_eval_binding.matrix_scratch,
         )
 
     return runner
