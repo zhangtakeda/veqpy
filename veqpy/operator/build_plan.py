@@ -17,8 +17,6 @@ from dataclasses import dataclass
 
 import numpy as np
 
-import veqpy.engine.backend_abi as backend_abi
-from veqpy.engine import validate_route
 from veqpy.model.grid import Grid
 from veqpy.model.problem import Problem
 from veqpy.operator.packed_layout import (
@@ -36,12 +34,17 @@ from veqpy.operator.packed_layout import (
     packed_size,
 )
 from veqpy.operator.profile_runtime import build_profile_parameter_arrays
+from veqpy.operator.source_execution import (
+    SourceExecutionPlan,
+    build_source_execution_plan,
+    validate_source_plan_profile_support,
+)
 from veqpy.operator.source_plan import (
     SourcePlan,
     build_source_plan,
     validate_source_inputs,
-    validate_source_plan_profile_support,
 )
+from veqpy.operator.source_routes import validate_route_metadata
 from veqpy.workspace import GridWorkspace
 
 
@@ -74,7 +77,7 @@ class OperatorBuildPlan:
     x_size: int
     source_route_spec: object
     source_plan: SourcePlan
-    source_execution: backend_abi.SourceExecutionABI
+    source_execution: SourceExecutionPlan
     residual_binding_layout: ResidualBindingLayout
     profile_static_kwargs_by_name: dict[str, dict[str, int]]
     profile_offset_specs: dict[str, float | str]
@@ -137,7 +140,7 @@ def build_operator_plan(
         profile_static_kwargs_by_name=profile_static_kwargs_by_name,
         profile_offset_specs=profile_offset_specs,
     )
-    source_route_spec = validate_route(problem.route, problem.coordinate, problem.nodes)
+    source_route_spec = validate_route_metadata(problem.route, problem.coordinate, problem.nodes)
     source_plan = build_source_plan(
         problem=problem,
         source_route_spec=source_route_spec,
@@ -145,7 +148,7 @@ def build_operator_plan(
     )
     # SourceExecutionABI bridges the declarative source plan to workspace needs:
     # whether psin is optimized, source-owned, or requires remap scratch.
-    source_execution = backend_abi.build_source_execution_abi(
+    source_execution = build_source_execution_plan(
         source_plan=source_plan,
         profile_index=profile_index,
         profile_L=profile_L,
@@ -195,13 +198,13 @@ def refresh_operator_plan_for_problem(
 ) -> OperatorBuildPlan:
     """Refresh problem-dependent route/source ABI while preserving packed topology."""
 
-    source_route_spec = validate_route(problem.route, problem.coordinate, problem.nodes)
+    source_route_spec = validate_route_metadata(problem.route, problem.coordinate, problem.nodes)
     source_plan = build_source_plan(
         problem=problem,
         source_route_spec=source_route_spec,
         interpolation_kind=source_interpolation_kind,
     )
-    source_execution = backend_abi.build_source_execution_abi(
+    source_execution = build_source_execution_plan(
         source_plan=source_plan,
         profile_index=plan.profile_index,
         profile_L=plan.profile_L,

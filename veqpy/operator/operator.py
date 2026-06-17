@@ -19,6 +19,7 @@ from dataclasses import InitVar, dataclass, field
 
 import numpy as np
 
+from veqpy.engine.backend import JaxBackendOptions, UnsupportedBackendFeature, normalize_backend
 from veqpy.layout.binding import build_operator_layout
 from veqpy.layout.runtime import OperatorLayout
 from veqpy.math.interpolate import SOURCE_INTERP_DEFAULT
@@ -64,6 +65,8 @@ class Operator:
 
     grid: InitVar[Grid]
     problem: Problem = field(repr=False)
+    backend: str = field(init=False)
+    backend_options: JaxBackendOptions | None = field(init=False, repr=False)
     fix_rho: float = 0.05
     source_interpolation_kind: str = SOURCE_INTERP_DEFAULT
     plan: OperatorBuildPlan = field(init=False, repr=False)
@@ -82,6 +85,8 @@ class Operator:
         problem: Problem | None = None,
         *,
         case: Problem | None = None,
+        backend: str = "numba",
+        backend_options: JaxBackendOptions | None = None,
         fix_rho: float = 0.05,
         source_interpolation_kind: str = SOURCE_INTERP_DEFAULT,
     ) -> None:
@@ -97,6 +102,8 @@ class Operator:
         elif case is not None:
             raise TypeError("Pass either problem or case, not both")
         self.problem = problem
+        self.backend = normalize_backend(backend)
+        self.backend_options = backend_options
         self.fix_rho = float(fix_rho)
         self.source_interpolation_kind = source_interpolation_kind
         self.__post_init__(grid)
@@ -123,21 +130,25 @@ class Operator:
     @property
     def alpha1(self) -> float:
         """Current source normalization owned by the source runtime state."""
+        self._raise_if_jax_public_state("alpha1")
         return float(self.source_workspace.alpha_state[0])
 
     @alpha1.setter
     def alpha1(self, value: float) -> None:
         """Update the current source normalization in place."""
+        self._raise_if_jax_public_state("alpha1")
         self.source_workspace.alpha_state[0] = float(value)
 
     @property
     def alpha2(self) -> float:
         """Flux/source normalization owned by the source runtime state."""
+        self._raise_if_jax_public_state("alpha2")
         return float(self.source_workspace.alpha_state[1])
 
     @alpha2.setter
     def alpha2(self, value: float) -> None:
         """Update the flux/source normalization in place."""
+        self._raise_if_jax_public_state("alpha2")
         self.source_workspace.alpha_state[1] = float(value)
 
     @property
@@ -469,6 +480,8 @@ class Operator:
             s_effective_order=self.s_effective_order,
             fix_rho=self.fix_rho,
             psin_profile_fields_available=self.profile_workspace.has_fields_for("psin"),
+            backend=self.backend,
+            backend_options=self.backend_options,
         )
         fixed_profile_ids = np.flatnonzero(~self.plan.active_profile_mask).astype(
             np.int64, copy=False
@@ -537,6 +550,13 @@ class Operator:
         self.layout.run_source()
         return target_root_fields[0]
 
+    def _raise_if_jax_public_state(self, name: str) -> None:
+        if self.backend == "jax":
+            raise UnsupportedBackendFeature(
+                f"backend='jax' does not expose public state {name!r} until "
+                "explicit host publication is implemented."
+            )
+
     def _snapshot_equilibrium_from_runtime(self, x: np.ndarray) -> Equilibrium:
         root_fields = self.residual_workspace.root_fields
         return snapshot_equilibrium_from_runtime(
@@ -558,6 +578,6 @@ class Operator:
             Pn_psin=root_fields[4],
             psin_r=root_fields[1],
             psin_rr=root_fields[2],
-            alpha1=self.alpha1,
-            alpha2=self.alpha2,
+            alpha1=float(self.source_workspace.alpha_state[0]),
+            alpha2=float(self.source_workspace.alpha_state[1]),
         )

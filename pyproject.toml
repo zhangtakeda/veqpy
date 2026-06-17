@@ -47,6 +47,9 @@ dev = [
     "ruff>=0.4",
     "twine>=6.2",
 ]
+jax = [
+    "jax>=0.4.30",
+]
 
 [project.urls]
 Homepage = "https://zhangtakeda.github.io"

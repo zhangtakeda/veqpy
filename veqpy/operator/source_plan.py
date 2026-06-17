@@ -13,20 +13,21 @@ Notes:
 from __future__ import annotations
 
 import warnings
-from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
 
-from veqpy.engine.numba_source import (
-    COORDINATE_CODES,
-    source_parameterization_for_route_key,
-)
 from veqpy.math.interpolate import (
     SOURCE_INTERP_DEFAULT,
     normalize_source_interpolation_kind,
     source_interpolation_kind_is_barycentric,
+)
+from veqpy.operator.source_execution import (
+    validate_source_plan_profile_support as _validate_source_plan_profile_support,
+)
+from veqpy.operator.source_routes import (
+    source_parameterization_for_route_key,
 )
 
 if TYPE_CHECKING:
@@ -54,7 +55,6 @@ class SourcePlan:
     """
 
     route: str
-    kernel: Callable
     coordinate: str
     nodes: str
     parameterization: str
@@ -82,13 +82,29 @@ class SourcePlan:
 
     @property
     def coordinate_code(self) -> int:
-        """Integer coordinate code consumed by numba source kernels."""
-        return int(COORDINATE_CODES[self.coordinate])
+        """Compatibility-only integer coordinate code for Numba source kernels."""
+        from veqpy.engine.numba_abi import NumbaSourceBindingPlan
+
+        return int(NumbaSourceBindingPlan.from_source_plan(self).coordinate_code)
 
     @property
     def parameterization_code(self) -> int:
-        """Integer source-parameterization code consumed by numba kernels."""
-        return int(SOURCE_PARAMETERIZATION_CODES[self.parameterization])
+        """Compatibility-only source-parameterization code for Numba kernels."""
+        from veqpy.engine.numba_abi import NumbaSourceBindingPlan
+
+        return int(NumbaSourceBindingPlan.from_source_plan(self).parameterization_code)
+
+    @property
+    def kernel(self):
+        """Compatibility-only Numba source kernel lookup.
+
+        ``SourcePlan`` no longer stores concrete kernel callables.  Existing
+        callers that still need the Numba callable retrieve it through the Numba
+        binding adapter.
+        """
+        from veqpy.engine.numba_abi import NumbaSourceBindingPlan
+
+        return NumbaSourceBindingPlan.from_source_plan(self).kernel
 
     @property
     def uses_barycentric_interpolation(self) -> bool:
@@ -111,6 +127,7 @@ def build_source_plan(
     interpolation_kind: str = SOURCE_INTERP_DEFAULT,
 ) -> SourcePlan:
     """Build the immutable source plan for a ``Problem``."""
+    del source_route_spec  # route semantics are carried by problem/source_routes metadata
     scaled_heat, scaled_current, scaled_Ip, beta = _scaled_source_inputs(problem)
     # Parameterization is route-specific.  For example PP/psin/uniform samples
     # on sqrt(psin) to bias resolution near the magnetic axis while all kernels
@@ -122,7 +139,6 @@ def build_source_plan(
     )
     return SourcePlan(
         route=str(problem.route).upper(),
-        kernel=source_route_spec.implementation,
         coordinate=str(problem.coordinate).lower(),
         nodes=str(problem.nodes).lower(),
         parameterization=source_parameterization_for_route_key(route_key),
@@ -202,44 +218,13 @@ def validate_source_plan_profile_support(
     source_execution: object,
     problem: Problem,
 ) -> None:
-    """Validate source-plan compatibility with active profile ownership."""
-    route_key = source_plan.route_key
-    if route_key != tuple(getattr(source_execution, "route_key")):
-        raise ValueError(
-            f"Source execution binding route mismatch: plan={route_key!r}, "
-            f"binding={getattr(source_execution, 'route_key')!r}"
-        )
+    """Compatibility wrapper for source-execution ownership validation."""
 
-    has_active_psin = int(getattr(source_execution, "psin_active_length", 0)) > 0
-    has_active_F = int(getattr(source_execution, "f_active_length", 0)) > 0
-    requires_active_F = bool(getattr(source_execution, "requires_optimized_f_profile", False))
-    if has_active_F and not requires_active_F:
-        raise ValueError(
-            f"{problem.route} does not accept an active F profile; "
-            "active F is only supported for PJ2"
-        )
-    if requires_active_F and not has_active_F:
-        raise ValueError(f"{problem.route} requires an active F profile")
-    if has_active_F and has_active_psin:
-        raise ValueError("Active F and active psin profiles are mutually exclusive")
-    if (
-        bool(getattr(source_execution, "requires_optimized_psin_profile", False))
-        and not has_active_psin
-    ):
-        # PF/PP/PI/PJ1/PQ psin-uniform routes query external source samples at
-        # the current optimized psin each residual evaluation.
-        raise ValueError(f"{problem.route} requires an active psin profile")
-    if (
-        source_plan.is_psin_coordinate
-        and has_active_psin
-        and not bool(getattr(source_execution, "requires_optimized_psin_profile", False))
-    ):
-        # Source-owned psin routes reconstruct flux in the source kernel.  An
-        # active psin profile would create two independent owners of the same
-        # root field and stale source queries.
-        raise ValueError(
-            f"{problem.route} does not accept an active psin profile"
-        )
+    _validate_source_plan_profile_support(
+        source_plan=source_plan,
+        source_execution=source_execution,
+        problem=problem,
+    )
 
 
 def validate_source_inputs(problem: Problem, nr: int) -> None:
