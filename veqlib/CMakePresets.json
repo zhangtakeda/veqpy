@@ -1,0 +1,68 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 24,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "clang-release",
+      "displayName": "clang release",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "ENABLE_ENZYME": "OFF",
+        "VEQLIB_ENABLE_NATIVE_OPTIMIZATIONS": "ON",
+        "VEQLIB_ENABLE_THIN_LTO": "ON"
+      }
+    },
+    {
+      "name": "clang-enzyme-release",
+      "displayName": "clang release + Enzyme",
+      "inherits": "clang-release",
+      "binaryDir": "${sourceDir}/build/enzyme-release",
+      "cacheVariables": {
+        "ENABLE_ENZYME": "ON",
+        "VEQLIB_ENZYME_PLUGIN": "/home/rhzhang/opt/Enzyme/enzyme/build-llvm18/Enzyme/ClangEnzyme-18.so"
+      }
+    },
+    {
+      "name": "clang-debug",
+      "displayName": "clang debug",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "ENABLE_ENZYME": "OFF",
+        "VEQLIB_ENABLE_NATIVE_OPTIMIZATIONS": "OFF",
+        "VEQLIB_ENABLE_THIN_LTO": "OFF"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "clang-release",
+      "configurePreset": "clang-release"
+    },
+    {
+      "name": "clang-enzyme-release",
+      "configurePreset": "clang-enzyme-release"
+    },
+    {
+      "name": "clang-debug",
+      "configurePreset": "clang-debug"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "clang-enzyme-release",
+      "configurePreset": "clang-enzyme-release"
+    }
+  ]
+}
