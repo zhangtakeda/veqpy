@@ -72,4 +72,4 @@ tmp/
 # Root-only manuscript scratch/artifact directories.
 /figures/
 /references/
-/scripts/
+# /scripts/

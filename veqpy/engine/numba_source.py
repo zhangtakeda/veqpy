@@ -528,6 +528,45 @@ def _fill_g1n_rho_integrand(
 
 
 @njit(cache=True, fastmath=True, nogil=True)
+def _g1n_psin_integral_from_radial_moments(
+    FFn_psin: np.ndarray,
+    Pn_psin: np.ndarray,
+    Ln_r: np.ndarray,
+    V_r: np.ndarray,
+    weights: np.ndarray,
+) -> float:
+    total = 0.0
+    two_pi = 2.0 * np.pi
+    inv_two_pi = 1.0 / two_pi
+    for i in range(FFn_psin.shape[0]):
+        total += weights[i] * (two_pi * Ln_r[i] * FFn_psin[i] + inv_two_pi * V_r[i] * Pn_psin[i])
+    return total
+
+
+@njit(cache=True, fastmath=True, nogil=True)
+def _g1n_rho_integral_from_radial_moments(
+    FFn_r: np.ndarray,
+    Pn_r: np.ndarray,
+    psin_r: np.ndarray,
+    Ln_r: np.ndarray,
+    V_r: np.ndarray,
+    weights: np.ndarray,
+    source_scale: float,
+) -> float:
+    total = 0.0
+    two_pi = 2.0 * np.pi
+    inv_two_pi = 1.0 / two_pi
+    for i in range(FFn_r.shape[0]):
+        total += (
+            weights[i]
+            * source_scale
+            / psin_r[i]
+            * (two_pi * Ln_r[i] * FFn_r[i] + inv_two_pi * V_r[i] * Pn_r[i])
+        )
+    return total
+
+
+@njit(cache=True, fastmath=True, nogil=True)
 def _fill_pp_ffn_psin(
     out: np.ndarray,
     psin_r: np.ndarray,
@@ -543,8 +582,7 @@ def _fill_pp_ffn_psin(
     for i in range(out.shape[0]):
         term0 = alpha_ratio * (Kn_r[i] * psin_r[i] + Kn[i] * psin_rr[i])
         term1 = V_r[i] * Pn_psin[i] * pressure_factor
-        ffn_r = -(term0 + term1) * (psin_r[i] / Ln_r[i])
-        out[i] = ffn_r / psin_r[i]
+        out[i] = -(term0 + term1) / Ln_r[i]
     return out
 
 
@@ -580,8 +618,7 @@ def _fill_pj_ffn_psin(
     for i in range(out.shape[0]):
         term0 = current_scale * jtor[i] * S_r[i]
         term1 = V_r[i] * Pn_psin[i] * pressure_factor
-        ffn_r = -(term0 + term1) * (psin_r[i] / Ln_r[i])
-        out[i] = ffn_r / psin_r[i]
+        out[i] = -(term0 + term1) / Ln_r[i]
     return out
 
 
@@ -1177,7 +1214,7 @@ def _update_pf_from_rho_inputs_with_scratch(
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
     rho = _source_grid_rho(grid_radial_fields)
-    V_r, Kn, _, Ln_r, _, R, JdivR = _source_geometry_workspace_views(radial_fields, surface_fields)
+    V_r, Kn, _, Ln_r, _, _, _ = _source_geometry_workspace_views(radial_fields, surface_fields)
     has_Ip = not np.isnan(Ip)
     has_beta = not np.isnan(beta)
     integrand = array_scratch[_SLOT_INTEGRAND]
@@ -1214,27 +1251,15 @@ def _update_pf_from_rho_inputs_with_scratch(
         return alpha1, alpha2
     c2 = integral_prof * integral_prof
     if has_Ip and (not has_beta):
-        g1n_integrand = matrix_scratch[0]
-        _fill_g1n_rho_integrand(
-            g1n_integrand,
-            JdivR,
+        G1n_integral = _g1n_rho_integral_from_radial_moments(
             current_input,
-            R,
             heat_input,
             out_psin_r,
+            Ln_r,
+            V_r,
+            weights,
             psi_square_sign,
         )
-        radial_scratch = array_scratch[_SLOT_AUX0]
-        nt = g1n_integrand.shape[1]
-        for j in range(nt):
-            s = 0.0
-            for i in range(g1n_integrand.shape[0]):
-                s += weights[i] * g1n_integrand[i, j]
-            radial_scratch[j] = s
-        G1n_integral = 0.0
-        for j in range(nt):
-            G1n_integral += radial_scratch[j]
-        G1n_integral = (2.0 * np.pi / nt) * G1n_integral
         alpha1 = -Ip / G1n_integral
     elif has_beta and (not has_Ip):
         scratch_aux = array_scratch[_SLOT_AUX0]
@@ -1276,7 +1301,7 @@ def _update_pf_from_psin_uniform_inputs_with_scratch(
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
     rho = _source_grid_rho(grid_radial_fields)
-    V_r, Kn, _, Ln_r, _, R, JdivR = _source_geometry_workspace_views(radial_fields, surface_fields)
+    V_r, Kn, _, Ln_r, _, _, _ = _source_geometry_workspace_views(radial_fields, surface_fields)
     has_Ip = not np.isnan(Ip)
     has_beta = not np.isnan(beta)
     integrand = array_scratch[_SLOT_INTEGRAND]
@@ -1306,19 +1331,13 @@ def _update_pf_from_psin_uniform_inputs_with_scratch(
     copy_into(out_FFn_psin, current_input)
     _regularize_ffn_psin(out_FFn_psin, rho, n_axis_fix)
     if has_Ip and (not has_beta):
-        g1n_integrand = matrix_scratch[0]
-        _fill_g1n_psin_integrand(g1n_integrand, JdivR, out_FFn_psin, R, out_Pn_psin)
-        radial_scratch = array_scratch[_SLOT_AUX0]
-        nt = g1n_integrand.shape[1]
-        for j in range(nt):
-            s = 0.0
-            for i in range(g1n_integrand.shape[0]):
-                s += weights[i] * g1n_integrand[i, j]
-            radial_scratch[j] = s
-        G1n_integral = 0.0
-        for j in range(nt):
-            G1n_integral += radial_scratch[j]
-        G1n_integral = (2.0 * np.pi / nt) * G1n_integral
+        G1n_integral = _g1n_psin_integral_from_radial_moments(
+            out_FFn_psin,
+            out_Pn_psin,
+            Ln_r,
+            V_r,
+            weights,
+        )
         alpha1 = -Ip / G1n_integral
     elif has_beta and (not has_Ip):
         scratch_Pn_r = array_scratch[_SLOT_PNr]
@@ -1359,7 +1378,7 @@ def _update_pf_from_psin_grid_inputs_with_scratch(
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
     rho = _source_grid_rho(grid_radial_fields)
-    V_r, Kn, _, Ln_r, _, R, JdivR = _source_geometry_workspace_views(radial_fields, surface_fields)
+    V_r, Kn, _, Ln_r, _, _, _ = _source_geometry_workspace_views(radial_fields, surface_fields)
     has_Ip = not np.isnan(Ip)
     has_beta = not np.isnan(beta)
     integrand = array_scratch[_SLOT_INTEGRAND]
@@ -1389,19 +1408,13 @@ def _update_pf_from_psin_grid_inputs_with_scratch(
     copy_into(out_FFn_psin, current_input)
     _regularize_ffn_psin(out_FFn_psin, rho, n_axis_fix)
     if has_Ip and (not has_beta):
-        g1n_integrand = matrix_scratch[0]
-        _fill_g1n_psin_integrand(g1n_integrand, JdivR, out_FFn_psin, R, out_Pn_psin)
-        radial_scratch = array_scratch[_SLOT_AUX0]
-        nt = g1n_integrand.shape[1]
-        for j in range(nt):
-            s = 0.0
-            for i in range(g1n_integrand.shape[0]):
-                s += weights[i] * g1n_integrand[i, j]
-            radial_scratch[j] = s
-        G1n_integral = 0.0
-        for j in range(nt):
-            G1n_integral += radial_scratch[j]
-        G1n_integral = (2.0 * np.pi / nt) * G1n_integral
+        G1n_integral = _g1n_psin_integral_from_radial_moments(
+            out_FFn_psin,
+            out_Pn_psin,
+            Ln_r,
+            V_r,
+            weights,
+        )
         alpha1 = -Ip / G1n_integral
     elif has_beta and (not has_Ip):
         scratch_Pn_r = array_scratch[_SLOT_PNr]

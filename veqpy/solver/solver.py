@@ -251,17 +251,19 @@ class Solver:
 
         self.x0 = x_final.copy()
         self.result = replace(self.result, total_elapsed=(perf_counter() - call_started) * 1e6)
-        record = SolverRecord(
-            problem_snapshot=self.operator.problem.copy(),
-            config_snapshot=solve_config,
-            result_snapshot=self.result,
-        )
 
-        if solve_config.enable_verbose:
-            Console().print(record)
+        if solve_config.enable_verbose or solve_config.enable_history:
+            record = SolverRecord(
+                problem_snapshot=self.operator.problem.copy(),
+                config_snapshot=solve_config,
+                result_snapshot=self.result,
+            )
 
-        if solve_config.enable_history:
-            self.history.append(record)
+            if solve_config.enable_verbose:
+                Console().print(record)
+
+            if solve_config.enable_history:
+                self.history.append(record)
 
         return x_final
 
@@ -354,6 +356,12 @@ class Solver:
             overrides["collocation_max_residual"] = float(collocation_max_residual)
         if collocation_max_evaluations is not None:
             overrides["collocation_max_evaluations"] = int(collocation_max_evaluations)
+        if overrides:
+            overrides = {
+                name: value
+                for name, value in overrides.items()
+                if value != getattr(self.config, name)
+            }
         if not overrides:
             return self.config
         return replace(self.config, **overrides)
@@ -500,34 +508,37 @@ class Solver:
             tuple[str, tuple[np.ndarray, bool, str, int, int, int, float] | None, Exception | None]
         ] = []
 
-        attempt_plans = self._build_attempt_plans(
-            x_guess,
+        x_initial = self.operator.coerce_x(x_guess).copy()
+        label = self._display_attempt_label(
+            solve_config,
+            start_kind=self._display_start_kind(
+                x_initial,
+                solve_config=solve_config,
+                x0_was_provided=x0_was_provided,
+            ),
+        )
+        result, error = self._try_solve_attempt(
+            x_initial,
             solve_config=solve_config,
             residual_kind=residual_kind,
-            x0_was_provided=x0_was_provided,
         )
+        attempts.append((label, result, error))
+        if self._attempt_succeeded(result, error):
+            if result is None:
+                raise RuntimeError("Solve attempt succeeded without a result")
+            return result
 
-        for idx, attempt_plan in enumerate(attempt_plans):
-            label, x_attempt_guess, attempt_config = attempt_plan
-            result, error = self._try_solve_attempt(
-                x_attempt_guess,
-                solve_config=attempt_config,
-                residual_kind=residual_kind,
+        seen_methods = {solve_config.method}
+        fallback_methods = () if not solve_config.enable_fallback else solve_config.fallback_methods
+        for fallback_method in fallback_methods:
+            if fallback_method in seen_methods:
+                continue
+            seen_methods.add(fallback_method)
+            fallback_config = replace(solve_config, method=fallback_method)
+            next_label = self._display_attempt_label(
+                fallback_config,
+                start_kind="warm-fallback",
             )
-            attempts.append((label, result, error))
-            if self._attempt_succeeded(result, error):
-                if result is None:
-                    raise RuntimeError("Solve attempt succeeded without a result")
-                if idx == 0:
-                    return result
-                # For fallback success, preserve every prior attempt in the
-                # message and aggregate counters so diagnostics match total work.
-                return self._finalize_attempts(attempts)
-
-            if idx + 1 >= len(attempt_plans):
-                break
-
-            next_label = attempt_plans[idx + 1][0]
             failure = self._format_attempt_failure(
                 method=label,
                 result=result,
@@ -543,52 +554,21 @@ class Solver:
                     stacklevel=2,
                 )
 
-        return self._finalize_attempts(attempts)
-
-    def _build_attempt_plans(
-        self,
-        x_guess: np.ndarray,
-        *,
-        solve_config: SolverConfig,
-        residual_kind: str,
-        x0_was_provided: bool,
-    ) -> list[tuple[str, np.ndarray, SolverConfig]]:
-        x_initial = self.operator.coerce_x(x_guess).copy()
-        # All attempts start from the same physical state.  This makes method
-        # comparisons meaningful and avoids carrying a failed method's possibly
-        # invalid source fixed-point state into the next attempt.
-        attempt_plans = [
-            (
-                self._display_attempt_label(
-                    solve_config,
-                    start_kind=self._display_start_kind(
-                        x_initial,
-                        solve_config=solve_config,
-                        x0_was_provided=x0_was_provided,
-                    ),
-                ),
+            label = next_label
+            result, error = self._try_solve_attempt(
                 x_initial,
-                solve_config,
+                solve_config=fallback_config,
+                residual_kind=residual_kind,
             )
-        ]
+            attempts.append((label, result, error))
+            if self._attempt_succeeded(result, error):
+                if result is None:
+                    raise RuntimeError("Solve attempt succeeded without a result")
+                # For fallback success, preserve every prior attempt in the
+                # message and aggregate counters so diagnostics match total work.
+                return self._finalize_attempts(attempts)
 
-        seen_methods = {solve_config.method}
-        fallback_methods = () if not solve_config.enable_fallback else solve_config.fallback_methods
-        for fallback_method in fallback_methods:
-            if fallback_method in seen_methods:
-                continue
-            seen_methods.add(fallback_method)
-            fallback_config = replace(solve_config, method=fallback_method)
-            attempt_plans.append(
-                (
-                    self._display_attempt_label(fallback_config, start_kind="warm-fallback"),
-                    # Fallbacks compare methods from the same physical initial
-                    # state, not from the failed method's terminal iterate.
-                    x_initial.copy(),
-                    fallback_config,
-                )
-            )
-        return attempt_plans
+        return self._finalize_attempts(attempts)
 
     def _try_solve_attempt(
         self,
@@ -1264,6 +1244,7 @@ class Solver:
             return None, x_eval, None
 
         inv_scale = 1.0 / x_scale
+        x_buffer = np.empty_like(x_eval)
 
         def map_z_to_x(z: np.ndarray) -> np.ndarray:
             z_eval = np.asarray(z, dtype=np.float64)
@@ -1271,7 +1252,8 @@ class Solver:
                 raise ValueError(f"Expected z to have shape {x_eval.shape}, got {z_eval.shape}")
             # Root solvers operate in z-space for conditioning, but all operator
             # kernels must see the original packed x coordinates.
-            return self.operator.coerce_x(z_eval * x_scale)
+            np.multiply(z_eval, x_scale, out=x_buffer)
+            return x_buffer
 
         return map_z_to_x, x_eval * inv_scale, map_z_to_x
 

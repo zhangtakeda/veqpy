@@ -79,7 +79,7 @@ class SolverConfig:
     method: str | None = None
     max_residual: float = 1e-6
     max_evaluations: int = 1000
-    initial_policy: str | None = None
+    initial_policy: str | None = "auto"
     enable_fallback: bool = True
     fallback_methods: tuple[str, ...] | list[str] | None = field(default=None)
     enable_verbose: bool = False
@@ -150,9 +150,7 @@ class SolverConfig:
         max_residual = float(self.max_residual)
         max_evaluations = int(self.max_evaluations)
         initial_policy = (
-            None
-            if self.initial_policy is None
-            else str(self.initial_policy).strip().lower()
+            None if self.initial_policy is None else str(self.initial_policy).strip().lower()
         )
         if initial_policy == "zero":
             initial_policy = "zeros"

@@ -35,7 +35,7 @@ from rich.text import Text
 from rich.tree import Tree
 
 from veqpy.base import Reactive, Serial
-from veqpy.engine.numba_geometry import update_geometry_hot
+from veqpy.engine.numba_geometry import update_geometry_hot_auto
 from veqpy.engine.numba_profile import update_profile
 from veqpy.model.geqdsk import Geqdsk
 from veqpy.model.grid import Grid
@@ -1205,7 +1205,7 @@ def _materialized_geometry_from_profile_fields(
     surface_fields = np.empty((9, grid.Nr, grid.Nt), dtype=np.float64)
     radial_fields = np.empty((5, grid.Nr), dtype=np.float64)
     grid_workspace = GridWorkspace.from_grid(grid)
-    update_geometry_hot(
+    update_geometry_hot_auto(
         surface_fields,
         radial_fields,
         float(a),

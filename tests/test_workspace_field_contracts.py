@@ -10,7 +10,7 @@ from veqpy.engine.backend_abi import (
     build_fused_hot_runtime_abi,
     build_fused_source_eval_abi,
 )
-from veqpy.engine.numba_geometry import update_geometry_hot
+from veqpy.engine.numba_geometry import update_geometry_hot, update_geometry_hot_auto
 from veqpy.model import Problem
 from veqpy.operator import Operator
 from veqpy.workspace.geometry_workspace import GeometryWorkspace
@@ -226,6 +226,86 @@ def test_update_geometry_hot_accepts_grid_field_slabs() -> None:
 
     assert np.all(np.isfinite(geometry_workspace.surface_fields))
     assert np.all(np.isfinite(geometry_workspace.radial_fields))
+
+
+def test_update_geometry_hot_auto_matches_generic_for_specialized_shapes() -> None:
+    grid_workspace = GridWorkspace.from_grid(tiny_grid())
+    nr = grid_workspace.Nr
+    rho = grid_workspace.rho
+    h_fields = np.vstack(
+        (
+            0.03 * rho,
+            np.full(nr, 0.03, dtype=np.float64),
+            np.zeros(nr, dtype=np.float64),
+        )
+    )
+    v_fields = np.vstack(
+        (
+            0.02 * rho * rho,
+            0.04 * rho,
+            np.full(nr, 0.04, dtype=np.float64),
+        )
+    )
+    k_fields = np.vstack(
+        (
+            1.2 + 0.04 * rho,
+            np.full(nr, 0.04, dtype=np.float64),
+            np.zeros(nr, dtype=np.float64),
+        )
+    )
+
+    for include_s1 in (False, True):
+        c_fields = np.zeros((grid_workspace.M_max + 1, 3, nr), dtype=np.float64)
+        s_fields = np.zeros_like(c_fields)
+        c_fields[0, rows.PROFILE_VALUE] = 0.05 * rho
+        c_fields[0, rows.PROFILE_R] = 0.05
+        if include_s1:
+            s_fields[1, rows.PROFILE_VALUE] = 0.04 * rho
+            s_fields[1, rows.PROFILE_R] = 0.04
+            s_active_order = 1
+        else:
+            s_active_order = 0
+
+        generic_surface = np.empty((9, nr, grid_workspace.Nt), dtype=np.float64)
+        generic_radial = np.empty((5, nr), dtype=np.float64)
+        auto_surface = np.empty_like(generic_surface)
+        auto_radial = np.empty_like(generic_radial)
+
+        update_geometry_hot(
+            generic_surface,
+            generic_radial,
+            0.4,
+            1.6,
+            0.0,
+            grid_workspace.radial_fields,
+            grid_workspace.poloidal_fields,
+            h_fields,
+            v_fields,
+            k_fields,
+            c_fields,
+            s_fields,
+            0,
+            s_active_order,
+        )
+        update_geometry_hot_auto(
+            auto_surface,
+            auto_radial,
+            0.4,
+            1.6,
+            0.0,
+            grid_workspace.radial_fields,
+            grid_workspace.poloidal_fields,
+            h_fields,
+            v_fields,
+            k_fields,
+            c_fields,
+            s_fields,
+            0,
+            s_active_order,
+        )
+
+        assert_allclose(auto_surface, generic_surface, rtol=1e-12, atol=1e-12)
+        assert_allclose(auto_radial, generic_radial, rtol=1e-12, atol=1e-12)
 
 
 def test_profile_workspace_row_accessors_alias_profile_fields() -> None:
