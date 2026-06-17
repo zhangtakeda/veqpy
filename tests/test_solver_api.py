@@ -11,6 +11,7 @@ from veqpy.model import Boundary
 from veqpy.operator import Operator
 from veqpy.solver import Solver, SolverConfig, SolverResult
 from veqpy.solver.residual_scale import DEFAULT_RESIDUAL_NORMALIZATION
+from veqpy.solver.solver import _AUTO_CURVE_STRAIN_THRESHOLD, _boundary_curve_strain
 
 
 def test_solver_config_normalizes_aliases_and_validates_methods() -> None:
@@ -343,6 +344,7 @@ def test_solver_auto_policy_selects_refined_only_above_curve_strain_threshold(
         return captured["x_guess"]
 
     moderate_problem = tiny_pf_problem()
+    assert _boundary_curve_strain(moderate_problem.boundary) < _AUTO_CURVE_STRAIN_THRESHOLD
     moderate_auto = capture_x_guess(moderate_problem, "auto")
     moderate_zeros = capture_x_guess(moderate_problem, "zeros")
     assert np.array_equal(moderate_auto, moderate_zeros)
@@ -355,9 +357,10 @@ def test_solver_auto_policy_selects_refined_only_above_curve_strain_threshold(
             Z0=boundary.Z0,
             B0=boundary.B0,
             ka=boundary.ka,
-            c_offsets=np.array([0.0, 0.6], dtype=np.float64),
+            c_offsets=np.array([0.0, 0.4], dtype=np.float64),
         )
     )
+    assert _boundary_curve_strain(large_projection_problem.boundary) < _AUTO_CURVE_STRAIN_THRESHOLD
     large_projection_auto = capture_x_guess(large_projection_problem, "auto")
     large_projection_zeros = capture_x_guess(large_projection_problem, "zeros")
     assert np.array_equal(large_projection_auto, large_projection_zeros)
@@ -372,6 +375,7 @@ def test_solver_auto_policy_selects_refined_only_above_curve_strain_threshold(
             s_offsets=np.array([0.0, np.arcsin(0.9)], dtype=np.float64),
         )
     )
+    assert _boundary_curve_strain(high_s_problem.boundary) >= _AUTO_CURVE_STRAIN_THRESHOLD
     high_s_auto = capture_x_guess(high_s_problem, "auto")
     high_s_refined = capture_x_guess(high_s_problem, "geometric-refined")
     assert np.allclose(high_s_auto, high_s_refined)
@@ -386,6 +390,7 @@ def test_solver_auto_policy_selects_refined_only_above_curve_strain_threshold(
             c_offsets=np.array([0.0, 0.8], dtype=np.float64),
         )
     )
+    assert _boundary_curve_strain(high_c_problem.boundary) >= _AUTO_CURVE_STRAIN_THRESHOLD
     high_c_auto = capture_x_guess(high_c_problem, "auto")
     high_c_refined = capture_x_guess(high_c_problem, "geometric-refined")
     assert np.allclose(high_c_auto, high_c_refined)
@@ -404,4 +409,5 @@ def test_solver_auto_policy_selects_refined_only_above_curve_strain_threshold(
     ellipse_auto = capture_x_guess(ellipse_problem, "auto")
     ellipse_zeros = capture_x_guess(ellipse_problem, "zeros")
 
+    assert _boundary_curve_strain(ellipse_problem.boundary) < _AUTO_CURVE_STRAIN_THRESHOLD
     assert np.array_equal(ellipse_auto, ellipse_zeros)
