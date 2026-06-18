@@ -402,6 +402,10 @@ veqlib_enable_enzyme(veqlib_probe)
 add_executable(veqlib_temp_validation temp_validation.cpp ${VEQLIB_COMMON_SOURCES})
 veqlib_configure_executable(veqlib_temp_validation)
 
+add_executable(veqlib_pf_psin_uniform_validation pf_psin_uniform_validation.cpp ${VEQLIB_COMMON_SOURCES})
+veqlib_configure_executable(veqlib_pf_psin_uniform_validation)
+
 enable_testing()
 add_test(NAME veqlib_probe COMMAND veqlib_probe)
 add_test(NAME veqlib_temp_validation COMMAND veqlib_temp_validation)
+add_test(NAME veqlib_pf_psin_uniform_validation COMMAND veqlib_pf_psin_uniform_validation)
