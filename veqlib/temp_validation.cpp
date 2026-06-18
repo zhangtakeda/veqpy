@@ -1079,6 +1079,108 @@ namespace
         return true;
     }
 
+    constexpr bool pf_source_constexpr_ok()
+    {
+        using Shape   = SourceMaterializationShape;
+        using Grid    = SourceMaterializationGrid;
+        using Runtime = SourceMaterializationProfiles;
+        using Source  = SourceMaterializationRuntime;
+        using Geometry = GeometryRuntime<Grid>;
+
+        constexpr size_t psin_id = Shape::psin_profile_id;
+        const auto       psin_coeffs = make_profile_coefficients<3>(0.01, -0.0002);
+        constexpr std::array<double, 5> heat{2.0, 2.75, 3.5, 4.25, 5.0};
+        constexpr std::array<double, 5> current{0.5, 0.625, 0.75, 0.875, 1.0};
+        constexpr double a  = 0.42;
+        constexpr double R0 = 1.8;
+        constexpr double Z0 = -0.25;
+        constexpr double B0 = 2.1;
+
+        profiles::ProfileRuntimeParams<Shape> params{};
+        params.offsets[Shape::h_profile_id] = 0.0;
+        params.offsets[Shape::v_profile_id] = 0.0;
+        params.offsets[Shape::kappa_profile_id] = 1.45;
+        params.offsets[Shape::c_profile_id<0>()] = 0.0;
+
+        Vector<double, Shape::x_size> x{};
+        write_profile_coefficients<Shape, psin_id>(x, psin_coeffs);
+
+        Runtime profiles{};
+        profiles.refresh_fixed(params);
+        profiles.refresh_active(std::span<const double, Shape::x_size>{x.data(), Shape::x_size}, params);
+
+        Geometry geometry{};
+        geometry.update(a, R0, Z0, profiles);
+
+        auto make_source = [&heat, &current, &profiles](Source& source) constexpr {
+            source.set_uniform_sources(
+                std::span<const double, heat.size()>{heat.data(), heat.size()},
+                std::span<const double, current.size()>{current.data(), current.size()}
+            );
+            return source.materialize_profile_owned_psin(profiles, source::axis_fix_count<Grid>(0.0));
+        };
+
+        Source free_source{};
+        if (!make_source(free_source) ||
+            !free_source.update_pf_from_psin_uniform(
+                geometry,
+                B0,
+                source::unset_constraint(),
+                source::unset_constraint(),
+                source::axis_fix_count<Grid>(0.0)
+            ))
+            return false;
+
+        if (!math::is_finite(free_source.alpha1) || !math::is_finite(free_source.alpha2))
+            return false;
+        for (size_t i = 0; i < Grid::radial_nodes; ++i)
+        {
+            if (free_source.source_target_root_fields(root_psin_r, i) <= 0.0 ||
+                !close(free_source.Pn_psin[i], free_source.materialized_heat_input[i] / free_source.alpha1, 1.0e-10) ||
+                !close(free_source.FFn_psin[i], free_source.materialized_current_input[i] / free_source.alpha1, 1.0e-10))
+                return false;
+        }
+
+        Source ip_source{};
+        if (!make_source(ip_source) ||
+            !ip_source.update_pf_from_psin_uniform(
+                geometry,
+                B0,
+                0.75,
+                source::unset_constraint(),
+                source::axis_fix_count<Grid>(0.0)
+            ))
+            return false;
+        for (size_t i = 0; i < Grid::radial_nodes; ++i)
+            if (!close(ip_source.Pn_psin[i], ip_source.materialized_heat_input[i]) ||
+                !close(ip_source.FFn_psin[i], ip_source.materialized_current_input[i]))
+                return false;
+
+        Source beta_source{};
+        if (!make_source(beta_source) ||
+            !beta_source.update_pf_from_psin_uniform(
+                geometry,
+                B0,
+                source::unset_constraint(),
+                0.04,
+                source::axis_fix_count<Grid>(0.0)
+            ))
+            return false;
+        for (size_t i = 0; i < Grid::radial_nodes; ++i)
+            if (!close(beta_source.Pn_psin[i], beta_source.materialized_heat_input[i]) ||
+                !close(beta_source.FFn_psin[i], beta_source.materialized_current_input[i]))
+                return false;
+
+        Source invalid_source{};
+        if (!make_source(invalid_source))
+            return false;
+        if (invalid_source.update_pf_from_psin_uniform(geometry, B0, 0.75, 0.04, source::axis_fix_count<Grid>(0.0)))
+            return false;
+
+        return math::is_finite(ip_source.alpha1) && math::is_finite(ip_source.alpha2) &&
+               math::is_finite(beta_source.alpha1) && math::is_finite(beta_source.alpha2);
+    }
+
     static_assert(linalg_constexpr_ok());
     static_assert(tensor_math_constexpr_ok());
     static_assert(grid_constexpr_ok());
@@ -1087,6 +1189,7 @@ namespace
     static_assert(runtime_profile_semantics_constexpr_ok());
     static_assert(geometry_circular_constexpr_ok());
     static_assert(source_materialization_constexpr_ok());
+    static_assert(pf_source_constexpr_ok());
 
     int root_residual(void*, int n, const double* x, double* fvec, int iflag)
     {
@@ -1137,6 +1240,7 @@ int main()
         {"runtime_profile_semantics", runtime_profile_semantics_constexpr_ok()},
         {"geometry_circular", geometry_circular_constexpr_ok()},
         {"source_materialization", source_materialization_constexpr_ok()},
+        {"pf_source", pf_source_constexpr_ok()},
     };
     report["quadrature"] = {
         {"chebyshev_moment_error_n16_degree7", max_moment_error<Chebyshev, 16>(7)},
@@ -1158,7 +1262,7 @@ int main()
     const bool ok = linalg_constexpr_ok() && tensor_math_constexpr_ok() && grid_constexpr_ok() &&
                     profiles_grid_constexpr_ok() && runtime_profiles_constexpr_ok() &&
                     runtime_profile_semantics_constexpr_ok() && geometry_circular_constexpr_ok() &&
-                    source_materialization_constexpr_ok() && runtime_library_ok(report);
+                    source_materialization_constexpr_ok() && pf_source_constexpr_ok() && runtime_library_ok(report);
 
     std::cout << report.dump(2) << '\n';
     return ok ? EXIT_SUCCESS : EXIT_FAILURE;
