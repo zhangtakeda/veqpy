@@ -10,6 +10,7 @@
 #include <nlohmann/json.hpp>
 
 #include "config.h"
+#include "geometry.h"
 #include "grid.h"
 #include "linalg.h"
 #include "math.h"
@@ -27,6 +28,17 @@ namespace
     using grid::Lobatto;
     using grid::Radau;
     using grid::Spectral;
+    using geometry::GeometryRuntime;
+    using geometry::radial_Kn;
+    using geometry::radial_Ln_r;
+    using geometry::radial_S_r;
+    using geometry::radial_V_r;
+    using geometry::surface_J;
+    using geometry::surface_JdivR;
+    using geometry::surface_R;
+    using geometry::surface_R_t;
+    using geometry::surface_sin_tb;
+    using geometry::surface_Z_t;
     using linalg::BunchKaufman;
     using linalg::Cholesky;
     using linalg::Context;
@@ -99,6 +111,22 @@ namespace
         profiles::absent_slot(),
         no_c_slots,
         no_s_slots>;
+
+    using CircularGeometryShape = profiles::ProfileShape<
+        2,
+        2,
+        2,
+        profiles::absent_slot(),
+        profiles::absent_slot(),
+        profiles::fixed_slot(),
+        profiles::fixed_slot(),
+        profiles::absent_slot(),
+        profiles::absent_slot(),
+        no_c_slots,
+        no_s_slots>;
+    using CircularGeometryGrid     = Grid<8, 8, 2, 2, 2, Legendre, Spectral>;
+    using CircularGeometryProfiles = profiles::RuntimeProfiles<CircularGeometryShape, CircularGeometryGrid>;
+    using CircularGeometryRuntime  = GeometryRuntime<CircularGeometryGrid>;
 
     constexpr auto mixed_c_slots = std::array{
         profiles::optimized_slot(2),
@@ -912,12 +940,72 @@ namespace
                close(runtime.template s_family_field<4>(0, 0), runtime.template profile_field<s4_id>(0, 0));
     }
 
+    constexpr bool geometry_circular_constexpr_ok()
+    {
+        using Shape   = CircularGeometryShape;
+        using Grid    = CircularGeometryGrid;
+        using Runtime = CircularGeometryProfiles;
+        using Geometry = CircularGeometryRuntime;
+
+        constexpr double a  = 0.42;
+        constexpr double R0 = 1.8;
+        constexpr double Z0 = -0.25;
+        constexpr double ka = 1.55;
+
+        profiles::ProfileRuntimeParams<Shape> params{};
+        params.offsets[Shape::kappa_profile_id] = ka;
+        params.scales[Shape::kappa_profile_id]  = 1.0;
+        params.offsets[Shape::c_profile_id<0>()] = 0.0;
+        params.scales[Shape::c_profile_id<0>()]  = 1.0;
+
+        Runtime profiles{};
+        profiles.refresh_fixed(params);
+
+        Geometry geometry{};
+        geometry.update(a, R0, Z0, profiles);
+
+        if (!math::is_finite(geometry.surface_fields) || !math::is_finite(geometry.radial_fields))
+            return false;
+
+        for (size_t i = 0; i < Grid::radial_nodes; ++i)
+        {
+            const double rho_i      = Grid::nodes[i];
+            const double expected_J = a * a * rho_i * ka;
+            const double expected_S = 2.0 * grid::detail::pi * expected_J;
+            const double expected_V = 4.0 * grid::detail::pi * grid::detail::pi * expected_J * R0;
+
+            if (!close(geometry.radial_field(radial_S_r, i), expected_S, 1.0e-11) ||
+                !close(geometry.radial_field(radial_V_r, i), expected_V, 1.0e-10))
+                return false;
+            if (geometry.radial_field(radial_Kn, i) <= 0.0 || geometry.radial_field(radial_Ln_r, i) <= 0.0)
+                return false;
+
+            for (size_t j = 0; j < Grid::theta_rows; ++j)
+            {
+                const double sin_t      = Grid::sin_mtheta(1, j);
+                const double cos_t      = Grid::cos_mtheta(1, j);
+                const double expected_R = R0 + a * rho_i * cos_t;
+
+                if (!close(geometry.surface_field(surface_sin_tb, i, j), sin_t, 1.0e-12) ||
+                    !close(geometry.surface_field(surface_R, i, j), expected_R, 1.0e-12) ||
+                    !close(geometry.surface_field(surface_R_t, i, j), -a * rho_i * sin_t, 1.0e-12) ||
+                    !close(geometry.surface_field(surface_Z_t, i, j), -a * rho_i * ka * cos_t, 1.0e-12) ||
+                    !close(geometry.surface_field(surface_J, i, j), expected_J, 1.0e-12) ||
+                    !close(geometry.surface_field(surface_JdivR, i, j), expected_J / expected_R, 1.0e-12))
+                    return false;
+            }
+        }
+
+        return true;
+    }
+
     static_assert(linalg_constexpr_ok());
     static_assert(tensor_math_constexpr_ok());
     static_assert(grid_constexpr_ok());
     static_assert(profiles_grid_constexpr_ok());
     static_assert(runtime_profiles_constexpr_ok());
     static_assert(runtime_profile_semantics_constexpr_ok());
+    static_assert(geometry_circular_constexpr_ok());
 
     int root_residual(void*, int n, const double* x, double* fvec, int iflag)
     {
@@ -966,6 +1054,7 @@ int main()
         {"profiles_grid", profiles_grid_constexpr_ok()},
         {"runtime_profiles", runtime_profiles_constexpr_ok()},
         {"runtime_profile_semantics", runtime_profile_semantics_constexpr_ok()},
+        {"geometry_circular", geometry_circular_constexpr_ok()},
     };
     report["quadrature"] = {
         {"chebyshev_moment_error_n16_degree7", max_moment_error<Chebyshev, 16>(7)},
@@ -986,7 +1075,8 @@ int main()
 
     const bool ok = linalg_constexpr_ok() && tensor_math_constexpr_ok() && grid_constexpr_ok() &&
                     profiles_grid_constexpr_ok() && runtime_profiles_constexpr_ok() &&
-                    runtime_profile_semantics_constexpr_ok() && runtime_library_ok(report);
+                    runtime_profile_semantics_constexpr_ok() && geometry_circular_constexpr_ok() &&
+                    runtime_library_ok(report);
 
     std::cout << report.dump(2) << '\n';
     return ok ? EXIT_SUCCESS : EXIT_FAILURE;
