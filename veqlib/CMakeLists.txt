@@ -76,6 +76,7 @@ function(veqlib_prepare_nonnegative_int_list
 
     set(max_count 0)
     set(highest_order -1)
+    set(last_nonzero_index -1)
     set(index 0)
     foreach(value IN LISTS values)
         if(NOT "${value}" MATCHES "^[0-9]+$")
@@ -86,12 +87,20 @@ function(veqlib_prepare_nonnegative_int_list
         endif()
         if(NOT "${value}" EQUAL 0)
             math(EXPR highest_order "${index} + ${first_order}")
+            set(last_nonzero_index "${index}")
         endif()
         math(EXPR index "${index} + 1")
     endforeach()
 
-    string(REPLACE ";" ", " header_values "${values}")
-    list(LENGTH values value_count)
+    if(last_nonzero_index LESS 0)
+        set(trimmed_values)
+    else()
+        math(EXPR retained_count "${last_nonzero_index} + 1")
+        list(SUBLIST values 0 "${retained_count}" trimmed_values)
+    endif()
+
+    string(REPLACE ";" ", " header_values "${trimmed_values}")
+    list(LENGTH trimmed_values value_count)
 
     set("${out_values}" "${header_values}" PARENT_SCOPE)
     set("${out_size}" "${value_count}" PARENT_SCOPE)
