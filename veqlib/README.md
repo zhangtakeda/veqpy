@@ -68,6 +68,19 @@ Configure-time validation requires `VEQ_NR >= 4`, `VEQ_NT >= 4`, derived
 `L_max >= 1`, derived `M_max >= 1`, derived `K_max >= 2`, and
 `VEQ_PROFILE_KMAX_LIMIT >= 2`.
 
+## Static Profile Layout
+
+VEQlib maps VEQPy setup-stage semantics to C++ compile-time data: profile family
+order, profile ids, active/fixed/absent ownership, packed coefficient ordering,
+and workspace extents are compile-time facts for each concrete instantiation.
+Runtime code should carry numerical values only.
+
+`profile_layout.h` starts this boundary with `profiles::ProfileShape`, which
+mirrors VEQPy's profile order `h, v, k, c0, c, s, psin, F` and degree-first
+packed coefficient layout. `profiles::ProfileSlot` distinguishes absent,
+fixed, and optimized profiles so a profile can have runtime fields without
+contributing coefficients to packed `x`.
+
 ## Grid and Calculus
 
 The public grid families currently exposed from `grid.h` are:

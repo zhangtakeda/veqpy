@@ -1,3 +1,4 @@
+#include <array>
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
@@ -65,8 +66,141 @@ namespace
         Topology::c_family_counts,
         Topology::s_family_counts>;
 
+    constexpr auto topology_c_slots = profiles::tail_optimized_slots_from_counts<Topology::c_family_counts>();
+    constexpr auto topology_s_slots = profiles::optimized_slots_from_counts<Topology::s_family_counts>();
+
+    using ProbeProfileShape = profiles::ProfileShape<
+        Topology::L_max,
+        Topology::K_max,
+        Topology::M_max,
+        profiles::optimized_slot_from_count(Topology::h_count),
+        profiles::optimized_slot_from_count(Topology::v_count),
+        profiles::optimized_slot_from_count(Topology::kappa_count),
+        profiles::first_optimized_slot_from_counts<Topology::c_family_counts>(),
+        profiles::optimized_slot_from_count(Topology::psin_count),
+        profiles::optimized_slot_from_count(Topology::F_count),
+        topology_c_slots,
+        topology_s_slots>;
+
+    constexpr auto no_c_slots = std::array<profiles::ProfileSlot, 0>{};
+    constexpr auto no_s_slots = std::array<profiles::ProfileSlot, 0>{};
+
+    using FixedOnlyProfileShape = profiles::ProfileShape<
+        1,
+        2,
+        1,
+        profiles::fixed_slot(),
+        profiles::absent_slot(),
+        profiles::absent_slot(),
+        profiles::absent_slot(),
+        profiles::absent_slot(),
+        profiles::absent_slot(),
+        no_c_slots,
+        no_s_slots>;
+
+    constexpr auto mixed_c_slots = std::array{
+        profiles::optimized_slot(2),
+        profiles::fixed_slot(),
+    };
+    constexpr auto mixed_s_slots = std::array{
+        profiles::absent_slot(),
+        profiles::optimized_slot(3),
+    };
+
+    using MixedProfileShape = profiles::ProfileShape<
+        2,
+        2,
+        2,
+        profiles::optimized_slot(2),
+        profiles::fixed_slot(),
+        profiles::absent_slot(),
+        profiles::optimized_slot(1),
+        profiles::absent_slot(),
+        profiles::absent_slot(),
+        mixed_c_slots,
+        mixed_s_slots>;
+
+    template <typename Shape, size_t HCount>
+    consteval bool h_profile_L_matches()
+    {
+        if constexpr (HCount > 0)
+            return Shape::profile_L[Shape::h_profile_id] == static_cast<int>(HCount - 1);
+        else
+            return Shape::profile_L[Shape::h_profile_id] == -1;
+    }
+
+    template <typename Shape, typename TopologyType, size_t SMax>
+    consteval bool highest_s_profile_L_matches()
+    {
+        if constexpr (SMax > 0)
+            return Shape::profile_L[Shape::template s_profile_id<SMax>()] ==
+                   static_cast<int>(TopologyType::template s_count<SMax>() - 1);
+        else
+            return Shape::s_family_source_profile_ids[0] == -1;
+    }
+
     static_assert(Topology::fourier_power<Topology::K_max + 7>() == Topology::K_max);
     static_assert(ProbeProfiles::fourier_power<Topology::K_max + 7>() == Topology::K_max);
+
+    static_assert(ProbeProfileShape::h_profile_id == 0);
+    static_assert(ProbeProfileShape::v_profile_id == 1);
+    static_assert(ProbeProfileShape::kappa_profile_id == 2);
+    static_assert(ProbeProfileShape::c_profile_id<0>() == 3);
+    static_assert(ProbeProfileShape::s_profile_id<1>() == Topology::M_max + 4);
+    static_assert(ProbeProfileShape::psin_profile_id == 2 * Topology::M_max + 4);
+    static_assert(ProbeProfileShape::F_profile_id == 2 * Topology::M_max + 5);
+    static_assert(ProbeProfileShape::profile_count == 2 * Topology::M_max + 6);
+    static_assert(h_profile_L_matches<ProbeProfileShape, Topology::h_count>());
+    static_assert(highest_s_profile_L_matches<ProbeProfileShape, Topology, Topology::S_max>());
+    static_assert(ProbeProfileShape::coeff_index[ProbeProfileShape::h_profile_id][0] == 0);
+    static_assert(ProbeProfileShape::order_offsets[0] == 0);
+    static_assert(ProbeProfileShape::order_offsets[ProbeProfileShape::max_active_len] ==
+                  static_cast<int>(ProbeProfileShape::x_size));
+    static_assert(ProbeProfileShape::s_family_source_profile_ids[0] == -1);
+
+    static_assert(FixedOnlyProfileShape::profile_count == 8);
+    static_assert(FixedOnlyProfileShape::active_count == 0);
+    static_assert(FixedOnlyProfileShape::max_active_len == 0);
+    static_assert(FixedOnlyProfileShape::x_size == 0);
+    static_assert(FixedOnlyProfileShape::profile_L[FixedOnlyProfileShape::h_profile_id] == -1);
+    static_assert(FixedOnlyProfileShape::c_family_source_profile_ids[1] == -1);
+    static_assert(FixedOnlyProfileShape::s_family_source_profile_ids[0] == -1);
+
+    static_assert(MixedProfileShape::profile_count == 10);
+    static_assert(MixedProfileShape::active_count == 4);
+    static_assert(MixedProfileShape::max_active_len == 3);
+    static_assert(MixedProfileShape::x_size == 8);
+    static_assert(MixedProfileShape::profile_L[MixedProfileShape::h_profile_id] == 1);
+    static_assert(MixedProfileShape::profile_L[MixedProfileShape::v_profile_id] == -1);
+    static_assert(MixedProfileShape::profile_L[MixedProfileShape::c_profile_id<0>()] == 0);
+    static_assert(MixedProfileShape::profile_L[MixedProfileShape::c_profile_id<1>()] == 1);
+    static_assert(MixedProfileShape::profile_L[MixedProfileShape::c_profile_id<2>()] == -1);
+    static_assert(MixedProfileShape::profile_L[MixedProfileShape::s_profile_id<1>()] == -1);
+    static_assert(MixedProfileShape::profile_L[MixedProfileShape::s_profile_id<2>()] == 2);
+    static_assert(MixedProfileShape::active_profile_ids[0] == MixedProfileShape::h_profile_id);
+    static_assert(MixedProfileShape::active_profile_ids[1] == MixedProfileShape::c_profile_id<0>());
+    static_assert(MixedProfileShape::active_profile_ids[2] == MixedProfileShape::c_profile_id<1>());
+    static_assert(MixedProfileShape::active_profile_ids[3] == MixedProfileShape::s_profile_id<2>());
+    static_assert(MixedProfileShape::coeff_index[MixedProfileShape::h_profile_id][0] == 0);
+    static_assert(MixedProfileShape::coeff_index[MixedProfileShape::c_profile_id<0>()][0] == 1);
+    static_assert(MixedProfileShape::coeff_index[MixedProfileShape::c_profile_id<1>()][0] == 2);
+    static_assert(MixedProfileShape::coeff_index[MixedProfileShape::s_profile_id<2>()][0] == 3);
+    static_assert(MixedProfileShape::coeff_index[MixedProfileShape::h_profile_id][1] == 4);
+    static_assert(MixedProfileShape::coeff_index[MixedProfileShape::c_profile_id<1>()][1] == 5);
+    static_assert(MixedProfileShape::coeff_index[MixedProfileShape::s_profile_id<2>()][1] == 6);
+    static_assert(MixedProfileShape::coeff_index[MixedProfileShape::s_profile_id<2>()][2] == 7);
+    static_assert(MixedProfileShape::order_offsets[0] == 0);
+    static_assert(MixedProfileShape::order_offsets[1] == 4);
+    static_assert(MixedProfileShape::order_offsets[2] == 7);
+    static_assert(MixedProfileShape::order_offsets[3] == 8);
+    static_assert(MixedProfileShape::c_family_source_profile_ids[0] ==
+                  static_cast<int>(MixedProfileShape::c_profile_id<0>()));
+    static_assert(MixedProfileShape::c_family_source_profile_ids[2] ==
+                  static_cast<int>(MixedProfileShape::c_profile_id<2>()));
+    static_assert(MixedProfileShape::s_family_source_profile_ids[0] == -1);
+    static_assert(MixedProfileShape::s_family_source_profile_ids[1] == -1);
+    static_assert(MixedProfileShape::s_family_source_profile_ids[2] ==
+                  static_cast<int>(MixedProfileShape::s_profile_id<2>()));
 
     constexpr double tolerance = 1.0e-8;
 
@@ -587,6 +721,15 @@ namespace
         return true;
     }
 
+    template <typename ProfileOps, typename ProbeGrid, size_t Order>
+    constexpr bool highest_s_profile_grid_ok()
+    {
+        if constexpr (Order > 0)
+            return s_profile_grid_ok<ProfileOps, ProbeGrid, Order>();
+        else
+            return true;
+    }
+
     constexpr bool profiles_grid_constexpr_ok()
     {
         constexpr bool highest_c_ok = [] {
@@ -595,12 +738,7 @@ namespace
             else
                 return true;
         }();
-        constexpr bool highest_s_ok = [] {
-            if constexpr (Topology::S_max > 0)
-                return s_profile_grid_ok<ProbeProfiles, ProbeGrid, Topology::S_max>();
-            else
-                return true;
-        }();
+        constexpr bool highest_s_ok = highest_s_profile_grid_ok<ProbeProfiles, ProbeGrid, Topology::S_max>();
 
         return h_profile_grid_ok<ProbeProfiles, ProbeGrid, Topology::h_count>() &&
                v_profile_grid_ok<ProbeProfiles, ProbeGrid, Topology::v_count>() &&

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "math.h"
+#include "profile_layout.h"
 #include "tensor.h"
 #include <cstddef>
 
