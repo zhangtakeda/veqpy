@@ -42,6 +42,32 @@ the final VEQ kernel:
 - writes a nlohmann/json report;
 - when Enzyme is enabled, differentiates `x * x` at `x = 3` and expects `6`.
 
+The generated-topology validation target is `veqlib_temp_validation`. It checks
+that generated `config::DefaultTopology` values can instantiate one concrete
+`grid::Grid` and `profiles::Profiles` pair without making those generic types
+depend on `config.h`.
+
+## Default Topology
+
+CMake generates `config.h` from cache variables and exposes them through
+`config::DefaultTopology`. The generated topology is a composition boundary:
+entry points may read `DefaultTopology::Nr`, `DefaultTopology::L_max`, and the
+profile counts, then pass those values into ordinary templates. Generic headers
+such as `grid.h` and `profiles.h` do not include the generated config.
+
+The main topology variables are:
+
+- `VEQ_NR`, `VEQ_NT` for radial and poloidal grid sizes;
+- `VEQ_H_PROFILE_COUNT`, `VEQ_V_PROFILE_COUNT`, `VEQ_KAPPA_PROFILE_COUNT`,
+  `VEQ_PSIN_PROFILE_COUNT`, and `VEQ_F_PROFILE_COUNT`;
+- `VEQ_COS_PROFILE_COUNTS` and `VEQ_SIN_PROFILE_COUNTS` for Fourier-family
+  coefficient counts;
+- `VEQ_PROFILE_KMAX_LIMIT` for the upper bound used when deriving `K_max`.
+
+Configure-time validation requires `VEQ_NR >= 4`, `VEQ_NT >= 4`, derived
+`L_max >= 1`, derived `M_max >= 1`, derived `K_max >= 2`, and
+`VEQ_PROFILE_KMAX_LIMIT >= 2`.
+
 ## Grid and Calculus
 
 The public grid families currently exposed from `grid.h` are:

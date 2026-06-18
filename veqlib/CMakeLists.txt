@@ -15,6 +15,8 @@ set(VEQLIB_ENZYME_PLUGIN "" CACHE FILEPATH "Path to ClangEnzyme shared library")
 set(VEQLIB_GCEM_ROOT "$ENV{HOME}/opt/gcem-install" CACHE PATH "GCEM install prefix")
 set(VEQLIB_CONSTEXPR_STEP_LIMIT "67108864")
 set(VEQLIB_CONSTEXPR_STEPS "${VEQLIB_CONSTEXPR_STEP_LIMIT}" CACHE STRING "Clang constexpr evaluation step budget")
+set(VEQ_NR "8" CACHE STRING "Default topology radial grid node count")
+set(VEQ_NT "16" CACHE STRING "Default topology poloidal grid node count")
 set(VEQ_H_PROFILE_COUNT "10" CACHE STRING "h profile coefficient count; 0 disables the profile")
 set(VEQ_V_PROFILE_COUNT "10" CACHE STRING "v profile coefficient count; 0 disables the profile")
 set(VEQ_KAPPA_PROFILE_COUNT "10" CACHE STRING "kappa profile coefficient count; 0 disables the profile")
@@ -32,7 +34,12 @@ set(
     CACHE STRING
     "Sine profile coefficient counts: s1;s2;..., with 0 disabling a profile"
 )
-set(VEQ_PROFILE_KMAX_LIMIT "1048576" CACHE STRING "Upper bound for K_max; config uses min(M_max, this value)")
+set(
+    VEQ_PROFILE_KMAX_LIMIT
+    "1024"
+    CACHE STRING
+    "Upper bound for K_max; config uses min(M_max, this value)"
+)
 
 if(VEQLIB_CONSTEXPR_STEPS GREATER VEQLIB_CONSTEXPR_STEP_LIMIT)
     message(FATAL_ERROR "VEQLIB_CONSTEXPR_STEPS must not exceed ${VEQLIB_CONSTEXPR_STEP_LIMIT}")
@@ -44,7 +51,21 @@ function(veqlib_require_nonnegative_int_var source_var)
     endif()
 endfunction()
 
-function(veqlib_prepare_nonnegative_int_list source_var out_values)
+function(veqlib_require_int_at_least source_var minimum)
+    veqlib_require_nonnegative_int_var("${source_var}")
+    if("${${source_var}}" LESS "${minimum}")
+        message(FATAL_ERROR "${source_var} must be at least ${minimum}, got '${${source_var}}'")
+    endif()
+endfunction()
+
+function(veqlib_prepare_nonnegative_int_list
+    source_var
+    out_values
+    out_size
+    out_max
+    out_highest_order
+    first_order
+)
     string(REGEX REPLACE "[ \t\r\n]+" "" normalized "${${source_var}}")
     string(REPLACE "," ";" normalized "${normalized}")
     if("${normalized}" STREQUAL "")
@@ -53,26 +74,113 @@ function(veqlib_prepare_nonnegative_int_list source_var out_values)
         set(values ${normalized})
     endif()
 
+    set(max_count 0)
+    set(highest_order -1)
+    set(index 0)
     foreach(value IN LISTS values)
         if(NOT "${value}" MATCHES "^[0-9]+$")
             message(FATAL_ERROR "${source_var} must contain non-negative integers, got '${value}'")
         endif()
+        if("${value}" GREATER "${max_count}")
+            set(max_count "${value}")
+        endif()
+        if(NOT "${value}" EQUAL 0)
+            math(EXPR highest_order "${index} + ${first_order}")
+        endif()
+        math(EXPR index "${index} + 1")
     endforeach()
 
     string(REPLACE ";" ", " header_values "${values}")
+    list(LENGTH values value_count)
 
     set("${out_values}" "${header_values}" PARENT_SCOPE)
+    set("${out_size}" "${value_count}" PARENT_SCOPE)
+    set("${out_max}" "${max_count}" PARENT_SCOPE)
+    set("${out_highest_order}" "${highest_order}" PARENT_SCOPE)
 endfunction()
 
+veqlib_require_int_at_least(VEQ_NR 4)
+veqlib_require_int_at_least(VEQ_NT 4)
 veqlib_require_nonnegative_int_var(VEQ_H_PROFILE_COUNT)
 veqlib_require_nonnegative_int_var(VEQ_V_PROFILE_COUNT)
 veqlib_require_nonnegative_int_var(VEQ_KAPPA_PROFILE_COUNT)
 veqlib_require_nonnegative_int_var(VEQ_PSIN_PROFILE_COUNT)
 veqlib_require_nonnegative_int_var(VEQ_F_PROFILE_COUNT)
-veqlib_require_nonnegative_int_var(VEQ_PROFILE_KMAX_LIMIT)
+veqlib_require_int_at_least(VEQ_PROFILE_KMAX_LIMIT 2)
 
-veqlib_prepare_nonnegative_int_list(VEQ_COS_PROFILE_COUNTS VEQ_COS_PROFILE_COUNTS_VALUES)
-veqlib_prepare_nonnegative_int_list(VEQ_SIN_PROFILE_COUNTS VEQ_SIN_PROFILE_COUNTS_VALUES)
+veqlib_prepare_nonnegative_int_list(
+    VEQ_COS_PROFILE_COUNTS
+    VEQ_COS_PROFILE_COUNTS_VALUES
+    VEQ_COS_PROFILE_COUNTS_SIZE
+    VEQ_COS_PROFILE_COUNT_MAX
+    VEQ_C_MAX
+    0
+)
+veqlib_prepare_nonnegative_int_list(
+    VEQ_SIN_PROFILE_COUNTS
+    VEQ_SIN_PROFILE_COUNTS_VALUES
+    VEQ_SIN_PROFILE_COUNTS_SIZE
+    VEQ_SIN_PROFILE_COUNT_MAX
+    VEQ_S_MAX
+    1
+)
+
+set(VEQ_CORE_PROFILE_COUNT_MAX "${VEQ_H_PROFILE_COUNT}")
+foreach(profile_count IN ITEMS
+    "${VEQ_V_PROFILE_COUNT}"
+    "${VEQ_KAPPA_PROFILE_COUNT}"
+    "${VEQ_PSIN_PROFILE_COUNT}"
+    "${VEQ_F_PROFILE_COUNT}"
+)
+    if("${profile_count}" GREATER "${VEQ_CORE_PROFILE_COUNT_MAX}")
+        set(VEQ_CORE_PROFILE_COUNT_MAX "${profile_count}")
+    endif()
+endforeach()
+
+set(VEQ_PROFILE_COUNT_MAX "${VEQ_CORE_PROFILE_COUNT_MAX}")
+foreach(profile_count IN ITEMS
+    "${VEQ_COS_PROFILE_COUNT_MAX}"
+    "${VEQ_SIN_PROFILE_COUNT_MAX}"
+)
+    if("${profile_count}" GREATER "${VEQ_PROFILE_COUNT_MAX}")
+        set(VEQ_PROFILE_COUNT_MAX "${profile_count}")
+    endif()
+endforeach()
+
+math(EXPR VEQ_L_MAX "${VEQ_PROFILE_COUNT_MAX} - 1")
+if(VEQ_L_MAX LESS 1)
+    message(
+        FATAL_ERROR
+        "Derived L_max must be at least 1; increase at least one profile count to 2 or higher"
+    )
+endif()
+
+if(VEQ_C_MAX LESS 0)
+    set(VEQ_C_MAX 0)
+endif()
+if(VEQ_S_MAX LESS 0)
+    set(VEQ_S_MAX 0)
+endif()
+
+set(VEQ_M_MAX "${VEQ_C_MAX}")
+if(VEQ_S_MAX GREATER VEQ_M_MAX)
+    set(VEQ_M_MAX "${VEQ_S_MAX}")
+endif()
+if(VEQ_M_MAX LESS 1)
+    message(FATAL_ERROR "Derived M_max must be at least 1; enable at least one positive c/s order")
+endif()
+
+set(VEQ_RHO_ORDER_BASE "${VEQ_M_MAX}")
+if(VEQ_RHO_ORDER_BASE LESS 2)
+    set(VEQ_RHO_ORDER_BASE 2)
+endif()
+set(VEQ_K_MAX "${VEQ_RHO_ORDER_BASE}")
+if(VEQ_PROFILE_KMAX_LIMIT LESS VEQ_K_MAX)
+    set(VEQ_K_MAX "${VEQ_PROFILE_KMAX_LIMIT}")
+endif()
+if(VEQ_K_MAX LESS 2)
+    message(FATAL_ERROR "Derived K_max must be at least 2")
+endif()
 
 set(VEQLIB_GENERATED_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
 file(MAKE_DIRECTORY "${VEQLIB_GENERATED_INCLUDE_DIR}")

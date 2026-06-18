@@ -7,6 +7,7 @@
 #include <lapacke.h>
 #include <nlohmann/json.hpp>
 
+#include "config.h"
 #include "grid.h"
 #include "linalg.h"
 #include "math.h"
@@ -43,6 +44,29 @@ namespace
     using tensor::Matrix;
     using tensor::Vector;
     using tensor::uninitialized;
+
+    using Topology = config::DefaultTopology;
+    using ProbeGrid = Grid<
+        Topology::Nr,
+        Topology::Nt,
+        Topology::L_max,
+        Topology::M_max,
+        Topology::K_max,
+        Legendre,
+        Spectral>;
+    using ProbeProfiles = profiles::Profiles<
+        Topology::L_max,
+        Topology::K_max,
+        Topology::h_count,
+        Topology::v_count,
+        Topology::kappa_count,
+        Topology::psin_count,
+        Topology::F_count,
+        Topology::c_family_counts,
+        Topology::s_family_counts>;
+
+    static_assert(Topology::fourier_power<Topology::K_max + 7>() == Topology::K_max);
+    static_assert(ProbeProfiles::fourier_power<Topology::K_max + 7>() == Topology::K_max);
 
     constexpr double tolerance = 1.0e-8;
 
@@ -374,11 +398,9 @@ namespace
 
     constexpr bool grid_constexpr_ok()
     {
-        using ProbeGrid = Grid<8, 16, Legendre, Spectral>;
-
         constexpr double rho0              = ProbeGrid::nodes[0];
         constexpr double x0                = 2.0 * rho0 * rho0 - 1.0;
-        constexpr double theta_step        = 2.0 * grid::detail::pi / 16.0;
+        constexpr double theta_step        = 2.0 * grid::detail::pi / static_cast<double>(ProbeGrid::theta_rows);
         constexpr bool   radial_tables_ok  = close(ProbeGrid::x[0], x0) &&
                                             close(ProbeGrid::y[0], 1.0 - rho0 * rho0) &&
                                             close(ProbeGrid::rhos(0, 0), rho0) &&
@@ -389,26 +411,18 @@ namespace
                                          close(ProbeGrid::sin_mtheta(0, 3), 0.0, 1.0e-15) &&
                                          close(ProbeGrid::m_cos_mtheta(0, 3), 0.0, 0.0) &&
                                          close(ProbeGrid::m2_sin_mtheta(0, 3), 0.0, 0.0);
-        constexpr bool chebyshev_tables_ok = [] {
-            if constexpr (config::L_max == 0)
-                return ProbeGrid::basis_rows == 0;
-            else
-                return close(ProbeGrid::T(0, 0), ProbeGrid::x[0]) &&
-                       close(ProbeGrid::T_r(0, 0), 4.0 * ProbeGrid::nodes[0]) &&
-                       close(ProbeGrid::T_rr(0, 0), 4.0);
-        }();
-        constexpr bool harmonic_tables_ok = [] {
-            if constexpr (config::M_max == 0)
-                return ProbeGrid::harmonic_rows == 1;
-            else
-                return close(ProbeGrid::cos_mtheta(1, 2), math::cos(ProbeGrid::theta[2])) &&
-                       close(ProbeGrid::sin_mtheta(1, 2), math::sin(ProbeGrid::theta[2])) &&
-                       close(ProbeGrid::m_cos_mtheta(1, 2), math::cos(ProbeGrid::theta[2])) &&
-                       close(ProbeGrid::m_sin_mtheta(1, 2), math::sin(ProbeGrid::theta[2]));
-        }();
+        constexpr bool chebyshev_tables_ok = close(ProbeGrid::T(0, 0), ProbeGrid::x[0]) &&
+                                             close(ProbeGrid::T_r(0, 0), 4.0 * ProbeGrid::nodes[0]) &&
+                                             close(ProbeGrid::T_rr(0, 0), 4.0);
+        constexpr bool harmonic_tables_ok = close(ProbeGrid::cos_mtheta(1, 2), math::cos(ProbeGrid::theta[2])) &&
+                                            close(ProbeGrid::sin_mtheta(1, 2), math::sin(ProbeGrid::theta[2])) &&
+                                            close(ProbeGrid::m_cos_mtheta(1, 2), math::cos(ProbeGrid::theta[2])) &&
+                                            close(ProbeGrid::m_sin_mtheta(1, 2), math::sin(ProbeGrid::theta[2]));
 
-        return ProbeGrid::nodes.count == 8 && ProbeGrid::weights.count == 8 && ProbeGrid::accumulator.shape[0] == 8 &&
-               ProbeGrid::differentiator.shape[1] == 8 && radial_tables_ok && theta_tables_ok &&
+        return ProbeGrid::nodes.count == ProbeGrid::radial_nodes &&
+               ProbeGrid::weights.count == ProbeGrid::radial_nodes &&
+               ProbeGrid::accumulator.shape[0] == ProbeGrid::radial_nodes &&
+               ProbeGrid::differentiator.shape[1] == ProbeGrid::radial_nodes && radial_tables_ok && theta_tables_ok &&
                chebyshev_tables_ok && harmonic_tables_ok && quadrature_shape_ok<Chebyshev, 8>() &&
                quadrature_shape_ok<Legendre, 8>() && quadrature_shape_ok<Lobatto, 8>() &&
                quadrature_shape_ok<Radau, 8>() && close(Lobatto::nodes<8>[0], 0.0, 0.0) &&
@@ -431,42 +445,42 @@ namespace
                max_accumulator_error<CFD55, Lobatto, 8>(1) < 1.0e-8;
     }
 
-    template <typename ProbeGrid, size_t Count>
+    template <typename ProfileOps, typename ProbeGrid, size_t Count>
     constexpr bool h_profile_grid_ok()
     {
-        if constexpr (Count > 0 && config::L_max > 0)
+        if constexpr (Count > 0)
         {
             Matrix<double, ProbeGrid::nodes.count, 3> out{};
             const auto coeffs = make_profile_coefficients<Count>(0.12, -0.003);
-            profiles::update_h_profiles(out, coeffs, ProbeGrid::T, ProbeGrid::T_r, ProbeGrid::T_rr, ProbeGrid::rhos);
+            ProfileOps::update_h(out, coeffs, ProbeGrid::T, ProbeGrid::T_r, ProbeGrid::T_rr, ProbeGrid::rhos);
             return math::is_finite(out) && check_enveloped_profile<ProbeGrid>(out, coeffs, 0) &&
                    check_enveloped_profile<ProbeGrid>(out, coeffs, ProbeGrid::nodes.count - 1);
         }
         return true;
     }
 
-    template <typename ProbeGrid, size_t Count>
+    template <typename ProfileOps, typename ProbeGrid, size_t Count>
     constexpr bool v_profile_grid_ok()
     {
-        if constexpr (Count > 0 && config::L_max > 0)
+        if constexpr (Count > 0)
         {
             Matrix<double, ProbeGrid::nodes.count, 3> out{};
             const auto coeffs = make_profile_coefficients<Count>(-0.08, 0.002);
-            profiles::update_v_profiles(out, coeffs, ProbeGrid::T, ProbeGrid::T_r, ProbeGrid::T_rr, ProbeGrid::rhos);
+            ProfileOps::update_v(out, coeffs, ProbeGrid::T, ProbeGrid::T_r, ProbeGrid::T_rr, ProbeGrid::rhos);
             return math::is_finite(out) && check_enveloped_profile<ProbeGrid>(out, coeffs, 1);
         }
         return true;
     }
 
-    template <typename ProbeGrid, size_t Count>
+    template <typename ProfileOps, typename ProbeGrid, size_t Count>
     constexpr bool kappa_profile_grid_ok()
     {
-        if constexpr (Count > 0 && config::L_max > 0)
+        if constexpr (Count > 0)
         {
             Matrix<double, ProbeGrid::nodes.count, 3> out{};
             const auto   coeffs = make_profile_coefficients<Count>(0.05, 0.001);
             constexpr double ka = 1.7;
-            profiles::update_kappa_profiles(
+            ProfileOps::update_kappa(
                 out,
                 coeffs,
                 ProbeGrid::T,
@@ -480,28 +494,28 @@ namespace
         return true;
     }
 
-    template <typename ProbeGrid, size_t Count>
+    template <typename ProfileOps, typename ProbeGrid, size_t Count>
     constexpr bool psin_profile_grid_ok()
     {
-        if constexpr (Count > 0 && config::L_max > 0)
+        if constexpr (Count > 0)
         {
             Matrix<double, ProbeGrid::nodes.count, 3> out{};
             const auto coeffs = make_profile_coefficients<Count>(0.02, -0.0005);
-            profiles::update_psin_profiles(out, coeffs, ProbeGrid::T, ProbeGrid::T_r, ProbeGrid::T_rr, ProbeGrid::rhos);
+            ProfileOps::update_psin(out, coeffs, ProbeGrid::T, ProbeGrid::T_r, ProbeGrid::T_rr, ProbeGrid::rhos);
             return math::is_finite(out) && check_psin_profile<ProbeGrid>(out, coeffs, 3);
         }
         return true;
     }
 
-    template <typename ProbeGrid, size_t Count>
+    template <typename ProfileOps, typename ProbeGrid, size_t Count>
     constexpr bool F_profile_grid_ok()
     {
-        if constexpr (Count > 0 && config::L_max > 0)
+        if constexpr (Count > 0)
         {
             Matrix<double, ProbeGrid::nodes.count, 3> out{};
             const auto   coeffs = make_profile_coefficients<Count>(0.015, -0.0004);
             constexpr double scale = 2.25;
-            profiles::update_F_profiles(
+            ProfileOps::update_F(
                 out,
                 coeffs,
                 ProbeGrid::T,
@@ -515,20 +529,20 @@ namespace
         return true;
     }
 
-    template <typename ProbeGrid, size_t Order>
+    template <typename ProfileOps, typename ProbeGrid, size_t Order>
     constexpr bool c_profile_grid_ok()
     {
-        if constexpr (Order < config::c_family_counts.size())
+        if constexpr (Order < ProfileOps::c_family_size)
         {
-            constexpr size_t count = config::c_family_counts[Order];
-            if constexpr (count > 0 && config::L_max > 0)
+            constexpr size_t count = ProfileOps::template c_count<Order>();
+            if constexpr (count > 0)
             {
-                constexpr size_t power = Order < config::K_max ? Order : config::K_max;
+                constexpr size_t power = ProfileOps::template fourier_power<Order>();
 
                 Matrix<double, ProbeGrid::nodes.count, 3> out{};
                 const auto   coeffs = make_profile_coefficients<count>(0.07, 0.001);
                 constexpr double offset = 0.25;
-                profiles::update_c_profiles<Order>(
+                ProfileOps::template update_c<Order>(
                     out,
                     coeffs,
                     ProbeGrid::T,
@@ -543,22 +557,22 @@ namespace
         return true;
     }
 
-    template <typename ProbeGrid, size_t Order>
+    template <typename ProfileOps, typename ProbeGrid, size_t Order>
     constexpr bool s_profile_grid_ok()
     {
         static_assert(Order > 0, "s profile checks start at s1");
 
-        if constexpr (Order <= config::s_family_counts.size())
+        if constexpr (Order <= ProfileOps::s_family_size)
         {
-            constexpr size_t count = config::s_family_counts[Order - 1];
-            if constexpr (count > 0 && config::L_max > 0)
+            constexpr size_t count = ProfileOps::template s_count<Order>();
+            if constexpr (count > 0)
             {
-                constexpr size_t power = Order < config::K_max ? Order : config::K_max;
+                constexpr size_t power = ProfileOps::template fourier_power<Order>();
 
                 Matrix<double, ProbeGrid::nodes.count, 3> out{};
                 const auto   coeffs = make_profile_coefficients<count>(-0.06, 0.0015);
                 constexpr double offset = -0.15;
-                profiles::update_s_profiles<Order>(
+                ProfileOps::template update_s<Order>(
                     out,
                     coeffs,
                     ProbeGrid::T,
@@ -575,15 +589,26 @@ namespace
 
     constexpr bool profiles_grid_constexpr_ok()
     {
-        using ProbeGrid = Grid<8, 16, Legendre, Spectral>;
+        constexpr bool highest_c_ok = [] {
+            if constexpr (Topology::C_max < ProbeProfiles::c_family_size)
+                return c_profile_grid_ok<ProbeProfiles, ProbeGrid, Topology::C_max>();
+            else
+                return true;
+        }();
+        constexpr bool highest_s_ok = [] {
+            if constexpr (Topology::S_max > 0)
+                return s_profile_grid_ok<ProbeProfiles, ProbeGrid, Topology::S_max>();
+            else
+                return true;
+        }();
 
-        return h_profile_grid_ok<ProbeGrid, config::h_count>() &&
-               v_profile_grid_ok<ProbeGrid, config::v_count>() &&
-               kappa_profile_grid_ok<ProbeGrid, config::kappa_count>() &&
-               psin_profile_grid_ok<ProbeGrid, config::psin_count>() &&
-               F_profile_grid_ok<ProbeGrid, config::F_count>() &&
-               c_profile_grid_ok<ProbeGrid, 1>() &&
-               s_profile_grid_ok<ProbeGrid, 1>();
+        return h_profile_grid_ok<ProbeProfiles, ProbeGrid, Topology::h_count>() &&
+               v_profile_grid_ok<ProbeProfiles, ProbeGrid, Topology::v_count>() &&
+               kappa_profile_grid_ok<ProbeProfiles, ProbeGrid, Topology::kappa_count>() &&
+               psin_profile_grid_ok<ProbeProfiles, ProbeGrid, Topology::psin_count>() &&
+               F_profile_grid_ok<ProbeProfiles, ProbeGrid, Topology::F_count>() &&
+               c_profile_grid_ok<ProbeProfiles, ProbeGrid, 1>() &&
+               s_profile_grid_ok<ProbeProfiles, ProbeGrid, 1>() && highest_c_ok && highest_s_ok;
     }
 
     static_assert(linalg_constexpr_ok());

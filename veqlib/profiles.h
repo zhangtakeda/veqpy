@@ -1,8 +1,8 @@
 #pragma once
 
-#include "config.h"
 #include "math.h"
 #include "tensor.h"
+#include <cstddef>
 
 namespace profiles::detail
 {
@@ -21,36 +21,16 @@ namespace profiles::detail
         double diff2;
     };
 
-    template <size_t Order>
-    consteval size_t c_count()
-    {
-        static_assert(Order < config::c_family_counts.size(), "c profile order exceeds configured counts");
-        return config::c_family_counts[Order];
-    }
-
-    template <size_t Order>
-    consteval size_t s_count()
-    {
-        static_assert(Order > 0, "s0 is not a physical sine profile");
-        static_assert(Order <= config::s_family_counts.size(), "s profile order exceeds configured counts");
-        return config::s_family_counts[Order - 1];
-    }
-
-    template <size_t Order>
-    consteval size_t fourier_power()
-    {
-        return Order < config::K_max ? Order : config::K_max;
-    }
-
-    template <size_t Count, size_t Nr>
+    template <size_t Lmax, size_t Count, size_t Nr>
         requires(Count > 0)
-    constexpr void update_polys(Matrix<double, Nr, 3>&                   polys,
-                                const Vector<double, Count>&             coeffs,
-                                const Matrix<double, config::L_max, Nr>& T,
-                                const Matrix<double, config::L_max, Nr>& T_r,
-                                const Matrix<double, config::L_max, Nr>& T_rr) noexcept
+    constexpr void update_polys(Matrix<double, Nr, 3>&          polys,
+                                const Vector<double, Count>&    coeffs,
+                                const Matrix<double, Lmax, Nr>& T,
+                                const Matrix<double, Lmax, Nr>& T_r,
+                                const Matrix<double, Lmax, Nr>& T_rr) noexcept
     {
-        static_assert(Count <= config::L_max + 1, "profile count exceeds shared basis rows plus T0");
+        static_assert(Lmax >= 1, "profile basis table must contain stored T1.. rows");
+        static_assert(Count <= Lmax + 1, "profile count exceeds shared basis rows plus T0");
 
         for (size_t i = 0; i < Nr; ++i)
         {
@@ -73,30 +53,30 @@ namespace profiles::detail
         }
     }
 
-    template <size_t Nr>
-    constexpr double rho_at(const Matrix<double, config::K_max, Nr>& rhos, size_t i) noexcept
+    template <size_t Kmax, size_t Nr>
+    constexpr double rho_at(const Matrix<double, Kmax, Nr>& rhos, size_t i) noexcept
     {
-        static_assert(config::K_max >= 2, "rho table must contain rho and rho^2 rows");
+        static_assert(Kmax >= 2, "rho table must contain rho and rho^2 rows");
         return rhos(0, i);
     }
 
-    template <size_t Nr>
-    constexpr double rho2_at(const Matrix<double, config::K_max, Nr>& rhos, size_t i) noexcept
+    template <size_t Kmax, size_t Nr>
+    constexpr double rho2_at(const Matrix<double, Kmax, Nr>& rhos, size_t i) noexcept
     {
-        static_assert(config::K_max >= 2, "rho table must contain rho and rho^2 rows");
+        static_assert(Kmax >= 2, "rho table must contain rho and rho^2 rows");
         return rhos(1, i);
     }
 
-    template <size_t Nr>
-    constexpr double y_at(const Matrix<double, config::K_max, Nr>& rhos, size_t i) noexcept
+    template <size_t Kmax, size_t Nr>
+    constexpr double y_at(const Matrix<double, Kmax, Nr>& rhos, size_t i) noexcept
     {
         return 1.0 - rho2_at(rhos, i);
     }
 
-    template <size_t Power, size_t Nr>
-    constexpr ProfileValues rho_power_rows(const Matrix<double, config::K_max, Nr>& rhos, size_t i) noexcept
+    template <size_t Kmax, size_t Power, size_t Nr>
+    constexpr ProfileValues rho_power_rows(const Matrix<double, Kmax, Nr>& rhos, size_t i) noexcept
     {
-        static_assert(Power <= config::K_max, "rho power exceeds shared rho table rows");
+        static_assert(Power <= Kmax, "rho power exceeds shared rho table rows");
 
         if constexpr (Power == 0)
             return {1.0, 0.0, 0.0};
@@ -115,10 +95,10 @@ namespace profiles::detail
         }
     }
 
-    template <size_t Nr>
-    constexpr void update_enveloped_profiles(Matrix<double, Nr, 3>&                   profiles,
-                                             const Matrix<double, Nr, 3>&             polys,
-                                             const Matrix<double, config::K_max, Nr>& rhos) noexcept
+    template <size_t Kmax, size_t Nr>
+    constexpr void update_enveloped_profiles(Matrix<double, Nr, 3>&          profiles,
+                                             const Matrix<double, Nr, 3>&    polys,
+                                             const Matrix<double, Kmax, Nr>& rhos) noexcept
     {
         for (size_t i = 0; i < Nr; ++i)
         {
@@ -134,12 +114,11 @@ namespace profiles::detail
         }
     }
 
-    template <size_t Nr>
-        requires(config::kappa_count > 0)
-    constexpr void update_kappa_from_polys(Matrix<double, Nr, 3>&                   profiles,
-                                           const Matrix<double, Nr, 3>&             polys,
-                                           const Matrix<double, config::K_max, Nr>& rhos,
-                                           double                                   ka) noexcept
+    template <size_t Kmax, size_t Nr>
+    constexpr void update_kappa_from_polys(Matrix<double, Nr, 3>&          profiles,
+                                           const Matrix<double, Nr, 3>&    polys,
+                                           const Matrix<double, Kmax, Nr>& rhos,
+                                           double                          ka) noexcept
     {
         for (size_t i = 0; i < Nr; ++i)
         {
@@ -158,11 +137,10 @@ namespace profiles::detail
         }
     }
 
-    template <size_t Nr>
-        requires(config::psin_count > 0)
-    constexpr void update_psin_from_polys(Matrix<double, Nr, 3>&                   profiles,
-                                          const Matrix<double, Nr, 3>&             polys,
-                                          const Matrix<double, config::K_max, Nr>& rhos) noexcept
+    template <size_t Kmax, size_t Nr>
+    constexpr void update_psin_from_polys(Matrix<double, Nr, 3>&          profiles,
+                                          const Matrix<double, Nr, 3>&    polys,
+                                          const Matrix<double, Kmax, Nr>& rhos) noexcept
     {
         for (size_t i = 0; i < Nr; ++i)
         {
@@ -185,12 +163,11 @@ namespace profiles::detail
         }
     }
 
-    template <size_t Nr>
-        requires(config::F_count > 0)
-    constexpr void update_F_from_polys(Matrix<double, Nr, 3>&                   profiles,
-                                       const Matrix<double, Nr, 3>&             polys,
-                                       const Matrix<double, config::K_max, Nr>& rhos,
-                                       double                                   scale) noexcept
+    template <size_t Kmax, size_t Nr>
+    constexpr void update_F_from_polys(Matrix<double, Nr, 3>&          profiles,
+                                       const Matrix<double, Nr, 3>&    polys,
+                                       const Matrix<double, Kmax, Nr>& rhos,
+                                       double                          scale) noexcept
     {
         for (size_t i = 0; i < Nr; ++i)
         {
@@ -216,16 +193,15 @@ namespace profiles::detail
         }
     }
 
-    template <size_t Order, size_t Nr>
-    constexpr void update_fourier_from_polys(Matrix<double, Nr, 3>&                   profiles,
-                                             const Matrix<double, Nr, 3>&             polys,
-                                             const Matrix<double, config::K_max, Nr>& rhos,
-                                             double                                   offset) noexcept
+    template <size_t Kmax, size_t Power, size_t Nr>
+    constexpr void update_fourier_from_polys(Matrix<double, Nr, 3>&          profiles,
+                                             const Matrix<double, Nr, 3>&    polys,
+                                             const Matrix<double, Kmax, Nr>& rhos,
+                                             double                          offset) noexcept
     {
-        constexpr size_t Power = fourier_power<Order>();
         for (size_t i = 0; i < Nr; ++i)
         {
-            const ProfileValues rp      = rho_power_rows<Power>(rhos, i);
+            const ProfileValues rp      = rho_power_rows<Kmax, Power>(rhos, i);
             const double        rho     = rho_at(rhos, i);
             const double        y       = y_at(rhos, i);
             const double        value   = polys(i, 0);
@@ -241,119 +217,160 @@ namespace profiles::detail
             profiles(i, 2) = rp.diff2 * amp + 2.0 * rp.diff * base_r + rp.value * base_rr;
         }
     }
-
-    template <size_t Nr>
-        requires(config::h_count > 0 && config::L_max + 1 >= config::h_count && config::K_max >= 2)
-    constexpr void update_h_profiles(Matrix<double, Nr, 3>&                   profiles,
-                                     const Vector<double, config::h_count>&   coeffs,
-                                     const Matrix<double, config::L_max, Nr>& T,
-                                     const Matrix<double, config::L_max, Nr>& T_r,
-                                     const Matrix<double, config::L_max, Nr>& T_rr,
-                                     const Matrix<double, config::K_max, Nr>& rhos) noexcept
-    {
-        Matrix<double, Nr, 3> polys{};
-        update_polys<config::h_count>(polys, coeffs, T, T_r, T_rr);
-        update_enveloped_profiles(profiles, polys, rhos);
-    }
-
-    template <size_t Nr>
-        requires(config::v_count > 0 && config::L_max + 1 >= config::v_count && config::K_max >= 2)
-    constexpr void update_v_profiles(Matrix<double, Nr, 3>&                   profiles,
-                                     const Vector<double, config::v_count>&   coeffs,
-                                     const Matrix<double, config::L_max, Nr>& T,
-                                     const Matrix<double, config::L_max, Nr>& T_r,
-                                     const Matrix<double, config::L_max, Nr>& T_rr,
-                                     const Matrix<double, config::K_max, Nr>& rhos) noexcept
-    {
-        Matrix<double, Nr, 3> polys{};
-        update_polys<config::v_count>(polys, coeffs, T, T_r, T_rr);
-        update_enveloped_profiles(profiles, polys, rhos);
-    }
-
-    template <size_t Nr>
-        requires(config::kappa_count > 0 && config::L_max + 1 >= config::kappa_count && config::K_max >= 2)
-    constexpr void update_kappa_profiles(Matrix<double, Nr, 3>&                     profiles,
-                                         const Vector<double, config::kappa_count>& coeffs,
-                                         const Matrix<double, config::L_max, Nr>&   T,
-                                         const Matrix<double, config::L_max, Nr>&   T_r,
-                                         const Matrix<double, config::L_max, Nr>&   T_rr,
-                                         const Matrix<double, config::K_max, Nr>&   rhos,
-                                         double                                     ka) noexcept
-    {
-        Matrix<double, Nr, 3> polys{};
-        update_polys<config::kappa_count>(polys, coeffs, T, T_r, T_rr);
-        update_kappa_from_polys(profiles, polys, rhos, ka);
-    }
-
-    template <size_t Nr>
-        requires(config::psin_count > 0 && config::L_max + 1 >= config::psin_count && config::K_max >= 2)
-    constexpr void update_psin_profiles(Matrix<double, Nr, 3>&                    profiles,
-                                        const Vector<double, config::psin_count>& coeffs,
-                                        const Matrix<double, config::L_max, Nr>&  T,
-                                        const Matrix<double, config::L_max, Nr>&  T_r,
-                                        const Matrix<double, config::L_max, Nr>&  T_rr,
-                                        const Matrix<double, config::K_max, Nr>&  rhos) noexcept
-    {
-        Matrix<double, Nr, 3> polys{};
-        update_polys<config::psin_count>(polys, coeffs, T, T_r, T_rr);
-        update_psin_from_polys(profiles, polys, rhos);
-    }
-
-    template <size_t Nr>
-        requires(config::F_count > 0 && config::L_max + 1 >= config::F_count && config::K_max >= 2)
-    constexpr void update_F_profiles(Matrix<double, Nr, 3>&                   profiles,
-                                     const Vector<double, config::F_count>&   coeffs,
-                                     const Matrix<double, config::L_max, Nr>& T,
-                                     const Matrix<double, config::L_max, Nr>& T_r,
-                                     const Matrix<double, config::L_max, Nr>& T_rr,
-                                     const Matrix<double, config::K_max, Nr>& rhos,
-                                     double                                   scale) noexcept
-    {
-        Matrix<double, Nr, 3> polys{};
-        update_polys<config::F_count>(polys, coeffs, T, T_r, T_rr);
-        update_F_from_polys(profiles, polys, rhos, scale);
-    }
-
-    template <size_t Order, size_t Nr>
-        requires(c_count<Order>() > 0 && config::L_max + 1 >= c_count<Order>() && config::K_max >= 2 &&
-                 config::K_max >= fourier_power<Order>())
-    constexpr void update_c_profiles(Matrix<double, Nr, 3>&                   profiles,
-                                     const Vector<double, c_count<Order>()>&  coeffs,
-                                     const Matrix<double, config::L_max, Nr>& T,
-                                     const Matrix<double, config::L_max, Nr>& T_r,
-                                     const Matrix<double, config::L_max, Nr>& T_rr,
-                                     const Matrix<double, config::K_max, Nr>& rhos,
-                                     double                                   offset) noexcept
-    {
-        Matrix<double, Nr, 3> polys{};
-        update_polys<c_count<Order>()>(polys, coeffs, T, T_r, T_rr);
-        update_fourier_from_polys<Order>(profiles, polys, rhos, offset);
-    }
-
-    template <size_t Order, size_t Nr>
-        requires(s_count<Order>() > 0 && config::L_max + 1 >= s_count<Order>() && config::K_max >= 2 &&
-                 config::K_max >= fourier_power<Order>())
-    constexpr void update_s_profiles(Matrix<double, Nr, 3>&                   profiles,
-                                     const Vector<double, s_count<Order>()>&  coeffs,
-                                     const Matrix<double, config::L_max, Nr>& T,
-                                     const Matrix<double, config::L_max, Nr>& T_r,
-                                     const Matrix<double, config::L_max, Nr>& T_rr,
-                                     const Matrix<double, config::K_max, Nr>& rhos,
-                                     double                                   offset) noexcept
-    {
-        Matrix<double, Nr, 3> polys{};
-        update_polys<s_count<Order>()>(polys, coeffs, T, T_r, T_rr);
-        update_fourier_from_polys<Order>(profiles, polys, rhos, offset);
-    }
 } // namespace profiles::detail
 
 namespace profiles
 {
-    using detail::update_h_profiles;
-    using detail::update_v_profiles;
-    using detail::update_kappa_profiles;
-    using detail::update_c_profiles;
-    using detail::update_s_profiles;
-    using detail::update_psin_profiles;
-    using detail::update_F_profiles;
+    using std::size_t;
+    using tensor::Matrix;
+    using tensor::Vector;
+
+    template <size_t Lmax,
+              size_t Kmax,
+              size_t HCount,
+              size_t VCount,
+              size_t KappaCount,
+              size_t PsinCount,
+              size_t FCount,
+              auto   CFamilyCounts,
+              auto   SFamilyCounts>
+    struct Profiles
+    {
+        static_assert(Lmax >= 1, "Profiles requires at least one stored Chebyshev row");
+        static_assert(Kmax >= 2, "Profiles requires rho and rho^2 rows");
+
+        static constexpr size_t basis_rows    = Lmax;
+        static constexpr size_t rho_rows      = Kmax;
+        static constexpr size_t c_family_size = CFamilyCounts.size();
+        static constexpr size_t s_family_size = SFamilyCounts.size();
+
+        template <size_t Order>
+        static consteval size_t c_count()
+        {
+            static_assert(Order < c_family_size, "c profile order exceeds configured counts");
+            return CFamilyCounts[Order];
+        }
+
+        template <size_t Order>
+        static consteval size_t s_count()
+        {
+            static_assert(Order > 0, "s0 is not a physical sine profile");
+            static_assert(Order <= s_family_size, "s profile order exceeds configured counts");
+            return SFamilyCounts[Order - 1];
+        }
+
+        template <size_t Order>
+        static consteval size_t fourier_power()
+        {
+            return Order < Kmax ? Order : Kmax;
+        }
+
+        template <size_t Nr>
+            requires(HCount > 0 && Lmax + 1 >= HCount)
+        static constexpr void update_h(Matrix<double, Nr, 3>&          profiles,
+                                       const Vector<double, HCount>&   coeffs,
+                                       const Matrix<double, Lmax, Nr>& T,
+                                       const Matrix<double, Lmax, Nr>& T_r,
+                                       const Matrix<double, Lmax, Nr>& T_rr,
+                                       const Matrix<double, Kmax, Nr>& rhos) noexcept
+        {
+            Matrix<double, Nr, 3> polys{};
+            detail::update_polys<Lmax, HCount>(polys, coeffs, T, T_r, T_rr);
+            detail::update_enveloped_profiles<Kmax>(profiles, polys, rhos);
+        }
+
+        template <size_t Nr>
+            requires(VCount > 0 && Lmax + 1 >= VCount)
+        static constexpr void update_v(Matrix<double, Nr, 3>&          profiles,
+                                       const Vector<double, VCount>&   coeffs,
+                                       const Matrix<double, Lmax, Nr>& T,
+                                       const Matrix<double, Lmax, Nr>& T_r,
+                                       const Matrix<double, Lmax, Nr>& T_rr,
+                                       const Matrix<double, Kmax, Nr>& rhos) noexcept
+        {
+            Matrix<double, Nr, 3> polys{};
+            detail::update_polys<Lmax, VCount>(polys, coeffs, T, T_r, T_rr);
+            detail::update_enveloped_profiles<Kmax>(profiles, polys, rhos);
+        }
+
+        template <size_t Nr>
+            requires(KappaCount > 0 && Lmax + 1 >= KappaCount)
+        static constexpr void update_kappa(Matrix<double, Nr, 3>&            profiles,
+                                           const Vector<double, KappaCount>& coeffs,
+                                           const Matrix<double, Lmax, Nr>&   T,
+                                           const Matrix<double, Lmax, Nr>&   T_r,
+                                           const Matrix<double, Lmax, Nr>&   T_rr,
+                                           const Matrix<double, Kmax, Nr>&   rhos,
+                                           double                            ka) noexcept
+        {
+            Matrix<double, Nr, 3> polys{};
+            detail::update_polys<Lmax, KappaCount>(polys, coeffs, T, T_r, T_rr);
+            detail::update_kappa_from_polys<Kmax>(profiles, polys, rhos, ka);
+        }
+
+        template <size_t Nr>
+            requires(PsinCount > 0 && Lmax + 1 >= PsinCount)
+        static constexpr void update_psin(Matrix<double, Nr, 3>&           profiles,
+                                          const Vector<double, PsinCount>& coeffs,
+                                          const Matrix<double, Lmax, Nr>&  T,
+                                          const Matrix<double, Lmax, Nr>&  T_r,
+                                          const Matrix<double, Lmax, Nr>&  T_rr,
+                                          const Matrix<double, Kmax, Nr>&  rhos) noexcept
+        {
+            Matrix<double, Nr, 3> polys{};
+            detail::update_polys<Lmax, PsinCount>(polys, coeffs, T, T_r, T_rr);
+            detail::update_psin_from_polys<Kmax>(profiles, polys, rhos);
+        }
+
+        template <size_t Nr>
+            requires(FCount > 0 && Lmax + 1 >= FCount)
+        static constexpr void update_F(Matrix<double, Nr, 3>&          profiles,
+                                       const Vector<double, FCount>&   coeffs,
+                                       const Matrix<double, Lmax, Nr>& T,
+                                       const Matrix<double, Lmax, Nr>& T_r,
+                                       const Matrix<double, Lmax, Nr>& T_rr,
+                                       const Matrix<double, Kmax, Nr>& rhos,
+                                       double                          scale) noexcept
+        {
+            Matrix<double, Nr, 3> polys{};
+            detail::update_polys<Lmax, FCount>(polys, coeffs, T, T_r, T_rr);
+            detail::update_F_from_polys<Kmax>(profiles, polys, rhos, scale);
+        }
+
+        template <size_t Order, size_t Nr>
+            requires(c_count<Order>() > 0 && Lmax + 1 >= c_count<Order>() && Kmax >= fourier_power<Order>())
+        static constexpr void update_c(Matrix<double, Nr, 3>&                  profiles,
+                                       const Vector<double, c_count<Order>()>& coeffs,
+                                       const Matrix<double, Lmax, Nr>&         T,
+                                       const Matrix<double, Lmax, Nr>&         T_r,
+                                       const Matrix<double, Lmax, Nr>&         T_rr,
+                                       const Matrix<double, Kmax, Nr>&         rhos,
+                                       double                                  offset) noexcept
+        {
+            constexpr size_t Count = c_count<Order>();
+            constexpr size_t Power = fourier_power<Order>();
+
+            Matrix<double, Nr, 3> polys{};
+            detail::update_polys<Lmax, Count>(polys, coeffs, T, T_r, T_rr);
+            detail::update_fourier_from_polys<Kmax, Power>(profiles, polys, rhos, offset);
+        }
+
+        template <size_t Order, size_t Nr>
+            requires(s_count<Order>() > 0 && Lmax + 1 >= s_count<Order>() && Kmax >= fourier_power<Order>())
+        static constexpr void update_s(Matrix<double, Nr, 3>&                  profiles,
+                                       const Vector<double, s_count<Order>()>& coeffs,
+                                       const Matrix<double, Lmax, Nr>&         T,
+                                       const Matrix<double, Lmax, Nr>&         T_r,
+                                       const Matrix<double, Lmax, Nr>&         T_rr,
+                                       const Matrix<double, Kmax, Nr>&         rhos,
+                                       double                                  offset) noexcept
+        {
+            constexpr size_t Count = s_count<Order>();
+            constexpr size_t Power = fourier_power<Order>();
+
+            Matrix<double, Nr, 3> polys{};
+            detail::update_polys<Lmax, Count>(polys, coeffs, T, T_r, T_rr);
+            detail::update_fourier_from_polys<Kmax, Power>(profiles, polys, rhos, offset);
+        }
+    };
 } // namespace profiles

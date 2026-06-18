@@ -1,6 +1,5 @@
 #pragma once
 
-#include "config.h"
 #include "linalg.h"
 #include "math.h"
 #include "tensor.h"
@@ -11,9 +10,6 @@
 
 namespace grid::detail
 {
-    using config::L_max;
-    using config::M_max;
-    using config::K_max;
     using linalg::Thomas;
     using linalg::solve;
     using linalg::transpose;
@@ -27,8 +23,7 @@ namespace grid::detail
     using tensor::Vector;
     using tensor::uninitialized;
 
-    inline constexpr double pi                     = 3.141592653589793238462643383279502884;
-    inline constexpr size_t chebyshev_storage_rows = L_max == 0 ? 1 : L_max;
+    inline constexpr double pi = 3.141592653589793238462643383279502884;
 
     // GST theta-correction coefficients. The expansion shape follows
     // A. Gil, J. Segura, and N. M. Temme, "Noniterative Computation of
@@ -1261,16 +1256,16 @@ namespace grid::detail
         return out;
     }
 
-    template <size_t N>
-    constexpr Matrix<double, K_max, N> make_rhos(const Vector<double, N>& rho)
+    template <size_t Kmax, size_t N>
+    constexpr Matrix<double, Kmax, N> make_rhos(const Vector<double, N>& rho)
     {
-        static_assert(K_max >= 2, "rho table requires at least rho and rho^2");
+        static_assert(Kmax >= 2, "rho table requires at least rho and rho^2");
 
-        Matrix<double, K_max, N> out{uninitialized};
+        Matrix<double, Kmax, N> out{uninitialized};
         for (size_t i = 0; i < N; ++i)
         {
             double value = rho[i];
-            for (size_t row = 0; row < K_max; ++row)
+            for (size_t row = 0; row < Kmax; ++row)
             {
                 out(row, i) = value;
                 value *= rho[i];
@@ -1286,53 +1281,50 @@ namespace grid::detail
         radial2,
     };
 
-    template <ChebyshevField Field, size_t N>
-    constexpr Matrix<double, chebyshev_storage_rows, N> make_chebyshev_table(const Vector<double, N>& rho,
-                                                                             const Vector<double, N>& x)
+    template <size_t Lmax, ChebyshevField Field, size_t N>
+    constexpr Matrix<double, Lmax, N> make_chebyshev_table(const Vector<double, N>& rho, const Vector<double, N>& x)
     {
-        Matrix<double, chebyshev_storage_rows, N> out{};
+        static_assert(Lmax >= 1, "Chebyshev table requires at least one stored row");
 
-        if constexpr (L_max > 0)
+        Matrix<double, Lmax, N> out{};
+        for (size_t i = 0; i < N; ++i)
         {
-            for (size_t i = 0; i < N; ++i)
+            const double xi       = x[i];
+            const double dx_dr    = 4.0 * rho[i];
+            const double d2x_dr2  = 4.0;
+            double       T_prev   = 1.0;
+            double       Tx_prev  = 0.0;
+            double       Txx_prev = 0.0;
+            double       T_curr   = xi;
+            double       Tx_curr  = 1.0;
+            double       Txx_curr = 0.0;
+
+            if constexpr (Field == ChebyshevField::value)
+                out(0, i) = T_curr;
+            else if constexpr (Field == ChebyshevField::radial)
+                out(0, i) = Tx_curr * dx_dr;
+            else
+                out(0, i) = Txx_curr * dx_dr * dx_dr + Tx_curr * d2x_dr2;
+
+            for (size_t degree = 1; degree < Lmax; ++degree)
             {
-                const double xi       = x[i];
-                const double dx_dr    = 4.0 * rho[i];
-                const double d2x_dr2  = 4.0;
-                double       T_prev   = 1.0;
-                double       Tx_prev  = 0.0;
-                double       Txx_prev = 0.0;
-                double       T_curr   = xi;
-                double       Tx_curr  = 1.0;
-                double       Txx_curr = 0.0;
+                const double T_next   = 2.0 * xi * T_curr - T_prev;
+                const double Tx_next  = 2.0 * T_curr + 2.0 * xi * Tx_curr - Tx_prev;
+                const double Txx_next = 4.0 * Tx_curr + 2.0 * xi * Txx_curr - Txx_prev;
 
                 if constexpr (Field == ChebyshevField::value)
-                    out(0, i) = T_curr;
+                    out(degree, i) = T_next;
                 else if constexpr (Field == ChebyshevField::radial)
-                    out(0, i) = Tx_curr * dx_dr;
+                    out(degree, i) = Tx_next * dx_dr;
                 else
-                    out(0, i) = Txx_curr * dx_dr * dx_dr + Tx_curr * d2x_dr2;
+                    out(degree, i) = Txx_next * dx_dr * dx_dr + Tx_next * d2x_dr2;
 
-                for (size_t degree = 1; degree < L_max; ++degree)
-                {
-                    const double T_next   = 2.0 * xi * T_curr - T_prev;
-                    const double Tx_next  = 2.0 * T_curr + 2.0 * xi * Tx_curr - Tx_prev;
-                    const double Txx_next = 4.0 * Tx_curr + 2.0 * xi * Txx_curr - Txx_prev;
-
-                    if constexpr (Field == ChebyshevField::value)
-                        out(degree, i) = T_next;
-                    else if constexpr (Field == ChebyshevField::radial)
-                        out(degree, i) = Tx_next * dx_dr;
-                    else
-                        out(degree, i) = Txx_next * dx_dr * dx_dr + Tx_next * d2x_dr2;
-
-                    T_prev   = T_curr;
-                    Tx_prev  = Tx_curr;
-                    Txx_prev = Txx_curr;
-                    T_curr   = T_next;
-                    Tx_curr  = Tx_next;
-                    Txx_curr = Txx_next;
-                }
+                T_prev   = T_curr;
+                Tx_prev  = Tx_curr;
+                Txx_prev = Txx_curr;
+                T_curr   = T_next;
+                Tx_curr  = Tx_next;
+                Txx_curr = Txx_next;
             }
         }
         return out;
@@ -1358,11 +1350,13 @@ namespace grid::detail
         m2_sin,
     };
 
-    template <TrigField Field, size_t N>
-    constexpr Matrix<double, M_max + 1, N> make_trig_table(const Vector<double, N>& theta)
+    template <size_t Mmax, TrigField Field, size_t N>
+    constexpr Matrix<double, Mmax + 1, N> make_trig_table(const Vector<double, N>& theta)
     {
-        Matrix<double, M_max + 1, N> out{uninitialized};
-        for (size_t order = 0; order <= M_max; ++order)
+        static_assert(Mmax >= 1, "trig table requires at least one positive harmonic");
+
+        Matrix<double, Mmax + 1, N> out{uninitialized};
+        for (size_t order = 0; order <= Mmax; ++order)
         {
             const double m  = static_cast<double>(order);
             const double m2 = m * m;
@@ -1389,12 +1383,19 @@ namespace grid::detail
         return out;
     }
 
-    template <size_t Nr, size_t Nt, typename Quadrature, typename Calculus>
+    template <size_t Nr, size_t Nt, size_t Lmax, size_t Mmax, size_t Kmax, typename Quadrature, typename Calculus>
     struct Grid
     {
-        static constexpr size_t basis_rows     = L_max;
-        static constexpr size_t rho_power_rows = K_max;
-        static constexpr size_t harmonic_rows  = M_max + 1;
+        static_assert(Nr >= 4, "Grid requires at least four radial nodes");
+        static_assert(Nt >= 4, "Grid requires at least four poloidal nodes");
+        static_assert(Lmax >= 1, "Grid requires at least one Chebyshev row");
+        static_assert(Mmax >= 1, "Grid requires at least one positive harmonic");
+        static_assert(Kmax >= 2, "Grid requires rho and rho^2 rows");
+
+        static constexpr size_t basis_rows     = Lmax;
+        static constexpr size_t rho_power_rows = Kmax;
+        static constexpr size_t harmonic_rows  = Mmax + 1;
+        static constexpr size_t radial_nodes   = Nr;
         static constexpr size_t theta_rows     = Nt;
         static constexpr auto   nodes          = Quadrature::template nodes<Nr>;
         static constexpr auto   weights        = Quadrature::template weights<Nr>;
@@ -1402,17 +1403,17 @@ namespace grid::detail
         static constexpr auto   differentiator = Calculus::template differentiator<Nr, Quadrature>;
         static constexpr auto   x              = make_x(nodes);
         static constexpr auto   y              = make_y(nodes);
-        static constexpr auto   rhos           = make_rhos(nodes);
-        static constexpr auto   T              = make_chebyshev_table<ChebyshevField::value>(nodes, x);
-        static constexpr auto   T_r            = make_chebyshev_table<ChebyshevField::radial>(nodes, x);
-        static constexpr auto   T_rr           = make_chebyshev_table<ChebyshevField::radial2>(nodes, x);
+        static constexpr auto   rhos           = make_rhos<Kmax>(nodes);
+        static constexpr auto   T              = make_chebyshev_table<Lmax, ChebyshevField::value>(nodes, x);
+        static constexpr auto   T_r            = make_chebyshev_table<Lmax, ChebyshevField::radial>(nodes, x);
+        static constexpr auto   T_rr           = make_chebyshev_table<Lmax, ChebyshevField::radial2>(nodes, x);
         static constexpr auto   theta          = make_theta<Nt>();
-        static constexpr auto   cos_mtheta     = make_trig_table<TrigField::cos>(theta);
-        static constexpr auto   sin_mtheta     = make_trig_table<TrigField::sin>(theta);
-        static constexpr auto   m_cos_mtheta   = make_trig_table<TrigField::m_cos>(theta);
-        static constexpr auto   m_sin_mtheta   = make_trig_table<TrigField::m_sin>(theta);
-        static constexpr auto   m2_cos_mtheta  = make_trig_table<TrigField::m2_cos>(theta);
-        static constexpr auto   m2_sin_mtheta  = make_trig_table<TrigField::m2_sin>(theta);
+        static constexpr auto   cos_mtheta     = make_trig_table<Mmax, TrigField::cos>(theta);
+        static constexpr auto   sin_mtheta     = make_trig_table<Mmax, TrigField::sin>(theta);
+        static constexpr auto   m_cos_mtheta   = make_trig_table<Mmax, TrigField::m_cos>(theta);
+        static constexpr auto   m_sin_mtheta   = make_trig_table<Mmax, TrigField::m_sin>(theta);
+        static constexpr auto   m2_cos_mtheta  = make_trig_table<Mmax, TrigField::m2_cos>(theta);
+        static constexpr auto   m2_sin_mtheta  = make_trig_table<Mmax, TrigField::m2_sin>(theta);
     };
 } // namespace grid::detail
 
