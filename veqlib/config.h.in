@@ -1,0 +1,95 @@
+#pragma once
+
+#include <array>
+#include <cstddef>
+
+namespace config::detail
+{
+    using std::array;
+    using std::size_t;
+
+    constexpr int max_int(int lhs, int rhs) noexcept { return lhs > rhs ? lhs : rhs; }
+    constexpr int min_int(int lhs, int rhs) noexcept { return lhs < rhs ? lhs : rhs; }
+
+    template <int... Values>
+    constexpr auto profile_counts() noexcept
+    {
+        static_assert(((Values >= 0) && ...), "profile counts must be non-negative");
+        return array<int, sizeof...(Values)>{Values...};
+    }
+
+    template <size_t Count>
+    constexpr int max_count(const array<int, Count>& counts) noexcept
+    {
+        int result = 0;
+        for (size_t i = 0; i < Count; ++i)
+            result = max_int(result, counts[i]);
+        return result;
+    }
+
+    template <size_t Count>
+    constexpr int highest_active_order(const array<int, Count>& counts, int first_order) noexcept
+    {
+        int result = -1;
+        for (size_t i = 0; i < Count; ++i)
+            if (counts[i] != 0)
+                result = static_cast<int>(i) + first_order;
+        return result;
+    }
+
+    constexpr size_t nonnegative_size(int value) noexcept
+    {
+        return static_cast<size_t>(value < 0 ? 0 : value);
+    }
+
+    template <size_t Count>
+    constexpr auto size_counts(const array<int, Count>& counts) noexcept
+    {
+        array<size_t, Count> result{};
+        for (size_t i = 0; i < Count; ++i)
+            result[i] = nonnegative_size(counts[i]);
+        return result;
+    }
+
+    inline constexpr int h_count     = @VEQ_H_PROFILE_COUNT@;
+    inline constexpr int v_count     = @VEQ_V_PROFILE_COUNT@;
+    inline constexpr int kappa_count = @VEQ_KAPPA_PROFILE_COUNT@;
+    inline constexpr int psin_count  = @VEQ_PSIN_PROFILE_COUNT@;
+    inline constexpr int F_count     = @VEQ_F_PROFILE_COUNT@;
+    inline constexpr int profile_Kmax_limit = @VEQ_PROFILE_KMAX_LIMIT@;
+
+    inline constexpr auto cos_counts = detail::profile_counts<@VEQ_COS_PROFILE_COUNTS_VALUES@>();
+    inline constexpr auto sin_counts = detail::profile_counts<@VEQ_SIN_PROFILE_COUNTS_VALUES@>();
+
+    inline constexpr int core_count_max =
+        detail::max_int(detail::max_int(detail::max_int(h_count, v_count), kappa_count),
+                        detail::max_int(psin_count, F_count));
+    inline constexpr int family_count_max =
+        detail::max_int(detail::max_count(cos_counts), detail::max_count(sin_counts));
+    inline constexpr int profile_count_max = detail::max_int(core_count_max, family_count_max);
+    inline constexpr int profile_order_max =
+        detail::max_int(detail::highest_active_order(cos_counts, 0),
+                        detail::highest_active_order(sin_counts, 1));
+    inline constexpr int rho_order_max =
+        detail::min_int(detail::max_int(profile_order_max, 2), profile_Kmax_limit);
+
+    inline constexpr size_t L_max = detail::nonnegative_size(profile_count_max - 1);
+    inline constexpr size_t M_max = detail::nonnegative_size(profile_order_max);
+    inline constexpr size_t K_max = detail::nonnegative_size(rho_order_max);
+
+    static_assert(K_max >= 2, "profile rho table requires rho and rho^2 rows");
+} // namespace config::detail
+
+namespace config
+{
+    inline constexpr size_t L_max           = detail::L_max;
+    inline constexpr size_t M_max           = detail::M_max;
+    inline constexpr size_t K_max           = detail::K_max;
+    inline constexpr size_t h_count         = static_cast<size_t>(detail::h_count);
+    inline constexpr size_t v_count         = static_cast<size_t>(detail::v_count);
+    inline constexpr size_t kappa_count     = static_cast<size_t>(detail::kappa_count);
+    inline constexpr size_t psin_count      = static_cast<size_t>(detail::psin_count);
+    inline constexpr size_t F_count         = static_cast<size_t>(detail::F_count);
+    inline constexpr auto   c_family_counts = detail::size_counts(detail::cos_counts);
+    inline constexpr auto   s_family_counts = detail::size_counts(detail::sin_counts);
+} // namespace config

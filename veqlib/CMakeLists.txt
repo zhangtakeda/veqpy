@@ -15,10 +15,72 @@ set(VEQLIB_ENZYME_PLUGIN "" CACHE FILEPATH "Path to ClangEnzyme shared library")
 set(VEQLIB_GCEM_ROOT "$ENV{HOME}/opt/gcem-install" CACHE PATH "GCEM install prefix")
 set(VEQLIB_CONSTEXPR_STEP_LIMIT "67108864")
 set(VEQLIB_CONSTEXPR_STEPS "${VEQLIB_CONSTEXPR_STEP_LIMIT}" CACHE STRING "Clang constexpr evaluation step budget")
+set(VEQ_H_PROFILE_COUNT "10" CACHE STRING "h profile coefficient count; 0 disables the profile")
+set(VEQ_V_PROFILE_COUNT "10" CACHE STRING "v profile coefficient count; 0 disables the profile")
+set(VEQ_KAPPA_PROFILE_COUNT "10" CACHE STRING "kappa profile coefficient count; 0 disables the profile")
+set(VEQ_PSIN_PROFILE_COUNT "10" CACHE STRING "psin profile coefficient count; 0 disables the profile")
+set(VEQ_F_PROFILE_COUNT "10" CACHE STRING "F profile coefficient count; 0 disables the profile")
+set(
+    VEQ_COS_PROFILE_COUNTS
+    "10;10;10;10;10;10;10;10;10;10"
+    CACHE STRING
+    "Cosine profile coefficient counts: c0;c1;..., with 0 disabling a profile"
+)
+set(
+    VEQ_SIN_PROFILE_COUNTS
+    "10;10;10;10;10;10;10;10;10;10"
+    CACHE STRING
+    "Sine profile coefficient counts: s1;s2;..., with 0 disabling a profile"
+)
+set(VEQ_PROFILE_KMAX_LIMIT "1048576" CACHE STRING "Upper bound for K_max; config uses min(M_max, this value)")
 
 if(VEQLIB_CONSTEXPR_STEPS GREATER VEQLIB_CONSTEXPR_STEP_LIMIT)
     message(FATAL_ERROR "VEQLIB_CONSTEXPR_STEPS must not exceed ${VEQLIB_CONSTEXPR_STEP_LIMIT}")
 endif()
+
+function(veqlib_require_nonnegative_int_var source_var)
+    if(NOT "${${source_var}}" MATCHES "^[0-9]+$")
+        message(FATAL_ERROR "${source_var} must be a non-negative integer, got '${${source_var}}'")
+    endif()
+endfunction()
+
+function(veqlib_prepare_nonnegative_int_list source_var out_values)
+    string(REGEX REPLACE "[ \t\r\n]+" "" normalized "${${source_var}}")
+    string(REPLACE "," ";" normalized "${normalized}")
+    if("${normalized}" STREQUAL "")
+        set(values)
+    else()
+        set(values ${normalized})
+    endif()
+
+    foreach(value IN LISTS values)
+        if(NOT "${value}" MATCHES "^[0-9]+$")
+            message(FATAL_ERROR "${source_var} must contain non-negative integers, got '${value}'")
+        endif()
+    endforeach()
+
+    string(REPLACE ";" ", " header_values "${values}")
+
+    set("${out_values}" "${header_values}" PARENT_SCOPE)
+endfunction()
+
+veqlib_require_nonnegative_int_var(VEQ_H_PROFILE_COUNT)
+veqlib_require_nonnegative_int_var(VEQ_V_PROFILE_COUNT)
+veqlib_require_nonnegative_int_var(VEQ_KAPPA_PROFILE_COUNT)
+veqlib_require_nonnegative_int_var(VEQ_PSIN_PROFILE_COUNT)
+veqlib_require_nonnegative_int_var(VEQ_F_PROFILE_COUNT)
+veqlib_require_nonnegative_int_var(VEQ_PROFILE_KMAX_LIMIT)
+
+veqlib_prepare_nonnegative_int_list(VEQ_COS_PROFILE_COUNTS VEQ_COS_PROFILE_COUNTS_VALUES)
+veqlib_prepare_nonnegative_int_list(VEQ_SIN_PROFILE_COUNTS VEQ_SIN_PROFILE_COUNTS_VALUES)
+
+set(VEQLIB_GENERATED_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
+file(MAKE_DIRECTORY "${VEQLIB_GENERATED_INCLUDE_DIR}")
+configure_file(
+    "${PROJECT_SOURCE_DIR}/config.h.in"
+    "${VEQLIB_GENERATED_INCLUDE_DIR}/config.h"
+    @ONLY
+)
 
 function(veqlib_require_clang)
     if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
@@ -206,7 +268,12 @@ veqlib_require_clang()
 set(VEQLIB_COMMON_SOURCES linalg.cpp)
 
 function(veqlib_configure_executable target)
-    target_include_directories("${target}" PRIVATE "${PROJECT_SOURCE_DIR}")
+    target_include_directories(
+        "${target}"
+        PRIVATE
+            "${VEQLIB_GENERATED_INCLUDE_DIR}"
+            "${PROJECT_SOURCE_DIR}"
+    )
     set_target_properties(
         "${target}"
         PROPERTIES

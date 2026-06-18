@@ -10,8 +10,8 @@
 
 namespace linalg::detail
 {
-    using std::size_t;
     using math::sqrt;
+    using std::size_t;
     using tensor::Matrix;
     using tensor::Vector;
 

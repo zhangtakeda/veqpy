@@ -15,6 +15,10 @@ namespace tensor::detail
 
     inline constexpr size_t simd_alignment = 64;
 
+    inline constexpr struct Uninitialized
+    {
+    } uninitialized;
+
     template <typename T>
     inline constexpr size_t tensor_alignment =
         std::is_floating_point_v<T> ? (alignof(T) > simd_alignment ? alignof(T) : simd_alignment) : alignof(T);
@@ -31,25 +35,6 @@ namespace tensor::detail
             strides[i - 1] = strides[i] * shape[i];
         return strides;
     }
-}
-
-namespace tensor
-{
-    using std::array;
-    using std::size_t;
-
-    inline constexpr struct Uninitialized
-    {
-    } uninitialized;
-
-    template <typename T, size_t... Extents>
-    struct Tensor;
-
-    template <typename T, size_t size>
-    using Vector = Tensor<T, size, 1>;
-
-    template <typename T, size_t rows, size_t cols = rows>
-    using Matrix = Tensor<T, rows, cols>;
 
     template <typename T, size_t... Extents>
     struct Tensor
@@ -64,12 +49,12 @@ namespace tensor
         using const_iterator  = const T*;
 
         static constexpr size_type rank          = sizeof...(Extents);
-        static constexpr size_type count         = detail::static_product<Extents...>;
-        static constexpr size_type alignment     = detail::tensor_alignment<T>;
+        static constexpr size_type count         = static_product<Extents...>;
+        static constexpr size_type alignment     = tensor_alignment<T>;
         static constexpr size_type storage_bytes = count * sizeof(T);
 
         static constexpr array<size_type, rank> shape   = {Extents...};
-        static constexpr array<size_type, rank> strides = detail::make_strides(shape);
+        static constexpr array<size_type, rank> strides = make_strides(shape);
 
         static_assert(rank > 0, "Tensor must have at least one dimension");
         static_assert(count > 0, "Tensor must contain at least one element");
@@ -225,10 +210,13 @@ namespace tensor
             return result;
         }
     };
-}
 
-namespace tensor::detail
-{
+    template <typename T, size_t size>
+    using Vector = Tensor<T, size, 1>;
+
+    template <typename T, size_t rows, size_t cols = rows>
+    using Matrix = Tensor<T, rows, cols>;
+
     template <typename Lhs, typename Rhs, size_t... Extents, typename Operation>
     constexpr auto
     elementwise_tensor(const Tensor<Lhs, Extents...>& lhs, const Tensor<Rhs, Extents...>& rhs, Operation operation)
@@ -261,48 +249,45 @@ namespace tensor::detail
             out[i] = operation(lhs, rhs[i]);
         return out;
     }
-}
 
-namespace tensor
-{
     template <typename Lhs, typename Rhs, size_t... Extents>
     constexpr auto operator+(const Tensor<Lhs, Extents...>& lhs, const Tensor<Rhs, Extents...>& rhs)
     {
-        return detail::elementwise_tensor(lhs, rhs, [](auto left, auto right) constexpr { return left + right; });
+        return elementwise_tensor(lhs, rhs, [](auto left, auto right) constexpr { return left + right; });
     }
 
     template <typename Lhs, typename Rhs, size_t... Extents>
         requires std::is_arithmetic_v<Rhs>
     constexpr auto operator+(const Tensor<Lhs, Extents...>& lhs, Rhs rhs)
     {
-        return detail::elementwise_scalar_right(lhs, rhs, [](auto left, auto right) constexpr { return left + right; });
+        return elementwise_scalar_right(lhs, rhs, [](auto left, auto right) constexpr { return left + right; });
     }
 
     template <typename Lhs, typename Rhs, size_t... Extents>
         requires std::is_arithmetic_v<Lhs>
     constexpr auto operator+(Lhs lhs, const Tensor<Rhs, Extents...>& rhs)
     {
-        return detail::elementwise_scalar_left(lhs, rhs, [](auto left, auto right) constexpr { return left + right; });
+        return elementwise_scalar_left(lhs, rhs, [](auto left, auto right) constexpr { return left + right; });
     }
 
     template <typename Lhs, typename Rhs, size_t... Extents>
     constexpr auto operator-(const Tensor<Lhs, Extents...>& lhs, const Tensor<Rhs, Extents...>& rhs)
     {
-        return detail::elementwise_tensor(lhs, rhs, [](auto left, auto right) constexpr { return left - right; });
+        return elementwise_tensor(lhs, rhs, [](auto left, auto right) constexpr { return left - right; });
     }
 
     template <typename Lhs, typename Rhs, size_t... Extents>
         requires std::is_arithmetic_v<Rhs>
     constexpr auto operator-(const Tensor<Lhs, Extents...>& lhs, Rhs rhs)
     {
-        return detail::elementwise_scalar_right(lhs, rhs, [](auto left, auto right) constexpr { return left - right; });
+        return elementwise_scalar_right(lhs, rhs, [](auto left, auto right) constexpr { return left - right; });
     }
 
     template <typename Lhs, typename Rhs, size_t... Extents>
         requires std::is_arithmetic_v<Lhs>
     constexpr auto operator-(Lhs lhs, const Tensor<Rhs, Extents...>& rhs)
     {
-        return detail::elementwise_scalar_left(lhs, rhs, [](auto left, auto right) constexpr { return left - right; });
+        return elementwise_scalar_left(lhs, rhs, [](auto left, auto right) constexpr { return left - right; });
     }
 
     template <typename T, size_t... Extents>
@@ -317,40 +302,49 @@ namespace tensor
     template <typename Lhs, typename Rhs, size_t... Extents>
     constexpr auto operator*(const Tensor<Lhs, Extents...>& lhs, const Tensor<Rhs, Extents...>& rhs)
     {
-        return detail::elementwise_tensor(lhs, rhs, [](auto left, auto right) constexpr { return left * right; });
+        return elementwise_tensor(lhs, rhs, [](auto left, auto right) constexpr { return left * right; });
     }
 
     template <typename Lhs, typename Rhs, size_t... Extents>
         requires std::is_arithmetic_v<Rhs>
     constexpr auto operator*(const Tensor<Lhs, Extents...>& lhs, Rhs rhs)
     {
-        return detail::elementwise_scalar_right(lhs, rhs, [](auto left, auto right) constexpr { return left * right; });
+        return elementwise_scalar_right(lhs, rhs, [](auto left, auto right) constexpr { return left * right; });
     }
 
     template <typename Lhs, typename Rhs, size_t... Extents>
         requires std::is_arithmetic_v<Lhs>
     constexpr auto operator*(Lhs lhs, const Tensor<Rhs, Extents...>& rhs)
     {
-        return detail::elementwise_scalar_left(lhs, rhs, [](auto left, auto right) constexpr { return left * right; });
+        return elementwise_scalar_left(lhs, rhs, [](auto left, auto right) constexpr { return left * right; });
     }
 
     template <typename Lhs, typename Rhs, size_t... Extents>
     constexpr auto operator/(const Tensor<Lhs, Extents...>& lhs, const Tensor<Rhs, Extents...>& rhs)
     {
-        return detail::elementwise_tensor(lhs, rhs, [](auto left, auto right) constexpr { return left / right; });
+        return elementwise_tensor(lhs, rhs, [](auto left, auto right) constexpr { return left / right; });
     }
 
     template <typename Lhs, typename Rhs, size_t... Extents>
         requires std::is_arithmetic_v<Rhs>
     constexpr auto operator/(const Tensor<Lhs, Extents...>& lhs, Rhs rhs)
     {
-        return detail::elementwise_scalar_right(lhs, rhs, [](auto left, auto right) constexpr { return left / right; });
+        return elementwise_scalar_right(lhs, rhs, [](auto left, auto right) constexpr { return left / right; });
     }
 
     template <typename Lhs, typename Rhs, size_t... Extents>
         requires std::is_arithmetic_v<Lhs>
     constexpr auto operator/(Lhs lhs, const Tensor<Rhs, Extents...>& rhs)
     {
-        return detail::elementwise_scalar_left(lhs, rhs, [](auto left, auto right) constexpr { return left / right; });
+        return elementwise_scalar_left(lhs, rhs, [](auto left, auto right) constexpr { return left / right; });
     }
+} // namespace tensor::detail
+
+namespace tensor
+{
+    using detail::Matrix;
+    using detail::Tensor;
+    using detail::Vector;
+
+    using detail::uninitialized;
 } // namespace tensor
