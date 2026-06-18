@@ -124,6 +124,35 @@ namespace
     using RuntimeProbeGrid     = Grid<8, 8, 2, 2, 2, Legendre, Spectral>;
     using MixedRuntimeProfiles = profiles::RuntimeProfiles<MixedProfileShape, RuntimeProbeGrid>;
 
+    constexpr auto semantic_c_slots = std::array{
+        profiles::absent_slot(),
+        profiles::absent_slot(),
+        profiles::absent_slot(),
+        profiles::optimized_slot(2),
+    };
+    constexpr auto semantic_s_slots = std::array{
+        profiles::absent_slot(),
+        profiles::absent_slot(),
+        profiles::absent_slot(),
+        profiles::optimized_slot(2),
+    };
+
+    using RuntimeSemanticShape = profiles::ProfileShape<
+        2,
+        2,
+        4,
+        profiles::absent_slot(),
+        profiles::absent_slot(),
+        profiles::absent_slot(),
+        profiles::optimized_slot(1),
+        profiles::absent_slot(),
+        profiles::optimized_slot(2),
+        semantic_c_slots,
+        semantic_s_slots>;
+    using RuntimeSemanticGrid     = Grid<8, 8, 2, 4, 2, Legendre, Spectral>;
+    using RuntimeSemanticProfiles = profiles::RuntimeProfiles<RuntimeSemanticShape, RuntimeSemanticGrid>;
+    using RuntimeSemanticEvaluator = profiles::ProfileEvaluator<RuntimeSemanticShape>;
+
     template <typename Shape, size_t HCount>
     consteval bool h_profile_L_matches()
     {
@@ -209,6 +238,7 @@ namespace
                   static_cast<int>(MixedProfileShape::s_profile_id<2>()));
     static_assert(MixedRuntimeProfiles::profile_field_count == MixedProfileShape::profile_count);
     static_assert(MixedRuntimeProfiles::family_field_count == MixedProfileShape::M_max + 1);
+    static_assert(RuntimeSemanticEvaluator::fourier_power<4>() == RuntimeSemanticShape::K_max);
 
     constexpr double tolerance = 1.0e-8;
 
@@ -824,11 +854,70 @@ namespace
                close(runtime.template s_family_field<2>(0, 0), runtime.template profile_field<s2_id>(0, 0));
     }
 
+    constexpr bool runtime_profile_semantics_constexpr_ok()
+    {
+        using Shape   = RuntimeSemanticShape;
+        using Runtime = RuntimeSemanticProfiles;
+
+        constexpr size_t c0_id = Shape::c_profile_id<0>();
+        constexpr size_t c4_id = Shape::c_profile_id<4>();
+        constexpr size_t s4_id = Shape::s_profile_id<4>();
+        constexpr size_t F_id  = Shape::F_profile_id;
+
+        const auto c0_coeffs = make_profile_coefficients<1>(0.04, 0.0);
+        const auto c4_coeffs = make_profile_coefficients<2>(0.05, 0.002);
+        const auto s4_coeffs = make_profile_coefficients<2>(-0.03, 0.001);
+        const auto F_coeffs  = make_profile_coefficients<2>(0.015, -0.0004);
+
+        profiles::ProfileRuntimeParams<Shape> params{};
+        params.offsets[c0_id] = 0.2;
+        params.offsets[c4_id] = 0.3;
+        params.offsets[s4_id] = -0.1;
+        params.scales[F_id]   = 2.25;
+
+        Vector<double, Shape::x_size> x{};
+        write_profile_coefficients<Shape, c0_id>(x, c0_coeffs);
+        write_profile_coefficients<Shape, c4_id>(x, c4_coeffs);
+        write_profile_coefficients<Shape, s4_id>(x, s4_coeffs);
+        write_profile_coefficients<Shape, F_id>(x, F_coeffs);
+
+        Runtime runtime{};
+        runtime.refresh_active(std::span<const double, Shape::x_size>{x.data(), Shape::x_size}, params);
+
+        return check_fourier_profile<0, RuntimeSemanticGrid>(
+                   runtime.template profile_matrix<c0_id>(),
+                   c0_coeffs,
+                   0,
+                   params.offsets[c0_id]
+               ) &&
+               check_fourier_profile<2, RuntimeSemanticGrid>(
+                   runtime.template profile_matrix<c4_id>(),
+                   c4_coeffs,
+                   1,
+                   params.offsets[c4_id]
+               ) &&
+               check_fourier_profile<2, RuntimeSemanticGrid>(
+                   runtime.template profile_matrix<s4_id>(),
+                   s4_coeffs,
+                   2,
+                   params.offsets[s4_id]
+               ) &&
+               check_F_profile<RuntimeSemanticGrid>(
+                   runtime.template profile_matrix<F_id>(),
+                   F_coeffs,
+                   3,
+                   params.scales[F_id]
+               ) &&
+               close(runtime.template c_family_field<4>(0, 0), runtime.template profile_field<c4_id>(0, 0)) &&
+               close(runtime.template s_family_field<4>(0, 0), runtime.template profile_field<s4_id>(0, 0));
+    }
+
     static_assert(linalg_constexpr_ok());
     static_assert(tensor_math_constexpr_ok());
     static_assert(grid_constexpr_ok());
     static_assert(profiles_grid_constexpr_ok());
     static_assert(runtime_profiles_constexpr_ok());
+    static_assert(runtime_profile_semantics_constexpr_ok());
 
     int root_residual(void*, int n, const double* x, double* fvec, int iflag)
     {
@@ -876,6 +965,7 @@ int main()
         {"grid", grid_constexpr_ok()},
         {"profiles_grid", profiles_grid_constexpr_ok()},
         {"runtime_profiles", runtime_profiles_constexpr_ok()},
+        {"runtime_profile_semantics", runtime_profile_semantics_constexpr_ok()},
     };
     report["quadrature"] = {
         {"chebyshev_moment_error_n16_degree7", max_moment_error<Chebyshev, 16>(7)},
@@ -895,7 +985,8 @@ int main()
     };
 
     const bool ok = linalg_constexpr_ok() && tensor_math_constexpr_ok() && grid_constexpr_ok() &&
-                    profiles_grid_constexpr_ok() && runtime_profiles_constexpr_ok() && runtime_library_ok(report);
+                    profiles_grid_constexpr_ok() && runtime_profiles_constexpr_ok() &&
+                    runtime_profile_semantics_constexpr_ok() && runtime_library_ok(report);
 
     std::cout << report.dump(2) << '\n';
     return ok ? EXIT_SUCCESS : EXIT_FAILURE;
