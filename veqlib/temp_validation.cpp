@@ -2,6 +2,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
+#include <span>
 
 #include <cminpack.h>
 #include <gcem.hpp>
@@ -120,6 +121,8 @@ namespace
         profiles::absent_slot(),
         mixed_c_slots,
         mixed_s_slots>;
+    using RuntimeProbeGrid     = Grid<8, 8, 2, 2, 2, Legendre, Spectral>;
+    using MixedRuntimeProfiles = profiles::RuntimeProfiles<MixedProfileShape, RuntimeProbeGrid>;
 
     template <typename Shape, size_t HCount>
     consteval bool h_profile_L_matches()
@@ -204,6 +207,8 @@ namespace
     static_assert(MixedProfileShape::s_family_source_profile_ids[1] == -1);
     static_assert(MixedProfileShape::s_family_source_profile_ids[2] ==
                   static_cast<int>(MixedProfileShape::s_profile_id<2>()));
+    static_assert(MixedRuntimeProfiles::profile_field_count == MixedProfileShape::profile_count);
+    static_assert(MixedRuntimeProfiles::family_field_count == MixedProfileShape::M_max + 1);
 
     constexpr double tolerance = 1.0e-8;
 
@@ -236,6 +241,13 @@ namespace
         for (size_t i = 0; i < Count; ++i)
             coeffs[i] = base + step * static_cast<double>(i);
         return coeffs;
+    }
+
+    template <typename Shape, size_t ProfileId, size_t Count>
+    constexpr void write_profile_coefficients(Vector<double, Shape::x_size>& x, const Vector<double, Count>& coeffs)
+    {
+        for (size_t degree = 0; degree < Count; ++degree)
+            x[static_cast<size_t>(Shape::coeff_index[ProfileId][degree])] = coeffs[degree];
     }
 
     template <typename GridType, size_t Count>
@@ -752,10 +764,71 @@ namespace
                s_profile_grid_ok<ProbeProfiles, ProbeGrid, 1>() && highest_c_ok && highest_s_ok;
     }
 
+    constexpr bool runtime_profiles_constexpr_ok()
+    {
+        using Shape   = MixedProfileShape;
+        using Runtime = MixedRuntimeProfiles;
+
+        constexpr size_t h_id  = Shape::h_profile_id;
+        constexpr size_t c0_id = Shape::c_profile_id<0>();
+        constexpr size_t c1_id = Shape::c_profile_id<1>();
+        constexpr size_t c2_id = Shape::c_profile_id<2>();
+        constexpr size_t s2_id = Shape::s_profile_id<2>();
+
+        const auto h_coeffs  = make_profile_coefficients<2>(0.12, -0.003);
+        const auto c0_coeffs = make_profile_coefficients<1>(0.07, 0.001);
+        const auto c1_coeffs = make_profile_coefficients<2>(0.08, 0.001);
+        const auto s2_coeffs = make_profile_coefficients<3>(-0.06, 0.0015);
+
+        profiles::ProfileRuntimeParams<Shape> params{};
+        params.offsets[c0_id] = 0.25;
+        params.offsets[c1_id] = 0.35;
+        params.offsets[c2_id] = 4.5;
+        params.offsets[s2_id] = -0.15;
+        params.scales[c2_id]  = 2.0;
+
+        Vector<double, Shape::x_size> x{};
+        write_profile_coefficients<Shape, h_id>(x, h_coeffs);
+        write_profile_coefficients<Shape, c0_id>(x, c0_coeffs);
+        write_profile_coefficients<Shape, c1_id>(x, c1_coeffs);
+        write_profile_coefficients<Shape, s2_id>(x, s2_coeffs);
+
+        Runtime runtime{};
+        runtime.refresh_fixed(params);
+        runtime.refresh_active(std::span<const double, Shape::x_size>{x.data(), Shape::x_size}, params);
+
+        return check_enveloped_profile<RuntimeProbeGrid>(runtime.template profile_matrix<h_id>(), h_coeffs, 0) &&
+               check_fourier_profile<0, RuntimeProbeGrid>(
+                   runtime.template profile_matrix<c0_id>(),
+                   c0_coeffs,
+                   5,
+                   params.offsets[c0_id]
+               ) &&
+               check_fourier_profile<1, RuntimeProbeGrid>(
+                   runtime.template profile_matrix<c1_id>(),
+                   c1_coeffs,
+                   5,
+                   params.offsets[c1_id]
+               ) &&
+               check_fourier_profile<2, RuntimeProbeGrid>(
+                   runtime.template profile_matrix<s2_id>(),
+                   s2_coeffs,
+                   6,
+                   params.offsets[s2_id]
+               ) &&
+               close(runtime.template profile_field<c2_id>(0, 0), 9.0) &&
+               close(runtime.template profile_field<c2_id>(0, 1), 0.0) &&
+               close(runtime.template profile_field<c2_id>(0, 2), 0.0) &&
+               close(runtime.template c_family_field<2>(0, 0), 9.0) &&
+               close(runtime.template s_family_field<1>(0, 0), 0.0) &&
+               close(runtime.template s_family_field<2>(0, 0), runtime.template profile_field<s2_id>(0, 0));
+    }
+
     static_assert(linalg_constexpr_ok());
     static_assert(tensor_math_constexpr_ok());
     static_assert(grid_constexpr_ok());
     static_assert(profiles_grid_constexpr_ok());
+    static_assert(runtime_profiles_constexpr_ok());
 
     int root_residual(void*, int n, const double* x, double* fvec, int iflag)
     {
@@ -802,6 +875,7 @@ int main()
         {"tensor_math", tensor_math_constexpr_ok()},
         {"grid", grid_constexpr_ok()},
         {"profiles_grid", profiles_grid_constexpr_ok()},
+        {"runtime_profiles", runtime_profiles_constexpr_ok()},
     };
     report["quadrature"] = {
         {"chebyshev_moment_error_n16_degree7", max_moment_error<Chebyshev, 16>(7)},
@@ -821,7 +895,7 @@ int main()
     };
 
     const bool ok = linalg_constexpr_ok() && tensor_math_constexpr_ok() && grid_constexpr_ok() &&
-                    profiles_grid_constexpr_ok() && runtime_library_ok(report);
+                    profiles_grid_constexpr_ok() && runtime_profiles_constexpr_ok() && runtime_library_ok(report);
 
     std::cout << report.dump(2) << '\n';
     return ok ? EXIT_SUCCESS : EXIT_FAILURE;

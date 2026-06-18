@@ -3,7 +3,10 @@
 #include "math.h"
 #include "profile_layout.h"
 #include "tensor.h"
+#include <array>
+#include <cassert>
 #include <cstddef>
+#include <span>
 
 namespace profiles::detail
 {
@@ -21,6 +24,15 @@ namespace profiles::detail
         double diff;
         double diff2;
     };
+
+    template <typename T, size_t Count>
+    consteval std::array<T, Count> filled_array(T value)
+    {
+        std::array<T, Count> out{};
+        for (auto& item : out)
+            item = value;
+        return out;
+    }
 
     template <size_t Lmax, size_t Count, size_t Nr>
         requires(Count > 0)
@@ -224,6 +236,7 @@ namespace profiles
 {
     using std::size_t;
     using tensor::Matrix;
+    using tensor::Tensor;
     using tensor::Vector;
 
     template <typename Shape>
@@ -456,4 +469,378 @@ namespace profiles
               CFamilyCounts,
               SFamilyCounts>>
     {};
+
+    template <typename Shape>
+    struct ProfileRuntimeParams
+    {
+        std::array<double, Shape::profile_count> offsets{};
+        std::array<double, Shape::profile_count> scales =
+            detail::filled_array<double, Shape::profile_count>(1.0);
+        std::array<size_t, Shape::profile_count> powers{};
+        std::array<size_t, Shape::profile_count> envelope_powers{};
+        std::array<double, Shape::profile_count> amplitude_powers =
+            detail::filled_array<double, Shape::profile_count>(1.0);
+    };
+
+    template <typename Shape, typename GridType>
+    struct RuntimeProfiles
+    {
+        static_assert(Shape::L_max == GridType::basis_rows, "RuntimeProfiles requires matching basis rows");
+        static_assert(Shape::K_max == GridType::rho_power_rows, "RuntimeProfiles requires matching rho rows");
+        static_assert(Shape::M_max + 1 == GridType::harmonic_rows, "RuntimeProfiles requires matching harmonics");
+
+        using shape     = Shape;
+        using grid      = GridType;
+        using evaluator = ProfileEvaluator<Shape>;
+
+        static constexpr size_t radial_nodes        = GridType::radial_nodes;
+        static constexpr size_t profile_field_count = Shape::profile_count;
+        static constexpr size_t family_field_count  = Shape::M_max + 1;
+
+        using ProfileField = Matrix<double, radial_nodes, 3>;
+        using ProfileSlab  = Tensor<double, profile_field_count, radial_nodes, 3>;
+        using FamilySlab   = Tensor<double, family_field_count, radial_nodes, 3>;
+
+        ProfileSlab profile_fields{};
+        ProfileSlab profile_rp_fields{};
+        ProfileSlab profile_env_fields{};
+        FamilySlab  c_family_fields{};
+        FamilySlab  s_family_fields{};
+        FamilySlab  c_family_base_fields{};
+        FamilySlab  s_family_base_fields{};
+
+        constexpr void clear() noexcept
+        {
+            profile_fields.clear();
+            profile_rp_fields.clear();
+            profile_env_fields.clear();
+            c_family_fields.clear();
+            s_family_fields.clear();
+            c_family_base_fields.clear();
+            s_family_base_fields.clear();
+        }
+
+        constexpr double& profile_field(size_t profile_id, size_t node, size_t component) noexcept
+        {
+            return profile_fields(profile_id, node, component);
+        }
+
+        constexpr double profile_field(size_t profile_id, size_t node, size_t component) const noexcept
+        {
+            return profile_fields(profile_id, node, component);
+        }
+
+        template <size_t ProfileId>
+        constexpr double& profile_field(size_t node, size_t component) noexcept
+        {
+            static_assert(ProfileId < profile_field_count, "profile id exceeds runtime profile slab");
+            return profile_fields(ProfileId, node, component);
+        }
+
+        template <size_t ProfileId>
+        constexpr double profile_field(size_t node, size_t component) const noexcept
+        {
+            static_assert(ProfileId < profile_field_count, "profile id exceeds runtime profile slab");
+            return profile_fields(ProfileId, node, component);
+        }
+
+        template <size_t ProfileId>
+        constexpr ProfileField profile_matrix() const noexcept
+        {
+            static_assert(ProfileId < profile_field_count, "profile id exceeds runtime profile slab");
+
+            ProfileField out{};
+            for (size_t node = 0; node < radial_nodes; ++node)
+                for (size_t component = 0; component < 3; ++component)
+                    out(node, component) = profile_fields(ProfileId, node, component);
+            return out;
+        }
+
+        template <size_t Order>
+        constexpr double& c_family_field(size_t node, size_t component) noexcept
+        {
+            static_assert(Order < family_field_count, "c-family order exceeds runtime family slab");
+            return c_family_fields(Order, node, component);
+        }
+
+        template <size_t Order>
+        constexpr double c_family_field(size_t node, size_t component) const noexcept
+        {
+            static_assert(Order < family_field_count, "c-family order exceeds runtime family slab");
+            return c_family_fields(Order, node, component);
+        }
+
+        template <size_t Order>
+        constexpr double& s_family_field(size_t node, size_t component) noexcept
+        {
+            static_assert(Order < family_field_count, "s-family order exceeds runtime family slab");
+            return s_family_fields(Order, node, component);
+        }
+
+        template <size_t Order>
+        constexpr double s_family_field(size_t node, size_t component) const noexcept
+        {
+            static_assert(Order < family_field_count, "s-family order exceeds runtime family slab");
+            return s_family_fields(Order, node, component);
+        }
+
+        constexpr void refresh_fixed(const ProfileRuntimeParams<Shape>& params) noexcept
+        {
+            refresh_fixed_profile<0>(params);
+            refresh_fourier_family_fields();
+        }
+
+        constexpr void refresh_active(std::span<const double, Shape::x_size> x,
+                                      const ProfileRuntimeParams<Shape>&     params) noexcept
+        {
+            refresh_h_active(x);
+            refresh_v_active(x);
+            refresh_kappa_active(x, params);
+            refresh_psin_active(x);
+            refresh_F_active(x, params);
+            refresh_c_active<0>(x, params);
+            refresh_s_active<1>(x, params);
+            refresh_fourier_family_fields();
+        }
+
+        constexpr void refresh_fourier_family_fields() noexcept
+        {
+            c_family_fields.clear();
+            s_family_fields.clear();
+            c_family_base_fields.clear();
+            s_family_base_fields.clear();
+            refresh_c_family_order<0>();
+            refresh_s_family_order<1>();
+        }
+
+    private:
+        template <size_t ProfileId, size_t Count>
+        static constexpr Vector<double, Count> coefficients_from_x(std::span<const double, Shape::x_size> x) noexcept
+        {
+            Vector<double, Count> out{};
+            for (size_t degree = 0; degree < Count; ++degree)
+            {
+                const int x_index = Shape::coeff_index[ProfileId][degree];
+                assert(x_index >= 0);
+                out[degree] = x[static_cast<size_t>(x_index)];
+            }
+            return out;
+        }
+
+        template <size_t ProfileId>
+        constexpr void store_profile(const ProfileField& values) noexcept
+        {
+            static_assert(ProfileId < profile_field_count, "profile id exceeds runtime profile slab");
+
+            for (size_t node = 0; node < radial_nodes; ++node)
+                for (size_t component = 0; component < 3; ++component)
+                    profile_fields(ProfileId, node, component) = values(node, component);
+        }
+
+        template <size_t ProfileId>
+        constexpr void fill_profile(double value, double radial, double radial2) noexcept
+        {
+            static_assert(ProfileId < profile_field_count, "profile id exceeds runtime profile slab");
+
+            for (size_t node = 0; node < radial_nodes; ++node)
+            {
+                profile_fields(ProfileId, node, 0) = value;
+                profile_fields(ProfileId, node, 1) = radial;
+                profile_fields(ProfileId, node, 2) = radial2;
+            }
+        }
+
+        template <size_t ProfileId>
+        constexpr void refresh_fixed_profile(const ProfileRuntimeParams<Shape>& params) noexcept
+        {
+            if constexpr (ProfileId < profile_field_count)
+            {
+                constexpr ProfileSlot slot = Shape::slot_for_profile_id(ProfileId);
+                if constexpr (slot.fixed())
+                    fill_profile<ProfileId>(params.offsets[ProfileId] * params.scales[ProfileId], 0.0, 0.0);
+                refresh_fixed_profile<ProfileId + 1>(params);
+            }
+        }
+
+        constexpr void refresh_h_active(std::span<const double, Shape::x_size> x) noexcept
+        {
+            if constexpr (Shape::slot_for_profile_id(Shape::h_profile_id).optimized())
+            {
+                constexpr size_t profile_id = Shape::h_profile_id;
+                constexpr size_t count      = evaluator::h_count;
+                const auto       coeffs     = coefficients_from_x<profile_id, count>(x);
+                ProfileField     out{};
+                evaluator::update_h(out, coeffs, GridType::T, GridType::T_r, GridType::T_rr, GridType::rhos);
+                store_profile<profile_id>(out);
+            }
+        }
+
+        constexpr void refresh_v_active(std::span<const double, Shape::x_size> x) noexcept
+        {
+            if constexpr (Shape::slot_for_profile_id(Shape::v_profile_id).optimized())
+            {
+                constexpr size_t profile_id = Shape::v_profile_id;
+                constexpr size_t count      = evaluator::v_count;
+                const auto       coeffs     = coefficients_from_x<profile_id, count>(x);
+                ProfileField     out{};
+                evaluator::update_v(out, coeffs, GridType::T, GridType::T_r, GridType::T_rr, GridType::rhos);
+                store_profile<profile_id>(out);
+            }
+        }
+
+        constexpr void refresh_kappa_active(std::span<const double, Shape::x_size> x,
+                                            const ProfileRuntimeParams<Shape>&     params) noexcept
+        {
+            if constexpr (Shape::slot_for_profile_id(Shape::kappa_profile_id).optimized())
+            {
+                constexpr size_t profile_id = Shape::kappa_profile_id;
+                constexpr size_t count      = evaluator::kappa_count;
+                const auto       coeffs     = coefficients_from_x<profile_id, count>(x);
+                ProfileField     out{};
+                evaluator::update_kappa(
+                    out,
+                    coeffs,
+                    GridType::T,
+                    GridType::T_r,
+                    GridType::T_rr,
+                    GridType::rhos,
+                    params.offsets[profile_id]
+                );
+                store_profile<profile_id>(out);
+            }
+        }
+
+        constexpr void refresh_psin_active(std::span<const double, Shape::x_size> x) noexcept
+        {
+            if constexpr (Shape::slot_for_profile_id(Shape::psin_profile_id).optimized())
+            {
+                constexpr size_t profile_id = Shape::psin_profile_id;
+                constexpr size_t count      = evaluator::psin_count;
+                const auto       coeffs     = coefficients_from_x<profile_id, count>(x);
+                ProfileField     out{};
+                evaluator::update_psin(out, coeffs, GridType::T, GridType::T_r, GridType::T_rr, GridType::rhos);
+                store_profile<profile_id>(out);
+            }
+        }
+
+        constexpr void refresh_F_active(std::span<const double, Shape::x_size> x,
+                                        const ProfileRuntimeParams<Shape>&     params) noexcept
+        {
+            if constexpr (Shape::slot_for_profile_id(Shape::F_profile_id).optimized())
+            {
+                constexpr size_t profile_id = Shape::F_profile_id;
+                constexpr size_t count      = evaluator::F_count;
+                const auto       coeffs     = coefficients_from_x<profile_id, count>(x);
+                ProfileField     out{};
+                evaluator::update_F(
+                    out,
+                    coeffs,
+                    GridType::T,
+                    GridType::T_r,
+                    GridType::T_rr,
+                    GridType::rhos,
+                    params.scales[profile_id]
+                );
+                store_profile<profile_id>(out);
+            }
+        }
+
+        template <size_t Order>
+        constexpr void refresh_c_active(std::span<const double, Shape::x_size> x,
+                                        const ProfileRuntimeParams<Shape>&     params) noexcept
+        {
+            if constexpr (Order <= Shape::M_max)
+            {
+                if constexpr (Order < evaluator::c_family_size && Shape::c_slot(Order).optimized())
+                {
+                    constexpr size_t profile_id = Shape::template c_profile_id<Order>();
+                    constexpr size_t count      = evaluator::template c_count<Order>();
+                    const auto       coeffs     = coefficients_from_x<profile_id, count>(x);
+                    ProfileField     out{};
+                    evaluator::template update_c<Order>(
+                        out,
+                        coeffs,
+                        GridType::T,
+                        GridType::T_r,
+                        GridType::T_rr,
+                        GridType::rhos,
+                        params.offsets[profile_id]
+                    );
+                    store_profile<profile_id>(out);
+                }
+                refresh_c_active<Order + 1>(x, params);
+            }
+        }
+
+        template <size_t Order>
+        constexpr void refresh_s_active(std::span<const double, Shape::x_size> x,
+                                        const ProfileRuntimeParams<Shape>&     params) noexcept
+        {
+            if constexpr (Order <= Shape::M_max)
+            {
+                if constexpr (Order <= evaluator::s_family_size && Shape::s_slot(Order).optimized())
+                {
+                    constexpr size_t profile_id = Shape::template s_profile_id<Order>();
+                    constexpr size_t count      = evaluator::template s_count<Order>();
+                    const auto       coeffs     = coefficients_from_x<profile_id, count>(x);
+                    ProfileField     out{};
+                    evaluator::template update_s<Order>(
+                        out,
+                        coeffs,
+                        GridType::T,
+                        GridType::T_r,
+                        GridType::T_rr,
+                        GridType::rhos,
+                        params.offsets[profile_id]
+                    );
+                    store_profile<profile_id>(out);
+                }
+                refresh_s_active<Order + 1>(x, params);
+            }
+        }
+
+        template <size_t ProfileId, size_t Order>
+        constexpr void copy_profile_to_family(FamilySlab& family, FamilySlab& family_base) noexcept
+        {
+            for (size_t node = 0; node < radial_nodes; ++node)
+            {
+                for (size_t component = 0; component < 3; ++component)
+                {
+                    const double value              = profile_fields(ProfileId, node, component);
+                    family(Order, node, component)  = value;
+                    family_base(Order, node, component) = value;
+                }
+            }
+        }
+
+        template <size_t Order>
+        constexpr void refresh_c_family_order() noexcept
+        {
+            if constexpr (Order <= Shape::M_max)
+            {
+                constexpr int profile_id = Shape::c_family_source_profile_ids[Order];
+                if constexpr (profile_id >= 0)
+                    copy_profile_to_family<static_cast<size_t>(profile_id), Order>(
+                        c_family_fields,
+                        c_family_base_fields
+                    );
+                refresh_c_family_order<Order + 1>();
+            }
+        }
+
+        template <size_t Order>
+        constexpr void refresh_s_family_order() noexcept
+        {
+            if constexpr (Order <= Shape::M_max)
+            {
+                constexpr int profile_id = Shape::s_family_source_profile_ids[Order];
+                if constexpr (profile_id >= 0)
+                    copy_profile_to_family<static_cast<size_t>(profile_id), Order>(
+                        s_family_fields,
+                        s_family_base_fields
+                    );
+                refresh_s_family_order<Order + 1>();
+            }
+        }
+    };
 } // namespace profiles
