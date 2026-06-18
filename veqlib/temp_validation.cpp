@@ -15,6 +15,7 @@
 #include "linalg.h"
 #include "math.h"
 #include "profiles.h"
+#include "source.h"
 #include "tensor.h"
 
 namespace
@@ -55,6 +56,11 @@ namespace
     using linalg::transpose;
     using linalg::transpose_into;
     using std::size_t;
+    using source::ProfileOwnedPsinSourceRuntime;
+    using source::UniformSourceShape;
+    using source::root_psin;
+    using source::root_psin_r;
+    using source::root_psin_rr;
     using tensor::Matrix;
     using tensor::Vector;
     using tensor::uninitialized;
@@ -127,6 +133,23 @@ namespace
     using CircularGeometryGrid     = Grid<8, 8, 2, 2, 2, Legendre, Spectral>;
     using CircularGeometryProfiles = profiles::RuntimeProfiles<CircularGeometryShape, CircularGeometryGrid>;
     using CircularGeometryRuntime  = GeometryRuntime<CircularGeometryGrid>;
+
+    using SourceMaterializationShape = profiles::ProfileShape<
+        3,
+        2,
+        1,
+        profiles::fixed_slot(),
+        profiles::fixed_slot(),
+        profiles::fixed_slot(),
+        profiles::fixed_slot(),
+        profiles::optimized_slot(3),
+        profiles::absent_slot(),
+        no_c_slots,
+        no_s_slots>;
+    using SourceMaterializationGrid     = Grid<8, 8, 3, 1, 2, Legendre, Spectral>;
+    using SourceMaterializationProfiles = profiles::RuntimeProfiles<SourceMaterializationShape, SourceMaterializationGrid>;
+    using SourceMaterializationRuntime =
+        ProfileOwnedPsinSourceRuntime<SourceMaterializationGrid, UniformSourceShape<5>>;
 
     constexpr auto mixed_c_slots = std::array{
         profiles::optimized_slot(2),
@@ -999,6 +1022,63 @@ namespace
         return true;
     }
 
+    constexpr bool source_materialization_constexpr_ok()
+    {
+        using Shape   = SourceMaterializationShape;
+        using Grid    = SourceMaterializationGrid;
+        using Runtime = SourceMaterializationProfiles;
+        using Source  = SourceMaterializationRuntime;
+
+        constexpr size_t psin_id = Shape::psin_profile_id;
+        const auto       psin_coeffs = make_profile_coefficients<3>(0.01, -0.0002);
+
+        profiles::ProfileRuntimeParams<Shape> params{};
+        params.offsets[Shape::h_profile_id] = 0.0;
+        params.offsets[Shape::v_profile_id] = 0.0;
+        params.offsets[Shape::kappa_profile_id] = 1.45;
+        params.offsets[Shape::c_profile_id<0>()] = 0.0;
+
+        Vector<double, Shape::x_size> x{};
+        write_profile_coefficients<Shape, psin_id>(x, psin_coeffs);
+
+        Runtime profiles{};
+        profiles.refresh_fixed(params);
+        profiles.refresh_active(std::span<const double, Shape::x_size>{x.data(), Shape::x_size}, params);
+
+        Source source{};
+        constexpr std::array<double, 5> heat{2.0, 2.75, 3.5, 4.25, 5.0};
+        constexpr std::array<double, 5> current{-1.0, -0.875, -0.75, -0.625, -0.5};
+        source.set_uniform_sources(
+            std::span<const double, heat.size()>{heat.data(), heat.size()},
+            std::span<const double, current.size()>{current.data(), current.size()}
+        );
+
+        if (!source.materialize_profile_owned_psin(profiles, source::axis_fix_count<Grid>(0.0)))
+            return false;
+
+        if (!close(source.source_target_root_fields(root_psin, 0), 0.0, 0.0) ||
+            !close(source.source_target_root_fields(root_psin, Grid::radial_nodes - 1), 1.0, 0.0))
+            return false;
+
+        for (size_t i = 0; i < Grid::radial_nodes; ++i)
+        {
+            const double q = source.source_psin_query[i];
+            if (!close(source.source_parameter_query[i], q) ||
+                !close(source.source_target_root_fields(root_psin, i), q) ||
+                source.source_target_root_fields(root_psin_r, i) <= 0.0 ||
+                !math::is_finite(source.source_target_root_fields(root_psin_rr, i)))
+                return false;
+
+            const double expected_heat = 2.0 + 3.0 * q;
+            const double expected_current = -1.0 + 0.5 * q;
+            if (!close(source.materialized_heat_input[i], expected_heat, 1.0e-10) ||
+                !close(source.materialized_current_input[i], expected_current, 1.0e-10))
+                return false;
+        }
+
+        return true;
+    }
+
     static_assert(linalg_constexpr_ok());
     static_assert(tensor_math_constexpr_ok());
     static_assert(grid_constexpr_ok());
@@ -1006,6 +1086,7 @@ namespace
     static_assert(runtime_profiles_constexpr_ok());
     static_assert(runtime_profile_semantics_constexpr_ok());
     static_assert(geometry_circular_constexpr_ok());
+    static_assert(source_materialization_constexpr_ok());
 
     int root_residual(void*, int n, const double* x, double* fvec, int iflag)
     {
@@ -1055,6 +1136,7 @@ int main()
         {"runtime_profiles", runtime_profiles_constexpr_ok()},
         {"runtime_profile_semantics", runtime_profile_semantics_constexpr_ok()},
         {"geometry_circular", geometry_circular_constexpr_ok()},
+        {"source_materialization", source_materialization_constexpr_ok()},
     };
     report["quadrature"] = {
         {"chebyshev_moment_error_n16_degree7", max_moment_error<Chebyshev, 16>(7)},
@@ -1076,7 +1158,7 @@ int main()
     const bool ok = linalg_constexpr_ok() && tensor_math_constexpr_ok() && grid_constexpr_ok() &&
                     profiles_grid_constexpr_ok() && runtime_profiles_constexpr_ok() &&
                     runtime_profile_semantics_constexpr_ok() && geometry_circular_constexpr_ok() &&
-                    runtime_library_ok(report);
+                    source_materialization_constexpr_ok() && runtime_library_ok(report);
 
     std::cout << report.dump(2) << '\n';
     return ok ? EXIT_SUCCESS : EXIT_FAILURE;
