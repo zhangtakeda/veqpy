@@ -15,6 +15,7 @@
 #include "linalg.h"
 #include "math.h"
 #include "profiles.h"
+#include "residual.h"
 #include "source.h"
 #include "tensor.h"
 
@@ -47,6 +48,7 @@ namespace
     using linalg::GolubReinsch;
     using linalg::Householder;
     using linalg::Thomas;
+    using residual::ResidualRuntime;
     using linalg::factorize;
     using linalg::factorize_into;
     using linalg::matmul;
@@ -150,6 +152,31 @@ namespace
     using SourceMaterializationProfiles = profiles::RuntimeProfiles<SourceMaterializationShape, SourceMaterializationGrid>;
     using SourceMaterializationRuntime =
         ProfileOwnedPsinSourceRuntime<SourceMaterializationGrid, UniformSourceShape<5>>;
+
+    constexpr auto residual_c_slots = std::array{
+        profiles::optimized_slot(2),
+    };
+    constexpr auto residual_s_slots = std::array{
+        profiles::optimized_slot(2),
+    };
+
+    using ResidualProbeShape = profiles::ProfileShape<
+        2,
+        2,
+        1,
+        profiles::optimized_slot(2),
+        profiles::optimized_slot(2),
+        profiles::optimized_slot(2),
+        profiles::optimized_slot(2),
+        profiles::optimized_slot(2),
+        profiles::absent_slot(),
+        residual_c_slots,
+        residual_s_slots>;
+    using ResidualProbeGrid     = Grid<8, 8, 2, 1, 2, Legendre, Spectral>;
+    using ResidualProbeProfiles = profiles::RuntimeProfiles<ResidualProbeShape, ResidualProbeGrid>;
+    using ResidualProbeSource   = ProfileOwnedPsinSourceRuntime<ResidualProbeGrid, UniformSourceShape<5>>;
+    using ResidualProbeGeometry = GeometryRuntime<ResidualProbeGrid>;
+    using ResidualProbeRuntime  = ResidualRuntime<ResidualProbeShape, ResidualProbeGrid>;
 
     constexpr auto mixed_c_slots = std::array{
         profiles::optimized_slot(2),
@@ -1181,6 +1208,75 @@ namespace
                math::is_finite(beta_source.alpha1) && math::is_finite(beta_source.alpha2);
     }
 
+    constexpr bool residual_pack_constexpr_ok()
+    {
+        using Shape    = ResidualProbeShape;
+        using Grid     = ResidualProbeGrid;
+        using Runtime  = ResidualProbeProfiles;
+        using Source   = ResidualProbeSource;
+        using Geometry = ResidualProbeGeometry;
+        using Residual = ResidualProbeRuntime;
+
+        constexpr size_t h_id     = Shape::h_profile_id;
+        constexpr size_t v_id     = Shape::v_profile_id;
+        constexpr size_t k_id     = Shape::kappa_profile_id;
+        constexpr size_t c0_id    = Shape::c_profile_id<0>();
+        constexpr size_t c1_id    = Shape::c_profile_id<1>();
+        constexpr size_t s1_id    = Shape::s_profile_id<1>();
+        constexpr size_t psin_id  = Shape::psin_profile_id;
+
+        profiles::ProfileRuntimeParams<Shape> params{};
+        params.offsets[k_id]  = 1.45;
+        params.offsets[c0_id] = 0.0;
+        params.offsets[c1_id] = 0.0;
+        params.offsets[s1_id] = 0.0;
+
+        Vector<double, Shape::x_size> x{};
+        write_profile_coefficients<Shape, h_id>(x, make_profile_coefficients<2>(0.020, -0.0010));
+        write_profile_coefficients<Shape, v_id>(x, make_profile_coefficients<2>(0.010, 0.0010));
+        write_profile_coefficients<Shape, k_id>(x, make_profile_coefficients<2>(0.015, -0.0007));
+        write_profile_coefficients<Shape, c0_id>(x, make_profile_coefficients<2>(0.004, 0.0002));
+        write_profile_coefficients<Shape, c1_id>(x, make_profile_coefficients<2>(0.003, 0.0002));
+        write_profile_coefficients<Shape, s1_id>(x, make_profile_coefficients<2>(-0.002, 0.0001));
+        write_profile_coefficients<Shape, psin_id>(x, make_profile_coefficients<2>(0.010, -0.0002));
+
+        Runtime profiles{};
+        profiles.refresh_fixed(params);
+        profiles.refresh_active(std::span<const double, Shape::x_size>{x.data(), Shape::x_size}, params);
+
+        Geometry geometry{};
+        geometry.update(0.42, 1.8, -0.25, profiles);
+
+        Source source{};
+        constexpr std::array<double, 5> heat{2.0, 2.75, 3.5, 4.25, 5.0};
+        constexpr std::array<double, 5> current{0.5, 0.625, 0.75, 0.875, 1.0};
+        source.set_uniform_sources(
+            std::span<const double, heat.size()>{heat.data(), heat.size()},
+            std::span<const double, current.size()>{current.data(), current.size()}
+        );
+        if (!source.materialize_profile_owned_psin(profiles, source::axis_fix_count<Grid>(0.0)) ||
+            !source.update_pf_from_psin_uniform(
+                geometry,
+                2.1,
+                source::unset_constraint(),
+                source::unset_constraint(),
+                source::axis_fix_count<Grid>(0.0)
+            ))
+            return false;
+
+        Residual residual{};
+        residual.update_compact(source, geometry);
+        const auto packed = residual.pack(0.42, 1.8, 2.1);
+
+        if (!math::is_finite(residual.surface_fields) || !math::is_finite(packed))
+            return false;
+
+        double norm1 = 0.0;
+        for (size_t i = 0; i < Shape::x_size; ++i)
+            norm1 += math::abs(packed[i]);
+        return norm1 > 1.0e-12;
+    }
+
     static_assert(linalg_constexpr_ok());
     static_assert(tensor_math_constexpr_ok());
     static_assert(grid_constexpr_ok());
@@ -1190,6 +1286,7 @@ namespace
     static_assert(geometry_circular_constexpr_ok());
     static_assert(source_materialization_constexpr_ok());
     static_assert(pf_source_constexpr_ok());
+    static_assert(residual_pack_constexpr_ok());
 
     int root_residual(void*, int n, const double* x, double* fvec, int iflag)
     {
@@ -1241,6 +1338,7 @@ int main()
         {"geometry_circular", geometry_circular_constexpr_ok()},
         {"source_materialization", source_materialization_constexpr_ok()},
         {"pf_source", pf_source_constexpr_ok()},
+        {"residual_pack", residual_pack_constexpr_ok()},
     };
     report["quadrature"] = {
         {"chebyshev_moment_error_n16_degree7", max_moment_error<Chebyshev, 16>(7)},
@@ -1262,7 +1360,8 @@ int main()
     const bool ok = linalg_constexpr_ok() && tensor_math_constexpr_ok() && grid_constexpr_ok() &&
                     profiles_grid_constexpr_ok() && runtime_profiles_constexpr_ok() &&
                     runtime_profile_semantics_constexpr_ok() && geometry_circular_constexpr_ok() &&
-                    source_materialization_constexpr_ok() && pf_source_constexpr_ok() && runtime_library_ok(report);
+                    source_materialization_constexpr_ok() && pf_source_constexpr_ok() &&
+                    residual_pack_constexpr_ok() && runtime_library_ok(report);
 
     std::cout << report.dump(2) << '\n';
     return ok ? EXIT_SUCCESS : EXIT_FAILURE;

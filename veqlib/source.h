@@ -95,6 +95,7 @@ namespace source::detail
         RadialVector source_parameter_query{};
         RadialVector materialized_heat_input{};
         RadialVector materialized_current_input{};
+        RootFields   profile_root_fields{};
         RootFields   source_target_root_fields{};
         RadialVector FFn_psin{};
         RadialVector Pn_psin{};
@@ -132,6 +133,7 @@ namespace source::detail
             store_root_row<root_psin_rr>(psin_rr);
             if (!update_psin_coordinate())
                 return false;
+            copy_source_target_to_profile_root();
 
             for (size_t i = 0; i < radial_nodes; ++i)
             {
@@ -405,6 +407,13 @@ namespace source::detail
                     materialized_current_input[i] = numerator_current / denominator;
                 }
             }
+        }
+
+        constexpr void copy_source_target_to_profile_root() noexcept
+        {
+            for (size_t row = 0; row < root_field_count; ++row)
+                for (size_t i = 0; i < radial_nodes; ++i)
+                    profile_root_fields(row, i) = source_target_root_fields(row, i);
         }
 
         template <typename GeometryRuntime>
