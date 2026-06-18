@@ -102,6 +102,9 @@ namespace profiles
         static constexpr size_t K_max = Kmax;
         static constexpr size_t M_max = Mmax;
 
+        static constexpr size_t c_family_slot_count = CFamilySlots.size();
+        static constexpr size_t s_family_slot_count = SFamilySlots.size();
+
         static constexpr size_t h_profile_id     = 0;
         static constexpr size_t v_profile_id     = 1;
         static constexpr size_t kappa_profile_id = 2;

@@ -55,7 +55,7 @@ namespace
         Topology::K_max,
         Legendre,
         Spectral>;
-    using ProbeProfiles = profiles::Profiles<
+    using ProbeProfilesFromCounts = profiles::Profiles<
         Topology::L_max,
         Topology::K_max,
         Topology::h_count,
@@ -81,6 +81,7 @@ namespace
         profiles::optimized_slot_from_count(Topology::F_count),
         topology_c_slots,
         topology_s_slots>;
+    using ProbeProfiles = profiles::ProfileEvaluator<ProbeProfileShape>;
 
     constexpr auto no_c_slots = std::array<profiles::ProfileSlot, 0>{};
     constexpr auto no_s_slots = std::array<profiles::ProfileSlot, 0>{};
@@ -143,6 +144,8 @@ namespace
     static_assert(ProbeProfiles::fourier_power<Topology::K_max + 7>() == Topology::K_max);
 
     static_assert(ProbeProfileShape::h_profile_id == 0);
+    static_assert(ProbeProfiles::shape::profile_count == ProbeProfilesFromCounts::shape::profile_count);
+    static_assert(ProbeProfiles::shape::x_size == ProbeProfilesFromCounts::shape::x_size);
     static_assert(ProbeProfileShape::v_profile_id == 1);
     static_assert(ProbeProfileShape::kappa_profile_id == 2);
     static_assert(ProbeProfileShape::c_profile_id<0>() == 3);
