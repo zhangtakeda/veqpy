@@ -250,6 +250,8 @@ class Solver:
         )
 
         self.x0 = x_final.copy()
+        if self.operator.backend == "jax":
+            self.operator.publish_snapshot(x_final)
         self.result = replace(self.result, total_elapsed=(perf_counter() - call_started) * 1e6)
 
         if solve_config.enable_verbose or solve_config.enable_history:

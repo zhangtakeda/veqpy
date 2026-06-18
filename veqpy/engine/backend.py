@@ -33,6 +33,10 @@ class UnsupportedBackendFeature(BackendFeatureError):
     """Raised when a valid backend lacks support for a requested feature."""
 
 
+class SnapshotNotPublishedError(UnsupportedBackendFeature):
+    """Raised when a JAX public state view requires an explicit snapshot."""
+
+
 class MissingOptionalBackendError(BackendError):
     """Raised when an optional backend dependency is required but unavailable."""
 

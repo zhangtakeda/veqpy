@@ -400,8 +400,12 @@ Implemented behavior:
   `residual_var_into(...)` return/copy NumPy arrays for PF/rho/grid.
 - JAX residual execution uses the existing PackedLayout metadata and residual
   block order; no alternate packed order is introduced.
-- Fused JAX residual publication copies stage snapshots back to private NumPy
-  workspaces so `build_equilibrium(...)` can produce a NumPy-backed snapshot.
+- JAX residual execution is a residual-only hot path: it copies only the packed
+  residual back to host for SciPy and does not publish profile, geometry,
+  source, root, alpha, or snapshot state.
+- `build_equilibrium(x)` and `publish_snapshot(x)` use an explicit lazy snapshot
+  graph that publishes the full NumPy-backed host state exactly for the requested
+  packed state.
 - Did not implement a JAX-native nonlinear solver.
 - Kept supported JAX route list at `PF/rho/grid` only.
 - Left all unsupported routes explicit through `UnsupportedBackendFeature`.
@@ -441,6 +445,35 @@ Numerical parity tolerances:
 stage fields: rtol=1e-10, atol=1e-10
 packed residual: rtol=1e-8, atol=1e-8
 ```
+
+## Residual-Only Hot Path And Explicit Snapshot Publication
+
+The JAX runtime is split into two independently compiled paths:
+
+```text
+Path A: SciPy hot path
+host x -> device_put -> compiled_residual -> device residual -> host NumPy residual
+
+Path B: explicit snapshot publication
+final x -> device_put -> compiled_snapshot -> host NumPy snapshot -> Equilibrium
+```
+
+Important boundary:
+
+- the existing SciPy solver still requires one host NumPy residual per function
+  evaluation, so residual calls still synchronize/copy the residual vector;
+- residual calls do not publish profile, geometry, source, root, alpha, or
+  equilibrium snapshot state;
+- `build_equilibrium(x)` publishes a snapshot for exactly `x` unless an exact
+  cached snapshot for the same runtime generation and static signature exists;
+- `Solver.solve()` publishes one final JAX snapshot for `scipy_result.x`, then
+  later `Solver.build_equilibrium()` reuses that exact snapshot;
+- `alpha1`/`alpha2` are readable only after a valid explicit snapshot and remain
+  read-only for JAX;
+- staged APIs and collocation remain unsupported for JAX because fused residual
+  calls do not refresh staged host workspaces;
+- a future JAX-native nonlinear solver is required to remove the per-evaluation
+  residual host/device transfer entirely.
 
 ## Public API Changes
 
@@ -485,19 +518,19 @@ PQ/*
 
 | Method | JAX behavior in this build |
 |---|---|
-| `residual_var` | Implemented for PF/rho/grid; returns `np.ndarray`. |
-| `residual_var_into` | Implemented for PF/rho/grid; writes caller-owned `np.ndarray`. |
+| `residual_var` | Implemented for PF/rho/grid; returns residual-only `np.ndarray`; no snapshot publication. |
+| `residual_var_into` | Implemented for PF/rho/grid; writes caller-owned residual-only `np.ndarray`; no snapshot publication. |
 | `residual_collocation` | `UnsupportedBackendFeature`. |
 | `residual_collocation_into` | `UnsupportedBackendFeature`. |
 | `stage_a_profile` | `UnsupportedBackendFeature`. |
 | `stage_b_geometry` | `UnsupportedBackendFeature`. |
 | `stage_c_source` | `UnsupportedBackendFeature`. |
 | `stage_d_residual` | `UnsupportedBackendFeature`. |
-| `build_equilibrium` | Implemented for PF/rho/grid after fused residual host publication; returns NumPy-backed `Equilibrium`. |
+| `build_equilibrium` | Publishes or reuses an explicit snapshot for exactly `x`; returns NumPy-backed `Equilibrium`. |
 | `replace_problem` | Revalidates JAX route capability and raises on unsupported route. |
 | `replace_case` | Alias of `replace_problem`; same behavior. |
-| `alpha1` | `UnsupportedBackendFeature`; no stale workspace read. |
-| `alpha2` | `UnsupportedBackendFeature`; no stale workspace read. |
+| `alpha1` | Read-only value from a valid published snapshot; `SnapshotNotPublishedError` before publish. |
+| `alpha2` | Read-only value from a valid published snapshot; `SnapshotNotPublishedError` before publish. |
 
 ## Static/Dynamic Manifest Summary
 
@@ -517,8 +550,8 @@ not marked as static metadata.
 ## Final Validation
 
 ```bash
-JAX_ENABLE_X64=True JAX_PLATFORMS=cpu .venv-jax/bin/python -m compileall -q veqpy tests
-JAX_ENABLE_X64=True JAX_PLATFORMS=cpu .venv-jax/bin/ruff check veqpy tests
+JAX_ENABLE_X64=True JAX_PLATFORMS=cpu .venv-jax/bin/python -m compileall -q veqpy tests scripts
+JAX_ENABLE_X64=True JAX_PLATFORMS=cpu .venv-jax/bin/ruff check veqpy tests scripts
 JAX_ENABLE_X64=True JAX_PLATFORMS=cpu .venv-jax/bin/python -m pytest -q tests/test_public_api.py tests/test_operator_public_api.py
 JAX_ENABLE_X64=True JAX_PLATFORMS=cpu .venv-jax/bin/python -m pytest -q tests/test_engine_source_registry.py tests/test_workspace_field_contracts.py
 JAX_ENABLE_X64=True JAX_PLATFORMS=cpu .venv-jax/bin/python -m pytest -q tests/test_packed_layout_api.py tests/test_solver_api.py
@@ -529,7 +562,8 @@ JAX_ENABLE_X64=True JAX_PLATFORMS=cpu .venv-jax/bin/python -m pytest -q \
   tests/test_jax_memory_options.py tests/test_jax_device_state.py
 JAX_ENABLE_X64=True JAX_PLATFORMS=cpu .venv-jax/bin/python -m pytest -q \
   tests/test_jax_unsupported_routes.py tests/test_jax_public_method_contract.py \
-  tests/test_jax_stage_parity.py tests/test_jax_residual_parity.py tests/test_jax_solver_smoke.py
+  tests/test_jax_stage_parity.py tests/test_jax_residual_parity.py \
+  tests/test_jax_snapshot_publication.py tests/test_jax_solver_smoke.py
 JAX_ENABLE_X64=True JAX_PLATFORMS=cpu .venv-jax/bin/python -m pytest -q -m "not slow"
 ```
 
@@ -543,8 +577,8 @@ engine source/workspace contracts: 11 passed
 packed layout/solver API: 19 passed
 backend/model/source-plan/static tests: 20 passed
 JAX optional/memory/state/unsupported/public tests: 13 passed, 2 skipped
-JAX stage/residual/solver parity tests: 9 passed
-broad non-slow suite: 116 passed, 2 skipped, 2 deselected
+JAX stage/residual/snapshot/solver parity tests: 18 passed
+broad non-slow suite: 125 passed, 2 skipped, 2 deselected
 ```
 
 ## Git Diff Summary

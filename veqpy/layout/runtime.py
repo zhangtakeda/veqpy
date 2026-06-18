@@ -84,6 +84,8 @@ class OperatorLayout:
     source: SourceLayout
     residual: ResidualLayout
     _run_collocation_into: Callable[[np.ndarray, np.ndarray], None]
+    _publish_snapshot: Callable[[np.ndarray], object] | None = None
+    backend_runtime: object | None = None
 
     @classmethod
     def empty(cls, x_size: int) -> Self:
@@ -99,6 +101,8 @@ class OperatorLayout:
             residual_full_stage_runner_into=lambda out: out.fill(0.0),
             fused_residual_runner_into=lambda x_eval, out: out.fill(0.0),
             collocation_runner_into=lambda x_eval, out: out.fill(0.0),
+            snapshot_publisher=None,
+            backend_runtime=None,
         )
 
     @classmethod
@@ -111,6 +115,8 @@ class OperatorLayout:
         residual_full_stage_runner_into: Callable[[np.ndarray], None],
         fused_residual_runner_into: Callable[[np.ndarray, np.ndarray], None],
         collocation_runner_into: Callable[[np.ndarray, np.ndarray], None],
+        snapshot_publisher: Callable[[np.ndarray], object] | None = None,
+        backend_runtime: object | None = None,
     ) -> Self:
         """Compose stage callables into an executable operator layout."""
         return cls(
@@ -122,6 +128,8 @@ class OperatorLayout:
                 run_fused_into=fused_residual_runner_into,
             ),
             _run_collocation_into=collocation_runner_into,
+            _publish_snapshot=snapshot_publisher,
+            backend_runtime=backend_runtime,
         )
 
     def run_profile(self, x: np.ndarray) -> None:
@@ -148,3 +156,9 @@ class OperatorLayout:
     def run_collocation_into(self, x: np.ndarray, out: np.ndarray) -> None:
         """Run the collocation residual path into ``out``."""
         self._run_collocation_into(x, out)
+
+    def publish_snapshot(self, x: np.ndarray) -> object:
+        """Publish a backend snapshot for exactly ``x`` when supported."""
+        if self._publish_snapshot is None:
+            raise RuntimeError("This operator layout does not support snapshot publication.")
+        return self._publish_snapshot(x)

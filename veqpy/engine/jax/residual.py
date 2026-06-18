@@ -20,8 +20,13 @@ def fused_residual_pf_rho_grid(
     leaves: dict[str, Any],
     spec: JaxStaticSpec,
     x: Any,
-) -> tuple[Any, dict[str, Any]]:
-    """Evaluate the PF/rho/grid packed residual and return a stage snapshot."""
+) -> Any:
+    """Evaluate the PF/rho/grid packed residual only.
+
+    This is the SciPy hot-path graph.  It intentionally returns only the packed
+    residual so host bridge calls do not publish profile, geometry, source,
+    root, or alpha state as a side effect.
+    """
 
     jnp = jax_module.numpy
     profile_fields = evaluate_profile_stage_pf_rho_grid(jax_module, leaves, spec, x)
@@ -41,19 +46,7 @@ def fused_residual_pf_rho_grid(
         root_fields,
         geometry_surface_fields,
     )
-    packed = _pack_residual(jnp, leaves, spec, residual_surface_fields)
-    snapshot = {
-        "profile_fields": profile_fields,
-        "c_family_fields": c_fields,
-        "s_family_fields": s_fields,
-        "geometry_surface_fields": geometry_surface_fields,
-        "geometry_radial_fields": geometry_radial_fields,
-        "root_fields": root_fields,
-        "alpha_state": alpha_state,
-        "residual_surface_fields": residual_surface_fields,
-        "packed_residual": packed,
-    }
-    return packed, snapshot
+    return _pack_residual(jnp, leaves, spec, residual_surface_fields)
 
 
 def _evaluate_residual_surface(

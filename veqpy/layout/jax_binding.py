@@ -14,7 +14,11 @@ import numpy as np
 
 from veqpy.engine.backend import JaxBackendOptions, UnsupportedBackendFeature
 from veqpy.engine.jax.config import require_jax
-from veqpy.engine.jax.operator import build_pf_rho_grid_runtime, residual_var_numpy_bridge
+from veqpy.engine.jax.operator import (
+    build_pf_rho_grid_runtime,
+    publish_snapshot_numpy_bridge,
+    residual_var_numpy_bridge,
+)
 
 if TYPE_CHECKING:
     from veqpy.model.problem import Problem
@@ -155,14 +159,22 @@ def _pf_rho_grid_jax_layout(
             runtime=runtime,
             x=x_eval,
             out=out,
-            profile_workspace=profile_workspace,
-            geometry_workspace=geometry_workspace,
-            source_workspace=source_workspace,
-            residual_workspace=residual_workspace,
         )
 
     def collocation(_: np.ndarray, __: np.ndarray) -> None:
         raise UnsupportedBackendFeature(message)
+
+    def publish_snapshot(x_eval: np.ndarray) -> object:
+        return publish_snapshot_numpy_bridge(
+            jax_module=jax_module,
+            runtime=runtime,
+            x=x_eval,
+            profile_workspace=profile_workspace,
+            geometry_workspace=geometry_workspace,
+            source_workspace=source_workspace,
+            residual_workspace=residual_workspace,
+            problem_generation=0,
+        )
 
     return OperatorLayout.from_callables(
         profile_stage_runner=raise_profile,
@@ -171,4 +183,6 @@ def _pf_rho_grid_jax_layout(
         residual_full_stage_runner_into=raise_residual,
         fused_residual_runner_into=fused,
         collocation_runner_into=collocation,
+        snapshot_publisher=publish_snapshot,
+        backend_runtime=runtime,
     )

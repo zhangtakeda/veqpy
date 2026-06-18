@@ -19,7 +19,12 @@ from dataclasses import InitVar, dataclass, field
 
 import numpy as np
 
-from veqpy.engine.backend import JaxBackendOptions, UnsupportedBackendFeature, normalize_backend
+from veqpy.engine.backend import (
+    JaxBackendOptions,
+    SnapshotNotPublishedError,
+    UnsupportedBackendFeature,
+    normalize_backend,
+)
 from veqpy.layout.binding import build_operator_layout
 from veqpy.layout.runtime import OperatorLayout
 from veqpy.math.interpolate import SOURCE_INTERP_DEFAULT
@@ -75,6 +80,11 @@ class Operator:
     source_workspace: SourceWorkspace = field(init=False, repr=False)
     residual_workspace: ResidualWorkspace = field(init=False, repr=False)
     layout: OperatorLayout = field(init=False, repr=False)
+    _runtime_generation: int = field(init=False, default=0, repr=False)
+    _published_snapshot_x: np.ndarray | None = field(init=False, default=None, repr=False)
+    _published_snapshot_generation: int = field(init=False, default=-1, repr=False)
+    _published_snapshot_signature: object | None = field(init=False, default=None, repr=False)
+    _published_snapshot: object | None = field(init=False, default=None, repr=False)
 
     c_effective_order: int = field(init=False, repr=False)
     s_effective_order: int = field(init=False, repr=False)
@@ -106,6 +116,11 @@ class Operator:
         self.backend_options = backend_options
         self.fix_rho = float(fix_rho)
         self.source_interpolation_kind = source_interpolation_kind
+        self._runtime_generation = 0
+        self._published_snapshot_x = None
+        self._published_snapshot_generation = -1
+        self._published_snapshot_signature = None
+        self._published_snapshot = None
         self.__post_init__(grid)
 
     def __post_init__(self, grid: Grid) -> None:
@@ -130,25 +145,27 @@ class Operator:
     @property
     def alpha1(self) -> float:
         """Current source normalization owned by the source runtime state."""
-        self._raise_if_jax_public_state("alpha1")
+        if self.backend == "jax":
+            self._require_jax_snapshot("alpha1")
         return float(self.source_workspace.alpha_state[0])
 
     @alpha1.setter
     def alpha1(self, value: float) -> None:
         """Update the current source normalization in place."""
-        self._raise_if_jax_public_state("alpha1")
+        self._raise_if_jax_public_state_mutation("alpha1")
         self.source_workspace.alpha_state[0] = float(value)
 
     @property
     def alpha2(self) -> float:
         """Flux/source normalization owned by the source runtime state."""
-        self._raise_if_jax_public_state("alpha2")
+        if self.backend == "jax":
+            self._require_jax_snapshot("alpha2")
         return float(self.source_workspace.alpha_state[1])
 
     @alpha2.setter
     def alpha2(self, value: float) -> None:
         """Update the flux/source normalization in place."""
-        self._raise_if_jax_public_state("alpha2")
+        self._raise_if_jax_public_state_mutation("alpha2")
         self.source_workspace.alpha_state[1] = float(value)
 
     @property
@@ -350,14 +367,50 @@ class Operator:
         del include_none
         return {name: block.tolist() for name, block in self.unpack_coefficients(x).items()}
 
-    def build_equilibrium(self, x: np.ndarray) -> Equilibrium:
+    def build_equilibrium(self, x: np.ndarray | None = None) -> Equilibrium:
         """Build a complete Equilibrium snapshot from a packed state vector."""
+        if self.backend == "jax":
+            if x is None:
+                self._require_jax_snapshot("build_equilibrium")
+                x_eval = self._published_snapshot_x
+                if x_eval is None:  # defensive; _require_jax_snapshot should catch this.
+                    raise SnapshotNotPublishedError("No JAX snapshot has been published.")
+            else:
+                x_eval = self.coerce_x(x)
+                if not self._has_matching_published_snapshot(x_eval):
+                    self.publish_snapshot(x_eval)
+            return self._snapshot_equilibrium_from_runtime(np.asarray(x_eval, dtype=np.float64))
+
+        if x is None:
+            raise TypeError("build_equilibrium() missing required argument: 'x'")
         x_eval = self.coerce_x(x)
         # Snapshotting intentionally runs the residual pipeline first: source
         # routes own alpha1/alpha2 and root fields, so decoding coefficients alone
         # is not enough to build a consistent Equilibrium.
         self.residual_var(x_eval)
         return self._snapshot_equilibrium_from_runtime(x_eval)
+
+    def publish_snapshot(self, x: np.ndarray) -> object:
+        """Explicitly publish a host snapshot for exactly ``x``.
+
+        For JAX this is the only path that refreshes host profile, geometry,
+        source, root, alpha, and residual workspaces.  Residual-only calls never
+        mark a snapshot current.
+        """
+
+        x_eval = self.coerce_x(x)
+        if self.backend != "jax":
+            self.residual_var(x_eval)
+            return None
+        if self._has_matching_published_snapshot(x_eval):
+            return self._published_snapshot
+        snapshot = self.layout.publish_snapshot(x_eval)
+        self._published_snapshot_x = np.array(x_eval, dtype=np.float64, copy=True)
+        self._published_snapshot_generation = self._runtime_generation
+        runtime = self.layout.backend_runtime
+        self._published_snapshot_signature = getattr(runtime, "static_spec", None)
+        self._published_snapshot = snapshot
+        return snapshot
 
     def stage_a_profile(self, x: np.ndarray) -> None:
         """Run the profile stage and refresh active profile fields."""
@@ -430,6 +483,8 @@ class Operator:
     def _refresh_runtime_state(self) -> None:
         # Problem replacement may change source route semantics but must preserve
         # the packed topology; compatibility was already checked by replace_problem.
+        self._runtime_generation += 1
+        self._invalidate_published_snapshot()
         self.plan = refresh_operator_plan_for_problem(
             self.plan,
             problem=self.problem,
@@ -550,12 +605,47 @@ class Operator:
         self.layout.run_source()
         return target_root_fields[0]
 
-    def _raise_if_jax_public_state(self, name: str) -> None:
+    def _raise_if_jax_public_state_mutation(self, name: str) -> None:
         if self.backend == "jax":
             raise UnsupportedBackendFeature(
-                f"backend='jax' does not expose public state {name!r} until "
-                "explicit host publication is implemented."
+                f"backend='jax' exposes public state {name!r} only from an explicit "
+                "published snapshot; direct mutation is unsupported."
             )
+
+    def _require_jax_snapshot(self, name: str) -> None:
+        if self.backend != "jax":
+            return
+        if (
+            self._published_snapshot_x is None
+            or self._published_snapshot_generation != self._runtime_generation
+        ):
+            raise SnapshotNotPublishedError(
+                f"backend='jax' public state {name!r} requires explicit snapshot "
+                "publication via publish_snapshot(x) or build_equilibrium(x)."
+            )
+        runtime = self.layout.backend_runtime
+        signature = getattr(runtime, "static_spec", None)
+        if self._published_snapshot_signature != signature:
+            raise SnapshotNotPublishedError(
+                f"backend='jax' public state {name!r} snapshot is stale for the current "
+                "static signature."
+            )
+
+    def _has_matching_published_snapshot(self, x: np.ndarray) -> bool:
+        if self.backend != "jax" or self._published_snapshot_x is None:
+            return False
+        if self._published_snapshot_generation != self._runtime_generation:
+            return False
+        runtime = self.layout.backend_runtime
+        if self._published_snapshot_signature != getattr(runtime, "static_spec", None):
+            return False
+        return bool(np.array_equal(x, self._published_snapshot_x))
+
+    def _invalidate_published_snapshot(self) -> None:
+        self._published_snapshot_x = None
+        self._published_snapshot_generation = -1
+        self._published_snapshot_signature = None
+        self._published_snapshot = None
 
     def _snapshot_equilibrium_from_runtime(self, x: np.ndarray) -> Equilibrium:
         root_fields = self.residual_workspace.root_fields

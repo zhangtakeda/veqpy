@@ -7,7 +7,7 @@ import pytest
 from helpers import tiny_grid
 from jax_helpers import tiny_pf_rho_grid_problem
 
-from veqpy.engine.backend import UnsupportedBackendFeature
+from veqpy.engine.backend import SnapshotNotPublishedError, UnsupportedBackendFeature
 from veqpy.operator import Operator
 
 JAX_INSTALLED = importlib.util.find_spec("jax") is not None
@@ -53,20 +53,23 @@ def test_jax_public_collocation_and_stage_methods_raise_explicit_unsupported(mon
 
 
 @pytest.mark.skipif(not JAX_INSTALLED, reason="JAX snapshot contract requires JAX installed")
-def test_jax_public_snapshot_is_supported_but_alpha_state_raises_explicit_unsupported() -> None:
+def test_jax_public_snapshot_is_supported_and_alpha_requires_snapshot() -> None:
     grid = tiny_grid()
     operator = Operator(grid, tiny_pf_rho_grid_problem(grid), backend="jax")
     x = operator.zero_state()
 
+    with pytest.raises(SnapshotNotPublishedError):
+        _ = operator.alpha1
+    with pytest.raises(SnapshotNotPublishedError):
+        _ = operator.alpha2
+
     equilibrium = operator.build_equilibrium(x)
 
     assert isinstance(equilibrium.psin, np.ndarray)
-    with pytest.raises(UnsupportedBackendFeature):
-        _ = operator.alpha1
+    assert isinstance(operator.alpha1, float)
+    assert isinstance(operator.alpha2, float)
     with pytest.raises(UnsupportedBackendFeature):
         operator.alpha1 = 1.0
-    with pytest.raises(UnsupportedBackendFeature):
-        _ = operator.alpha2
     with pytest.raises(UnsupportedBackendFeature):
         operator.alpha2 = 1.0
 

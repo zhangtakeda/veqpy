@@ -14,10 +14,13 @@ def device_put_array(jax_module: Any, value: np.ndarray) -> Any:
 
 
 def copy_device_array_to_numpy(value: Any) -> np.ndarray:
-    """Synchronize a JAX value if possible and copy it back to host NumPy."""
+    """Copy a JAX value back to host NumPy.
 
-    if hasattr(value, "block_until_ready"):
-        value.block_until_ready()
+    The host conversion itself establishes readiness for public NumPy results,
+    so callers should avoid an additional ``block_until_ready`` unless they are
+    measuring device-only timing.
+    """
+
     return np.asarray(value)
 
 

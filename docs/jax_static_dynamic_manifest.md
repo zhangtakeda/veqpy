@@ -129,7 +129,8 @@ output are dynamic input/output.
 | Item | Category | Notes |
 |---|---|---|
 | packed state `x` | dynamic device leaf | Per-call dynamic input. |
-| residual output | dynamic device leaf | Per-call dynamic output copied back to NumPy. |
+| residual output | dynamic device leaf | Per-call dynamic output copied back to NumPy for SciPy. |
+| snapshot output PyTree | dynamic device leaf | Produced only by explicit snapshot publication. |
 | caller-provided `out` in `residual_var_into` | host-only bridge | Caller-owned NumPy array, copy completes before return. |
 
 ## Backend Options
@@ -152,31 +153,32 @@ numeric behavior or compiled function signature.
 
 | State Or Method Family | Category | Notes |
 |---|---|---|
-| fused variational residual | dynamic device leaf | Implemented first for `PF/rho/grid`. |
-| residual-only publication | host-only bridge | Return NumPy residual only. |
-| root fields publication | unsupported/not-yet-lowered | Do not read stale Numba state. |
-| alpha state publication | unsupported/not-yet-lowered | Unsupported until explicit host reflection exists. |
+| fused variational residual | dynamic device leaf | Implemented first for `PF/rho/grid`; returns residual only. |
+| residual-only publication | host-only bridge | Return NumPy residual only; no full-state publication. |
+| explicit snapshot publication | host-only bridge | Separate lazy snapshot graph used by `publish_snapshot` and `build_equilibrium`. |
+| root fields publication | host-only bridge | Published only by the explicit snapshot path. |
+| alpha state publication | host-only bridge | Published only by the explicit snapshot path; read-only afterwards. |
 | collocation fields | unsupported/not-yet-lowered | Unsupported until parity exists. |
-| snapshot fields | unsupported/not-yet-lowered | `build_equilibrium` unsupported or explicit fallback. |
+| snapshot fields | host-only bridge | Host NumPy snapshot cache keyed by exact `x`, generation, and static signature. |
 | staged profile/geometry/source/residual APIs | unsupported/not-yet-lowered | Unsupported until staged publication exists. |
 
 ## Public Operator Method Matrix
 
 | Method | Initial JAX behavior |
 |---|---|
-| `residual_var` | Supported only after PF/rho/grid residual parity; otherwise `UnsupportedBackendFeature`. |
-| `residual_var_into` | Supported only after PF/rho/grid residual parity; otherwise `UnsupportedBackendFeature`. |
+| `residual_var` | Supported for PF/rho/grid as residual-only host bridge; otherwise `UnsupportedBackendFeature`. |
+| `residual_var_into` | Supported for PF/rho/grid as residual-only host bridge; otherwise `UnsupportedBackendFeature`. |
 | `residual_collocation` | `UnsupportedBackendFeature`. |
 | `residual_collocation_into` | `UnsupportedBackendFeature`. |
 | `stage_a_profile` | `UnsupportedBackendFeature`. |
 | `stage_b_geometry` | `UnsupportedBackendFeature`. |
 | `stage_c_source` | `UnsupportedBackendFeature`. |
 | `stage_d_residual` | `UnsupportedBackendFeature`. |
-| `build_equilibrium` | `UnsupportedBackendFeature` unless explicit safe fallback is implemented. |
+| `build_equilibrium` | Publishes/reuses explicit snapshot for exactly `x`; never reads stale Numba workspace. |
 | `replace_problem` | Revalidates backend capability/static signature. |
 | `replace_case` | Alias of `replace_problem`; same backend revalidation. |
-| `alpha1` | Unsupported or read-only reflected value only if not stale. |
-| `alpha2` | Unsupported or read-only reflected value only if not stale. |
+| `alpha1` | Read-only reflected value after valid explicit snapshot; otherwise `SnapshotNotPublishedError`. |
+| `alpha2` | Read-only reflected value after valid explicit snapshot; otherwise `SnapshotNotPublishedError`. |
 
 ## Unsupported Or Not Yet Lowered
 

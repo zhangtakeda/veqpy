@@ -50,3 +50,11 @@ class JaxRuntime:
     static_spec: JaxStaticSpec
     device_state: JaxDeviceState
     compiled_residual: Any | None = None
+    compiled_snapshot: Any | None = None
+    residual_call_count: int = 0
+    residual_host_copy_count: int = 0
+    residual_host_bytes: int = 0
+    snapshot_publish_count: int = 0
+    snapshot_host_bytes: int = 0
+    residual_compile_count: int = 0
+    snapshot_compile_count: int = 0

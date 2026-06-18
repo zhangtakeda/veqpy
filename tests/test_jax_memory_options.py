@@ -52,11 +52,11 @@ class _FakeDeviceArray:
         return np.asarray(self.value, dtype=dtype)
 
 
-def test_jax_memory_helpers_block_and_copy_to_numpy() -> None:
+def test_jax_memory_helpers_copy_to_numpy_without_explicit_preblock() -> None:
     fake = _FakeDeviceArray(np.array([1.0, 2.0], dtype=np.float64))
     host = copy_device_array_to_numpy(fake)
 
-    assert fake.blocked
+    assert not fake.blocked
     assert np.array_equal(host, np.array([1.0, 2.0]))
 
 
@@ -65,5 +65,5 @@ def test_jax_memory_helpers_copy_into_caller_array() -> None:
     out = np.empty(2, dtype=np.float64)
     copy_device_array_into(fake, out)
 
-    assert fake.blocked
+    assert not fake.blocked
     assert np.array_equal(out, np.array([3.0, 4.0]))
