@@ -7,11 +7,18 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 endif()
 
 option(ENABLE_ENZYME "Load the Enzyme clang plugin and probe autodiff" ON)
+option(VEQLIB_ENABLE_STRICT_CONVERSIONS "Reject implicit narrowing and signedness conversions with clang warnings" ON)
 option(VEQLIB_ENABLE_NATIVE_OPTIMIZATIONS "Enable native CPU, fast-math, and loop optimization flags" ON)
 option(VEQLIB_ENABLE_THIN_LTO "Enable clang ThinLTO and lld for optimized builds" ON)
 option(VEQLIB_FORCE_OPENBLAS_SINGLE_THREAD "Force OpenBLAS to one runtime thread inside veqlib targets" ON)
 set(VEQLIB_ENZYME_PLUGIN "" CACHE FILEPATH "Path to ClangEnzyme shared library")
 set(VEQLIB_GCEM_ROOT "$ENV{HOME}/opt/gcem-install" CACHE PATH "GCEM install prefix")
+set(VEQLIB_CONSTEXPR_STEP_LIMIT "67108864")
+set(VEQLIB_CONSTEXPR_STEPS "${VEQLIB_CONSTEXPR_STEP_LIMIT}" CACHE STRING "Clang constexpr evaluation step budget")
+
+if(VEQLIB_CONSTEXPR_STEPS GREATER VEQLIB_CONSTEXPR_STEP_LIMIT)
+    message(FATAL_ERROR "VEQLIB_CONSTEXPR_STEPS must not exceed ${VEQLIB_CONSTEXPR_STEP_LIMIT}")
+endif()
 
 function(veqlib_require_clang)
     if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
@@ -107,6 +114,39 @@ function(veqlib_enable_enzyme target)
     target_compile_definitions("${target}" PRIVATE ENABLE_ENZYME=1)
 endfunction()
 
+function(veqlib_enable_strict_conversions target)
+    if(NOT VEQLIB_ENABLE_STRICT_CONVERSIONS)
+        return()
+    endif()
+
+    target_compile_options(
+        "${target}"
+        PRIVATE
+            -Wconversion
+            -Wsign-conversion
+            -Wsign-compare
+            -Wconstant-conversion
+            -Wfloat-conversion
+            -Wimplicit-int-conversion
+            -Wimplicit-float-conversion
+            -Wliteral-conversion
+            -Wshorten-64-to-32
+            -Werror=conversion
+            -Werror=sign-conversion
+            -Werror=sign-compare
+            -Werror=constant-conversion
+            -Werror=float-conversion
+            -Werror=implicit-int-conversion
+            -Werror=implicit-float-conversion
+            -Werror=literal-conversion
+            -Werror=shorten-64-to-32
+    )
+endfunction()
+
+function(veqlib_enable_constexpr_budget target)
+    target_compile_options("${target}" PRIVATE "-fconstexpr-steps=${VEQLIB_CONSTEXPR_STEPS}")
+endfunction()
+
 function(veqlib_enable_kernel_optimizations target)
     target_compile_options(
         "${target}"
@@ -163,18 +203,30 @@ endfunction()
 
 veqlib_require_clang()
 
-file(GLOB_RECURSE VEQLIB_SOURCES CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/*.cpp")
-list(FILTER VEQLIB_SOURCES EXCLUDE REGEX "^${PROJECT_SOURCE_DIR}/build/")
+set(VEQLIB_COMMON_SOURCES linalg.cpp)
 
-add_executable(veqlib_probe ${VEQLIB_SOURCES})
-target_include_directories(veqlib_probe PRIVATE "${PROJECT_SOURCE_DIR}")
-set_target_properties(
-    veqlib_probe
-    PROPERTIES
-        CXX_STANDARD 20
-        CXX_STANDARD_REQUIRED ON
-        CXX_EXTENSIONS OFF
-)
-veqlib_enable_kernel_optimizations(veqlib_probe)
-veqlib_link_dependencies(veqlib_probe)
+function(veqlib_configure_executable target)
+    target_include_directories("${target}" PRIVATE "${PROJECT_SOURCE_DIR}")
+    set_target_properties(
+        "${target}"
+        PROPERTIES
+            CXX_STANDARD 20
+            CXX_STANDARD_REQUIRED ON
+            CXX_EXTENSIONS OFF
+    )
+    veqlib_enable_strict_conversions("${target}")
+    veqlib_enable_constexpr_budget("${target}")
+    veqlib_enable_kernel_optimizations("${target}")
+    veqlib_link_dependencies("${target}")
+endfunction()
+
+add_executable(veqlib_probe main.cpp ${VEQLIB_COMMON_SOURCES})
+veqlib_configure_executable(veqlib_probe)
 veqlib_enable_enzyme(veqlib_probe)
+
+add_executable(veqlib_temp_validation temp_validation.cpp ${VEQLIB_COMMON_SOURCES})
+veqlib_configure_executable(veqlib_temp_validation)
+
+enable_testing()
+add_test(NAME veqlib_probe COMMAND veqlib_probe)
+add_test(NAME veqlib_temp_validation COMMAND veqlib_temp_validation)

@@ -37,6 +37,7 @@ dist/
 /*.md
 !README.md
 /*.pdf
+AGENTS.md
 
 # Root-only scratch tools stay local; benchmark generators live under tests/.
 /tools/

@@ -14,10 +14,10 @@ namespace
 #endif
         return true;
     }();
-}
+} // namespace
 
-using namespace linalg;
-
+namespace linalg::detail
+{
 void Doolittle::lapack_factorize_inplace(int m, int n, double* a, int lda, int* ipiv)
 {
     [[maybe_unused]] int info = LAPACKE_dgetrf(LAPACK_ROW_MAJOR, m, n, a, lda, ipiv);
@@ -94,9 +94,11 @@ void GolubReinsch::lapack_substitute_inplace(
             buffer[i * nrhs + p] *= sinv;
     }
 
-    if (n > rank) std::fill(buffer + rank * nrhs, buffer + n * nrhs, 0.0);
+    if (n > rank)
+        std::fill(buffer + rank * nrhs, buffer + n * nrhs, 0.0);
 
     cblas_dgemm(CblasRowMajor, CblasTrans, CblasNoTrans, n, nrhs, n, 1.0, vt, n, buffer, nrhs, 0.0, b, nrhs);
 
     delete[] buffer;
 }
+} // namespace linalg::detail
