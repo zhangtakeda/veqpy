@@ -81,6 +81,19 @@ packed coefficient layout. `profiles::ProfileSlot` distinguishes absent,
 fixed, and optimized profiles so a profile can have runtime fields without
 contributing coefficients to packed `x`.
 
+## Runtime Profile ABI
+
+`profiles::RuntimeProfiles<Shape, GridType>` is the storage boundary for later
+source, geometry, and residual code. It owns fixed-size slabs for stable
+profile-id fields and c/s Fourier-family fields. The shape decides profile ids,
+family extents, active profile order, and packed coefficient indices at compile
+time; runtime refresh only moves numerical values from fixed parameters or
+packed `x` into those slots.
+
+Later stages should consume `RuntimeProfiles<Shape, GridType>&` and the
+compile-time metadata on `Shape`. They should not recompute profile order,
+family lengths, or packed coefficient layout from runtime state.
+
 ## Grid and Calculus
 
 The public grid families currently exposed from `grid.h` are:
