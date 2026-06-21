@@ -10,6 +10,7 @@ option(ENABLE_ENZYME "Load the Enzyme clang plugin and probe autodiff" ON)
 option(VEQLIB_ENABLE_STRICT_CONVERSIONS "Reject implicit narrowing and signedness conversions with clang warnings" ON)
 option(VEQLIB_ENABLE_NATIVE_OPTIMIZATIONS "Enable native CPU, fast-math, and loop optimization flags" ON)
 option(VEQLIB_ENABLE_THIN_LTO "Enable clang ThinLTO and lld for optimized builds" ON)
+option(VEQLIB_ANALYSIS_BUILD "Build with source-correlated optimization diagnostics" OFF)
 option(VEQLIB_FORCE_OPENBLAS_SINGLE_THREAD "Force OpenBLAS to one runtime thread inside veqlib targets" ON)
 set(VEQLIB_ENZYME_PLUGIN "" CACHE FILEPATH "Path to ClangEnzyme shared library")
 set(VEQLIB_ENZYME_INCLUDE_DIR "$ENV{HOME}/opt/Enzyme/enzyme/include" CACHE PATH "Path to Enzyme C++ headers")
@@ -386,7 +387,7 @@ function(veqlib_enable_kernel_optimizations target)
         )
     endif()
 
-    if(VEQLIB_ENABLE_THIN_LTO)
+    if(VEQLIB_ENABLE_THIN_LTO AND NOT VEQLIB_ANALYSIS_BUILD)
         target_compile_options(
             "${target}"
             PRIVATE
@@ -397,6 +398,24 @@ function(veqlib_enable_kernel_optimizations target)
             PRIVATE
                 $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-flto=thin>
                 $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-fuse-ld=lld>
+        )
+    endif()
+
+    if(VEQLIB_ANALYSIS_BUILD)
+        target_compile_options(
+            "${target}"
+            PRIVATE
+                -g
+                -fno-omit-frame-pointer
+                -fdebug-info-for-profiling
+                -fno-unroll-loops
+                "-Rpass=(loop-vectorize|slp-vectorizer)"
+                "-Rpass-missed=(loop-vectorize|slp-vectorizer)"
+                "-Rpass-analysis=(loop-vectorize|slp-vectorizer)"
+                -fsave-optimization-record=yaml
+                -Wframe-larger-than=4096
+                -Wlarge-by-value-copy=256
+                -fstack-usage
         )
     endif()
 endfunction()
@@ -438,6 +457,9 @@ veqlib_configure_executable(veqlib_pf_psin_uniform_validation)
 add_executable(veqlib_pf_psin_uniform_benchmark pf_psin_uniform_benchmark.cpp ${VEQLIB_COMMON_SOURCES})
 veqlib_configure_executable(veqlib_pf_psin_uniform_benchmark)
 veqlib_enable_enzyme(veqlib_pf_psin_uniform_benchmark)
+
+add_executable(veqlib_stage_benchmark stage_benchmark.cpp ${VEQLIB_COMMON_SOURCES})
+veqlib_configure_executable(veqlib_stage_benchmark)
 
 enable_testing()
 add_test(NAME veqlib_probe COMMAND veqlib_probe)

@@ -199,6 +199,23 @@ runtime unless the Jacobian is generated much more cheaply than a batch of
 residual evaluations. Powell/hybrd therefore remains the baseline until VEQlib
 has a route-specific analytic or template-generated Jacobian path.
 
+`veqlib_stage_benchmark` is the lower-level timing target for the same inline
+PF-psin-uniform-Ip case. It measures repeated hot-path stages without the
+CMINPACK solve loop:
+
+```bash
+./build/release/veqlib_stage_benchmark \
+  --stage all \
+  --repeat 30 \
+  --warmup 5 \
+  --inner 10000
+```
+
+Available stages are `profiles_fixed`, `profiles_active`, `profiles_all`,
+`geometry`, `source_materialize`, `source_update`, `residual_update`,
+`residual_pack`, and `evaluate`. Each reported sample is nanoseconds per stage
+call after dividing by `--inner`.
+
 ## Dependency Versions
 
 The versions below are the currently validated local toolchain versions.
@@ -253,6 +270,22 @@ IEEE floating-point edge-case behavior, including NaN/inf propagation,
 trapping, signed zero, errno, and operation reassociation. Keep Debug presets
 conservative, and use Python-side regression tests to lock acceptable numerical
 tolerances for each route before relying on these flags for production kernels.
+
+For source-correlated performance diagnostics, configure a separate analysis
+build with `VEQLIB_ANALYSIS_BUILD=ON`. This keeps `-O3` but disables ThinLTO for
+that build and emits Clang vectorization optimization remarks, stack-usage
+files, frame-size warnings, and large-by-value-copy warnings:
+
+```bash
+cmake -S . -B build/analysis \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_CXX_COMPILER=clang++ \
+  -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+  -DENABLE_ENZYME=OFF \
+  -DVEQLIB_ENABLE_THIN_LTO=OFF \
+  -DVEQLIB_ANALYSIS_BUILD=ON
+cmake --build build/analysis --target veqlib_stage_benchmark
+```
 
 ## Build Presets
 
