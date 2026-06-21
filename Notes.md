@@ -856,6 +856,14 @@ mean≈0.994、range≈0.851--1.035；三个 apparent worst topology 的 paired
 `16x8x4`≈0.995/0.986，`64x16x1`≈0.996/1.001。结论：保留；这是小幅但语义清晰的
 source_update pass 删除，后续不要再把它包装成 checked facade 或有效值 guard。
 
+又测试了 geometry theta-loop vectorization pragma：在 phase synthesis loop 和
+metric/store loop 前显式加 `#pragma clang loop vectorize(enable)`。该候选不改公式，
+release CTest 和 PF comparator 通过（`max_abs≈7.66e-10`），初轮 9 组 paired
+timing 一度显示 `evaluate` median ratio≈0.988、`evaluate_ring`≈0.994，但
+`geometry` 自身≈0.999，信号已经可疑。随后 7 组更长 paired 复测显示
+`geometry`≈0.998、`evaluate`≈1.015、`evaluate_ring`≈1.002。结论：回滚；
+当前 loop hints 没有带来稳定 geometry 改善，反而可能扰动整体 codegen。
+
 目标：在 geometry/residual 结构性收益之后，再处理固定成本。
 
 建议动作：

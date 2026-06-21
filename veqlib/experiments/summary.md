@@ -106,6 +106,7 @@ end-to-end timing neutral-to-slightly-positive.
 | Geometry residual-ready descriptor compression | `residual_update` 0.809, but `geometry` 1.021 | `evaluate` 1.004; `evaluate_ring` 1.008 | reject; moved arithmetic into dominant geometry stage without end-to-end gain |
 | Geometry absent Fourier order static skip for `harmonic_rows>2` | `32x16x4` geometry-only 0.925; `32x16x8` geometry-only 0.808 | default `32x16x1` neutral; high-Mmax all-stage evaluate about 0.95 / 0.89 | keep; default topology keeps original loop, high Mmax skips absent c-family orders at compile time |
 | Source sign-normalization dot fusion | default paired `source_update` 0.977 | default `evaluate` 0.995 and `evaluate_ring` 0.984; 45-topology median 0.995 | keep; removes one independent source-update scan with no route/finite/sentinel branch |
+| Geometry theta-loop vectorization pragmas | long paired `geometry` 0.998 | long paired `evaluate` 1.015 and `evaluate_ring` 1.002 | reject; explicit loop hints did not improve geometry and disturbed endpoint codegen |
 | Remove independent `Pn_psin` buffer and read `materialized_heat_input` instead | `source_update` 1.008; `residual_update` 1.003 | `evaluate` 0.993 but mixed-sign pairs; `evaluate_ring` 0.998 | reject; aliasing the duplicate value is semantically clean but not a stable performance win |
 | Remove duplicate `source_psin_query/source_parameter_query` buffers | first pass: `source_materialize` 1.002; long rerun: `evaluate` 0.997 | long rerun `evaluate_ring` 1.004 | reject; direct root-psin interpolation did not survive state-ring timing |
 | Source `psin_r` regularization/pass reduction | `source_update` 0.954 | 1.000 | reject; no end-to-end gain |
@@ -557,3 +558,14 @@ were retested with paired binaries and did not show a strong endpoint regression
 ≈0.995/0.986, and `64x16x1`≈0.996/1.001. Keep the change as a narrow
 source-update pass deletion; do not reintroduce checked facades or finite-value
 guards around it.
+
+A geometry theta-loop vectorization-pragma candidate was rejected. It added
+`#pragma clang loop vectorize(enable)` before the phase-synthesis theta sweep
+and the metric/store theta sweep, leaving the formulas unchanged. Correctness
+passed release CTest and the RELAXED PF comparator (`max_abs≈7.66e-10`). The
+first 9-pair timing run looked mildly positive at the endpoint
+(`evaluate` median ratio≈0.988, `evaluate_ring`≈0.994), but the target stage did
+not move (`geometry`≈0.999). A longer 7-pair retest reversed the decision:
+`geometry`≈0.998, `evaluate`≈1.015, and `evaluate_ring`≈1.002. The patch was
+reverted because explicit loop hints do not create stable geometry work removal
+here and can perturb surrounding codegen.
