@@ -456,8 +456,26 @@ callback traffic，不声称是真实 nonlinear solver trajectory。一次 relea
 `32x16x1`、`32x32x1` 与 `32x16x4`，输出 topology metadata 正确，且
 `Mmax=4` 不再被默认 benchmark static_assert 阻塞。
 
-未完成：尚未跑完整大矩阵（`Nr=16/32/64`, `Nt=8/16/24/32/64`, `Mmax=1/4/8`），
-因为每个 topology 都要重新模板实例化/链接；后续应作为长耗时实验单独执行。
+代表性 production-stage matrix 已跑 9 个 topology（`repeat=12`、`warmup=4`、
+`inner=5000`；只用 production `geometry/evaluate`，不把 micro-probe delta
+外推到所有 topology）：
+
+| topology | `geometry` ns | `evaluate` ns | geometry share |
+| --- | ---: | ---: | ---: |
+| `16x16x1` | 2510.8 | 3666.6 | 0.685 |
+| `32x16x1` | 5048.1 | 8278.8 | 0.610 |
+| `64x16x1` | 10157.5 | 15073.7 | 0.674 |
+| `32x8x1` | 2582.0 | 6004.0 | 0.430 |
+| `32x24x1` | 7656.2 | 10899.3 | 0.702 |
+| `32x32x1` | 10301.8 | 14593.4 | 0.706 |
+| `32x64x1` | 20502.7 | 26664.9 | 0.769 |
+| `32x16x4` | 5724.1 | 9280.5 | 0.617 |
+| `32x16x8` | 7743.2 | 10935.6 | 0.708 |
+
+结论：默认 `32x16x1` 不是唯一表现；Geometry 在代表矩阵中仍是最大单项
+热点，且随 `Nt` 增大 share 明显上升。`Nt=8` 时非-Geometry 固定成本占比较高，
+但 `Nt>=16` 后继续优先 Geometry 是合理的。完整 45-entry 矩阵仍未跑，
+因为它是长耗时验证，不阻塞下一轮结构性优化。
 
 停止条件：确认 `[rho][field][theta]` 在默认 topology 是默认选择；对其它 topology 只声明“已测范围内”的结论，必要时保留 `GeometryLayoutPolicy<GridType>` 设计空间。
 

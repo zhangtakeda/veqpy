@@ -227,8 +227,25 @@ CMake-generated `config::DefaultTopology` instead of a source-level hard-coded
 the previous default benchmark shape (`Nr=32`, `Nt=16`, `Mmax=1`, `x_size=18`).
 `stage_topology_matrix.py` can configure isolated build directories and collect
 JSON reports for requested `Nr x Nt x Mmax` entries. Smoke coverage ran
-`32x16x1`, `32x32x1`, and `32x16x4`; the full large matrix remains a
-long-running experiment.
+`32x16x1`, `32x32x1`, and `32x16x4`; a representative production-stage matrix
+then covered nine topologies with `repeat=12`, `warmup=4`, `inner=5000`:
+
+| Topology | `geometry` ns | `evaluate` ns | Geometry share |
+| --- | ---: | ---: | ---: |
+| `16x16x1` | 2510.8 | 3666.6 | 0.685 |
+| `32x16x1` | 5048.1 | 8278.8 | 0.610 |
+| `64x16x1` | 10157.5 | 15073.7 | 0.674 |
+| `32x8x1` | 2582.0 | 6004.0 | 0.430 |
+| `32x24x1` | 7656.2 | 10899.3 | 0.702 |
+| `32x32x1` | 10301.8 | 14593.4 | 0.706 |
+| `32x64x1` | 20502.7 | 26664.9 | 0.769 |
+| `32x16x4` | 5724.1 | 9280.5 | 0.617 |
+| `32x16x8` | 7743.2 | 10935.6 | 0.708 |
+
+The result generalizes the hotspot ordering: Geometry remains the largest
+single production stage across the representative sweep, and its share grows as
+`Nt` increases. The full `3 x 5 x 3` matrix remains a longer-running validation
+line rather than a blocker.
 
 Geometry residual-ready descriptor compression was tested after `c56a5b6`: the
 prototype replaced the 9 raw geometry surface fields with 7 residual-ready fields
