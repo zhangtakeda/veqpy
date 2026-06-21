@@ -42,10 +42,24 @@ contract，再继续 vector sincos / approximate math / residual fusion。当前
 - RELAXED release Python/C++ validation 仍通过，`max_abs≈6.762e-12`。
 - RELAXED sanity benchmark（非 paired，仅确认未明显破坏基线）：
   `geometry median≈5554 ns/call`，`evaluate median≈9109 ns/call`。
+- 同窗口 FP mode A/B（3 轮 median-of-medians，`repeat=25`、
+  `warmup=8`、`inner=10000`）显示 RELAXED 是后续性能实验的唯一合理主基线：
 
-下一步应进入 Phase 1：补齐 post-layout stage 表，并开始 topology /
-state-ring benchmark matrix；不要在未建立 STRICT/FMA/RELAXED 误差口径前
-直接比较 approximate/vector math kernel。
+  | FP mode | `geometry` ns/call | `evaluate` ns/call | `evaluate / STRICT` |
+  | --- | ---: | ---: | ---: |
+  | `STRICT` | 12223.9 | 16498.8 | 1.000 |
+  | `FMA` | 10731.0 | 15059.6 | 0.913 |
+  | `RELAXED` | 5391.8 | 8907.0 | 0.540 |
+
+  结论：后续性能 A/B 默认只比较 RELAXED build 下的修改前/修改后；
+  STRICT/FMA 只作为 correctness / error-budget 参照，不再作为热点优化的
+  性能基线。
+
+下一步应进入 Phase 1a：先把测试/benchmark hot path 完全剥离为
+`PF/psin/uniform/Ip` 专用 unchecked 路径，再补 post-layout stage 表和
+topology/state-ring matrix。计时路径中不应继续用“是否极大值/是否有效幅度”
+作为控制流；正确性检查保留在 timed loop 外部的 Python/C++ validation 和
+route-specific checked smoke test 中。
 
 随后用独立 baseline worktree 重新测试 `a5c4d3c` 的 geometry surface layout 改动。复测仍然支持保留该改动：
 
@@ -313,16 +327,36 @@ veqlib/experiments/tooling/
 1. 引入明确 FP mode：
    - `STRICT`: `-fno-fast-math -ffp-contract=off`
    - `FMA`: `-fno-fast-math -ffp-contract=fast`
-   - `RELAXED`: 只在 validation 后逐项打开 relaxed flags
+   - `RELAXED`: 保留历史 fast-math 性能基线，作为所有后续性能 A/B 的主模式
 2. 将 `math::is_finite` 与 magnitude policy 分离：
    - `is_finite`: 标准有限性语义
    - `is_valid_magnitude`: 有限且不过大
 3. 不让包含 NaN/Inf validity check 的 TU 依赖 `-ffinite-math-only` 语义。
-4. 每个 FP mode 都跑 Python/C++ validation，记录 max_abs、solver nfev、stage timing。
+4. 每个 FP mode 都跑 Python/C++ validation，记录 max_abs、solver nfev；性能 stage timing
+   只用 RELAXED 做主裁决。
 
-停止条件：三种 FP mode 的 correctness contract 明确，并能解释 relaxed mode 的误差/速度 tradeoff。
+停止条件：三种 FP mode 的 correctness contract 明确；RELAXED 作为性能主基线，STRICT/FMA
+只用于解释误差/速度 tradeoff。
 
-### Phase 1：补齐 post-layout stage 表与 topology/state matrix
+### Phase 1a：剥离 PF/psin/uniform/Ip unchecked benchmark 路径
+
+目标：先把当前实验路线彻底固定为 `PF/psin/uniform/Ip`，避免 generic source
+constraint / topology 逻辑和 hot-path validity guard 混入判断。
+
+建议动作：
+
+1. route 语义静态化：benchmark target 明确只测 `PF/psin/uniform/Ip`，
+   不在 timed path 中处理 beta/free-source 分支。
+2. timed hot path 使用 unchecked evaluator：假设输入合法，不做
+   `is_valid_magnitude()` 或“极大值”判断。
+3. checked evaluator / public facade 暂时保留边界 guard，避免改动公共失败语义。
+4. 正确性由 timed loop 外部的 C++ smoke test、Python/C++ compare 和
+   STRICT/FMA/RELAXED 差异表承担。
+
+停止条件：能量化 checked vs unchecked 在 RELAXED 下的开销，并确认后续
+stage/topology benchmark 只测 route kernel 本身。
+
+### Phase 1b：补齐 post-layout stage 表与 topology/state matrix
 
 目标：新布局已验证 `geometry/evaluate`，但还缺 layout 后完整 stage 排序，以及 topology resonance 检查。
 

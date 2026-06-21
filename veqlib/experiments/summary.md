@@ -163,6 +163,29 @@ Validation:
   `evaluate median=9109.3373 ns/call`. This is not a paired optimization proof;
   it only confirms Phase 0 did not visibly damage the current layout baseline.
 
-Next step: Phase 1 should generate a post-layout stage table across the new
-FP modes and then add topology/state-ring coverage before any approximate
-dynamic `sincos(tb)` backend is compared.
+Follow-up same-window FP A/B (`taskset -c 2`, three median-of-medians rounds,
+`repeat=25`, `warmup=8`, `inner=10000`) shows that RELAXED must be the
+performance baseline:
+
+| FP mode | `geometry` ns/call | `evaluate` ns/call | `evaluate / STRICT` |
+| --- | ---: | ---: | ---: |
+| `STRICT` | 12223.9 | 16498.8 | 1.000 |
+| `FMA` | 10731.0 | 15059.6 | 0.913 |
+| `RELAXED` | 5391.8 | 8907.0 | 0.540 |
+
+Decision: future performance A/B work should compare candidate vs baseline
+inside RELAXED builds only. STRICT/FMA remain correctness and error-budget
+references, not wall-clock baselines for hotspot decisions.
+
+`math::is_finite()` in RELAXED is implemented as a raw double-bit exponent
+mask check, not as `std::isfinite()`: exponent bits equal to all ones mean NaN
+or inf. This is the only viable local finite probe under `-ffinite-math-only`,
+but the RELAXED contract still means NaN/inf should not be used as ordinary
+hot-path control flow.
+
+Next step: Phase 1a should split the timed benchmark path into a fully
+route-specific `PF/psin/uniform/Ip` unchecked evaluator. The timed loop should
+not branch on magnitude-validity / "too large" checks; those checks belong in
+outer C++ smoke tests, Python/C++ validation, and checked public facades. After
+that split, Phase 1b can add the post-layout RELAXED stage table and
+topology/state-ring matrix.
