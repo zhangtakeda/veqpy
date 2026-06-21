@@ -261,122 +261,177 @@ veqlib/experiments/tooling/
 
 但在做下一轮优化前，建议先保留完整目录，便于复现和比较。
 
-## 7. 下一步计划
+## 7. 修订后的下一步计划
 
-### Phase A：先固定 baseline artifact
+这份计划采纳 2026-06-21 新指导建议：`a5c4d3c` 的 layout A/B 已足够证明“allocation-free 不等于 cache-efficient”；PMU 是机制验证线，不再阻塞工程优化主线。当前首要工作从“继续随手试 geometry/trig 微调”改为先稳定 FP/correctness contract，再补齐 post-layout stage/topology 证据，最后进入结构性 geometry/residual 实验。
 
-目标：确保后续每次 A/B 都能和本轮基线比较。
+### Phase 0：FP 构建语义与 correctness contract（P0）
 
-建议动作：
+目标：先拆清楚 Release 数学语义，避免后续 vector sincos、polynomial、FMA、reciprocal 实验的误差基准不稳定。
 
-1. 保留 `veqlib_stage_benchmark` 作为正式开发工具。
-2. 确定是否版本化 `veqlib/experiments/summary.md` 与关键 JSON。
-3. 每个优化分支都至少跑：
-   - `veqlib_stage_benchmark --stage geometry`
-   - `veqlib_stage_benchmark --stage evaluate`
-   - Python/C++ validation
-   - Debug CTest
-
-停止条件：baseline 可一键复现，且后续实验输出路径不会污染项目根目录。
-
-### Phase B：geometry 结构性 A/B
-
-目标：在 layout 改动后的新 baseline 上继续降低 `geometry`，但避免重复已经失败的微调。
-
-已完成一项布局 A/B：`[field][rho][theta] -> [rho][field][theta]`，端到端 `evaluate` ratio 复测约 0.687。layout 后的 `geometry` 仍占 `evaluate` 约 60% 左右，因此仍是第一优化对象；但已确认以下方向不要再作为短期主线：
-
-- 单纯打平 `surface_field` / `profile_field` 访问器。
-- 显式调用 glibc `sincos`。
-- 只跳过 absent Fourier order。
-- 不改变端到端 `evaluate` 的单 pass hoist。
-
-后续建议按以下顺序做更结构性的 A/B：
-
-1. **三角函数证据增强**
-   - 在 analysis/objdump 中定位 `sincos@plt` 所在调用块。
-   - 如果可行，构造一个只跑 theta trig 的 micro stage，估计 trig 占比。
-
-2. **预计算或复用 theta trig**
-   - 若 `theta` 相关项与当前 active profiles 的依赖允许，尝试把固定 theta 的 `sin/cos` 基础表预计算到 setup/plan。
-   - 对包含 profile-dependent phase/shape 的项，先不要改变数学语义；可先做局部缓存或 recurrence A/B。
-
-3. **geometry layout A/B**
-   - 已完成 Alternative layout：`[rho][field][theta]`，保持 theta 连续，同时让同 rho 的 field 聚集。
-   - Padded field plane：可作为后续对照，但当前 `[rho][field][theta]` 已显著改善，优先级下降。
-   - 当前没有 PMU，不应仅凭推理解释机制；保留依据是 correctness validation + paired stage/evaluate timing。
-
-4. **只在实测支持后再考虑 AVX2 intrinsic**
-   - 当前首选让 Clang 自动向量化或使用更利于向量化的数据布局。
-   - 手写 AVX2 仅在 objdump/remarks 证明 compiler 无法生成目标形态时再做。
-
-成功标准：
-
-- `geometry` median 明显下降。
-- `evaluate` median 同步下降，而不是只优化孤立 stage。
-- Python/C++ validation 仍在 `1e-9` tolerance 内。
-
-### Phase C：Residual materialize/project 融合
-
-目标：验证 TODO 中“写二维场再按 profile 重扫”的结构性问题。
+当前风险：Release 同时启用了 `-ffast-math`、`-ffinite-math-only`、`-fapprox-func`、`-freciprocal-math`、`-funsafe-math-optimizations`，但 hot path 仍用 `math::is_finite()` 做有效性判断；该函数当前语义实际是 magnitude-bound check，不是标准 NaN/Inf finite check。
 
 建议动作：
 
-1. 新增一个实验性 residual path，不替换默认实现。
-2. 在一次 theta sweep 中同步累计需要的 theta moments。
-3. 将 radial projection 与 moment accumulation 解耦，减少对 `Nr*Nt` surface slab 的重复扫描。
-4. 对比：
+1. 引入明确 FP mode：
+   - `STRICT`: `-fno-fast-math -ffp-contract=off`
+   - `FMA`: `-fno-fast-math -ffp-contract=fast`
+   - `RELAXED`: 只在 validation 后逐项打开 relaxed flags
+2. 将 `math::is_finite` 与 magnitude policy 分离：
+   - `is_finite`: 标准有限性语义
+   - `is_valid_magnitude`: 有限且不过大
+3. 不让包含 NaN/Inf validity check 的 TU 依赖 `-ffinite-math-only` 语义。
+4. 每个 FP mode 都跑 Python/C++ validation，记录 max_abs、solver nfev、stage timing。
+
+停止条件：三种 FP mode 的 correctness contract 明确，并能解释 relaxed mode 的误差/速度 tradeoff。
+
+### Phase 1：补齐 post-layout stage 表与 topology/state matrix
+
+目标：新布局已验证 `geometry/evaluate`，但还缺 layout 后完整 stage 排序，以及 topology resonance 检查。
+
+建议动作：
+
+1. 输出 layout 后完整 stage 表：
+   - `profiles_all`
+   - `geometry`
+   - `source_materialize`
+   - `source_update`
    - `residual_update`
    - `residual_pack`
    - `evaluate`
-   - Cachegrind D refs / D1 misses
+2. 对旧/新布局或当前 baseline 输出同一张表：
+   - stage ns
+   - stage ratio
+   - `stage/evaluate` share
+   - Amdahl contribution estimate
+   - Cachegrind D refs / D1 misses（WSL 下仅作模拟参考）
+3. 增加 topology matrix，至少覆盖：
+   - `Nr = 16, 32, 64`
+   - `Nt = 8, 16, 24, 32, 64`
+   - `Mmax = 1, 4, 8`
+4. 增加 solver-state 输入模式：
+   - same-x warm benchmark
+   - 16--64 个有效 solver state 的 ring benchmark
 
-注意：当前墙钟上 residual 不是第一瓶颈，所以应在 geometry 有结果后再投入较大重构。
+停止条件：确认 `[rho][field][theta]` 在默认 topology 是默认选择；对其它 topology 只声明“已测范围内”的结论，必要时保留 `GeometryLayoutPolicy<GridType>` 设计空间。
 
-### Phase D：FP 语义修正与 Release mode 分层
+### Phase 2：拆分 Geometry micro-stage
 
-目标：解决 `TODO-1.md` 中 Release `-ffinite-math-only` 与有限性检查的语义冲突。
+目标：把“继续研究 sin/cos”改成可计量的 geometry 内部阶段，而不是模糊地试 trig 优化。
 
-建议动作：
+建议拆成四个 micro-stage：
 
-1. 将 FP mode 拆为：
-   - `STRICT`
-   - `FMA`
-   - `RELAXED`
-2. 不让包含 NaN/Inf validity check 的 TU 启用 `-ffinite-math-only`。
-3. 将 `math::is_finite` 与 magnitude policy 分离：
-   - `is_finite`: 标准有限性语义。
-   - `is_valid_magnitude`: 有限且不过大。
-4. 每个 FP mode 都跑 Python/C++ validation，并记录最大差异。
+```text
+A. Fourier phase synthesis:
+   tb, tb_r, tb_t, tb_rr, tb_rt, tb_tt
 
-这属于正确性 P0，建议不要长期拖延；但它会影响 benchmark 可比性，最好作为单独分支处理。
+B. dynamic sincos:
+   sin(tb), cos(tb)
 
-### Phase E：Source route 静态化与 fixed profile refresh 去重
+C. metric arithmetic:
+   R/J/JR/grt/gtt 和导数
 
-目标：减少 TODO 中指出的分支、复制和重复 refresh。
-
-建议动作：
-
-1. 对 `PF/psin/uniform/Ip` 编译期实例，消除不可能的 `beta`/route 分支。
-2. fixed profiles 尽量迁到 plan/setup 阶段，只在参数变化时刷新。
-3. 检查 `refresh_fixed -> refresh_fourier_family_fields` 与 `refresh_active -> refresh_fourier_family_fields` 是否重复清零 family slab。
-4. 用 `profiles_all` 和 `evaluate` stage 验证收益。
-
-这部分单次墙钟占比不高，但会减少每次 residual callback 的固定成本，也能降低未来更大 topology 下的成本。
-
-### Phase F：PMU 环境复测
-
-目标：验证 4 KiB field-plane conflict，而不是只停留在推断。
-
-需要环境：原生 Linux 或支持硬件 PMU 的 VM/container host。
-
-建议命令方向：
-
-```bash
-perf stat -e cycles,instructions,L1-dcache-loads,L1-dcache-load-misses,L1-dcache-stores,cache-references,cache-misses \
-  ./build/release/veqlib_stage_benchmark --stage geometry --repeat 40 --warmup 10 --inner 10000
+D. output traffic:
+   九个 surface field 写入和五个 radial reduction
 ```
 
-如果 LIKWID 可用，可补充 L2/L3、MEM、FLOPS_DP group。只有当 padded/layout A/B 同时改善 wall time 和 L1 replacement/line fill，才应保留 layout 改动。
+注意：固定 `sin(theta)`、`cos(theta)` 和 harmonic 表已经通过 `GridType` setup 预计算；真正动态且无法 setup 预计算的是 `sin(tb_ij)` 和 `cos(tb_ij)`，因为 `tb_ij` 依赖 active profile coefficients。因此删除“预计算 theta trig”作为主线，改为测试动态 `sincos(tb)` backend。
+
+停止条件：能量化每次 Geometry 的实际 dynamic sincos 调用数、phase synthesis 占比、metric arithmetic 占比和 output traffic 占比。
+
+### Phase 3：Geometry dynamic sincos backend A/B
+
+目标：在 Phase 2 的拆分证据下，测试真正可能带来较大收益的动态数学路径。
+
+建议顺序：
+
+1. 捕获或生成 `tb[Nr*Nt]` 输入，单独 benchmark scalar libm。
+2. 测 AVX2/SVML/SLEEF/libmvec 或受控误差的 domain-specific vector sincos backend。
+3. 将 vector sincos 嵌入 Geometry，检查端到端是否仍有收益。
+4. 对比 assembly/optimization remarks：vectorization width、call site、spill/reload、寄存器压力。
+5. 严格跑 Python/C++ validation 与 FP mode matrix。
+
+已删除方向：显式 glibc `::sincos`。它已严重退化，且 baseline 已有 compiler-lowered `sincos@plt` 证据。
+
+### Phase 4：压缩 Geometry descriptor，减少 Residual 重算
+
+目标：layout 改动改善了九个 field 的访问方式，但没有删除九个二维 field 的写入/读取。下一步应审计能否存储 residual 直接需要的派生量，而不是继续换排列。
+
+候选派生量：
+
+```text
+qR      = -Z_t / J
+qZ      =  R_t / J
+R2      = R * R
+dmetric = gttdivJR_r - grtdivJR_t
+```
+
+这些可以减少 Residual 中的 `1.0 / J`、`R * R`、两个 field load 后相减等重算。任何 descriptor 压缩都必须先做 correctness comparator 和 stage/evaluate A/B。
+
+### Phase 5：Residual theta-moment fusion
+
+目标：删除四个 residual 二维中间场，而不是再尝试单一 residual layout。
+
+已知证据：residual physical layout 改成 `[rho][field][theta]` 时，`residual_update` 快约 7.3%，但 `residual_pack` 退化，`evaluate` 只有噪声级收益。这说明 update 和 pack 需要相反 locality：
+
+```text
+update：同一点生成多个 field
+pack：固定一个 field 扫过 rho/theta
+```
+
+正确方向是删除中间 slab：
+
+```text
+G
+G*psin_R
+G*psin_Z
+G*psin_R*sin(tb)
+```
+
+在一次 theta sweep 中直接累计 `rowwise_sum` / `rowwise_weighted_sum` 所需 moments，再做 radial projection。
+
+### Phase 6：Source/profile route 静态化
+
+目标：在 geometry/residual 结构性收益之后，再处理固定成本。
+
+建议动作：
+
+1. 对 `PF/psin/uniform/Ip` 编译期实例消除不可能的 route/beta 分支。
+2. fixed profiles 尽量迁到 setup/plan 阶段，只在参数变化时刷新。
+3. 检查 family slab 是否在 `refresh_fixed` 和 `refresh_active` 中重复清零/重建。
+4. 保持 source 单 pass 微调降级；只有端到端 `evaluate` 有同步收益才保留。
+
+### Phase 7：PMU / native Linux 并行验证线
+
+目标：验证 4 KiB field-plane conflict 和 libm/cache 机制，而不是决定 layout 是否保留。
+
+当前 WSL2 不能读取硬件 PMU；`cycles`、`instructions`、`L1-dcache-load-misses` 等事件均 `<not supported>`。因此主线继续使用：
+
+```text
+paired wall-clock + correctness + assembly/objdump + Cachegrind
+```
+
+并行验证线在原生 Linux 或 PMU 可用服务器上补：
+
+```bash
+perf stat -e cycles,instructions,branches,branch-misses,L1-dcache-loads,L1-dcache-load-misses,cache-misses \
+  taskset -c 2 ./build/release/veqlib_stage_benchmark --stage geometry --repeat 30 --warmup 8 --inner 10000
+```
+
+PMU 的作用是确认“为什么快/慢”，不是重新决定 `a5c4d3c` 是否有效。
+
+### 短期删除/降级项
+
+| 工作项 | 决策 |
+| --- | --- |
+| Geometry accessor/pointer flatten | 删除；已测无收益 |
+| 显式 glibc `sincos` | 删除；已严重退化 |
+| 仅跳过 absent Fourier order | 降级；约 1% stage 线索且端到端无收益 |
+| Residual 单纯 transpose | 删除；应做 fusion |
+| 单个 residual load hoist | 降级；fusion 会覆盖 |
+| Source 单 pass 合并 | 降级；端到端无收益 |
+| 强制“所有对象放栈” | 删除；persistent workspace 更合理，当前 allocation 不在计时区间 |
+| 立即开发完整自定义 AST 工具 | 后移；当前热点已明确 |
 
 ## 8. 决策原则
 

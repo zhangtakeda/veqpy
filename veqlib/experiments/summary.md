@@ -103,3 +103,28 @@ After the layout retest, several smaller candidates were tested against
 Next optimization work should not repeat these micro-candidates. Prefer either a
 larger geometry math-path experiment with a dedicated correctness comparator, or
 native-Linux PMU validation before spending more time on cache-mechanism claims.
+
+## Planning update after 3851f62 review
+
+The post-review priority is adjusted as follows:
+
+1. Treat the geometry layout change as accepted. PMU is useful to validate the
+   cache/conflict mechanism, not to decide whether the wall-clock improvement is
+   real.
+2. Promote FP build semantics to P0. Split strict/FMA/relaxed modes before
+   testing vector sincos or approximate math backends, and separate true
+   finite-check semantics from magnitude-validity checks.
+3. Fill the post-layout stage table before choosing the next absolute hot spot.
+   Current formal retest only covers `geometry`, `evaluate`, and their share.
+4. Extend the benchmark beyond the default resonance-prone topology
+   (`Nr=32`, `Nt=16`, `Mmax=1`) and add a solver-state ring in addition to the
+   same-x warm benchmark.
+5. Decompose geometry into phase synthesis, dynamic sincos, metric arithmetic,
+   and output traffic micro-stages. Fixed theta/harmonic trig tables are already
+   setup-time data; the relevant target is dynamic `sin(tb)` / `cos(tb)`.
+6. Move residual fusion earlier. The residual-layout A/B indicates conflicting
+   producer/consumer locality, so the next structural direction is theta-moment
+   fusion rather than another materialized surface layout.
+7. Keep PMU/native-Linux work as a parallel mechanism-validation line while the
+   main optimization loop continues with paired wall-clock, correctness checks,
+   assembly, and Cachegrind.
