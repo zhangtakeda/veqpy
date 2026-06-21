@@ -85,6 +85,7 @@ Phase 2 首轮 micro A/B：
 | Geometry harmonic profile reads hoist 到 `i` 层 | 5 组 paired median：`geometry` ratio≈0.984，`evaluate` ratio≈0.993；5/5 evaluate 均快 | 保留；低风险小收益，为高 `M_max` topology 预期更有价值 |
 | Residual surface physical layout 改为 `[rho][field][theta]` | 5 组 paired median：`residual_update` ratio≈0.931，`residual_pack` ratio≈1.004，`evaluate` ratio≈0.994 | 保留；端到端收益小但未见显著回归，且 producer 语义与 geometry layout 对齐 |
 | Residual theta-moment fusion，直接累计 active block moments | active-only 5 组 paired median：`residual_fused / (update+pack)`≈1.090，`evaluate` ratio≈1.007；naive 全 moments 约 1.166 / 1.021 | 回滚；当前 materialized update + vectorized pack 更快 |
+| Geometry residual-ready descriptor compression（`qR/qZ/R2/dmetric`，9 fields -> 7 fields） | 5 组 paired median：`residual_update` ratio≈0.809，但 `geometry` ratio≈1.021，`evaluate` ratio≈1.004，`evaluate_ring` ratio≈1.008 | 回滚；只是把成本从 residual 移到 geometry，端到端无收益 |
 
 Residual layout 本轮的逐项中位数：baseline `residual_update≈912.2 ns`、candidate
 `≈846.1 ns`；baseline `evaluate≈8288.7 ns`、candidate `≈8230.4 ns`。
@@ -487,7 +488,12 @@ R2      = R * R
 dmetric = gttdivJR_r - grtdivJR_t
 ```
 
-这些可以减少 Residual 中的 `1.0 / J`、`R * R`、两个 field load 后相减等重算。任何 descriptor 压缩都必须先做 correctness comparator 和 stage/evaluate A/B。
+已测试一版 residual-ready descriptor compression：Geometry surface 从 9 个 raw fields
+改为 7 个 residual-ready fields。Python/C++ comparator 通过（`max_abs≈5.578e-11`），
+但 paired RELAXED A/B 显示 `residual_update` 虽快约 19.1%，`geometry` 慢约 2.1%，
+最终 `evaluate` ratio≈1.004、`evaluate_ring` ratio≈1.008，因此回滚。
+结论：不要简单把 residual 重算移动到 Geometry；若再做 descriptor compression，应只
+接受能改善 `evaluate` 的组合，或把派生量放在 residual 局部 vector-friendly pass 中。
 
 ### Phase 5：Residual theta-moment fusion
 

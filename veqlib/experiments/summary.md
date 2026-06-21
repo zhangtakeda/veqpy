@@ -101,6 +101,7 @@ end-to-end timing neutral-to-slightly-positive.
 | Explicit glibc `sincos` path | `geometry` 2.386 | 1.835 | reject; severe regression |
 | Residual surface physical layout `[rho][field][theta]` | re-test: `residual_update` 0.931; `residual_pack` 1.004 | 0.994 | retain; semantic layout alignment, no significant end-to-end regression |
 | Residual theta-moment fusion | active-only `residual_fused / (update+pack)` 1.090; naive 1.166 | active-only 1.007; naive 1.021 | reject; scalar moment accumulation lost to materialized update + vectorized rowwise pack |
+| Geometry residual-ready descriptor compression | `residual_update` 0.809, but `geometry` 1.021 | `evaluate` 1.004; `evaluate_ring` 1.008 | reject; moved arithmetic into dominant geometry stage without end-to-end gain |
 | Source `psin_r` regularization/pass reduction | `source_update` 0.954 | 1.000 | reject; no end-to-end gain |
 | Geometry hot-loop pointer/index flattening | `geometry` 1.003 | 1.000 | reject; compiler already removes most accessor overhead |
 
@@ -219,6 +220,14 @@ for the ring stage. Release smoke timing with `repeat=10`, `warmup=4`,
 `inner=5000`, `ring-size=16` observed same-x `evaluate=8115.7 ns/call` and
 `evaluate_ring=8191.4 ns/call` (`ring/evaluate=1.009`). Treat this as an input
 state-variation harness, not a real solver trajectory.
+
+Geometry residual-ready descriptor compression was tested after `c56a5b6`: the
+prototype replaced the 9 raw geometry surface fields with 7 residual-ready fields
+(`qR`, `qZ`, `R2`, `JdivR`, `gttdivJR`, `dmetric`, `sin_tb`). Correctness passed
+against Python (`max_abs≈5.578e-11`), but paired RELAXED timing rejected it:
+`residual_update=0.809`, `geometry=1.021`, `evaluate=1.004`, and
+`evaluate_ring=1.008`. Do not move residual recomputation into Geometry unless
+the full `evaluate` path improves.
 
 Phase 1a RELAXED validation and timing (three same-window runs; per-run
 `taskset -c 2`, `repeat=25`, `warmup=8`, `inner=10000`; table uses the
