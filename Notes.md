@@ -680,6 +680,16 @@ G*psin_R*sin(tb)
 
 在一次 theta sweep 中直接累计 `rowwise_sum` / `rowwise_weighted_sum` 所需 moments，再做 radial projection。
 
+2026-06-21 又保留了一项小的 residual 局部效率改进：`residual_update`
+在 theta loop 内把同一点的 Geometry surface field 和 `alpha1/alpha2`
+加载到局部变量，避免重复 accessor/地址生成，并让 `[rho][field][theta]`
+布局下的点式读取更显式。release/debug CTest 与 PF Python/C++ comparator
+均通过（`max_abs≈5.578e-11`）。9 组 paired RELAXED timing
+（`taskset -c 2`、`repeat=24`、`warmup=8`、`inner=10000`、`ring-size=16`）
+显示 `residual_update` median ratio≈0.947，`evaluate`≈0.995，
+`evaluate_ring`≈0.995，sink 全匹配。结论：保留；它是 stage-local
+约 5.3% 的小收益，端到端约 0.5%，但不替代后续结构性 fusion。
+
 ### Phase 6：Source/profile route 静态化
 
 已完成一项局部静态化：Geometry Fourier order accumulation 现在在

@@ -392,3 +392,14 @@ Phase 2 first geometry micro-results:
 | Reuse `inv_JR` for `JdivR = J*J/(J*R)` | 5 paired runs: median `geometry` ratio≈0.992, `evaluate` ratio≈0.990, but evaluate had reverse runs (`1.031`, `1.009`) | reject; too small/noisy |
 | Hoist harmonic profile reads from theta loop to rho loop | 5 paired runs: median `geometry` ratio≈0.984, `evaluate` ratio≈0.993; all evaluate pairs improved | keep; small but stable low-risk gain |
 | Explicit per-rho arithmetic hoist (`a*rho`, `a*h`, `k+rho*k_r`) | 9 paired runs: `geometry` median ratio≈1.000, `evaluate`≈1.008, `evaluate_ring`≈0.990; sinks matched | reject; compiler already handles this class of invariants and same-x evaluate regressed |
+
+Residual local load hoisting was kept as a small efficiency cleanup rather than a
+structural fusion substitute. The patch loads same-point Geometry fields and
+`alpha1/alpha2` into locals inside `residual_update`, matching the retained
+`[rho][field][theta]` physical layout. Release/debug CTest and PF Python/C++
+comparison passed (`max_abs≈5.578e-11`). Nine paired RELAXED runs
+(`taskset -c 2`, `repeat=24`, `warmup=8`, `inner=10000`, `ring-size=16`) measured
+`residual_update` median ratio≈0.947, `evaluate`≈0.995, and
+`evaluate_ring`≈0.995 with zero sink differences. Keep the change, but continue
+to treat residual theta-moment fusion as the only likely larger residual
+opportunity.

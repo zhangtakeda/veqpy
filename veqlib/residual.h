@@ -76,6 +76,9 @@ namespace residual::detail
             static_assert(GeometryRuntime::radial_nodes == radial_nodes, "residual/geometry radial grids must match");
             static_assert(GeometryRuntime::theta_rows == theta_rows, "residual/geometry theta grids must match");
 
+            const double alpha1 = source_runtime.alpha1;
+            const double alpha2 = source_runtime.alpha2;
+
             for (size_t i = 0; i < radial_nodes; ++i)
             {
                 const double psin_r_i    = source_runtime.profile_root_fields(source::root_psin_r, i);
@@ -85,29 +88,32 @@ namespace residual::detail
 
                 for (size_t j = 0; j < theta_rows; ++j)
                 {
-                    const double inv_J = 1.0 / geometry_runtime.surface_field(geometry::surface_J, i, j);
-                    const double psin_R =
-                        -geometry_runtime.surface_field(geometry::surface_Z_t, i, j) * inv_J * psin_r_i;
-                    const double psin_Z =
-                        geometry_runtime.surface_field(geometry::surface_R_t, i, j) * inv_J * psin_r_i;
+                    const double sin_tb_ij     = geometry_runtime.surface_field(geometry::surface_sin_tb, i, j);
+                    const double R_ij          = geometry_runtime.surface_field(geometry::surface_R, i, j);
+                    const double R_t_ij        = geometry_runtime.surface_field(geometry::surface_R_t, i, j);
+                    const double Z_t_ij        = geometry_runtime.surface_field(geometry::surface_Z_t, i, j);
+                    const double J_ij          = geometry_runtime.surface_field(geometry::surface_J, i, j);
+                    const double JdivR_ij      = geometry_runtime.surface_field(geometry::surface_JdivR, i, j);
+                    const double grtdivJR_t_ij =
+                        geometry_runtime.surface_field(geometry::surface_grtdivJR_t, i, j);
+                    const double gttdivJR_ij   = geometry_runtime.surface_field(geometry::surface_gttdivJR, i, j);
+                    const double gttdivJR_r_ij =
+                        geometry_runtime.surface_field(geometry::surface_gttdivJR_r, i, j);
 
-                    const double R_ij = geometry_runtime.surface_field(geometry::surface_R, i, j);
-                    const double G1n =
-                        geometry_runtime.surface_field(geometry::surface_JdivR, i, j) *
-                        (FFn_psin_i + R_ij * R_ij * Pn_psin_i);
+                    const double inv_J  = 1.0 / J_ij;
+                    const double psin_R = -Z_t_ij * inv_J * psin_r_i;
+                    const double psin_Z = R_t_ij * inv_J * psin_r_i;
+
+                    const double G1n = JdivR_ij * (FFn_psin_i + R_ij * R_ij * Pn_psin_i);
                     const double G2n =
-                        geometry_runtime.surface_field(geometry::surface_gttdivJR, i, j) * psin_rr_i +
-                        (geometry_runtime.surface_field(geometry::surface_gttdivJR_r, i, j) -
-                         geometry_runtime.surface_field(geometry::surface_grtdivJR_t, i, j)) *
-                            psin_r_i;
-                    const double G_ij = source_runtime.alpha1 * G1n + source_runtime.alpha2 * G2n;
+                        gttdivJR_ij * psin_rr_i + (gttdivJR_r_ij - grtdivJR_t_ij) * psin_r_i;
+                    const double G_ij = alpha1 * G1n + alpha2 * G2n;
                     surface_field(surface_G, i, j) = G_ij;
 
                     const double Gpsin_R = G_ij * psin_R;
                     surface_field(surface_Gpsin_R, i, j) = Gpsin_R;
                     surface_field(surface_Gpsin_Z, i, j) = G_ij * psin_Z;
-                    surface_field(surface_Gpsin_R_sin_tb, i, j) =
-                        Gpsin_R * geometry_runtime.surface_field(geometry::surface_sin_tb, i, j);
+                    surface_field(surface_Gpsin_R_sin_tb, i, j) = Gpsin_R * sin_tb_ij;
                 }
             }
         }
