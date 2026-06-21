@@ -377,6 +377,14 @@ the same 45-entry full preset as the pre-split pinned matrix
 the median `evaluate` ratios were 0.948, 0.929, 0.918, 0.925, and 0.945 for
 `Nt=8,16,24,32,64`, respectively.
 
+After split-trig, the default-stage table was remeasured once with `--stage all`
+(`taskset -c 2`, `repeat=15`, `warmup=5`, `inner=10000`). `evaluate` is now
+7675.9 ns/call; `geometry` is 4586.1 ns/call (59.7%), `source_materialize`
+888.3 (11.6%), `source_update` 813.1 (10.6%), `residual_update` 862.8 (11.2%),
+and `residual_pack` 132.7 (1.7%). `evaluate_ring` was 7708.7 ns/call. The
+existing `geometry_metric_no_store` probe still reflects the old fused probe
+shape and should be split before using it for post-split micro-stage accounting.
+
 Phase 2 first geometry micro-results:
 
 | Candidate | Paired result | Decision |

@@ -620,6 +620,24 @@ topology 的 `geometry` 和 `evaluate` 都改善：
 不是默认 `32x16x1` resonance，而是在已测 full matrix 内稳定改善；较大 `Nt`
 的 `geometry` ratio 仍改善，但端到端收益会被其它固定/投影成本稀释。
 
+split 后默认 topology 的最新 stage 表（单次 pinned `--stage all`，`repeat=15`、
+`warmup=5`、`inner=10000`，原始 JSON `/tmp/veqlib_stage_all_after_split.json`）：
+
+| stage | ns/call | `evaluate` share |
+| --- | ---: | ---: |
+| `profiles_all` | 124.5 | 1.6% |
+| `geometry` | 4586.1 | 59.7% |
+| `source_materialize` | 888.3 | 11.6% |
+| `source_update` | 813.1 | 10.6% |
+| `residual_update` | 862.8 | 11.2% |
+| `residual_pack` | 132.7 | 1.7% |
+| `evaluate` | 7675.9 | 100% |
+| `evaluate_ring` | 7708.7 | 100.4% |
+
+注意：`geometry_metric_no_store` 仍是旧 fused benchmark probe，split 后不再适合作为
+production Geometry 的直接拆分差值；后续若继续做 Geometry micro-stage，需要先把
+metric probe 改成 split 结构。
+
 ### Phase 4：压缩 Geometry descriptor，减少 Residual 重算
 
 目标：layout 改动改善了九个 field 的访问方式，但没有删除九个二维 field 的写入/读取。下一步应审计能否存储 residual 直接需要的派生量，而不是继续换排列。
