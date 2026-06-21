@@ -43,7 +43,9 @@ namespace residual::detail
         static constexpr size_t radial_nodes = GridType::radial_nodes;
         static constexpr size_t theta_rows   = GridType::theta_rows;
 
-        using SurfaceSlab  = Tensor<double, residual_surface_count, radial_nodes, theta_rows>;
+        // Store [rho][field][theta] to match the point-wise residual update
+        // producer. The logical accessor remains [field, rho, theta].
+        using SurfaceSlab  = Tensor<double, radial_nodes, residual_surface_count, theta_rows>;
         using RadialVector = Vector<double, radial_nodes>;
         using PackedVector = Vector<double, Shape::x_size>;
 
@@ -54,6 +56,16 @@ namespace residual::detail
         {
             surface_fields.clear();
             scratch.clear();
+        }
+
+        constexpr double& surface_field(size_t row, size_t radial_node, size_t theta_node) noexcept
+        {
+            return surface_fields(radial_node, row, theta_node);
+        }
+
+        constexpr double surface_field(size_t row, size_t radial_node, size_t theta_node) const noexcept
+        {
+            return surface_fields(radial_node, row, theta_node);
         }
 
         template <typename SourceRuntime, typename GeometryRuntime>
@@ -89,12 +101,12 @@ namespace residual::detail
                          geometry_runtime.surface_field(geometry::surface_grtdivJR_t, i, j)) *
                             psin_r_i;
                     const double G_ij = source_runtime.alpha1 * G1n + source_runtime.alpha2 * G2n;
-                    surface_fields(surface_G, i, j) = G_ij;
+                    surface_field(surface_G, i, j) = G_ij;
 
                     const double Gpsin_R = G_ij * psin_R;
-                    surface_fields(surface_Gpsin_R, i, j) = Gpsin_R;
-                    surface_fields(surface_Gpsin_Z, i, j) = G_ij * psin_Z;
-                    surface_fields(surface_Gpsin_R_sin_tb, i, j) =
+                    surface_field(surface_Gpsin_R, i, j) = Gpsin_R;
+                    surface_field(surface_Gpsin_Z, i, j) = G_ij * psin_Z;
+                    surface_field(surface_Gpsin_R_sin_tb, i, j) =
                         Gpsin_R * geometry_runtime.surface_field(geometry::surface_sin_tb, i, j);
                 }
             }
@@ -245,7 +257,7 @@ namespace residual::detail
             {
                 double total = 0.0;
                 for (size_t j = 0; j < theta_rows; ++j)
-                    total += surface_fields(surface_row, i, j);
+                    total += surface_field(surface_row, i, j);
                 scratch[i] = total;
             }
         }
@@ -257,7 +269,7 @@ namespace residual::detail
             {
                 double total = 0.0;
                 for (size_t j = 0; j < theta_rows; ++j)
-                    total += surface_fields(surface_row, i, j) * theta_weights[j];
+                    total += surface_field(surface_row, i, j) * theta_weights[j];
                 scratch[i] = total;
             }
         }

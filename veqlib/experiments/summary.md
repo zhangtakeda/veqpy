@@ -85,24 +85,28 @@ wall-clock timing used 5 rounds, `repeat=30`, `warmup=8`, `inner=10000`, and
 Decision: the layout change remains effective under a fresh paired run and
 should stay as the new optimization baseline.
 
-## Follow-up candidates tested and rejected
+## Follow-up candidates tested
 
 After the layout retest, several smaller candidates were tested against
-`a5c4d3c`. They were reverted because they did not produce a stable end-to-end
-`evaluate` improvement.
+`a5c4d3c`. Most were reverted because they did not produce a stable end-to-end
+`evaluate` improvement. The residual surface layout was later re-tested against
+`7cf44f4` and retained because it aligns the materialized residual producer with
+the now-standard physical `[rho][field][theta]` slab contract while keeping
+end-to-end timing neutral-to-slightly-positive.
 
 | candidate | key stage ratio | `evaluate` ratio | decision |
 | --- | ---: | ---: | --- |
 | Skip absent Fourier orders in `GeometryRuntime::update` | `geometry` 0.988 | 1.001 | reject; stage-only clue below decision threshold |
 | Hoist repeated residual geometry loads | `residual_update` 0.974 | 0.996 | reject; end-to-end effect too small |
 | Explicit glibc `sincos` path | `geometry` 2.386 | 1.835 | reject; severe regression |
-| Residual surface physical layout `[rho][field][theta]` | `residual_update` 0.927 | 0.991 | reject; noisy end-to-end gain and `residual_pack` regression |
+| Residual surface physical layout `[rho][field][theta]` | re-test: `residual_update` 0.931; `residual_pack` 1.004 | 0.994 | retain; semantic layout alignment, no significant end-to-end regression |
 | Source `psin_r` regularization/pass reduction | `source_update` 0.954 | 1.000 | reject; no end-to-end gain |
 | Geometry hot-loop pointer/index flattening | `geometry` 1.003 | 1.000 | reject; compiler already removes most accessor overhead |
 
-Next optimization work should not repeat these micro-candidates. Prefer either a
-larger geometry math-path experiment with a dedicated correctness comparator, or
-native-Linux PMU validation before spending more time on cache-mechanism claims.
+Next optimization work should not repeat the rejected micro-candidates. Residual
+surface layout is now an accepted physical-layout cleanup, but it does not remove
+the structural update/pack locality conflict; residual theta-moment fusion remains
+the larger candidate if residual work is prioritized.
 
 ## Planning update after 3851f62 review
 
@@ -190,6 +194,13 @@ not branch on magnitude-validity, finite checks, or fallback sentinel values.
 Solve success is interpreted only by the outer solver/validation layer from the
 computed residual norm. The generic free/beta source branches were removed from
 this PF/psin/uniform/Ip path.
+
+Residual surface layout re-test after the kernel-purity cleanup: physical storage
+now uses `[rho][field][theta]` with the logical accessor preserved as
+`surface_field(field, rho, theta)`. Paired timing against `7cf44f4` used 5 rounds,
+`repeat=25`, `warmup=8`, `inner=10000`, `taskset -c 2`. Median ratios were
+`residual_update=0.931`, `residual_pack=1.004`, and `evaluate=0.994`; the change
+is retained as a small producer-locality and semantic-alignment cleanup.
 
 Phase 1a RELAXED validation and timing (three same-window runs; per-run
 `taskset -c 2`, `repeat=25`, `warmup=8`, `inner=10000`; table uses the

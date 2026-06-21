@@ -3,7 +3,7 @@
 更新时间：2026-06-21  
 范围：`TODO-1.md`、`TODO-2.md` 指向的 VEQlib hot path / cache / tooling 初步实验。
 
-## 0. 最新状态：Phase 1a 已完成，PF/psin/uniform/Ip kernel 不再有 checked facade
+## 0. 最新状态：kernel 纯化已完成，Residual surface layout 已按语义对齐保留
 
 此前已把阶段性变更提交为 git commit：
 
@@ -13,6 +13,8 @@
 - `a4637fd Reprioritize VEQlib optimization by evidence`
 - `4715b04 Separate VEQlib FP contracts before math experiments`
 - `e161475 Make RELAXED the VEQlib performance baseline`
+- `845a3da Purify PF psin uniform Ip as a kernel contract`
+- `7cf44f4 Reduce geometry harmonic profile reloads`
 
 Phase 0 已把 FP 构建语义拆成 `STRICT` / `FMA` / `RELAXED`，并确认后续
 性能 A/B 应默认只在 `RELAXED` 下比较。根据最新修正，Phase 1a 进一步
@@ -81,6 +83,13 @@ Phase 2 首轮 micro A/B：
 | --- | --- | --- |
 | `JdivR = J*J/(J*R)` 复用 `inv_JR`，减少一个显式除法 | 5 组 paired median：`geometry` ratio≈0.992，`evaluate` ratio≈0.990；但 evaluate 有反向组（1.031、1.009） | 回滚；收益太小且不稳定 |
 | Geometry harmonic profile reads hoist 到 `i` 层 | 5 组 paired median：`geometry` ratio≈0.984，`evaluate` ratio≈0.993；5/5 evaluate 均快 | 保留；低风险小收益，为高 `M_max` topology 预期更有价值 |
+| Residual surface physical layout 改为 `[rho][field][theta]` | 5 组 paired median：`residual_update` ratio≈0.931，`residual_pack` ratio≈1.004，`evaluate` ratio≈0.994 | 保留；端到端收益小但未见显著回归，且 producer 语义与 geometry layout 对齐 |
+
+Residual layout 本轮的逐项中位数：baseline `residual_update≈912.2 ns`、candidate
+`≈846.1 ns`；baseline `evaluate≈8288.7 ns`、candidate `≈8230.4 ns`。
+这不是替代 Residual fusion 的结构性结论，只是把 materialized residual slab 的物理
+布局改到更符合当前 producer 的 `[rho][field][theta]`。后续若做 theta-moment
+fusion，这个 slab 本身仍可能被删除。
 
 随后用独立 baseline worktree 重新测试 `a5c4d3c` 的 geometry surface layout 改动。复测仍然支持保留该改动：
 
@@ -99,7 +108,7 @@ Phase 2 首轮 micro A/B：
 | 跳过 absent Fourier orders | `geometry` ratio 0.988 | 1.001 | 回滚；stage 线索太小且端到端无收益 |
 | residual load hoist | `residual_update` ratio 0.974 | 0.996 | 回滚；端到端收益不足 |
 | glibc `sincos` 显式调用 | `geometry` ratio 2.386 | 1.835 | 回滚；明显退化 |
-| residual physical layout 改为 `[rho][field][theta]` | `residual_update` ratio 0.927 | 0.991 | 回滚；端到端收益噪声级，且 `residual_pack` 退化 |
+| residual physical layout 改为 `[rho][field][theta]` | 旧 A/B：`residual_update` ratio 0.927；本轮：0.931 | 本轮 0.994 | 保留；语义对齐且未见显著端到端回归 |
 | source `psin_r` regularize / pass 合并 | `source_update` ratio 0.954 | 1.000 | 回滚；source stage 有线索但端到端无收益 |
 | geometry hot-loop 访问器打平 | `geometry` ratio 1.003 | 1.000 | 回滚；编译器已基本消除访问器开销 |
 
@@ -463,7 +472,7 @@ dmetric = gttdivJR_r - grtdivJR_t
 
 目标：删除四个 residual 二维中间场，而不是再尝试单一 residual layout。
 
-已知证据：residual physical layout 改成 `[rho][field][theta]` 时，`residual_update` 快约 7.3%，但 `residual_pack` 退化，`evaluate` 只有噪声级收益。这说明 update 和 pack 需要相反 locality：
+已知证据：residual physical layout 已改成 `[rho][field][theta]` 并保留；paired A/B 显示 `residual_update` 快约 6.9%，`residual_pack` 小幅退化，`evaluate` 只有噪声级收益。这说明 update 和 pack 仍需要相反 locality：
 
 ```text
 update：同一点生成多个 field

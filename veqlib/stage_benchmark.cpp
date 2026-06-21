@@ -256,7 +256,7 @@ namespace
     {
         return op.profiles.profile_field(BenchShape::psin_profile_id, 0, 0) +
                op.geometry.surface_field(surface_R, 0, 0) + op.source_runtime.alpha1 +
-               op.residual.surface_fields(surface_G, 0, 0) + packed[0];
+               op.residual.surface_field(surface_G, 0, 0) + packed[0];
     }
 
     void run_stage_once(StageKind                                   stage,

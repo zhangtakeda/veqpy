@@ -96,15 +96,15 @@ namespace
         return out;
     }
 
-    template <typename SlabType>
-    nlohmann::json json_slab_row(const SlabType& values, size_t row)
+    template <typename ResidualType>
+    nlohmann::json json_residual_surface_row(const ResidualType& residual, size_t row)
     {
         nlohmann::json out = nlohmann::json::array();
-        for (size_t i = 0; i < SlabType::shape[1]; ++i)
+        for (size_t i = 0; i < ResidualType::radial_nodes; ++i)
         {
             nlohmann::json radial = nlohmann::json::array();
-            for (size_t j = 0; j < SlabType::shape[2]; ++j)
-                radial.push_back(values(row, i, j));
+            for (size_t j = 0; j < ResidualType::theta_rows; ++j)
+                radial.push_back(residual.surface_field(row, i, j));
             out.push_back(radial);
         }
         return out;
@@ -151,11 +151,11 @@ namespace
              }},
             {"residual_surface",
              {
-                 {"G", json_slab_row(op.residual.surface_fields, residual::surface_G)},
-                 {"Gpsin_R", json_slab_row(op.residual.surface_fields, residual::surface_Gpsin_R)},
-                 {"Gpsin_Z", json_slab_row(op.residual.surface_fields, residual::surface_Gpsin_Z)},
+                 {"G", json_residual_surface_row(op.residual, residual::surface_G)},
+                 {"Gpsin_R", json_residual_surface_row(op.residual, residual::surface_Gpsin_R)},
+                 {"Gpsin_Z", json_residual_surface_row(op.residual, residual::surface_Gpsin_Z)},
                  {"Gpsin_R_sin_tb",
-                  json_slab_row(op.residual.surface_fields, residual::surface_Gpsin_R_sin_tb)},
+                  json_residual_surface_row(op.residual, residual::surface_Gpsin_R_sin_tb)},
              }},
         };
     }

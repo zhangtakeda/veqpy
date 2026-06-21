@@ -94,6 +94,15 @@ Later stages should consume `RuntimeProfiles<Shape, GridType>&` and the
 compile-time metadata on `Shape`. They should not recompute profile order,
 family lengths, or packed coefficient layout from runtime state.
 
+## Hot-path Surface Layout
+
+Materialized geometry and residual surface slabs use physical
+`[rho][field][theta]` storage while preserving logical accessors of the form
+`surface_field(field, rho, theta)`. This keeps the theta sweep contiguous and
+matches the producer pattern that writes multiple fields at each radial/theta
+point. Kernel code should go through the logical accessor unless it is making a
+measured layout-local optimization.
+
 ## Grid and Calculus
 
 The public grid families currently exposed from `grid.h` are:
