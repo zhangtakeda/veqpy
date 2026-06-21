@@ -368,6 +368,15 @@ against the pre-split baseline measured `geometry=0.897`, `evaluate=0.908`, and
 justify changing default flags: final `libmvec/normal` was `geometry=1.021`,
 `evaluate=0.988`, and `evaluate_ring=0.975`.
 
+The post-adoption full topology matrix also supports keeping split-trig. Using
+the same 45-entry full preset as the pre-split pinned matrix
+(`Nr={16,32,64}`, `Nt={8,16,24,32,64}`, `Mmax={1,4,8}`, `taskset -c 2`,
+`repeat=6`, `warmup=3`, `inner=4000`), every measured topology improved:
+`geometry` median ratio was 0.906 (range 0.766--0.944, 45/45 improved) and
+`evaluate` median ratio was 0.929 (range 0.874--0.978, 45/45 improved). By `Nt`,
+the median `evaluate` ratios were 0.948, 0.929, 0.918, 0.925, and 0.945 for
+`Nt=8,16,24,32,64`, respectively.
+
 Phase 2 first geometry micro-results:
 
 | Candidate | Paired result | Decision |

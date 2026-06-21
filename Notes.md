@@ -604,6 +604,22 @@ split 本身也有效（geometry ratio≈0.902），但 final `libmvec/normal` �
 因此不把 `-fveclib=libmvec` 纳入默认构建。后续 vector trig 若继续推进，应在
 已有 split 结构上检查 assembly/PMU，而不是回到 fused loop 加 pragma。
 
+采用后又按 full topology matrix 复测（45 点：`Nr={16,32,64}`、
+`Nt={8,16,24,32,64}`、`Mmax={1,4,8}`；`taskset -c 2`、`repeat=6`、
+`warmup=3`、`inner=4000`；pre-split JSON 为 `/tmp/veqlib_full_matrix_*_pinned.json`，
+post-split JSON 为 `/tmp/veqlib_full_matrix_*_split.json`）。结果显示 45/45
+topology 的 `geometry` 和 `evaluate` 都改善：
+
+| stage | median ratio | min ratio | max ratio | improved |
+| --- | ---: | ---: | ---: | ---: |
+| `geometry` | 0.906 | 0.766 | 0.944 | 45/45 |
+| `evaluate` | 0.929 | 0.874 | 0.978 | 45/45 |
+
+按 `Nt` 聚合的 `evaluate` median ratio 分别约为：`Nt=8` 0.948、
+`Nt=16` 0.929、`Nt=24` 0.918、`Nt=32` 0.925、`Nt=64` 0.945。说明 split-trig
+不是默认 `32x16x1` resonance，而是在已测 full matrix 内稳定改善；较大 `Nt`
+的 `geometry` ratio 仍改善，但端到端收益会被其它固定/投影成本稀释。
+
 ### Phase 4：压缩 Geometry descriptor，减少 Residual 重算
 
 目标：layout 改动改善了九个 field 的访问方式，但没有删除九个二维 field 的写入/读取。下一步应审计能否存储 residual 直接需要的派生量，而不是继续换排列。
