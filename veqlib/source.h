@@ -26,9 +26,15 @@ namespace source::detail
     inline constexpr size_t profile_radial  = 1;
     inline constexpr size_t profile_radial2 = 2;
 
-    constexpr double unset_constraint() noexcept { return std::numeric_limits<double>::quiet_NaN(); }
+    inline constexpr double unset_constraint_threshold = 1.0e20;
+    inline constexpr double unset_constraint_value     = 1.0e300;
 
-    constexpr bool constraint_is_set(double value) noexcept { return value == value; }
+    constexpr double unset_constraint() noexcept { return unset_constraint_value; }
+
+    constexpr bool constraint_is_set(double value) noexcept
+    {
+        return math::abs(value) <= unset_constraint_threshold;
+    }
 
     constexpr size_t clipped_stencil_size(size_t sample_count) noexcept
     {
@@ -516,9 +522,12 @@ namespace source
     using detail::ProfileOwnedPsinSourceRuntime;
     using detail::UniformSourceShape;
     using detail::axis_fix_count;
+    using detail::constraint_is_set;
     using detail::root_field_count;
     using detail::root_psin;
     using detail::root_psin_r;
     using detail::root_psin_rr;
+    using detail::unset_constraint_threshold;
+    using detail::unset_constraint_value;
     using detail::unset_constraint;
 } // namespace source

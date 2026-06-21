@@ -414,6 +414,9 @@ veqlib_configure_executable(veqlib_temp_validation)
 add_executable(veqlib_pf_psin_uniform_validation pf_psin_uniform_validation.cpp ${VEQLIB_COMMON_SOURCES})
 veqlib_configure_executable(veqlib_pf_psin_uniform_validation)
 
+add_executable(veqlib_pf_psin_uniform_benchmark pf_psin_uniform_benchmark.cpp ${VEQLIB_COMMON_SOURCES})
+veqlib_configure_executable(veqlib_pf_psin_uniform_benchmark)
+
 enable_testing()
 add_test(NAME veqlib_probe COMMAND veqlib_probe)
 add_test(NAME veqlib_temp_validation COMMAND veqlib_temp_validation)

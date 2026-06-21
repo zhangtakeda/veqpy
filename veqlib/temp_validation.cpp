@@ -78,6 +78,10 @@ namespace
         Topology::K_max,
         Legendre,
         Spectral>;
+
+    static_assert(!source::constraint_is_set(source::unset_constraint()));
+    static_assert(source::unset_constraint() > source::unset_constraint_threshold);
+    static_assert(source::constraint_is_set(0.0));
     using ProbeProfilesFromCounts = profiles::Profiles<
         Topology::L_max,
         Topology::K_max,
