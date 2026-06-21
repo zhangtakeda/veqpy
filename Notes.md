@@ -881,6 +881,10 @@ PF comparator 通过，但默认 paired timing 第 1--3 组已经严重回归：
 紧凑行布局已经是更好的局部性折中；不要再增加 row padding，除非原生 PMU/assembly
 明确证明新的 set 冲突。
 
+最后清理了 source sign-dot 采用后留下的死 helper：删除未再调用的
+`weighted_profile_sign()`，避免后续误把 sign 判定重新拆成独立 hot pass。该清理不改变
+性能路径，release/debug CTest 与 PF comparator 通过。
+
 目标：在 geometry/residual 结构性收益之后，再处理固定成本。
 
 建议动作：

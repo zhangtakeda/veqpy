@@ -370,12 +370,6 @@ namespace source::detail
             return total;
         }
 
-        constexpr double weighted_profile_sign(const RadialVector& values) const noexcept
-        {
-            return dot(values, GridType::weights) < 0.0 ? -1.0 : 1.0;
-        }
-
-
         template <typename GeometryRuntime>
         constexpr double g1n_psin_integral_from_radial_moments(const GeometryRuntime& geometry) const noexcept
         {

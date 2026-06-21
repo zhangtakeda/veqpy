@@ -591,3 +591,8 @@ paired default rounds already showed a severe regression: `geometry` ratios
 `evaluate_ring`≈1.56--1.59. The long run was interrupted and the patch reverted.
 This confirms that, after the accepted `[rho][field][theta]` layout, extra row
 padding destroys useful compact row locality instead of improving cache behavior.
+
+After retaining source sign-normalization dot fusion, the now-unused
+`weighted_profile_sign()` helper was removed so future changes do not accidentally
+reintroduce the independent sign scan. This cleanup does not alter the hot path;
+release/debug CTest and the RELAXED PF comparator passed.
