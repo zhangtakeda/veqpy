@@ -507,6 +507,22 @@ store 本身不再是最大桶。
 
 已删除方向：显式 glibc `::sincos`。它已严重退化，且 baseline 已有 compiler-lowered `sincos@plt` 证据。
 
+Phase 3 首轮 vector-math 探针：
+
+- `libmvec` 可用，且一个独立 canonical `for` loop 在
+  `-ffast-math -fveclib=libmvec` 下能生成 `_ZGVdN4v_sin` / `_ZGVdN4v_cos`。
+- 但把 `veqlib_stage_benchmark` 用 `-fveclib=libmvec` 重建后，Geometry 仍只出现
+  scalar `sin@plt` / `cos@plt` / `sincos@plt`，没有 `_ZGV*` vector libm 符号。
+- 5 组 paired timing（`repeat=10`、`warmup=4`、`inner=5000`）显示
+  `geometry_phase_sincos` median ratio≈1.018，`evaluate` ratio≈1.003；无收益。
+- 对生产 `geometry.h` theta loop 加 `#pragma clang loop vectorize(enable)` 后，LTO
+  仍提示 loop not vectorized，objdump 仍无 `_ZGV*`，该探针已回滚。
+
+结论：简单打开 `-fveclib=libmvec` 或强制 pragma 不能优化当前 fused Geometry
+loop。若继续做 vector trig，需要结构性拆分：先 materialize `tb[j]` 到临时数组，
+再用 canonical trig loop 调 vector libm，最后 metric loop 消费；这必须单独 A/B，
+因为额外数组 traffic 可能抵消 vector trig 收益。
+
 ### Phase 4：压缩 Geometry descriptor，减少 Residual 重算
 
 目标：layout 改动改善了九个 field 的访问方式，但没有删除九个二维 field 的写入/读取。下一步应审计能否存储 residual 直接需要的派生量，而不是继续换排列。

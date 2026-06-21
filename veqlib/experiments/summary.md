@@ -275,6 +275,20 @@ component in this default topology, roughly 64% of the measured production
 `geometry` stage. This supports prioritizing vector/approximate dynamic trig
 backends over more surface-layout tweaks.
 
+The first vector-math backend probe rejected the no-restructure path. The system
+has glibc `libmvec`, and a standalone canonical loop compiled with
+`-ffast-math -fveclib=libmvec` emits `_ZGVdN4v_sin` and `_ZGVdN4v_cos`, so the
+backend itself is available. Rebuilding `veqlib_stage_benchmark` with
+`-fveclib=libmvec` still left Geometry with scalar `sin@plt`, `cos@plt`, and
+`sincos@plt` call sites and no `_ZGV*` symbols. Five paired runs
+(`repeat=10`, `warmup=4`, `inner=5000`) measured median ratios of
+`geometry_phase_sincos=1.018` and `evaluate=1.003`, so the flag-only candidate
+is rejected. Adding a temporary `#pragma clang loop vectorize(enable)` to the
+production theta loop also failed to produce vector calls under LTO and was
+reverted. Any future vector trig attempt must reshape Geometry into a canonical
+materialize-`tb` / vector-trig / metric-consume pipeline and pay for that extra
+traffic explicitly.
+
 Phase 2 first geometry micro-results:
 
 | Candidate | Paired result | Decision |
