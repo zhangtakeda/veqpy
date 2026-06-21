@@ -811,6 +811,17 @@ median≈1.007，`64x8x4` median≈1.002。结论：回滚；这种单点算术�
 作为保留优化，后续 residual 应继续转向结构性 moment/fusion，而不是继续追逐
 乘法重排。
 
+又测试了 residual `surface_G` row-sum cache：`update_compact()` 在生成
+`G_ij` 时顺便累计每个 radial row 的 `G` 和，`pack` 中的 `block_psin/F`
+复用该缓存，避免重新 `rowwise_sum(surface_G)`。该候选通过 release CTest 与
+PF comparator（`max_abs≈7.66e-10`），但默认 9 组 paired timing 显示只是
+阶段转移：`residual_pack` 明显变快（median ratio≈0.836），`residual_update`
+变慢（≈1.014），`evaluate` 只有噪声级小幅改善（≈0.992），`evaluate_ring`
+中性偏负（≈1.001）。45 topology `evaluate` matrix 为 31/45 改善、median
+ratio≈0.992、range≈0.859--1.054。结论：回滚；当前只有一个 active `G`
+consumer 时，这相当于把一次 vector-friendly rowwise sum 搬进 pointwise update
+依赖链，并没有稳定删除端到端工作。
+
 目标：在 geometry/residual 结构性收益之后，再处理固定成本。
 
 建议动作：

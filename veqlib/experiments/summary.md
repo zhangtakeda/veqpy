@@ -496,3 +496,17 @@ measured `32x8x4` at≈1.007 and `64x8x4` at≈1.002. The candidate was reverted
 single-expression residual arithmetic folds are not robust enough to keep unless
 they produce clear endpoint gains across topology or stronger assembly/PMU
 evidence.
+
+
+A residual `surface_G` row-sum cache candidate was rejected. The patch accumulated
+one radial `G` sum during `update_compact()` and let the `block_psin/F` pack path
+reuse that value instead of rescanning `surface_G`. Correctness passed release
+CTest and the PF Python/C++ comparator (`max_abs≈7.66e-10`). Default paired
+timing showed the expected stage trade: `residual_pack` became much faster
+(median ratio≈0.836) while `residual_update` slowed (≈1.014); endpoint movement
+was weak (`evaluate`≈0.992) and state-ring was neutral to slightly worse
+(`evaluate_ring`≈1.001). The full 45-topology evaluate matrix was mixed: 31/45
+improved, median ratio≈0.992, range≈0.859--1.054. The candidate was reverted
+because, with only one active `G` consumer in the current PF/psin/uniform/Ip
+shape, it mostly moves a vector-friendly rowwise sum into the pointwise update
+dependency chain instead of removing robust endpoint work.
