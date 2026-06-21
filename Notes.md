@@ -3,6 +3,36 @@
 更新时间：2026-06-21  
 范围：`TODO-1.md`、`TODO-2.md` 指向的 VEQlib hot path / cache / tooling 初步实验。
 
+## 0. 最新状态：layout 保留，后续小改动未达保留门槛
+
+已把两个阶段性变更提交为 git commit：
+
+- `7566f97 Establish measurable VEQlib optimization baseline`
+- `a5c4d3c Reduce geometry cache interference before chasing trig`
+
+随后用独立 baseline worktree 重新测试 `a5c4d3c` 的 geometry surface layout 改动。复测仍然支持保留该改动：
+
+| metric | baseline | current layout | current / baseline |
+| --- | ---: | ---: | ---: |
+| `geometry` median-of-medians ns/call | 9297.0 | 5378.6 | 0.579 |
+| `evaluate` median-of-medians ns/call | 12879.2 | 8883.5 | 0.687 |
+| `geometry / evaluate` share | 0.723 | 0.608 | - |
+
+口径：`taskset -c 2` 可用时固定 CPU；5 组 paired run；每组 `repeat=30`、`warmup=8`、`inner=10000`；比较同一时间窗口内的相对变化。
+
+在 layout 之后又测试了多条“小改动”候选，但没有新的代码改动达到端到端保留门槛：
+
+| candidate | target stage result | `evaluate` result | decision |
+| --- | ---: | ---: | --- |
+| 跳过 absent Fourier orders | `geometry` ratio 0.988 | 1.001 | 回滚；stage 线索太小且端到端无收益 |
+| residual load hoist | `residual_update` ratio 0.974 | 0.996 | 回滚；端到端收益不足 |
+| glibc `sincos` 显式调用 | `geometry` ratio 2.386 | 1.835 | 回滚；明显退化 |
+| residual physical layout 改为 `[rho][field][theta]` | `residual_update` ratio 0.927 | 0.991 | 回滚；端到端收益噪声级，且 `residual_pack` 退化 |
+| source `psin_r` regularize / pass 合并 | `source_update` ratio 0.954 | 1.000 | 回滚；source stage 有线索但端到端无收益 |
+| geometry hot-loop 访问器打平 | `geometry` ratio 1.003 | 1.000 | 回滚；编译器已基本消除访问器开销 |
+
+当前结论：下一轮不要再优先做“访问器打平、单个 pass hoist、显式 `sincos`”这类微调；应转向更结构性的 geometry 数学路径实验，或在原生 Linux/PMU 可用环境中先验证 cache 和 libm 事件。
+
 ## 1. 本轮目标
 
 本轮工作的目标不是直接大改 kernel，而是先补齐 TODO 中缺失的证据链：
@@ -207,17 +237,23 @@ git diff --check
 
 ## 6. 当前工作树留痕
 
-本轮未提交 git。当前预期变更：
+已提交的代码/工具改动：
 
 ```text
- M veqlib/CMakeLists.txt
- M veqlib/README.md
-?? Notes.md
-?? veqlib/experiments/
-?? veqlib/stage_benchmark.cpp
+7566f97 Establish measurable VEQlib optimization baseline
+a5c4d3c Reduce geometry cache interference before chasing trig
 ```
 
-`veqlib/experiments/` 是本轮实验数据目录；如果后续不希望把原始 logs/JSON 全部纳入版本库，可只保留：
+本次复测之后没有保留新的 kernel 代码改动；无效候选均已回滚，只更新 Notes 和实验 summary。当前未版本化的原始实验目录包括 paired A/B JSON、Cachegrind、tooling 输出等，位于：
+
+```text
+veqlib/experiments/*_retest_20260621/
+veqlib/experiments/cachegrind/
+veqlib/experiments/perf/
+veqlib/experiments/tooling/
+```
+
+`veqlib/experiments/` 是实验数据目录；如果后续不希望把原始 logs/JSON 全部纳入版本库，可只保留：
 
 - `veqlib/experiments/summary.md`
 - 少量关键 JSON
@@ -243,11 +279,18 @@ git diff --check
 
 停止条件：baseline 可一键复现，且后续实验输出路径不会污染项目根目录。
 
-### Phase B：优先做 geometry A/B
+### Phase B：geometry 结构性 A/B
 
-目标：验证 `geometry` 的 9.3 us median 是否主要来自三角函数和 9-plane surface 更新。
+目标：在 layout 改动后的新 baseline 上继续降低 `geometry`，但避免重复已经失败的微调。
 
-已完成一项布局 A/B：`[field][rho][theta] -> [rho][field][theta]`，端到端 `evaluate` ratio 约 0.669。后续仍建议按以下顺序继续做小步 A/B：
+已完成一项布局 A/B：`[field][rho][theta] -> [rho][field][theta]`，端到端 `evaluate` ratio 复测约 0.687。layout 后的 `geometry` 仍占 `evaluate` 约 60% 左右，因此仍是第一优化对象；但已确认以下方向不要再作为短期主线：
+
+- 单纯打平 `surface_field` / `profile_field` 访问器。
+- 显式调用 glibc `sincos`。
+- 只跳过 absent Fourier order。
+- 不改变端到端 `evaluate` 的单 pass hoist。
+
+后续建议按以下顺序做更结构性的 A/B：
 
 1. **三角函数证据增强**
    - 在 analysis/objdump 中定位 `sincos@plt` 所在调用块。

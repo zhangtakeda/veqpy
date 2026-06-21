@@ -68,3 +68,38 @@ Interpretation: the layout hypothesis is strongly supported in this workstation
 run. Because PMU counters are unavailable under WSL2, treat the exact cache-set
 mechanism as still requiring hardware-counter confirmation, but keep the layout
 change unless a native-PMU run contradicts the wall-clock A/B.
+
+## Layout retest after commit
+
+The committed layout change (`a5c4d3c`) was retested against the pre-layout
+baseline commit (`7566f97`) from an independent worktree. Paired local
+wall-clock timing used 5 rounds, `repeat=30`, `warmup=8`, `inner=10000`, and
+`taskset -c 2` when available.
+
+| metric | pre-layout baseline | committed layout | layout / baseline |
+| --- | ---: | ---: | ---: |
+| `geometry` median-of-medians ns/call | 9297.0 | 5378.6 | 0.579 |
+| `evaluate` median-of-medians ns/call | 12879.2 | 8883.5 | 0.687 |
+| `geometry / evaluate` share | 0.723 | 0.608 | - |
+
+Decision: the layout change remains effective under a fresh paired run and
+should stay as the new optimization baseline.
+
+## Follow-up candidates tested and rejected
+
+After the layout retest, several smaller candidates were tested against
+`a5c4d3c`. They were reverted because they did not produce a stable end-to-end
+`evaluate` improvement.
+
+| candidate | key stage ratio | `evaluate` ratio | decision |
+| --- | ---: | ---: | --- |
+| Skip absent Fourier orders in `GeometryRuntime::update` | `geometry` 0.988 | 1.001 | reject; stage-only clue below decision threshold |
+| Hoist repeated residual geometry loads | `residual_update` 0.974 | 0.996 | reject; end-to-end effect too small |
+| Explicit glibc `sincos` path | `geometry` 2.386 | 1.835 | reject; severe regression |
+| Residual surface physical layout `[rho][field][theta]` | `residual_update` 0.927 | 0.991 | reject; noisy end-to-end gain and `residual_pack` regression |
+| Source `psin_r` regularization/pass reduction | `source_update` 0.954 | 1.000 | reject; no end-to-end gain |
+| Geometry hot-loop pointer/index flattening | `geometry` 1.003 | 1.000 | reject; compiler already removes most accessor overhead |
+
+Next optimization work should not repeat these micro-candidates. Prefer either a
+larger geometry math-path experiment with a dedicated correctness comparator, or
+native-Linux PMU validation before spending more time on cache-mechanism claims.
