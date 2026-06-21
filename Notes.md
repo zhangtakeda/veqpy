@@ -508,6 +508,14 @@ root `psin`；它同样通过 validation 且 sink 一致，但长跑中 `evaluat
 `evaluate_ring≈1.004`，没有达到保留门槛。后续 source cleanup 应优先看真正改变
 算法结构的固定刷新策略或插值/regularization 形状，而不是单个同义 vector。
 
+Profile staticization 的一个更小候选也已拒绝：对默认 topology 中 absent 的 `v`
+profile 和 `c0` family 引入 `if constexpr` helper，避免 generic accessor 读取
+zero slab。该 patch 通过 release build、PF validation 和 release CTest，sink
+完全一致；但 9 组 paired timing（`taskset -c 2`、`repeat=24`、`warmup=8`、
+`inner=10000`、`ring-size=16`）显示 `geometry` median ratio≈1.005，
+`evaluate≈0.995` 且波动很大，`evaluate_ring≈1.003`。结论：单个 absent
+core-profile helper 会增加代码形状/模板分支复杂度，却没有稳定端到端收益；已回滚。
+
 停止条件：确认 `[rho][field][theta]` 在默认 topology 是默认选择；对其它 topology 只声明“已测范围内”的结论，必要时保留 `GeometryLayoutPolicy<GridType>` 设计空间。
 
 ### Phase 2：拆分 Geometry micro-stage

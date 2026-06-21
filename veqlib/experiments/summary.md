@@ -279,6 +279,15 @@ the root `psin` row directly; the long rerun was `evaluate` 0.997 and
 aim at fixed-refresh policy or larger interpolation/regularization structure
 rather than single alias buffers.
 
+A smaller profile staticization probe was also rejected. It used `if constexpr`
+helpers to skip generic accessor reads for absent default-topology `v` and `c0`
+profile slots. Release build, PF validation, and release CTest passed, with zero
+stage sink differences. Nine paired runs (`repeat=24`, `warmup=8`,
+`inner=10000`, `ring-size=16`, `taskset -c 2`) measured `geometry` median
+ratio≈1.005, `evaluate`≈0.995 with high noise, and `evaluate_ring`≈1.003. The
+patch was reverted because it adds code-shape complexity without stable
+end-to-end gain.
+
 Geometry residual-ready descriptor compression was tested after `c56a5b6`: the
 prototype replaced the 9 raw geometry surface fields with 7 residual-ready fields
 (`qR`, `qZ`, `R2`, `JdivR`, `gttdivJR`, `dmetric`, `sin_tb`). Correctness passed
