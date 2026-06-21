@@ -227,7 +227,8 @@ CMake-generated `config::DefaultTopology` instead of a source-level hard-coded
 the previous default benchmark shape (`Nr=32`, `Nt=16`, `Mmax=1`, `x_size=18`).
 `stage_topology_matrix.py` can configure isolated build directories and collect
 JSON reports for requested `Nr x Nt x Mmax` entries. Smoke coverage ran
-`32x16x1` and `32x32x1`; the full large matrix remains a long-running experiment.
+`32x16x1`, `32x32x1`, and `32x16x4`; the full large matrix remains a
+long-running experiment.
 
 Geometry residual-ready descriptor compression was tested after `c56a5b6`: the
 prototype replaced the 9 raw geometry surface fields with 7 residual-ready fields

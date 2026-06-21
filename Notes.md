@@ -437,7 +437,8 @@ callback traffic，不声称是真实 nonlinear solver trajectory。一次 relea
 `clang-debug` / `clang-release` presets 显式固定当前默认 benchmark topology
 `Nr=32, Nt=16, Mmax=1, x_size=18`。新增 `veqlib/stage_topology_matrix.py`，
 可为多个 `Nr x Nt x Mmax` 生成独立 build dir 并汇总 JSON。smoke 已跑
-`32x16x1` 与 `32x32x1`，输出 topology metadata 正确。
+`32x16x1`、`32x32x1` 与 `32x16x4`，输出 topology metadata 正确，且
+`Mmax=4` 不再被默认 benchmark static_assert 阻塞。
 
 未完成：尚未跑完整大矩阵（`Nr=16/32/64`, `Nt=8/16/24/32/64`, `Mmax=1/4/8`），
 因为每个 topology 都要重新模板实例化/链接；后续应作为长耗时实验单独执行。

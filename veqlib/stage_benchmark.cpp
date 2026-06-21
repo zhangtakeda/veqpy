@@ -137,10 +137,9 @@ namespace
     using BenchOperator = BenchTopology::Operator;
     using PackedVector  = BenchOperator::PackedVector;
 
-    static_assert(BenchShape::x_size == 18);
-    static_assert(BenchShape::L_max == 5);
-    static_assert(BenchShape::M_max == 1);
-    static_assert(BenchShape::K_max == 2);
+    static_assert(BenchShape::L_max == DefaultTopology::L_max);
+    static_assert(BenchShape::M_max == DefaultTopology::M_max);
+    static_assert(BenchShape::K_max == DefaultTopology::K_max);
 
     constexpr std::array<double, BenchSource::sample_count> benchmark_scaled_heat = {
         -0.789683058574694,    -0.7925936329632908, -0.7953979059157582, -0.7981175242684836, -0.8007734699426484,
