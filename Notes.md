@@ -829,6 +829,13 @@ consumer 时，这相当于把一次 vector-friendly rowwise sum 搬进 pointwis
 `evaluate`≈1.008，`evaluate_ring`≈1.002。结论：回滚；当前默认 `fix_rho`
 只影响很少 radial node，融合带来的少量写入节省抵不过分支/代码形状扰动。
 
+又测试了 residual pack 静态权重表：把 `unit_weights()`、`rho_power<P>()`、
+`theta_sin/cos<Order>()` 从运行期返回临时 `Vector` 改成 class-scope `inline static
+constexpr` 表并返回引用。该候选通过 release CTest 与 PF comparator，但 9 组
+default paired timing 明显失败：`residual_pack` median ratio≈1.390，`evaluate`≈1.009，
+`evaluate_ring`≈1.018。结论：回滚；当前编译器更擅长内联/标量化小临时表，强制静态
+对象反而引入全局地址读取或阻碍优化。
+
 目标：在 geometry/residual 结构性收益之后，再处理固定成本。
 
 建议动作：

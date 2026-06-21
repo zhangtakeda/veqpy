@@ -520,3 +520,13 @@ timing did not support retention: `source_materialize` median ratio≈0.992,
 `source_update`≈0.999, `evaluate`≈1.008, and `evaluate_ring`≈1.002. The patch was
 reverted because the default `fix_rho` touches very few radial nodes, so the
 minor write saving is outweighed by branch/code-shape noise.
+
+
+A residual-pack static weight table candidate was rejected. It replaced the
+runtime-returned `unit_weights()`, `rho_power<P>()`, and `theta_sin/cos<Order>()`
+temporaries with class-scope `inline static constexpr` tables returned by
+reference. Correctness passed release CTest and the PF comparator, but default
+paired timing was clearly worse: `residual_pack` median ratio≈1.390,
+`evaluate`≈1.009, and `evaluate_ring`≈1.018. The patch was reverted because the
+compiler appears to scalarize or inline the tiny temporary tables better than it
+handles forced static-object loads in this hot pack path.
