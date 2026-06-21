@@ -228,6 +228,21 @@ through a deterministic synthetic solver-state ring controlled by `--ring-size`;
 use it to compare warm repeated callbacks against state-varying callback traffic,
 not as a real nonlinear-solver trajectory.
 
+For topology sweeps, use `stage_topology_matrix.py`. It creates isolated CMake
+build directories under `build/topology-matrix/`, configures `DefaultTopology`
+for each requested `Nr x Nt x Mmax`, runs `veqlib_stage_benchmark`, and emits a
+single JSON matrix report:
+
+```bash
+./stage_topology_matrix.py \
+  --topology 32x16x1 \
+  --topology 32x32x1 \
+  --stage evaluate \
+  --repeat 10 \
+  --warmup 4 \
+  --inner 5000
+```
+
 ## Dependency Versions
 
 The versions below are the currently validated local toolchain versions.

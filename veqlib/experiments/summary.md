@@ -221,6 +221,14 @@ for the ring stage. Release smoke timing with `repeat=10`, `warmup=4`,
 `evaluate_ring=8191.4 ns/call` (`ring/evaluate=1.009`). Treat this as an input
 state-variation harness, not a real solver trajectory.
 
+Topology-matrix infrastructure was added by making `veqlib_stage_benchmark` read
+CMake-generated `config::DefaultTopology` instead of a source-level hard-coded
+`32x16` topology. The standard debug/release presets now explicitly configure
+the previous default benchmark shape (`Nr=32`, `Nt=16`, `Mmax=1`, `x_size=18`).
+`stage_topology_matrix.py` can configure isolated build directories and collect
+JSON reports for requested `Nr x Nt x Mmax` entries. Smoke coverage ran
+`32x16x1` and `32x32x1`; the full large matrix remains a long-running experiment.
+
 Geometry residual-ready descriptor compression was tested after `c56a5b6`: the
 prototype replaced the 9 raw geometry surface fields with 7 residual-ready fields
 (`qR`, `qZ`, `R2`, `JdivR`, `gttdivJR`, `dmetric`, `sin_tb`). Correctness passed

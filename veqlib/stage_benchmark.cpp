@@ -15,6 +15,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "config.h"
 #include "geometry.h"
 #include "grid.h"
 #include "pf_psin_uniform_operator.h"
@@ -24,6 +25,7 @@
 
 namespace
 {
+    using config::DefaultTopology;
     using geometry::surface_R;
     using grid::Grid;
     using grid::Legendre;
@@ -113,11 +115,22 @@ namespace
         using Operator = PfPsinUniformOperator<Shape, Grid, Source>;
     };
 
-    constexpr auto bench_c_counts = std::array<size_t, 1>{0};
-    constexpr auto bench_s_counts = std::array<size_t, 1>{3};
+    constexpr auto bench_c_counts = DefaultTopology::c_family_counts;
+    constexpr auto bench_s_counts = DefaultTopology::s_family_counts;
 
     using BenchTopology =
-        PfPsinUniformIpTopology<32, 16, 51, 3, 0, 6, 6, 0, bench_c_counts, bench_s_counts, Legendre, Spectral>;
+        PfPsinUniformIpTopology<DefaultTopology::Nr,
+                                DefaultTopology::Nt,
+                                51,
+                                DefaultTopology::h_count,
+                                DefaultTopology::v_count,
+                                DefaultTopology::kappa_count,
+                                DefaultTopology::psin_count,
+                                DefaultTopology::F_count,
+                                bench_c_counts,
+                                bench_s_counts,
+                                Legendre,
+                                Spectral>;
     using BenchShape    = BenchTopology::Shape;
     using BenchGrid     = BenchTopology::Grid;
     using BenchSource   = BenchTopology::Source;

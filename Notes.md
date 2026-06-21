@@ -433,7 +433,14 @@ callback traffic，不声称是真实 nonlinear solver trajectory。一次 relea
 结果：same-x `evaluate≈8115.7 ns/call`，`evaluate_ring` ring-size 16
 `≈8191.4 ns/call`，ratio≈1.009。
 
-未完成：topology matrix 仍未接入；当前 benchmark 仍是固定 `Nr=32, Nt=16, Mmax=1`。
+进展：`stage_benchmark.cpp` 已改为读取 CMake 生成的 `config::DefaultTopology`，
+`clang-debug` / `clang-release` presets 显式固定当前默认 benchmark topology
+`Nr=32, Nt=16, Mmax=1, x_size=18`。新增 `veqlib/stage_topology_matrix.py`，
+可为多个 `Nr x Nt x Mmax` 生成独立 build dir 并汇总 JSON。smoke 已跑
+`32x16x1` 与 `32x32x1`，输出 topology metadata 正确。
+
+未完成：尚未跑完整大矩阵（`Nr=16/32/64`, `Nt=8/16/24/32/64`, `Mmax=1/4/8`），
+因为每个 topology 都要重新模板实例化/链接；后续应作为长耗时实验单独执行。
 
 停止条件：确认 `[rho][field][theta]` 在默认 topology 是默认选择；对其它 topology 只声明“已测范围内”的结论，必要时保留 `GeometryLayoutPolicy<GridType>` 设计空间。
 

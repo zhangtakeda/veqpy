@@ -18,7 +18,17 @@
         "ENABLE_ENZYME": "OFF",
         "VEQLIB_ENABLE_NATIVE_OPTIMIZATIONS": "ON",
         "VEQLIB_FP_MODE": "RELAXED",
-        "VEQLIB_ENABLE_THIN_LTO": "ON"
+        "VEQLIB_ENABLE_THIN_LTO": "ON",
+        "VEQ_NR": "32",
+        "VEQ_NT": "16",
+        "VEQ_H_PROFILE_COUNT": "3",
+        "VEQ_V_PROFILE_COUNT": "0",
+        "VEQ_KAPPA_PROFILE_COUNT": "6",
+        "VEQ_PSIN_PROFILE_COUNT": "6",
+        "VEQ_F_PROFILE_COUNT": "0",
+        "VEQ_COS_PROFILE_COUNTS": "0",
+        "VEQ_SIN_PROFILE_COUNTS": "3",
+        "VEQ_PROFILE_KMAX_LIMIT": "2"
       }
     },
     {
@@ -61,7 +71,17 @@
         "ENABLE_ENZYME": "OFF",
         "VEQLIB_ENABLE_NATIVE_OPTIMIZATIONS": "OFF",
         "VEQLIB_FP_MODE": "STRICT",
-        "VEQLIB_ENABLE_THIN_LTO": "OFF"
+        "VEQLIB_ENABLE_THIN_LTO": "OFF",
+        "VEQ_NR": "32",
+        "VEQ_NT": "16",
+        "VEQ_H_PROFILE_COUNT": "3",
+        "VEQ_V_PROFILE_COUNT": "0",
+        "VEQ_KAPPA_PROFILE_COUNT": "6",
+        "VEQ_PSIN_PROFILE_COUNT": "6",
+        "VEQ_F_PROFILE_COUNT": "0",
+        "VEQ_COS_PROFILE_COUNTS": "0",
+        "VEQ_SIN_PROFILE_COUNTS": "3",
+        "VEQ_PROFILE_KMAX_LIMIT": "2"
       }
     }
   ],
