@@ -245,8 +245,25 @@ then covered nine topologies with `repeat=12`, `warmup=4`, `inner=5000`:
 
 The result generalizes the hotspot ordering: Geometry remains the largest
 single production stage across the representative sweep, and its share grows as
-`Nt` increases. The full `3 x 5 x 3` matrix remains a longer-running validation
-line rather than a blocker.
+`Nt` increases.
+
+The full pinned `3 x 5 x 3` matrix was then completed with
+`taskset -c 2`, `repeat=6`, `warmup=3`, and `inner=4000` for the production
+`geometry` and `evaluate` stages. Raw JSON was kept under `/tmp` rather than
+committed. Across all 45 topologies, median `geometry/evaluate` share was
+0.699, with a range of 0.476--0.803. Aggregated by `Nt`:
+
+| `Nt` | median Geometry share | median `evaluate` ns |
+| ---: | ---: | ---: |
+| 8 | 0.528 | 5694.4 |
+| 16 | 0.626 | 8682.0 |
+| 24 | 0.735 | 11522.1 |
+| 32 | 0.725 | 15425.7 |
+| 64 | 0.774 | 27965.3 |
+
+Only `32x8x{1,4,8}` fell below 0.5 Geometry share. For normal and larger
+`Nt`, Geometry remains the optimization priority; small-`Nt` cases are the main
+reason to keep source/profile fixed-overhead cleanup as a parallel line.
 
 Geometry residual-ready descriptor compression was tested after `c56a5b6`: the
 prototype replaced the 9 raw geometry surface fields with 7 residual-ready fields

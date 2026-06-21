@@ -248,6 +248,22 @@ single JSON matrix report:
   --inner 5000
 ```
 
+When no explicit `--topology` is supplied, `--matrix-preset` selects a built-in
+set: `default`, `representative`, or `full`. The full preset is the current
+`Nr in {16,32,64}` x `Nt in {8,16,24,32,64}` x `Mmax in {1,4,8}` sweep. Pin the
+whole script when comparing timing across rows so the benchmark child processes
+inherit the same CPU affinity:
+
+```bash
+taskset -c 2 ./stage_topology_matrix.py \
+  --matrix-preset full \
+  --stage geometry \
+  --repeat 6 \
+  --warmup 3 \
+  --inner 4000 \
+  --output /tmp/veqlib_full_matrix_geometry_pinned.json
+```
+
 ## Dependency Versions
 
 The versions below are the currently validated local toolchain versions.

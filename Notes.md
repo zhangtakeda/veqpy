@@ -75,7 +75,7 @@ Phase 1a 的 RELAXED stage 表（三轮同窗口；每轮 `taskset -c 2`、`repe
 相对上一轮 RELAXED baseline（`evaluate≈8907.0 ns/call`、
 `geometry≈5391.8 ns/call`），route 纯化和 guard 删除让 `evaluate` 再降约
 4.3%。随后已完成 `evaluate_ring`、topology-matrix 基础设施，以及 Geometry
-micro-stage probe；完整大 topology matrix 仍是长耗时实验。
+micro-stage probe；完整 45-entry pinned topology matrix 已完成。
 
 Geometry micro-stage probe 的当前 RELAXED 结果（`taskset -c 2`、`repeat=15`、
 `warmup=5`、`inner=10000`）：
@@ -475,8 +475,26 @@ callback traffic，不声称是真实 nonlinear solver trajectory。一次 relea
 
 结论：默认 `32x16x1` 不是唯一表现；Geometry 在代表矩阵中仍是最大单项
 热点，且随 `Nt` 增大 share 明显上升。`Nt=8` 时非-Geometry 固定成本占比较高，
-但 `Nt>=16` 后继续优先 Geometry 是合理的。完整 45-entry 矩阵仍未跑，
-因为它是长耗时验证，不阻塞下一轮结构性优化。
+但 `Nt>=16` 后继续优先 Geometry 是合理的。
+
+完整 45-entry matrix 已补跑（`taskset -c 2`、`Nr={16,32,64}`、
+`Nt={8,16,24,32,64}`、`Mmax={1,4,8}`；`geometry/evaluate` 各自
+`repeat=6`、`warmup=3`、`inner=4000`；原始 JSON 留在 `/tmp`，不提交生成物）。
+全矩阵 `geometry/evaluate` share 的 median≈0.699，范围约 0.476--0.803。
+按 `Nt` 聚合最能解释热点排序：
+
+| `Nt` | median geometry share | median `evaluate` ns |
+| ---: | ---: | ---: |
+| 8 | 0.528 | 5694.4 |
+| 16 | 0.626 | 8682.0 |
+| 24 | 0.735 | 11522.1 |
+| 32 | 0.725 | 15425.7 |
+| 64 | 0.774 | 27965.3 |
+
+按 `Mmax` 聚合显示 high-Mmax 会抬高绝对时间，但并没有改变 Geometry 是主线
+热点的结论：`Mmax=1/4/8` 的 median share 分别约 0.699/0.686/0.699。
+只有 `32x8x{1,4,8}` 的 Geometry share 低于 0.5，说明小 `Nt` 下 source/profile/
+fixed overhead 更值得单独关注；常用/default 及更大 `Nt` 仍优先 Geometry。
 
 停止条件：确认 `[rho][field][theta]` 在默认 topology 是默认选择；对其它 topology 只声明“已测范围内”的结论，必要时保留 `GeometryLayoutPolicy<GridType>` 设计空间。
 

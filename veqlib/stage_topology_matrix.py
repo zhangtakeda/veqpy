@@ -10,6 +10,28 @@ from typing import Any
 
 
 DEFAULT_TOPOLOGIES = ("32x16x1", "32x32x1", "64x16x1")
+REPRESENTATIVE_TOPOLOGIES = (
+    "16x16x1",
+    "32x16x1",
+    "64x16x1",
+    "32x8x1",
+    "32x24x1",
+    "32x32x1",
+    "32x64x1",
+    "32x16x4",
+    "32x16x8",
+)
+FULL_MATRIX_TOPOLOGIES = tuple(
+    f"{nr}x{nt}x{mmax}"
+    for nr in (16, 32, 64)
+    for nt in (8, 16, 24, 32, 64)
+    for mmax in (1, 4, 8)
+)
+MATRIX_PRESETS = {
+    "default": DEFAULT_TOPOLOGIES,
+    "representative": REPRESENTATIVE_TOPOLOGIES,
+    "full": FULL_MATRIX_TOPOLOGIES,
+}
 
 
 def parse_topology(value: str) -> tuple[int, int, int]:
@@ -61,8 +83,21 @@ def run_json(command: list[str], cwd: Path) -> dict[str, Any]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run VEQlib stage benchmark across CMake topology builds.")
-    parser.add_argument("--topology", action="append", type=parse_topology, help="Nr x Nt x Mmax, e.g. 32x16x1")
+    parser = argparse.ArgumentParser(
+        description="Run VEQlib stage benchmark across CMake topology builds."
+    )
+    parser.add_argument(
+        "--topology",
+        action="append",
+        type=parse_topology,
+        help="Nr x Nt x Mmax, e.g. 32x16x1",
+    )
+    parser.add_argument(
+        "--matrix-preset",
+        choices=tuple(MATRIX_PRESETS),
+        default="default",
+        help="topology preset used when --topology is omitted",
+    )
     parser.add_argument("--stage", default="all", help="stage_benchmark --stage value")
     parser.add_argument("--repeat", type=int, default=10)
     parser.add_argument("--warmup", type=int, default=4)
@@ -73,7 +108,9 @@ def main() -> int:
     args = parser.parse_args()
 
     source_dir = Path(__file__).resolve().parent
-    topologies = args.topology or [parse_topology(item) for item in DEFAULT_TOPOLOGIES]
+    topologies = args.topology or [
+        parse_topology(item) for item in MATRIX_PRESETS[args.matrix_preset]
+    ]
     results: list[dict[str, Any]] = []
 
     for topology in topologies:
