@@ -74,8 +74,24 @@ Phase 1a 的 RELAXED stage 表（三轮同窗口；每轮 `taskset -c 2`、`repe
 
 相对上一轮 RELAXED baseline（`evaluate≈8907.0 ns/call`、
 `geometry≈5391.8 ns/call`），route 纯化和 guard 删除让 `evaluate` 再降约
-4.3%。下一步进入 Phase 1b/2：补 topology/state-ring matrix，并把 Geometry
-拆成 phase synthesis / dynamic sincos / metric / stores 微阶段。
+4.3%。随后已完成 `evaluate_ring`、topology-matrix 基础设施，以及 Geometry
+micro-stage probe；完整大 topology matrix 仍是长耗时实验。
+
+Geometry micro-stage probe 的当前 RELAXED 结果（`taskset -c 2`、`repeat=15`、
+`warmup=5`、`inner=10000`）：
+
+| probe | median ns/call | incremental bucket |
+| --- | ---: | ---: |
+| `geometry_phase` | 504.6 | Fourier phase synthesis |
+| `geometry_phase_sincos` | 3752.3 | +3247.7 dynamic `sin/cos(tb)` |
+| `geometry_metric_no_store` | 5039.8 | +1287.5 metric/radial arithmetic |
+| `geometry` | 5064.5 | +24.7 surface-output proxy |
+
+注意：这些 probe 是 benchmark-only cumulative 近似，用于判断热点桶；
+`geometry - geometry_metric_no_store` 不是 PMU store counter，也不是生产
+kernel 拆分。结论是 dynamic `sin/cos(tb)` 是默认 topology 下最大剩余
+Geometry 桶，约占 production `geometry` 的 64%，下一步优先做 vector/
+approximate dynamic trig backend A/B。
 
 Phase 2 首轮 micro A/B：
 
@@ -467,7 +483,15 @@ D. output traffic:
 
 注意：固定 `sin(theta)`、`cos(theta)` 和 harmonic 表已经通过 `GridType` setup 预计算；真正动态且无法 setup 预计算的是 `sin(tb_ij)` 和 `cos(tb_ij)`，因为 `tb_ij` 依赖 active profile coefficients。因此删除“预计算 theta trig”作为主线，改为测试动态 `sincos(tb)` backend。
 
-停止条件：能量化每次 Geometry 的实际 dynamic sincos 调用数、phase synthesis 占比、metric arithmetic 占比和 output traffic 占比。
+进展：`veqlib_stage_benchmark` 已新增 `geometry_phase`、
+`geometry_phase_sincos`、`geometry_metric_no_store` 三个 cumulative probe。
+默认 topology 每次 Geometry 有 `Nr*Nt = 512` 个 dynamic `sin/cos(tb)` 点；
+当前 RELAXED pinned run 显示 phase synthesis 约 505 ns、dynamic trig 增量约
+3248 ns、metric/radial arithmetic 增量约 1288 ns。output traffic 只能从
+probe 与生产 geometry 的差值粗略看，当前约 25 ns，说明 layout 后 surface
+store 本身不再是最大桶。
+
+停止条件：已满足用于排序的 micro-stage 量化；若要证明 cache/store 机制，仍需 native PMU 或 Cachegrind/assembly 辅助。
 
 ### Phase 3：Geometry dynamic sincos backend A/B
 

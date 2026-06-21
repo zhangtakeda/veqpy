@@ -254,9 +254,26 @@ median of per-run medians):
 
 Compared with the previous RELAXED baseline (`evaluate=8907.0 ns/call`,
 `geometry=5391.8 ns/call`), route purification plus guard removal improves
-`evaluate` by about 4.3%. Geometry remains the dominant hotspot, so Phase 1b/2
-should add the topology/state matrix and decompose geometry before attempting
-more source micro-optimizations.
+`evaluate` by about 4.3%. Geometry remains the dominant hotspot.
+
+Geometry micro-stage probes were then added to `veqlib_stage_benchmark` as
+benchmark-only cumulative stages. They duplicate the hot geometry formulas only
+for timing decomposition; they are not production kernels and the final
+`geometry - geometry_metric_no_store` delta is only a surface-output proxy, not a
+PMU store counter. One RELAXED pinned run (`taskset -c 2`, `repeat=15`,
+`warmup=5`, `inner=10000`) measured:
+
+| Geometry probe | Median ns/call | Incremental bucket |
+| --- | ---: | ---: |
+| `geometry_phase` | 504.6 | Fourier phase synthesis |
+| `geometry_phase_sincos` | 3752.3 | +3247.7 dynamic `sin/cos(tb)` |
+| `geometry_metric_no_store` | 5039.8 | +1287.5 metric/radial arithmetic |
+| `geometry` | 5064.5 | +24.7 surface-output proxy |
+
+The dynamic `sin/cos(tb)` bucket is therefore the largest remaining geometry
+component in this default topology, roughly 64% of the measured production
+`geometry` stage. This supports prioritizing vector/approximate dynamic trig
+backends over more surface-layout tweaks.
 
 Phase 2 first geometry micro-results:
 

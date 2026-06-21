@@ -221,12 +221,17 @@ CMINPACK solve loop:
 ```
 
 Available stages are `profiles_fixed`, `profiles_active`, `profiles_all`,
+`geometry_phase`, `geometry_phase_sincos`, `geometry_metric_no_store`,
 `geometry`, `source_materialize`, `source_update`, `residual_update`,
 `residual_pack`, `evaluate`, and `evaluate_ring`. Each reported sample is
-nanoseconds per stage call after dividing by `--inner`. `evaluate_ring` cycles
-through a deterministic synthetic solver-state ring controlled by `--ring-size`;
-use it to compare warm repeated callbacks against state-varying callback traffic,
-not as a real nonlinear-solver trajectory.
+nanoseconds per stage call after dividing by `--inner`. The `geometry_*` probe
+stages are benchmark-only cumulative approximations of phase synthesis, dynamic
+`sin/cos(tb)`, metric arithmetic, and full geometry; they are meant to locate the
+next hotspot bucket and should not be treated as separate production kernels or
+as exact hardware-event attribution. `evaluate_ring` cycles through a
+deterministic synthetic solver-state ring controlled by `--ring-size`; use it to
+compare warm repeated callbacks against state-varying callback traffic, not as a
+real nonlinear-solver trajectory.
 
 For topology sweeps, use `stage_topology_matrix.py`. It creates isolated CMake
 build directories under `build/topology-matrix/`, configures `DefaultTopology`
