@@ -95,7 +95,7 @@ Phase 2 首轮 micro A/B：
 
 | candidate | paired result | decision |
 | --- | --- | --- |
-| `JdivR = J*J/(J*R)` 复用 `inv_JR`，减少一个显式除法 | 5 组 paired median：`geometry` ratio≈0.992，`evaluate` ratio≈0.990；但 evaluate 有反向组（1.031、1.009） | 回滚；收益太小且不稳定 |
+| `JdivR = J*J/(J*R)` 复用 `inv_JR`，减少一个显式除法 | 早期 5 组：`geometry`≈0.992、`evaluate`≈0.990 但有反向组；reduced-Taylor 后 7 组重测：`geometry_metric_no_store`≈0.997、`geometry`≈1.018、`evaluate`≈1.006、`evaluate_ring`≈1.016 | 回滚；metric micro-probe 不足以覆盖 production codegen，端到端不支持 |
 | Geometry harmonic profile reads hoist 到 `i` 层 | 5 组 paired median：`geometry` ratio≈0.984，`evaluate` ratio≈0.993；5/5 evaluate 均快 | 保留；低风险小收益，为高 `M_max` topology 预期更有价值 |
 | Geometry per-rho arithmetic hoist（显式缓存 `a*rho`、`a*h`、`k+rho*k_r` 等） | 9 组 paired：`geometry` median ratio≈1.000，`evaluate`≈1.008，`evaluate_ring`≈0.990；sink diff≈0 | 回滚；编译器已基本处理该类 rho-invariant arithmetic，same-x evaluate 不支持保留 |
 | Residual surface physical layout 改为 `[rho][field][theta]` | 5 组 paired median：`residual_update` ratio≈0.931，`residual_pack` ratio≈1.004，`evaluate` ratio≈0.994 | 保留；端到端收益小但未见显著回归，且 producer 语义与 geometry layout 对齐 |
