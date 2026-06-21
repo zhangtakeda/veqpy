@@ -794,6 +794,13 @@ paired timing 只是小幅改善（`source_materialize≈0.969`、`source_update
 这类 root-row copy 微调没有跨 topology 的端到端收益，后续不要在没有 assembly/PMU
 证据时继续追这个方向。
 
+又测试了把 `local_uniform_stencil_start(q)` 延后到 exact-hit fast path 之后的
+微调。这个改动语义等价，但 9 组默认 paired timing 只得到
+`source_materialize≈1.005`、`source_update≈0.999`、`evaluate≈0.999`、
+`evaluate_ring≈0.992`，没有稳定 endpoint 收益，因此回滚。source exact-hit 已保留
+最近节点检查；不要继续追逐这类单指令级插值分支重排，除非新的 profile/assembly
+证据显示它阻塞了向量化或分支预测。
+
 目标：在 geometry/residual 结构性收益之后，再处理固定成本。
 
 建议动作：

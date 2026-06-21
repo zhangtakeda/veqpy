@@ -473,3 +473,12 @@ showed small apparent wins (`source_materialize`≈0.969, `source_update`≈0.99
 did not generalize: only 20/45 topologies improved, median ratio≈1.003 and
 range≈0.967--1.077. The candidate was reverted; do not keep root-row copy
 micro-tuning without stronger topology-wide or assembly/PMU evidence.
+
+A delayed-stencil-start variant of the source exact-hit path was rejected. It
+moved `local_uniform_stencil_start(q)` below the nearest-node exact-hit check so
+exact hits would skip the stencil-start calculation. The change was semantically
+equivalent and passed release CTest plus the PF comparator, but nine paired
+default-topology runs measured `source_materialize`≈1.005, `source_update`≈0.999,
+`evaluate`≈0.999, and `evaluate_ring`≈0.992. The code was reverted because the
+retained nearest-node exact-hit optimization already captures the useful source
+materialization win, while this branch reorder is only noise-level.
