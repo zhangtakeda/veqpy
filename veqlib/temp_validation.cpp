@@ -1,7 +1,10 @@
 #include <array>
+#include <bit>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <span>
 
 #include <cminpack.h>
@@ -658,6 +661,22 @@ namespace
         return close(math::sum(values), 6.0) && close(math::dot(values, values), 14.0) &&
                close(math::norm2(values), gcem::sqrt(14.0)) && close(shifted[2], 4.0) && close(scaled[1], 4.0) &&
                close(rooted[0], gcem::sqrt(3.0)) && math::is_finite(rooted);
+    }
+
+    constexpr bool finite_semantics_constexpr_ok()
+    {
+        constexpr double positive_inf = std::bit_cast<double>(0x7ff0'0000'0000'0000ULL);
+        constexpr double quiet_nan    = std::bit_cast<double>(0x7ff8'0000'0000'0001ULL);
+        constexpr double large_finite = std::numeric_limits<double>::max() / 2.0;
+
+        constexpr Vector<double, 2> finite_values{1.0, -large_finite};
+        constexpr Vector<double, 2> bounded_values{1.0, std::numeric_limits<double>::max() / 8.0};
+        constexpr Vector<double, 2> unbounded_values{1.0, large_finite};
+        constexpr Vector<double, 2> nan_values{1.0, quiet_nan};
+
+        return math::is_finite(1.0) && math::is_finite(large_finite) && !math::is_finite(positive_inf) &&
+               !math::is_finite(quiet_nan) && math::is_finite(finite_values) && !math::is_finite(nan_values) &&
+               math::is_valid_magnitude(bounded_values) && !math::is_valid_magnitude(unbounded_values);
     }
 
     constexpr bool grid_constexpr_ok()
@@ -1336,6 +1355,7 @@ namespace
 
     static_assert(linalg_constexpr_ok());
     static_assert(tensor_math_constexpr_ok());
+    static_assert(finite_semantics_constexpr_ok());
     static_assert(grid_constexpr_ok());
     static_assert(profiles_grid_constexpr_ok());
     static_assert(runtime_profiles_constexpr_ok());
@@ -1389,6 +1409,7 @@ int main()
     report["constexpr"] = {
         {"linalg", linalg_constexpr_ok()},
         {"tensor_math", tensor_math_constexpr_ok()},
+        {"finite_semantics", finite_semantics_constexpr_ok()},
         {"grid", grid_constexpr_ok()},
         {"profiles_grid", profiles_grid_constexpr_ok()},
         {"runtime_profiles", runtime_profiles_constexpr_ok()},
@@ -1416,8 +1437,8 @@ int main()
         {"cfd55_lobatto_acc_error", max_accumulator_error<CFD55, Lobatto, 8>(1)},
     };
 
-    const bool ok = linalg_constexpr_ok() && tensor_math_constexpr_ok() && grid_constexpr_ok() &&
-                    profiles_grid_constexpr_ok() && runtime_profiles_constexpr_ok() &&
+    const bool ok = linalg_constexpr_ok() && tensor_math_constexpr_ok() && finite_semantics_constexpr_ok() &&
+                    grid_constexpr_ok() && profiles_grid_constexpr_ok() && runtime_profiles_constexpr_ok() &&
                     runtime_profile_semantics_constexpr_ok() && geometry_circular_constexpr_ok() &&
                     source_materialization_constexpr_ok() && pf_source_constexpr_ok() &&
                     residual_pack_constexpr_ok() && pf_operator_facade_constexpr_ok() &&

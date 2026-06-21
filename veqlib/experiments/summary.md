@@ -128,3 +128,41 @@ The post-review priority is adjusted as follows:
 7. Keep PMU/native-Linux work as a parallel mechanism-validation line while the
    main optimization loop continues with paired wall-clock, correctness checks,
    assembly, and Cachegrind.
+
+## Phase 0 update: FP modes and validity semantics
+
+Phase 0 is now implemented before further approximate/vector-math experiments:
+
+- Added `VEQLIB_FP_MODE=STRICT|FMA|RELAXED`.
+  - `STRICT`: `-fno-fast-math -ffp-contract=off`.
+  - `FMA`: `-fno-fast-math -ffp-contract=fast`.
+  - `RELAXED`: preserves the historical release benchmark flags, including
+    `-ffast-math`, `-ffinite-math-only`, `-freciprocal-math`, and
+    `-fapprox-func`.
+- Added `clang-release-strict` and `clang-release-fma` presets. The default
+  `clang-release` remains `RELAXED` so existing performance comparisons keep
+  the same baseline semantics.
+- Split validity helpers:
+  - `math::is_finite()` is now a bit-level NaN/inf test that is still
+    meaningful under `-ffinite-math-only`.
+  - `math::is_valid_magnitude()` preserves the previous `max_double / 4`
+    overflow margin and is used by source/operator hot-path acceptance checks.
+
+Validation:
+
+- Compile-command inspection confirmed the expected FP flags for `release`,
+  `release-strict`, `release-fma`, and `debug`.
+- Debug CTest: 3/3 passed.
+- RELAXED release CTest: 3/3 passed.
+- STRICT release CTest: 3/3 passed.
+- FMA release CTest: 3/3 passed.
+- RELAXED release Python/C++ PF-psin-uniform validation passed with
+  `max_abs=6.7622192567728945e-12`.
+- RELAXED release sanity benchmark (`taskset -c 2`, `repeat=15`, `warmup=5`,
+  `inner=10000`) reported `geometry median=5554.3095 ns/call` and
+  `evaluate median=9109.3373 ns/call`. This is not a paired optimization proof;
+  it only confirms Phase 0 did not visibly damage the current layout baseline.
+
+Next step: Phase 1 should generate a post-layout stage table across the new
+FP modes and then add topology/state-ring coverage before any approximate
+dynamic `sincos(tb)` backend is compared.

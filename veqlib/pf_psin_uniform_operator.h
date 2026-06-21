@@ -76,7 +76,7 @@ namespace operator_pf::detail
 
             residual.update_compact(source_runtime, geometry);
             residual.pack_into(out, params.a, params.R0, params.B0);
-            return math::is_finite(out);
+            return math::is_valid_magnitude(out);
         }
 
         constexpr PackedVector evaluate(std::span<const double, Shape::x_size> x, bool& ok) noexcept

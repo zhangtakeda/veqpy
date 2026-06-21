@@ -8,10 +8,12 @@ endif()
 
 option(ENABLE_ENZYME "Load the Enzyme clang plugin and probe autodiff" ON)
 option(VEQLIB_ENABLE_STRICT_CONVERSIONS "Reject implicit narrowing and signedness conversions with clang warnings" ON)
-option(VEQLIB_ENABLE_NATIVE_OPTIMIZATIONS "Enable native CPU, fast-math, and loop optimization flags" ON)
+option(VEQLIB_ENABLE_NATIVE_OPTIMIZATIONS "Enable native CPU and loop optimization flags" ON)
 option(VEQLIB_ENABLE_THIN_LTO "Enable clang ThinLTO and lld for optimized builds" ON)
 option(VEQLIB_ANALYSIS_BUILD "Build with source-correlated optimization diagnostics" OFF)
 option(VEQLIB_FORCE_OPENBLAS_SINGLE_THREAD "Force OpenBLAS to one runtime thread inside veqlib targets" ON)
+set(VEQLIB_FP_MODE "RELAXED" CACHE STRING "Floating-point mode: STRICT, FMA, or RELAXED")
+set_property(CACHE VEQLIB_FP_MODE PROPERTY STRINGS STRICT FMA RELAXED)
 set(VEQLIB_ENZYME_PLUGIN "" CACHE FILEPATH "Path to ClangEnzyme shared library")
 set(VEQLIB_ENZYME_INCLUDE_DIR "$ENV{HOME}/opt/Enzyme/enzyme/include" CACHE PATH "Path to Enzyme C++ headers")
 set(VEQLIB_GCEM_ROOT "$ENV{HOME}/opt/gcem-install" CACHE PATH "GCEM install prefix")
@@ -42,6 +44,12 @@ set(
     CACHE STRING
     "Upper bound for K_max; config uses min(M_max, this value)"
 )
+
+string(TOUPPER "${VEQLIB_FP_MODE}" VEQLIB_FP_MODE_NORMALIZED)
+if(NOT VEQLIB_FP_MODE_NORMALIZED MATCHES "^(STRICT|FMA|RELAXED)$")
+    message(FATAL_ERROR "VEQLIB_FP_MODE must be STRICT, FMA, or RELAXED; got '${VEQLIB_FP_MODE}'")
+endif()
+set(VEQLIB_FP_MODE "${VEQLIB_FP_MODE_NORMALIZED}" CACHE STRING "Floating-point mode: STRICT, FMA, or RELAXED" FORCE)
 
 if(VEQLIB_CONSTEXPR_STEPS GREATER VEQLIB_CONSTEXPR_STEP_LIMIT)
     message(FATAL_ERROR "VEQLIB_CONSTEXPR_STEPS must not exceed ${VEQLIB_CONSTEXPR_STEP_LIMIT}")
@@ -349,41 +357,65 @@ function(veqlib_enable_constexpr_budget target)
 endfunction()
 
 function(veqlib_enable_kernel_optimizations target)
+    set(release_like "$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>")
+
     target_compile_options(
         "${target}"
         PRIVATE
-            $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O3>
+            $<${release_like}:-O3>
     )
+    target_compile_definitions("${target}" PRIVATE "VEQLIB_FP_MODE_${VEQLIB_FP_MODE}=1")
 
     if(VEQLIB_ENABLE_NATIVE_OPTIMIZATIONS)
         target_compile_options(
             "${target}"
             PRIVATE
-                $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-march=native>
-                $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-mtune=native>
-                $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-mprefer-vector-width=256>
-                $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-ffast-math>
-                $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-ffp-contract=fast>
-                $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-funsafe-math-optimizations>
-                $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-fno-math-errno>
-                $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-fno-trapping-math>
-                $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-fno-signed-zeros>
-                $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-freciprocal-math>
-                $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-ffinite-math-only>
-                $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-fapprox-func>
-                $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-fstrict-aliasing>
-                $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-fomit-frame-pointer>
-                $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-funroll-loops>
-                $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-fvectorize>
-                $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-fslp-vectorize>
-                $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-ffunction-sections>
-                $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-fdata-sections>
+                $<${release_like}:-march=native>
+                $<${release_like}:-mtune=native>
+                $<${release_like}:-mprefer-vector-width=256>
+                $<${release_like}:-fstrict-aliasing>
+                $<${release_like}:-fomit-frame-pointer>
+                $<${release_like}:-funroll-loops>
+                $<${release_like}:-fvectorize>
+                $<${release_like}:-fslp-vectorize>
+                $<${release_like}:-ffunction-sections>
+                $<${release_like}:-fdata-sections>
         )
         target_link_options(
             "${target}"
             PRIVATE
-                $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-Wl,-O3>
-                $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-Wl,--gc-sections>
+                $<${release_like}:-Wl,-O3>
+                $<${release_like}:-Wl,--gc-sections>
+        )
+    endif()
+
+    if(VEQLIB_FP_MODE STREQUAL "STRICT")
+        target_compile_options(
+            "${target}"
+            PRIVATE
+                $<${release_like}:-fno-fast-math>
+                $<${release_like}:-ffp-contract=off>
+        )
+    elseif(VEQLIB_FP_MODE STREQUAL "FMA")
+        target_compile_options(
+            "${target}"
+            PRIVATE
+                $<${release_like}:-fno-fast-math>
+                $<${release_like}:-ffp-contract=fast>
+        )
+    elseif(VEQLIB_FP_MODE STREQUAL "RELAXED")
+        target_compile_options(
+            "${target}"
+            PRIVATE
+                $<${release_like}:-ffast-math>
+                $<${release_like}:-ffp-contract=fast>
+                $<${release_like}:-funsafe-math-optimizations>
+                $<${release_like}:-fno-math-errno>
+                $<${release_like}:-fno-trapping-math>
+                $<${release_like}:-fno-signed-zeros>
+                $<${release_like}:-freciprocal-math>
+                $<${release_like}:-ffinite-math-only>
+                $<${release_like}:-fapprox-func>
         )
     endif()
 
@@ -391,13 +423,13 @@ function(veqlib_enable_kernel_optimizations target)
         target_compile_options(
             "${target}"
             PRIVATE
-                $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-flto=thin>
+                $<${release_like}:-flto=thin>
         )
         target_link_options(
             "${target}"
             PRIVATE
-                $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-flto=thin>
-                $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-fuse-ld=lld>
+                $<${release_like}:-flto=thin>
+                $<${release_like}:-fuse-ld=lld>
         )
     endif()
 

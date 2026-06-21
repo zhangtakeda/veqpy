@@ -17,7 +17,26 @@
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "ENABLE_ENZYME": "OFF",
         "VEQLIB_ENABLE_NATIVE_OPTIMIZATIONS": "ON",
+        "VEQLIB_FP_MODE": "RELAXED",
         "VEQLIB_ENABLE_THIN_LTO": "ON"
+      }
+    },
+    {
+      "name": "clang-release-strict",
+      "displayName": "clang release strict FP",
+      "inherits": "clang-release",
+      "binaryDir": "${sourceDir}/build/release-strict",
+      "cacheVariables": {
+        "VEQLIB_FP_MODE": "STRICT"
+      }
+    },
+    {
+      "name": "clang-release-fma",
+      "displayName": "clang release FMA FP",
+      "inherits": "clang-release",
+      "binaryDir": "${sourceDir}/build/release-fma",
+      "cacheVariables": {
+        "VEQLIB_FP_MODE": "FMA"
       }
     },
     {
@@ -41,6 +60,7 @@
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "ENABLE_ENZYME": "OFF",
         "VEQLIB_ENABLE_NATIVE_OPTIMIZATIONS": "OFF",
+        "VEQLIB_FP_MODE": "STRICT",
         "VEQLIB_ENABLE_THIN_LTO": "OFF"
       }
     }
@@ -49,6 +69,14 @@
     {
       "name": "clang-release",
       "configurePreset": "clang-release"
+    },
+    {
+      "name": "clang-release-strict",
+      "configurePreset": "clang-release-strict"
+    },
+    {
+      "name": "clang-release-fma",
+      "configurePreset": "clang-release-fma"
     },
     {
       "name": "clang-enzyme-release",

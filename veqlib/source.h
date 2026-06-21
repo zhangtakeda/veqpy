@@ -149,8 +149,9 @@ namespace source::detail
             }
 
             local_barycentric_interpolate_pair();
-            return math::is_finite(source_target_root_fields) && math::is_finite(materialized_heat_input) &&
-                   math::is_finite(materialized_current_input);
+            return math::is_valid_magnitude(source_target_root_fields) &&
+                   math::is_valid_magnitude(materialized_heat_input) &&
+                   math::is_valid_magnitude(materialized_current_input);
         }
 
         template <typename GeometryRuntime>
@@ -216,8 +217,8 @@ namespace source::detail
                     FFn_psin[i] = materialized_current_input[i] / alpha1;
                 }
                 regularize_ffn_psin(n_axis_fix);
-                return math::is_finite(FFn_psin) && math::is_finite(Pn_psin) && math::is_finite(alpha1) &&
-                       math::is_finite(alpha2);
+                return math::is_valid_magnitude(FFn_psin) && math::is_valid_magnitude(Pn_psin) &&
+                       math::is_valid_magnitude(alpha1) && math::is_valid_magnitude(alpha2);
             }
 
             for (size_t i = 0; i < radial_nodes; ++i)
@@ -250,8 +251,8 @@ namespace source::detail
                 alpha1 = signed_sqrt_ratio(numerator, integral_prof * denominator);
             }
             alpha2 = integral_prof * alpha1;
-            return math::is_finite(FFn_psin) && math::is_finite(Pn_psin) && math::is_finite(alpha1) &&
-                   math::is_finite(alpha2);
+            return math::is_valid_magnitude(FFn_psin) && math::is_valid_magnitude(Pn_psin) &&
+                   math::is_valid_magnitude(alpha1) && math::is_valid_magnitude(alpha2);
         }
 
         template <size_t Row>

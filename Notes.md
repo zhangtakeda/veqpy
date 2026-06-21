@@ -3,12 +3,49 @@
 更新时间：2026-06-21  
 范围：`TODO-1.md`、`TODO-2.md` 指向的 VEQlib hot path / cache / tooling 初步实验。
 
-## 0. 最新状态：layout 保留，后续小改动未达保留门槛
+## 0. 最新状态：Phase 0 FP 语义已拆分，layout 保留
 
-已把两个阶段性变更提交为 git commit：
+已把阶段性变更提交为 git commit：
 
 - `7566f97 Establish measurable VEQlib optimization baseline`
 - `a5c4d3c Reduce geometry cache interference before chasing trig`
+- `3851f62 Preserve VEQlib performance decision trail`
+- `a4637fd Reprioritize VEQlib optimization by evidence`
+
+本轮开始执行修订计划中的 Phase 0：先修正 FP 构建语义和 validity
+contract，再继续 vector sincos / approximate math / residual fusion。当前
+实现决策：
+
+- 新增 `VEQLIB_FP_MODE=STRICT|FMA|RELAXED`：
+  - `STRICT`: `-fno-fast-math -ffp-contract=off`
+  - `FMA`: `-fno-fast-math -ffp-contract=fast`
+  - `RELAXED`: 保留历史 release benchmark 的 fast-math / reciprocal /
+    approximate-function flags
+- `math::is_finite()` 改为 bit-level NaN/inf 检查，避免在
+  `-ffinite-math-only` 下被编译器当成恒真有限性假设。
+- 旧的 `max_double / 4` overflow margin 独立命名为
+  `math::is_valid_magnitude()`；hot-path source/operator acceptance 使用该
+  guard，保持旧行为。
+- 新增 `clang-release-strict` 和 `clang-release-fma` preset，默认
+  `clang-release` 仍是 `RELAXED`，因此不会破坏当前性能基线口径。
+
+验证留痕：
+
+- compile commands 检查确认：
+  - `release`: `VEQLIB_FP_MODE_RELAXED=1`，含 `-ffast-math` /
+    `-ffinite-math-only` / `-fapprox-func`
+  - `release-strict`: `VEQLIB_FP_MODE_STRICT=1`，含 `-fno-fast-math`
+    / `-ffp-contract=off`
+  - `release-fma`: `VEQLIB_FP_MODE_FMA=1`，含 `-fno-fast-math`
+    / `-ffp-contract=fast`
+- Debug / RELAXED release / STRICT release / FMA release CTest 均通过。
+- RELAXED release Python/C++ validation 仍通过，`max_abs≈6.762e-12`。
+- RELAXED sanity benchmark（非 paired，仅确认未明显破坏基线）：
+  `geometry median≈5554 ns/call`，`evaluate median≈9109 ns/call`。
+
+下一步应进入 Phase 1：补齐 post-layout stage 表，并开始 topology /
+state-ring benchmark matrix；不要在未建立 STRICT/FMA/RELAXED 误差口径前
+直接比较 approximate/vector math kernel。
 
 随后用独立 baseline worktree 重新测试 `a5c4d3c` 的 geometry surface layout 改动。复测仍然支持保留该改动：
 

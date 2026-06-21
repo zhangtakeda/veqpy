@@ -7,9 +7,9 @@ orchestration. Setup-time numerical constants are being moved into C++20
 without Python-side numerical setup. This directory is for the gradually
 introduced C++20 pieces:
 
-- fixed-size numerical kernels compiled with clang and an aggressive Release
-  profile (`-O3`, native CPU tuning, fast-math, loop unrolling,
-  vectorization, ThinLTO, and lld);
+- fixed-size numerical kernels compiled with clang and selectable floating-point
+  modes over an aggressive Release profile (`-O3`, native CPU tuning, loop
+  unrolling, vectorization, ThinLTO, and lld);
 - GCEM-backed compile-time math for generated constants and fixed-size kernels;
 - compile-time quadrature nodes, weights, spectral calculus, compact finite
   difference calculus, and fixed-size tensor/linalg helpers;
@@ -248,16 +248,22 @@ pipelines and is not the default integration path here.
 Release presets enable VEQlib's aggressive kernel profile by default:
 
 - `VEQLIB_ENABLE_NATIVE_OPTIMIZATIONS=ON`
+- `VEQLIB_FP_MODE=RELAXED`
 - `VEQLIB_ENABLE_THIN_LTO=ON`
 
-The current target flags are:
+`VEQLIB_FP_MODE` separates the numerical-contract baseline from the remaining
+native CPU and loop optimizations:
+
+- `STRICT`: `-fno-fast-math -ffp-contract=off`;
+- `FMA`: `-fno-fast-math -ffp-contract=fast`;
+- `RELAXED`: the historical benchmark profile with fast-math, reciprocal, and
+  approximate-function flags.
+
+The common Release target flags are:
 
 ```text
 -O3
 -march=native -mtune=native
--ffast-math -ffp-contract=fast -funsafe-math-optimizations
--fno-math-errno -fno-trapping-math -fno-signed-zeros
--freciprocal-math -ffinite-math-only -fapprox-func
 -fstrict-aliasing -fomit-frame-pointer
 -funroll-loops -fvectorize -fslp-vectorize
 -ffunction-sections -fdata-sections
@@ -265,11 +271,25 @@ The current target flags are:
 link: -fuse-ld=lld -Wl,-O3 -Wl,--gc-sections
 ```
 
-This profile is intended for generated/fixed-size numerical kernels. It relaxes
-IEEE floating-point edge-case behavior, including NaN/inf propagation,
-trapping, signed zero, errno, and operation reassociation. Keep Debug presets
-conservative, and use Python-side regression tests to lock acceptable numerical
-tolerances for each route before relying on these flags for production kernels.
+The default `RELAXED` FP mode adds:
+
+```text
+-ffast-math -ffp-contract=fast -funsafe-math-optimizations
+-fno-math-errno -fno-trapping-math -fno-signed-zeros
+-freciprocal-math -ffinite-math-only -fapprox-func
+```
+
+`RELAXED` is intended for generated/fixed-size numerical kernels after route
+correctness is locked. It relaxes IEEE floating-point edge-case behavior,
+including NaN/inf propagation, trapping, signed zero, errno, and operation
+reassociation. Use `STRICT` and `FMA` builds to define correctness and error
+budgets before comparing approximate or vector math kernels.
+
+Runtime validity checks deliberately distinguish true finiteness from the
+solver's old magnitude guard. `math::is_finite()` is a bit-level NaN/inf test
+that remains meaningful under `-ffinite-math-only`; hot-path solver acceptance
+uses `math::is_valid_magnitude()` to retain the previous `max_double / 4`
+overflow margin.
 
 For source-correlated performance diagnostics, configure a separate analysis
 build with `VEQLIB_ANALYSIS_BUILD=ON`. This keeps `-O3` but disables ThinLTO for
@@ -338,6 +358,8 @@ Available presets:
 | ---------------------- | ----------------------------------- |
 | `clang-debug`          | Debug build without Enzyme          |
 | `clang-release`        | Aggressive Release without Enzyme   |
+| `clang-release-strict` | Release with strict FP contract     |
+| `clang-release-fma`    | Release with strict math plus FMA   |
 | `clang-enzyme-release` | Aggressive Release with ClangEnzyme |
 
 The Enzyme preset currently records the local plugin path. On another machine,
