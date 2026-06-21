@@ -738,6 +738,41 @@ G*psin_R*sin(tb)
 启用 cosine family，也应继续依赖 `ProfileShape` 的 enabled slot，而不是运行期
 读取 absent family 的零 slab。
 
+2026-06-21 又保留了一项 source exact-hit 局部优化：
+`local_barycentric_interpolate_pair()` 不再对 8 点 stencil 逐个比较是否命中
+uniform input node，而是直接用 `round(q * (N-1))` 找最近 sample node，再做一次
+`1e-14` exact-hit 检查。这个改动不改变非命中时的 barycentric stencil，也不重新
+引入 route/finite/sentinel 分支。release/debug CTest 与 PF Python/C++ comparator
+均通过（`max_abs≈5.578e-11`）。
+
+默认 topology 的 7 组 paired RELAXED timing（`taskset -c 2`、`repeat=24`、
+`warmup=8`、`inner=10000`、`ring-size=16`）显示：
+
+| metric | median ratio |
+| --- | ---: |
+| `source_materialize` | 0.868 |
+| `source_update` | 0.995 |
+| `evaluate` | 0.956 |
+| `evaluate_ring` | 0.971 |
+
+完整 45 topology `evaluate` matrix（`Nr={16,32,64}`、
+`Nt={8,16,24,32,64}`、`Mmax={1,4,8}`）为 40/45 改善，median ratio≈0.976，
+range≈0.876--1.027。小 `Nt` 改善最大，`Nt=64` 基本中性。保留该改动，但把它
+定位为 source materialization 固定成本削减，而不是新的结构性 source algorithm。
+
+采用后默认 stage 表（`--stage all`，同 pinned 口径）为：
+
+| Stage | ns/call | Share of `evaluate` |
+| --- | ---: | ---: |
+| `profiles_all` | 125.7 | 2.6% |
+| `geometry` | 1926.6 | 40.5% |
+| `source_materialize` | 768.5 | 16.2% |
+| `source_update` | 813.6 | 17.1% |
+| `residual_update` | 796.3 | 16.7% |
+| `residual_pack` | 135.3 | 2.8% |
+| `evaluate` | 4756.6 | 100% |
+| `evaluate_ring` | 4805.8 | 101.0% |
+
 目标：在 geometry/residual 结构性收益之后，再处理固定成本。
 
 建议动作：

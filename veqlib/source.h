@@ -314,22 +314,12 @@ namespace source::detail
                 {
                     const double q = clip_unit(source_parameter_query[i]);
                     const size_t start = local_uniform_stencil_start(q);
-                    size_t       hit   = sample_count;
-                    for (size_t local_j = 0; local_j < stencil_size; ++local_j)
+                    const size_t nearest = static_cast<size_t>(q * denom_scale + 0.5);
+                    const double x_nearest = static_cast<double>(nearest) / denom_scale;
+                    if (math::abs(q - x_nearest) <= 1.0e-14)
                     {
-                        const size_t j  = start + local_j;
-                        const double xj = static_cast<double>(j) / denom_scale;
-                        if (math::abs(q - xj) <= 1.0e-14)
-                        {
-                            hit = j;
-                            break;
-                        }
-                    }
-
-                    if (hit < sample_count)
-                    {
-                        materialized_heat_input[i]    = heat_input[hit];
-                        materialized_current_input[i] = current_input[hit];
+                        materialized_heat_input[i]    = heat_input[nearest];
+                        materialized_current_input[i] = current_input[nearest];
                         continue;
                     }
 

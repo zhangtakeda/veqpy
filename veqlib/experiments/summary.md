@@ -427,3 +427,25 @@ comparison passed (`max_abs≈5.578e-11`). Nine paired RELAXED runs
 `evaluate_ring`≈0.995 with zero sink differences. Keep the change, but continue
 to treat residual theta-moment fusion as the only likely larger residual
 opportunity.
+
+A source materialization exact-hit cleanup was then retained. The uniform-node
+path in `local_barycentric_interpolate_pair()` now checks only the nearest
+sample node (`round(q * (N-1))`) instead of scanning all 8 local stencil nodes
+for an exact hit before falling back to the unchanged barycentric interpolation.
+This removes fixed per-radial-node comparisons without adding any route,
+finite-value, or solve-success branch. Release/debug CTest and the PF Python/C++
+comparison passed (`max_abs≈5.578e-11`). Seven paired RELAXED default-topology
+runs (`taskset -c 2`, `repeat=24`, `warmup=8`, `inner=10000`, `ring-size=16`)
+measured `source_materialize` median ratio≈0.868, `source_update`≈0.995,
+`evaluate`≈0.956, and `evaluate_ring`≈0.971. The full 45-topology `evaluate`
+matrix showed 40/45 improved, median ratio≈0.976 and range≈0.876--1.027; the
+benefit is largest at small `Nt` and mostly neutral at `Nt=64`.
+
+After the source exact-hit cleanup, a pinned `--stage all` run measured
+`evaluate` at 4756.6 ns/call. The current default-stage breakdown is:
+`geometry` 1926.6 ns/call (40.5%), `source_materialize` 768.5 (16.2%),
+`source_update` 813.6 (17.1%), `residual_update` 796.3 (16.7%), and
+`residual_pack` 135.3 (2.8%). `evaluate_ring` was 4805.8 ns/call. This keeps
+Geometry as the largest single bucket, but source update/materialization and
+residual update are now close enough that only endpoint-improving changes should
+be kept.
