@@ -355,6 +355,19 @@ reverted. Any future vector trig attempt must reshape Geometry into a canonical
 materialize-`tb` / vector-trig / metric-consume pipeline and pay for that extra
 traffic explicitly.
 
+The structural split-trig candidate was then tested and retained. A
+benchmark-only `geometry_phase_split_sincos` probe first showed that separating
+phase synthesis from a canonical `sin/cos(tb)` loop improved the trig bucket
+even without changing the default build flags (`split/fused≈0.966`; with the
+libmvec experiment build, `≈0.938`). The same split was then applied to
+production `GeometryRuntime::update`: per radial node it now materializes phase
+and derivative arrays, evaluates `sin/cos(tb)` in a dedicated theta loop, and
+then consumes those arrays in the metric/surface pass. Nine paired RELAXED runs
+against the pre-split baseline measured `geometry=0.897`, `evaluate=0.908`, and
+`evaluate_ring=0.925`, with all sinks matching. The libmvec build still does not
+justify changing default flags: final `libmvec/normal` was `geometry=1.021`,
+`evaluate=0.988`, and `evaluate_ring=0.975`.
+
 Phase 2 first geometry micro-results:
 
 | Candidate | Paired result | Decision |

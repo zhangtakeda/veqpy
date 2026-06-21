@@ -3,7 +3,9 @@
 #include "math.h"
 #include "profiles.h"
 #include "tensor.h"
+#include <array>
 #include <cstddef>
+#include <cmath>
 #include <utility>
 
 namespace geometry::detail
@@ -309,11 +311,17 @@ namespace geometry::detail
                 double sum_gttdivJR_r  = 0.0;
                 double sum_JdivR       = 0.0;
 
+                alignas(tensor::detail::simd_alignment) std::array<double, theta_rows> tb_values;
+                alignas(tensor::detail::simd_alignment) std::array<double, theta_rows> tb_r_values;
+                alignas(tensor::detail::simd_alignment) std::array<double, theta_rows> tb_t_values;
+                alignas(tensor::detail::simd_alignment) std::array<double, theta_rows> tb_rr_values;
+                alignas(tensor::detail::simd_alignment) std::array<double, theta_rows> tb_rt_values;
+                alignas(tensor::detail::simd_alignment) std::array<double, theta_rows> tb_tt_values;
+                alignas(tensor::detail::simd_alignment) std::array<double, theta_rows> sin_tb_values;
+                alignas(tensor::detail::simd_alignment) std::array<double, theta_rows> cos_tb_values;
+
                 for (size_t j = 0; j < theta_rows; ++j)
                 {
-                    const double sin_t = GridType::sin_mtheta(1, j);
-                    const double cos_t = GridType::cos_mtheta(1, j);
-
                     double tb_ij    = GridType::theta[j] + c0_i;
                     double tb_r_ij  = c0_r_i;
                     double tb_t_ij  = 1.0;
@@ -381,8 +389,34 @@ namespace geometry::detail
                         );
                     }
 
-                    const double cos_tb_ij = math::cos(tb_ij);
-                    const double sin_tb_ij = math::sin(tb_ij);
+                    tb_values[j]    = tb_ij;
+                    tb_r_values[j]  = tb_r_ij;
+                    tb_t_values[j]  = tb_t_ij;
+                    tb_rr_values[j] = tb_rr_ij;
+                    tb_rt_values[j] = tb_rt_ij;
+                    tb_tt_values[j] = tb_tt_ij;
+                }
+
+#pragma clang loop vectorize(enable)
+                for (size_t j = 0; j < theta_rows; ++j)
+                {
+                    const double tb_ij = tb_values[j];
+                    cos_tb_values[j] = std::cos(tb_ij);
+                    sin_tb_values[j] = std::sin(tb_ij);
+                }
+
+                for (size_t j = 0; j < theta_rows; ++j)
+                {
+                    const double sin_t = GridType::sin_mtheta(1, j);
+                    const double cos_t = GridType::cos_mtheta(1, j);
+
+                    const double tb_r_ij  = tb_r_values[j];
+                    const double tb_t_ij  = tb_t_values[j];
+                    const double tb_rr_ij = tb_rr_values[j];
+                    const double tb_rt_ij = tb_rt_values[j];
+                    const double tb_tt_ij = tb_tt_values[j];
+                    const double cos_tb_ij = cos_tb_values[j];
+                    const double sin_tb_ij = sin_tb_values[j];
 
                     double R_ij = R0 + a * (h_i + rho_i * cos_tb_ij);
                     if (R_ij < 1.0e-6)

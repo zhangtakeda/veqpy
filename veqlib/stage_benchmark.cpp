@@ -187,6 +187,7 @@ namespace
         ProfilesAll,
         GeometryPhase,
         GeometryPhaseSincos,
+        GeometryPhaseSplitSincos,
         GeometryMetricNoStore,
         Geometry,
         SourceMaterialize,
@@ -284,6 +285,7 @@ namespace
     {
         Phase,
         PhaseSincos,
+        PhaseSplitSincos,
         MetricNoStore,
     };
 
@@ -451,56 +453,126 @@ namespace
             }
             else
             {
-                for (size_t j = 0; j < BenchGrid::theta_rows; ++j)
+                if constexpr (Mode == GeometryProbeMode::PhaseSplitSincos)
                 {
-                    double tb_ij    = BenchGrid::theta[j] + c0_i;
-                    double tb_r_ij  = c0_r_i;
-                    double tb_t_ij  = 1.0;
-                    double tb_rr_ij = c0_rr_i;
-                    double tb_rt_ij = 0.0;
-                    double tb_tt_ij = 0.0;
+                    alignas(tensor::detail::simd_alignment) std::array<double, BenchGrid::theta_rows> tb_values;
+                    alignas(tensor::detail::simd_alignment) std::array<double, BenchGrid::theta_rows> tb_r_values;
+                    alignas(tensor::detail::simd_alignment) std::array<double, BenchGrid::theta_rows> tb_t_values;
+                    alignas(tensor::detail::simd_alignment) std::array<double, BenchGrid::theta_rows> tb_rr_values;
+                    alignas(tensor::detail::simd_alignment) std::array<double, BenchGrid::theta_rows> tb_rt_values;
+                    alignas(tensor::detail::simd_alignment) std::array<double, BenchGrid::theta_rows> tb_tt_values;
 
-                    for (size_t order = 1; order < c_limit; ++order)
+                    for (size_t j = 0; j < BenchGrid::theta_rows; ++j)
                     {
-                        const double cos_kt    = BenchGrid::cos_mtheta(order, j);
-                        const double k_sin_kt  = BenchGrid::m_sin_mtheta(order, j);
-                        const double k2_cos_kt = BenchGrid::m2_cos_mtheta(order, j);
-                        const double c_i       = c_fields(order, profile_value);
-                        const double c_r_i     = c_fields(order, profile_radial);
-                        const double c_rr_i    = c_fields(order, profile_radial2);
+                        double tb_ij    = BenchGrid::theta[j] + c0_i;
+                        double tb_r_ij  = c0_r_i;
+                        double tb_t_ij  = 1.0;
+                        double tb_rr_ij = c0_rr_i;
+                        double tb_rt_ij = 0.0;
+                        double tb_tt_ij = 0.0;
 
-                        tb_ij += c_i * cos_kt;
-                        tb_r_ij += c_r_i * cos_kt;
-                        tb_t_ij -= c_i * k_sin_kt;
-                        tb_rr_ij += c_rr_i * cos_kt;
-                        tb_rt_ij -= c_r_i * k_sin_kt;
-                        tb_tt_ij -= c_i * k2_cos_kt;
+                        for (size_t order = 1; order < c_limit; ++order)
+                        {
+                            const double cos_kt    = BenchGrid::cos_mtheta(order, j);
+                            const double k_sin_kt  = BenchGrid::m_sin_mtheta(order, j);
+                            const double k2_cos_kt = BenchGrid::m2_cos_mtheta(order, j);
+                            const double c_i       = c_fields(order, profile_value);
+                            const double c_r_i     = c_fields(order, profile_radial);
+                            const double c_rr_i    = c_fields(order, profile_radial2);
+
+                            tb_ij += c_i * cos_kt;
+                            tb_r_ij += c_r_i * cos_kt;
+                            tb_t_ij -= c_i * k_sin_kt;
+                            tb_rr_ij += c_rr_i * cos_kt;
+                            tb_rt_ij -= c_r_i * k_sin_kt;
+                            tb_tt_ij -= c_i * k2_cos_kt;
+                        }
+
+                        for (size_t order = 1; order < s_limit; ++order)
+                        {
+                            const double sin_kt    = BenchGrid::sin_mtheta(order, j);
+                            const double k_cos_kt  = BenchGrid::m_cos_mtheta(order, j);
+                            const double k2_sin_kt = BenchGrid::m2_sin_mtheta(order, j);
+                            const double s_i       = s_fields(order, profile_value);
+                            const double s_r_i     = s_fields(order, profile_radial);
+                            const double s_rr_i    = s_fields(order, profile_radial2);
+
+                            tb_ij += s_i * sin_kt;
+                            tb_r_ij += s_r_i * sin_kt;
+                            tb_t_ij += s_i * k_cos_kt;
+                            tb_rr_ij += s_rr_i * sin_kt;
+                            tb_rt_ij += s_r_i * k_cos_kt;
+                            tb_tt_ij -= s_i * k2_sin_kt;
+                        }
+
+                        tb_values[j] = tb_ij;
+                        tb_r_values[j] = tb_r_ij;
+                        tb_t_values[j] = tb_t_ij;
+                        tb_rr_values[j] = tb_rr_ij;
+                        tb_rt_values[j] = tb_rt_ij;
+                        tb_tt_values[j] = tb_tt_ij;
                     }
 
-                    for (size_t order = 1; order < s_limit; ++order)
+#pragma clang loop vectorize(enable)
+                    for (size_t j = 0; j < BenchGrid::theta_rows; ++j)
                     {
-                        const double sin_kt    = BenchGrid::sin_mtheta(order, j);
-                        const double k_cos_kt  = BenchGrid::m_cos_mtheta(order, j);
-                        const double k2_sin_kt = BenchGrid::m2_sin_mtheta(order, j);
-                        const double s_i       = s_fields(order, profile_value);
-                        const double s_r_i     = s_fields(order, profile_radial);
-                        const double s_rr_i    = s_fields(order, profile_radial2);
-
-                        tb_ij += s_i * sin_kt;
-                        tb_r_ij += s_r_i * sin_kt;
-                        tb_t_ij += s_i * k_cos_kt;
-                        tb_rr_ij += s_rr_i * sin_kt;
-                        tb_rt_ij += s_r_i * k_cos_kt;
-                        tb_tt_ij -= s_i * k2_sin_kt;
+                        sink += std::sin(tb_values[j]) + std::cos(tb_values[j]) + tb_r_values[j] + tb_t_values[j] +
+                                tb_rr_values[j] + tb_rt_values[j] + tb_tt_values[j];
                     }
+                }
+                else
+                {
+                    for (size_t j = 0; j < BenchGrid::theta_rows; ++j)
+                    {
+                        double tb_ij    = BenchGrid::theta[j] + c0_i;
+                        double tb_r_ij  = c0_r_i;
+                        double tb_t_ij  = 1.0;
+                        double tb_rr_ij = c0_rr_i;
+                        double tb_rt_ij = 0.0;
+                        double tb_tt_ij = 0.0;
 
-                    if constexpr (Mode == GeometryProbeMode::Phase)
-                    {
-                        sink += tb_ij + tb_r_ij + tb_t_ij + tb_rr_ij + tb_rt_ij + tb_tt_ij;
-                    }
-                    else
-                    {
-                        sink += sin(tb_ij) + cos(tb_ij) + tb_r_ij + tb_t_ij + tb_rr_ij + tb_rt_ij + tb_tt_ij;
+                        for (size_t order = 1; order < c_limit; ++order)
+                        {
+                            const double cos_kt    = BenchGrid::cos_mtheta(order, j);
+                            const double k_sin_kt  = BenchGrid::m_sin_mtheta(order, j);
+                            const double k2_cos_kt = BenchGrid::m2_cos_mtheta(order, j);
+                            const double c_i       = c_fields(order, profile_value);
+                            const double c_r_i     = c_fields(order, profile_radial);
+                            const double c_rr_i    = c_fields(order, profile_radial2);
+
+                            tb_ij += c_i * cos_kt;
+                            tb_r_ij += c_r_i * cos_kt;
+                            tb_t_ij -= c_i * k_sin_kt;
+                            tb_rr_ij += c_rr_i * cos_kt;
+                            tb_rt_ij -= c_r_i * k_sin_kt;
+                            tb_tt_ij -= c_i * k2_cos_kt;
+                        }
+
+                        for (size_t order = 1; order < s_limit; ++order)
+                        {
+                            const double sin_kt    = BenchGrid::sin_mtheta(order, j);
+                            const double k_cos_kt  = BenchGrid::m_cos_mtheta(order, j);
+                            const double k2_sin_kt = BenchGrid::m2_sin_mtheta(order, j);
+                            const double s_i       = s_fields(order, profile_value);
+                            const double s_r_i     = s_fields(order, profile_radial);
+                            const double s_rr_i    = s_fields(order, profile_radial2);
+
+                            tb_ij += s_i * sin_kt;
+                            tb_r_ij += s_r_i * sin_kt;
+                            tb_t_ij += s_i * k_cos_kt;
+                            tb_rr_ij += s_rr_i * sin_kt;
+                            tb_rt_ij += s_r_i * k_cos_kt;
+                            tb_tt_ij -= s_i * k2_sin_kt;
+                        }
+
+                        if constexpr (Mode == GeometryProbeMode::Phase)
+                        {
+                            sink += tb_ij + tb_r_ij + tb_t_ij + tb_rr_ij + tb_rt_ij + tb_tt_ij;
+                        }
+                        else
+                        {
+                            sink += sin(tb_ij) + cos(tb_ij) + tb_r_ij + tb_t_ij + tb_rr_ij + tb_rt_ij + tb_tt_ij;
+                        }
                     }
                 }
             }
@@ -543,6 +615,10 @@ namespace
             break;
         case StageKind::GeometryPhaseSincos:
             run_geometry_probe<GeometryProbeMode::PhaseSincos>(op);
+            compiler_barrier(op.geometry.radial_fields.data());
+            break;
+        case StageKind::GeometryPhaseSplitSincos:
+            run_geometry_probe<GeometryProbeMode::PhaseSplitSincos>(op);
             compiler_barrier(op.geometry.radial_fields.data());
             break;
         case StageKind::GeometryMetricNoStore:
@@ -594,6 +670,8 @@ namespace
             return "geometry_phase";
         case StageKind::GeometryPhaseSincos:
             return "geometry_phase_sincos";
+        case StageKind::GeometryPhaseSplitSincos:
+            return "geometry_phase_split_sincos";
         case StageKind::GeometryMetricNoStore:
             return "geometry_metric_no_store";
         case StageKind::Geometry:
@@ -626,6 +704,8 @@ namespace
             return StageKind::GeometryPhase;
         if (value == "geometry_phase_sincos")
             return StageKind::GeometryPhaseSincos;
+        if (value == "geometry_phase_split_sincos")
+            return StageKind::GeometryPhaseSplitSincos;
         if (value == "geometry_metric_no_store")
             return StageKind::GeometryMetricNoStore;
         if (value == "geometry")
@@ -655,6 +735,7 @@ namespace
             StageKind::ProfilesAll,
             StageKind::GeometryPhase,
             StageKind::GeometryPhaseSincos,
+            StageKind::GeometryPhaseSplitSincos,
             StageKind::GeometryMetricNoStore,
             StageKind::Geometry,
             StageKind::SourceMaterialize,
@@ -691,8 +772,8 @@ namespace
             if (arg == "--help")
             {
                 std::cout << "usage: veqlib_stage_benchmark [--stage all|profiles_fixed|profiles_active|"
-                             "profiles_all|geometry_phase|geometry_phase_sincos|geometry_metric_no_store|"
-                             "geometry|source_materialize|source_update|residual_update|residual_pack|"
+                             "profiles_all|geometry_phase|geometry_phase_sincos|geometry_phase_split_sincos|"
+                             "geometry_metric_no_store|geometry|source_materialize|source_update|residual_update|residual_pack|"
                              "evaluate|evaluate_ring] [--repeat N] [--warmup N] "
                              "[--inner N] [--ring-size N]\n";
                 std::exit(0);
@@ -762,6 +843,7 @@ namespace
             break;
         case StageKind::GeometryPhase:
         case StageKind::GeometryPhaseSincos:
+        case StageKind::GeometryPhaseSplitSincos:
         case StageKind::GeometryMetricNoStore:
         case StageKind::Geometry:
             refresh_profiles(op, x);

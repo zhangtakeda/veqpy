@@ -103,6 +103,12 @@ matches the producer pattern that writes multiple fields at each radial/theta
 point. Kernel code should go through the logical accessor unless it is making a
 measured layout-local optimization.
 
+Geometry computes dynamic phase values and their radial/theta derivatives in a
+separate theta pass before evaluating `sin/cos(tb)` and metric quantities. The
+split keeps the transcendental call loop canonical and measurably faster than
+the earlier fully fused theta loop while preserving the same stored surface and
+radial fields.
+
 ## Grid and Calculus
 
 The public grid families currently exposed from `grid.h` are:
@@ -221,9 +227,9 @@ CMINPACK solve loop:
 ```
 
 Available stages are `profiles_fixed`, `profiles_active`, `profiles_all`,
-`geometry_phase`, `geometry_phase_sincos`, `geometry_metric_no_store`,
-`geometry`, `source_materialize`, `source_update`, `residual_update`,
-`residual_pack`, `evaluate`, and `evaluate_ring`. Each reported sample is
+`geometry_phase`, `geometry_phase_sincos`, `geometry_phase_split_sincos`,
+`geometry_metric_no_store`, `geometry`, `source_materialize`, `source_update`,
+`residual_update`, `residual_pack`, `evaluate`, and `evaluate_ring`. Each reported sample is
 nanoseconds per stage call after dividing by `--inner`. The `geometry_*` probe
 stages are benchmark-only cumulative approximations of phase synthesis, dynamic
 `sin/cos(tb)`, metric arithmetic, and full geometry; they are meant to locate the

@@ -581,6 +581,29 @@ loop。若继续做 vector trig，需要结构性拆分：先 materialize `tb[j]
 再用 canonical trig loop 调 vector libm，最后 metric loop 消费；这必须单独 A/B，
 因为额外数组 traffic 可能抵消 vector trig 收益。
 
+结构性 split-trig 已完成并保留：生产 `GeometryRuntime::update()` 现在在每个
+radial node 内分成三段 theta pass：
+
+```text
+phase synthesis -> canonical sin/cos(tb) loop -> metric/surface/radial accumulation
+```
+
+该结构不依赖 `-fveclib=libmvec` 即有稳定收益。默认 RELAXED build 用 9 组
+paired timing（`taskset -c 2`、`repeat=24`、`warmup=8`、`inner=10000`、
+`ring-size=16`）对比本阶段 baseline：
+
+| stage | median ratio | 结果 |
+| --- | ---: | --- |
+| `geometry` | 0.897 | 快约 10.3% |
+| `evaluate` | 0.908 | 快约 9.2% |
+| `evaluate_ring` | 0.925 | 快约 7.5% |
+
+sink diff 全部为 0，release CTest 和 PF validation 通过。`libmvec` build 下
+split 本身也有效（geometry ratio≈0.902），但 final `libmvec/normal` 对照显示
+`geometry≈1.021`、`evaluate≈0.988`、`evaluate_ring≈0.975`，收益小且混合；
+因此不把 `-fveclib=libmvec` 纳入默认构建。后续 vector trig 若继续推进，应在
+已有 split 结构上检查 assembly/PMU，而不是回到 fused loop 加 pragma。
+
 ### Phase 4：压缩 Geometry descriptor，减少 Residual 重算
 
 目标：layout 改动改善了九个 field 的访问方式，但没有删除九个二维 field 的写入/读取。下一步应审计能否存储 residual 直接需要的派生量，而不是继续换排列。
