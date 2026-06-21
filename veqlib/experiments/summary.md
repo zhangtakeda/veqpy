@@ -449,3 +449,14 @@ After the source exact-hit cleanup, a pinned `--stage all` run measured
 Geometry as the largest single bucket, but source update/materialization and
 residual update are now close enough that only endpoint-improving changes should
 be kept.
+
+A follow-up root-row copy elimination candidate was rejected. The patch made
+`update_psin_coordinate()` and the post-regularization `psin_r` normalization
+read directly from `source_target_root_fields` for matvec/dot work instead of
+first copying the root row into a `RadialVector`. Correctness passed release
+CTest and the PF Python/C++ comparison, and seven paired default-topology runs
+showed small apparent wins (`source_materialize`≈0.969, `source_update`≈0.990,
+`evaluate`≈0.988, `evaluate_ring`≈0.994). The full 45-topology `evaluate` matrix
+did not generalize: only 20/45 topologies improved, median ratio≈1.003 and
+range≈0.967--1.077. The candidate was reverted; do not keep root-row copy
+micro-tuning without stronger topology-wide or assembly/PMU evidence.

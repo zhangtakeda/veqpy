@@ -773,6 +773,15 @@ range≈0.876--1.027。小 `Nt` 改善最大，`Nt=64` 基本中性。保留该�
 | `evaluate` | 4756.6 | 100% |
 | `evaluate_ring` | 4805.8 | 101.0% |
 
+随后测试了一个更小的 root-row copy 消除候选：`update_psin_coordinate()` 和
+`psin_r` 归一化路径直接从 `source_target_root_fields` 做 matvec/dot，避免先复制
+成 `RadialVector`。correctness 通过 release CTest 和 PF comparator，但 7 组默认
+paired timing 只是小幅改善（`source_materialize≈0.969`、`source_update≈0.990`、
+`evaluate≈0.988`、`evaluate_ring≈0.994`），完整 45 topology `evaluate` matrix
+反而为 20/45 改善、median ratio≈1.003、range≈0.967--1.077。结论：回滚；
+这类 root-row copy 微调没有跨 topology 的端到端收益，后续不要在没有 assembly/PMU
+证据时继续追这个方向。
+
 目标：在 geometry/residual 结构性收益之后，再处理固定成本。
 
 建议动作：
