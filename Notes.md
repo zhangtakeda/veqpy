@@ -426,6 +426,14 @@ outer solver/validation 只从残差范数解释成功与否。
    - same-x warm benchmark
    - 16--64 个有效 solver state 的 ring benchmark
 
+进展：`veqlib_stage_benchmark` 已新增 `evaluate_ring` stage 和 `--ring-size`。
+当前实现使用 deterministic synthetic solver-state ring；它用于检查 x 变化时的
+callback traffic，不声称是真实 nonlinear solver trajectory。一次 release smoke
+结果：same-x `evaluate≈8115.7 ns/call`，`evaluate_ring` ring-size 16
+`≈8191.4 ns/call`，ratio≈1.009。
+
+未完成：topology matrix 仍未接入；当前 benchmark 仍是固定 `Nr=32, Nt=16, Mmax=1`。
+
 停止条件：确认 `[rho][field][theta]` 在默认 topology 是默认选择；对其它 topology 只声明“已测范围内”的结论，必要时保留 `GeometryLayoutPolicy<GridType>` 设计空间。
 
 ### Phase 2：拆分 Geometry micro-stage

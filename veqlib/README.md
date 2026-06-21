@@ -222,8 +222,11 @@ CMINPACK solve loop:
 
 Available stages are `profiles_fixed`, `profiles_active`, `profiles_all`,
 `geometry`, `source_materialize`, `source_update`, `residual_update`,
-`residual_pack`, and `evaluate`. Each reported sample is nanoseconds per stage
-call after dividing by `--inner`.
+`residual_pack`, `evaluate`, and `evaluate_ring`. Each reported sample is
+nanoseconds per stage call after dividing by `--inner`. `evaluate_ring` cycles
+through a deterministic synthetic solver-state ring controlled by `--ring-size`;
+use it to compare warm repeated callbacks against state-varying callback traffic,
+not as a real nonlinear-solver trajectory.
 
 ## Dependency Versions
 

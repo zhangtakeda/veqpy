@@ -168,6 +168,7 @@ namespace
         ResidualUpdate,
         ResidualPack,
         Evaluate,
+        EvaluateRing,
     };
 
     struct Options
@@ -176,6 +177,7 @@ namespace
         size_t      repeat = 30;
         size_t      warmup = 5;
         size_t      inner  = 1000;
+        size_t      ring_size = 16;
     };
 
     struct Stats
@@ -303,6 +305,10 @@ namespace
             op.evaluate(x, packed);
             compiler_barrier(packed.data());
             break;
+        case StageKind::EvaluateRing:
+            op.evaluate(x, packed);
+            compiler_barrier(packed.data());
+            break;
         }
     }
 
@@ -328,6 +334,8 @@ namespace
             return "residual_pack";
         case StageKind::Evaluate:
             return "evaluate";
+        case StageKind::EvaluateRing:
+            return "evaluate_ring";
         }
         return "unknown";
     }
@@ -352,6 +360,8 @@ namespace
             return StageKind::ResidualPack;
         if (value == "evaluate")
             return StageKind::Evaluate;
+        if (value == "evaluate_ring")
+            return StageKind::EvaluateRing;
         throw std::invalid_argument("unknown --stage: " + value);
     }
 
@@ -369,6 +379,7 @@ namespace
             StageKind::ResidualUpdate,
             StageKind::ResidualPack,
             StageKind::Evaluate,
+            StageKind::EvaluateRing,
         };
     }
 
@@ -398,7 +409,8 @@ namespace
             {
                 std::cout << "usage: veqlib_stage_benchmark [--stage all|profiles_fixed|profiles_active|"
                              "profiles_all|geometry|source_materialize|source_update|residual_update|"
-                             "residual_pack|evaluate] [--repeat N] [--warmup N] [--inner N]\n";
+                             "residual_pack|evaluate|evaluate_ring] [--repeat N] [--warmup N] "
+                             "[--inner N] [--ring-size N]\n";
                 std::exit(0);
             }
             if (i + 1 >= argc)
@@ -412,6 +424,8 @@ namespace
                 options.warmup = parse_size_arg(arg, value, true);
             else if (arg == "--inner")
                 options.inner = parse_size_arg(arg, value, false);
+            else if (arg == "--ring-size")
+                options.ring_size = parse_size_arg(arg, value, false);
             else
                 throw std::invalid_argument("unknown argument: " + arg);
         }
@@ -480,7 +494,24 @@ namespace
             break;
         case StageKind::Evaluate:
             break;
+        case StageKind::EvaluateRing:
+            break;
         }
+    }
+
+    std::vector<std::array<double, BenchShape::x_size>> make_state_ring(size_t ring_size)
+    {
+        std::vector<std::array<double, BenchShape::x_size>> states(ring_size);
+        for (size_t state = 0; state < ring_size; ++state)
+        {
+            const double phase = static_cast<double>(state + 1) / static_cast<double>(ring_size);
+            for (size_t i = 0; i < BenchShape::x_size; ++i)
+            {
+                const double mode = static_cast<double>((i % 5) + 1);
+                states[state][i] = 0.02 * std::sin(mode * phase) + 0.01 * std::cos(mode + phase);
+            }
+        }
+        return states;
     }
 
     nlohmann::json run_benchmark(StageKind stage, const Options& options)
@@ -488,6 +519,7 @@ namespace
         auto op = std::make_unique<BenchOperator>();
         configure_operator(*op);
         std::array<double, BenchShape::x_size> x{};
+        auto                                  state_ring = make_state_ring(options.ring_size);
         PackedVector                           packed{};
         const auto                             x_values = x_span(x);
 
@@ -495,7 +527,12 @@ namespace
 
         for (size_t sample = 0; sample < options.warmup; ++sample)
             for (size_t i = 0; i < options.inner; ++i)
-                run_stage_once(stage, *op, x_values, packed);
+            {
+                const auto input = stage == StageKind::EvaluateRing
+                    ? x_span(state_ring[(sample * options.inner + i) % state_ring.size()])
+                    : x_values;
+                run_stage_once(stage, *op, input, packed);
+            }
 
         std::vector<double> samples;
         samples.reserve(options.repeat);
@@ -504,7 +541,12 @@ namespace
         {
             const auto start = clock::now();
             for (size_t i = 0; i < options.inner; ++i)
-                run_stage_once(stage, *op, x_values, packed);
+            {
+                const auto input = stage == StageKind::EvaluateRing
+                    ? x_span(state_ring[(sample * options.inner + i) % state_ring.size()])
+                    : x_values;
+                run_stage_once(stage, *op, input, packed);
+            }
             const auto                                     stop    = clock::now();
             const std::chrono::duration<double, std::nano> elapsed = stop - start;
             samples.push_back(elapsed.count() / static_cast<double>(options.inner));
@@ -518,6 +560,7 @@ namespace
             {"repeat", options.repeat},
             {"warmup", options.warmup},
             {"inner", options.inner},
+            {"ring_size", stage == StageKind::EvaluateRing ? options.ring_size : size_t{1}},
             {"calls", options.repeat * options.inner},
             {"avg_ns", stats.avg_ns},
             {"min_ns", stats.min_ns},

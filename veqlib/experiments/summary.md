@@ -212,6 +212,14 @@ Reject the simple fusion shape: it removes slab traffic but replaces vectorized
 rowwise passes with scalar accumulation dependency chains. Any future fusion
 should start with a vector-friendly or blocked moment design.
 
+State-ring benchmark support was added to `veqlib_stage_benchmark` as an
+`evaluate_ring` stage with `--ring-size`. It keeps the original same-x
+`evaluate` stage unchanged and cycles a deterministic synthetic x-sequence only
+for the ring stage. Release smoke timing with `repeat=10`, `warmup=4`,
+`inner=5000`, `ring-size=16` observed same-x `evaluate=8115.7 ns/call` and
+`evaluate_ring=8191.4 ns/call` (`ring/evaluate=1.009`). Treat this as an input
+state-variation harness, not a real solver trajectory.
+
 Phase 1a RELAXED validation and timing (three same-window runs; per-run
 `taskset -c 2`, `repeat=25`, `warmup=8`, `inner=10000`; table uses the
 median of per-run medians):
