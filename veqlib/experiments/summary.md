@@ -510,3 +510,13 @@ improved, median ratio≈0.992, range≈0.859--1.054. The candidate was reverted
 because, with only one active `G` consumer in the current PF/psin/uniform/Ip
 shape, it mostly moves a vector-friendly rowwise sum into the pointwise update
 dependency chain instead of removing robust endpoint work.
+
+
+A `regularize_psin_r()` pass-fusion candidate was rejected. It combined the
+axis-fix rewrite with the `1e-10` floor clamp so the axis segment would not be
+written and then revisited by the full clamp pass. Correctness passed release
+CTest and the PF Python/C++ comparator (`max_abs≈7.66e-10`). Default paired
+timing did not support retention: `source_materialize` median ratio≈0.992,
+`source_update`≈0.999, `evaluate`≈1.008, and `evaluate_ring`≈1.002. The patch was
+reverted because the default `fix_rho` touches very few radial nodes, so the
+minor write saving is outweighed by branch/code-shape noise.

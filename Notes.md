@@ -822,6 +822,13 @@ ratio≈0.992、range≈0.859--1.054。结论：回滚；当前只有一个 acti
 consumer 时，这相当于把一次 vector-friendly rowwise sum 搬进 pointwise update
 依赖链，并没有稳定删除端到端工作。
 
+又测试了 `regularize_psin_r()` pass 融合：把 axis-fix 前段修正与
+`1e-10` floor clamp 合并，避免先写 axis 区再全量重扫同一区间。release CTest
+和 PF comparator 通过（`max_abs≈7.66e-10`），但默认 9 组 paired timing 不支持
+保留：`source_materialize` median ratio≈0.992，`source_update`≈0.999，
+`evaluate`≈1.008，`evaluate_ring`≈1.002。结论：回滚；当前默认 `fix_rho`
+只影响很少 radial node，融合带来的少量写入节省抵不过分支/代码形状扰动。
+
 目标：在 geometry/residual 结构性收益之后，再处理固定成本。
 
 建议动作：
