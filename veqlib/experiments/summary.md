@@ -361,3 +361,4 @@ Phase 2 first geometry micro-results:
 | --- | --- | --- |
 | Reuse `inv_JR` for `JdivR = J*J/(J*R)` | 5 paired runs: median `geometry` ratio≈0.992, `evaluate` ratio≈0.990, but evaluate had reverse runs (`1.031`, `1.009`) | reject; too small/noisy |
 | Hoist harmonic profile reads from theta loop to rho loop | 5 paired runs: median `geometry` ratio≈0.984, `evaluate` ratio≈0.993; all evaluate pairs improved | keep; small but stable low-risk gain |
+| Explicit per-rho arithmetic hoist (`a*rho`, `a*h`, `k+rho*k_r`) | 9 paired runs: `geometry` median ratio≈1.000, `evaluate`≈1.008, `evaluate_ring`≈0.990; sinks matched | reject; compiler already handles this class of invariants and same-x evaluate regressed |
