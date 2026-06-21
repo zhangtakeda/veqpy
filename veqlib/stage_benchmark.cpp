@@ -408,8 +408,7 @@ namespace
                 for (size_t j = 0; j < BenchGrid::theta_rows; ++j)
                 {
                     const double tb_ij = tb_values[j];
-                    cos_tb_values[j] = std::cos(tb_ij);
-                    sin_tb_values[j] = std::sin(tb_ij);
+                    geometry::detail::reduced_taylor_sincos(tb_ij, sin_tb_values[j], cos_tb_values[j]);
                 }
 
                 for (size_t j = 0; j < BenchGrid::theta_rows; ++j)
@@ -548,8 +547,11 @@ namespace
 #pragma clang loop vectorize(enable)
                     for (size_t j = 0; j < BenchGrid::theta_rows; ++j)
                     {
-                        sink += std::sin(tb_values[j]) + std::cos(tb_values[j]) + tb_r_values[j] + tb_t_values[j] +
-                                tb_rr_values[j] + tb_rt_values[j] + tb_tt_values[j];
+                        double sin_tb = 0.0;
+                        double cos_tb = 0.0;
+                        geometry::detail::reduced_taylor_sincos(tb_values[j], sin_tb, cos_tb);
+                        sink += sin_tb + cos_tb + tb_r_values[j] + tb_t_values[j] + tb_rr_values[j] + tb_rt_values[j] +
+                                tb_tt_values[j];
                     }
                 }
                 else

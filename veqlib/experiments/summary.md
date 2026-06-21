@@ -99,6 +99,7 @@ end-to-end timing neutral-to-slightly-positive.
 | Skip absent Fourier orders in `GeometryRuntime::update` | `geometry` 0.988 | 1.001 | reject; stage-only clue below decision threshold |
 | Hoist repeated residual geometry loads | `residual_update` 0.974 | 0.996 | reject; end-to-end effect too small |
 | Explicit glibc `sincos` path | `geometry` 2.386 | 1.835 | reject; severe regression |
+| Reduced-Taylor dynamic `sincos(tb)` after split-trig | final full matrix: `geometry` 0.443 median, 45/45 improved | full matrix `evaluate` 0.609 median, 45/45 improved | keep; large RELAXED-only gain with PF Python/C++ max_abs≈5.578e-11 |
 | Residual surface physical layout `[rho][field][theta]` | re-test: `residual_update` 0.931; `residual_pack` 1.004 | 0.994 | retain; semantic layout alignment, no significant end-to-end regression |
 | Residual theta-moment fusion | active-only `residual_fused / (update+pack)` 1.090; naive 1.166 | active-only 1.007; naive 1.021 | reject; scalar moment accumulation lost to materialized update + vectorized rowwise pack |
 | Geometry residual-ready descriptor compression | `residual_update` 0.809, but `geometry` 1.021 | `evaluate` 1.004; `evaluate_ring` 1.008 | reject; moved arithmetic into dominant geometry stage without end-to-end gain |
@@ -368,6 +369,18 @@ against the pre-split baseline measured `geometry=0.897`, `evaluate=0.908`, and
 justify changing default flags: final `libmvec/normal` was `geometry=1.021`,
 `evaluate=0.988`, and `evaluate_ring=0.975`.
 
+The split structure then enabled a much larger RELAXED-only dynamic trig change:
+Geometry now uses a domain-specific reduced-Taylor `sincos(tb)` backend. It
+reduces `tb` to the nearest `pi/2` quadrant (`|r|<=pi/4`), evaluates high-order
+Taylor polynomials for `sin(r)` and `cos(r)`, and restores the quadrant with
+branchless selects. A first branchy version already improved default Geometry
+but emitted LTO "loop contains a switch statement" vectorization warnings; the
+branchless quadrant mapping removed those warnings and is the retained form.
+Release/debug CTest and PF Python/C++ comparison passed (`max_abs≈5.578e-11`,
+worst field `final.x`). Five paired RELAXED default-topology runs measured
+`geometry_phase_split_sincos≈0.253`, `geometry≈0.424`, `evaluate≈0.643`, and
+`evaluate_ring≈0.635` against the pre-polynomial split baseline.
+
 The post-adoption full topology matrix also supports keeping split-trig. Using
 the same 45-entry full preset as the pre-split pinned matrix
 (`Nr={16,32,64}`, `Nt={8,16,24,32,64}`, `Mmax={1,4,8}`, `taskset -c 2`,
@@ -377,17 +390,24 @@ the same 45-entry full preset as the pre-split pinned matrix
 the median `evaluate` ratios were 0.948, 0.929, 0.918, 0.925, and 0.945 for
 `Nt=8,16,24,32,64`, respectively.
 
-After split-trig, residual local-hoisting, and the post-split metric-probe fix,
-the default-stage table was remeasured once with `--stage all` (`taskset -c 2`,
-`repeat=15`, `warmup=5`, `inner=10000`, `ring-size=16`). `evaluate` is now
-7794.5 ns/call; `geometry` is 4532.1 ns/call (58.1%), `source_materialize`
-888.5 (11.4%), `source_update` 812.3 (10.4%), `residual_update` 803.4 (10.3%),
-and `residual_pack` 134.9 (1.7%). `evaluate_ring` was 7723.5 ns/call. The
-corrected `geometry_metric_no_store` probe now mirrors the production split
-shape while omitting the nine surface-field writes; it measured 4508.9 ns/call,
-so `geometry - geometry_metric_no_store≈23 ns` is only a surface-output proxy,
-not a hardware store counter. The largest bucket remains dynamic `sin/cos(tb)`:
-`geometry_phase_split_sincos` measured 3576.1 ns/call.
+The final branchless reduced-Taylor topology matrix is stronger: against the
+post-split baseline, all 45 measured topologies improved again. `geometry`
+median ratio was 0.443 (range 0.379--0.537, 45/45 improved) and `evaluate`
+median ratio was 0.609 (range 0.504--0.756, 45/45 improved). By `Nt`, median
+`evaluate` ratios were 0.737, 0.662, 0.578, 0.583, and 0.541 for
+`Nt=8,16,24,32,64`, respectively.
+
+After split-trig, reduced-Taylor sincos, residual local-hoisting, and the
+post-split metric-probe fix, the default-stage table was remeasured once with
+`--stage all` (`taskset -c 2`, `repeat=15`, `warmup=5`, `inner=10000`,
+`ring-size=16`). `evaluate` is now 4850.9 ns/call; `geometry` is 1911.9 ns/call
+(39.4%), `source_materialize` 896.4 (18.5%), `source_update` 818.6 (16.9%),
+`residual_update` 797.1 (16.4%), and `residual_pack` 133.4 (2.8%).
+`evaluate_ring` was 4875.5 ns/call. The corrected `geometry_metric_no_store`
+probe measured 1921.5 ns/call and still only acts as a surface-output proxy;
+the old scalar-libm reference probe `geometry_phase_sincos` remains 3767.5
+ns/call, while the retained split reduced-Taylor bucket
+`geometry_phase_split_sincos` is 920.4 ns/call.
 
 Phase 2 first geometry micro-results:
 

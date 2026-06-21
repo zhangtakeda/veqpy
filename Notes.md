@@ -77,8 +77,7 @@ Phase 1a 的 RELAXED stage 表（三轮同窗口；每轮 `taskset -c 2`、`repe
 4.3%。随后已完成 `evaluate_ring`、topology-matrix 基础设施，以及 Geometry
 micro-stage probe；完整 45-entry pinned topology matrix 已完成。
 
-Geometry micro-stage probe 的当前 RELAXED 结果（`taskset -c 2`、`repeat=15`、
-`warmup=5`、`inner=10000`）：
+Geometry micro-stage probe 在引入 split/reduced-Taylor 之前的 RELAXED 排序曾显示：
 
 | probe | median ns/call | incremental bucket |
 | --- | ---: | ---: |
@@ -89,9 +88,8 @@ Geometry micro-stage probe 的当前 RELAXED 结果（`taskset -c 2`、`repeat=1
 
 注意：这些 probe 是 benchmark-only cumulative 近似，用于判断热点桶；
 `geometry - geometry_metric_no_store` 不是 PMU store counter，也不是生产
-kernel 拆分。结论是 dynamic `sin/cos(tb)` 是默认 topology 下最大剩余
-Geometry 桶，约占 production `geometry` 的 64%，下一步优先做 vector/
-approximate dynamic trig backend A/B。
+kernel 拆分。该结果促成了后续 split-trig 和 reduced-Taylor dynamic sincos；
+最新 stage 表见 Phase 3，当前最大相对占比已转向 source/residual/metric。
 
 Phase 2 首轮 micro A/B：
 
@@ -106,6 +104,7 @@ Phase 2 首轮 micro A/B：
 | Geometry absent Fourier order static skip（仅 `harmonic_rows>2`） | 默认 `32x16x1` geometry 基本中性（短 all-stage median≈0.998，长 geometry-only median≈1.006）；`32x16x4` geometry-only median ratio≈0.925；`32x16x8` geometry-only median ratio≈0.808 | 保留；默认 topology 走原始 loop，高 `Mmax` 跳过 absent c-family order，stage sink 与 baseline 一致 |
 | 去掉 `Pn_psin` 独立 array，改由 `materialized_heat_input` 作为同义源 | 7 组 paired：`source_update` median ratio≈1.008，`residual_update`≈1.003，`evaluate`≈0.993 但正负混合，`evaluate_ring`≈0.998；sink diff=0 | 回滚；减少一个重复 buffer 的语义方向可行，但当前代码形状没有稳定端到端收益 |
 | 去掉 `source_psin_query/source_parameter_query` 两个同义 array，插值直接读 root `psin` | 首轮 7 组：`source_materialize`≈1.002，`evaluate`≈0.973 但 `evaluate_ring`≈1.015；追加 11 组长跑：`evaluate`≈0.997，`evaluate_ring`≈1.004；sink diff=0 | 回滚；删除重复 query buffer 未形成稳定收益，且 state-ring 口径不支持保留 |
+| Geometry reduced-Taylor dynamic `sincos(tb)` | 默认 5 组 paired：`geometry_phase_split_sincos`≈0.253，`geometry`≈0.424，`evaluate`≈0.643；full matrix 45/45 改善，`evaluate` median≈0.609 | 保留；这是 split 后最大的单项收益，需继续用 Python/C++ comparator 锁误差 |
 
 Residual layout 本轮的逐项中位数：baseline `residual_update≈912.2 ns`、candidate
 `≈846.1 ns`；baseline `evaluate≈8288.7 ns`、candidate `≈8230.4 ns`。
@@ -604,6 +603,26 @@ split 本身也有效（geometry ratio≈0.902），但 final `libmvec/normal` �
 因此不把 `-fveclib=libmvec` 纳入默认构建。后续 vector trig 若继续推进，应在
 已有 split 结构上检查 assembly/PMU，而不是回到 fused loop 加 pragma。
 
+在 split 结构稳定后，采用了一个 RELAXED-only 的 domain-specific dynamic
+`sincos(tb)` backend：`tb` 先按最近的 `pi/2` 做象限规约，使余量落在
+`|r|<=pi/4`，再用高阶 Taylor polynomial 同时近似 `sin(r)` 和 `cos(r)`，
+最后用无分支 quadrant mapping 还原符号和交换关系。显式分支版虽已明显更快，
+但 LTO 提示 switch 阻塞向量化；无分支版消除了该 warning 并进一步提速。
+验证结果：
+
+- release/debug CTest 通过，PF Python/C++ comparator 通过，
+  `max_abs≈5.578e-11`（worst field: `final.x`）。
+- 默认 topology 5 组 paired RELAXED A/B：
+  `geometry_phase_split_sincos` median ratio≈0.253，`geometry`≈0.424，
+  `evaluate`≈0.643，`evaluate_ring`≈0.635。
+- full topology matrix（45 点，同上 `Nr/Nt/Mmax`；`repeat=6`、`warmup=3`、
+  `inner=4000`）显示 45/45 改善：`geometry` median ratio≈0.443
+  （range 0.379--0.537），`evaluate` median ratio≈0.609
+  （range 0.504--0.756）。
+
+这是目前最大的单项收益；后续如要继续提高 trig backend，应先检查生成汇编和
+是否真正 vectorize，而不是退回 libmvec flag-only 路径。
+
 采用后又按 full topology matrix 复测（45 点：`Nr={16,32,64}`、
 `Nt={8,16,24,32,64}`、`Mmax={1,4,8}`；`taskset -c 2`、`repeat=6`、
 `warmup=3`、`inner=4000`；pre-split JSON 为 `/tmp/veqlib_full_matrix_*_pinned.json`，
@@ -620,31 +639,32 @@ topology 的 `geometry` 和 `evaluate` 都改善：
 不是默认 `32x16x1` resonance，而是在已测 full matrix 内稳定改善；较大 `Nt`
 的 `geometry` ratio 仍改善，但端到端收益会被其它固定/投影成本稀释。
 
-split 后默认 topology 的最新 stage 表已在 residual local-hoist 和
-post-split metric probe 修正后重测（单次 pinned `--stage all`，`repeat=15`、
-`warmup=5`、`inner=10000`、`ring-size=16`，原始 JSON
-`/tmp/veqlib_stage_all_metric_probe_split.json`）：
+采用 reduced-Taylor dynamic sincos 后，默认 topology 的最新 stage 表如下
+（单次 pinned `--stage all`，`repeat=15`、`warmup=5`、`inner=10000`、
+`ring-size=16`，原始 JSON `/tmp/veqlib_stage_all_branchless_poly.json`）：
 
 | stage | ns/call | `evaluate` share |
 | --- | ---: | ---: |
-| `profiles_all` | 130.8 | 1.7% |
-| `geometry_phase` | 510.2 | 6.5% |
-| `geometry_phase_sincos` | 3715.6 | 47.7% |
-| `geometry_phase_split_sincos` | 3576.1 | 45.9% |
-| `geometry_metric_no_store` | 4508.9 | 57.8% |
-| `geometry` | 4532.1 | 58.1% |
-| `source_materialize` | 888.5 | 11.4% |
-| `source_update` | 812.3 | 10.4% |
-| `residual_update` | 803.4 | 10.3% |
-| `residual_pack` | 134.9 | 1.7% |
-| `evaluate` | 7794.5 | 100% |
-| `evaluate_ring` | 7723.5 | 99.1% |
+| `profiles_all` | 125.1 | 2.6% |
+| `geometry_phase` | 499.9 | 10.3% |
+| `geometry_phase_sincos` | 3767.5 | 77.7% |
+| `geometry_phase_split_sincos` | 920.4 | 19.0% |
+| `geometry_metric_no_store` | 1921.5 | 39.6% |
+| `geometry` | 1911.9 | 39.4% |
+| `source_materialize` | 896.4 | 18.5% |
+| `source_update` | 818.6 | 16.9% |
+| `residual_update` | 797.1 | 16.4% |
+| `residual_pack` | 133.4 | 2.8% |
+| `evaluate` | 4850.9 | 100% |
+| `evaluate_ring` | 4875.5 | 100.5% |
 
 `geometry_metric_no_store` 现在已改成与 production split 结构一致的
 phase-materialize / sin-cos / metric accumulation probe，只省掉九个 surface
 field 写入；因此 `geometry - geometry_metric_no_store≈23 ns` 只能作为
-surface-output proxy，不能解释为硬件 store counter。新的排序仍然显示：
-动态 `sin/cos(tb)` 是最大 bucket，Geometry 总体仍约占 `evaluate` 的 58%。
+surface-output proxy，不能解释为硬件 store counter。新的排序显示：Geometry
+已经从约 58% 降到约 39%，source materialize/update 与 residual_update 的相对
+占比上升；`geometry_phase_sincos` 仍保留 scalar-libm fused reference，用来说明
+reduced-Taylor split backend 的差距。
 
 ### Phase 4：压缩 Geometry descriptor，减少 Residual 重算
 

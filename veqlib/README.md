@@ -104,10 +104,12 @@ point. Kernel code should go through the logical accessor unless it is making a
 measured layout-local optimization.
 
 Geometry computes dynamic phase values and their radial/theta derivatives in a
-separate theta pass before evaluating `sin/cos(tb)` and metric quantities. The
-split keeps the transcendental call loop canonical and measurably faster than
-the earlier fully fused theta loop while preserving the same stored surface and
-radial fields.
+separate theta pass before evaluating dynamic `sincos(tb)` and metric
+quantities. In the default RELAXED kernel, that dynamic trig backend reduces
+`tb` to the nearest `pi/2` quadrant and uses high-order Taylor polynomials on
+`|r|<=pi/4`, followed by branchless quadrant reconstruction. This is validated
+against the Python reference and is part of the performance kernel contract; use
+`STRICT`/`FMA` builds when establishing error budgets for future math backends.
 
 ## Grid and Calculus
 
@@ -339,7 +341,10 @@ The default `RELAXED` FP mode adds:
 correctness is locked. It relaxes IEEE floating-point edge-case behavior,
 including NaN/inf propagation, trapping, signed zero, errno, and operation
 reassociation. Use `STRICT` and `FMA` builds to define correctness and error
-budgets before comparing approximate or vector math kernels.
+budgets before comparing approximate or vector math kernels. The current
+Geometry RELAXED backend already uses a validated reduced-Taylor approximation
+for dynamic `sincos(tb)`; do not silently replace it with scalar libm or a
+different vector backend without paired timing and Python/C++ error evidence.
 
 VEQlib route kernels deliberately do not make solve-success decisions.
 `math::is_finite()` is a bit-level NaN/inf helper for diagnostics and tests,

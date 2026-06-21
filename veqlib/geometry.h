@@ -5,7 +5,6 @@
 #include "tensor.h"
 #include <array>
 #include <cstddef>
-#include <cmath>
 #include <utility>
 
 namespace geometry::detail
@@ -16,6 +15,47 @@ namespace geometry::detail
     using tensor::uninitialized;
 
     inline constexpr double pi = 3.141592653589793238462643383279502884;
+    inline constexpr double half_pi = 0.5 * pi;
+
+    // RELAXED hot-path backend for dynamic tb: reduce to |r|<=pi/4, then use
+    // high-order Taylor polynomials validated against the Python reference.
+    inline void reduced_taylor_sincos(double value, double& sin_value, double& cos_value) noexcept
+    {
+        constexpr double inv_half_pi = 2.0 / pi;
+        const double     scaled      = value * inv_half_pi;
+        const int        quadrant_index =
+            static_cast<int>(scaled + (scaled >= 0.0 ? 0.5 : -0.5));
+        const double     q              = static_cast<double>(quadrant_index);
+        const double     reduced        = value - q * half_pi;
+        const double     r2             = reduced * reduced;
+
+        double sin_poly = -1.0 / 1307674368000.0;
+        sin_poly = sin_poly * r2 + 1.0 / 6227020800.0;
+        sin_poly = sin_poly * r2 - 1.0 / 39916800.0;
+        sin_poly = sin_poly * r2 + 1.0 / 362880.0;
+        sin_poly = sin_poly * r2 - 1.0 / 5040.0;
+        sin_poly = sin_poly * r2 + 1.0 / 120.0;
+        sin_poly = sin_poly * r2 - 1.0 / 6.0;
+        sin_poly = sin_poly * r2 + 1.0;
+        const double sin_reduced = reduced * sin_poly;
+
+        double cos_poly = -1.0 / 87178291200.0;
+        cos_poly = cos_poly * r2 + 1.0 / 479001600.0;
+        cos_poly = cos_poly * r2 - 1.0 / 3628800.0;
+        cos_poly = cos_poly * r2 + 1.0 / 40320.0;
+        cos_poly = cos_poly * r2 - 1.0 / 720.0;
+        cos_poly = cos_poly * r2 + 1.0 / 24.0;
+        cos_poly = cos_poly * r2 - 1.0 / 2.0;
+        const double cos_reduced = cos_poly * r2 + 1.0;
+
+        const unsigned quadrant = static_cast<unsigned>(quadrant_index) & 3U;
+        const bool     odd      = (quadrant & 1U) != 0U;
+        const double   sin_base = odd ? cos_reduced : sin_reduced;
+        const double   cos_base = odd ? sin_reduced : cos_reduced;
+
+        sin_value = quadrant < 2U ? sin_base : -sin_base;
+        cos_value = quadrant == 0U || quadrant == 3U ? cos_base : -cos_base;
+    }
 
     inline constexpr size_t surface_sin_tb       = 0;
     inline constexpr size_t surface_R            = 1;
@@ -401,8 +441,7 @@ namespace geometry::detail
                 for (size_t j = 0; j < theta_rows; ++j)
                 {
                     const double tb_ij = tb_values[j];
-                    cos_tb_values[j] = std::cos(tb_ij);
-                    sin_tb_values[j] = std::sin(tb_ij);
+                    reduced_taylor_sincos(tb_ij, sin_tb_values[j], cos_tb_values[j]);
                 }
 
                 for (size_t j = 0; j < theta_rows; ++j)
