@@ -596,3 +596,39 @@ After retaining source sign-normalization dot fusion, the now-unused
 `weighted_profile_sign()` helper was removed so future changes do not accidentally
 reintroduce the independent sign scan. This cleanup does not alter the hot path;
 release/debug CTest and the RELAXED PF comparator passed.
+
+## Close-out for the remaining-candidates pass on 2026-06-21
+
+The final adopted change from this pass is the source sign-normalization dot
+fusion, followed by deletion of the now-unused `weighted_profile_sign()` helper.
+The retained performance evidence is: default paired `source_update` median
+ratio≈0.977, `evaluate`≈0.995, `evaluate_ring`≈0.984; the 45-topology
+`evaluate` matrix had median ratio≈0.995; and paired retests of the apparent
+worst topologies did not show a strong regression.
+
+Rejected in this pass: geometry theta-loop vectorization pragmas
+(`evaluate`≈1.015 on the longer retest), residual `UnitWeights` marker
+(`residual_pack`≈1.063, endpoint regressed), and geometry surface row padding
+(`geometry`≈2.33--2.35, endpoint≈1.54--1.59 in the first paired rounds). These
+join the earlier rejected source/residual micro-candidates and should not be
+retested without new assembly, compiler-version, or native-PMU evidence.
+
+Final code baseline before this close-out documentation commit (`3bf2fe9`) stage-all smoke, measured with `taskset -c 2`,
+`repeat=15`, `warmup=5`, `inner=10000`, `ring-size=16`:
+
+| stage | median ns/call |
+| --- | ---: |
+| `profiles_all` | 125.7 |
+| `geometry` | 1818.9 |
+| `source_materialize` | 773.1 |
+| `source_update` | 816.1 |
+| `residual_update` | 798.4 |
+| `residual_pack` | 136.8 |
+| `evaluate` | 4682.3 |
+| `evaluate_ring` | 4858.8 |
+
+Final verification for the close-out: release/debug CTest passed and the RELAXED
+PF Python/C++ comparator passed with `max_abs≈7.66e-10`. Remaining larger work
+is outside this micro-candidate pass: native-PMU mechanism validation, a
+deliberate external/vector math backend evaluation, and any broader Python/Numba
+route-specialization work should be started as separate scoped phases.

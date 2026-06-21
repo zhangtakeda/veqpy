@@ -885,6 +885,40 @@ PF comparator 通过，但默认 paired timing 第 1--3 组已经严重回归：
 `weighted_profile_sign()`，避免后续误把 sign 判定重新拆成独立 hot pass。该清理不改变
 性能路径，release/debug CTest 与 PF comparator 通过。
 
+### 本轮收尾总表（2026-06-21）
+
+最终代码基线在收尾文档提交前为 `3bf2fe9`。本轮实际采用：
+
+| 项目 | 采用理由 |
+| --- | --- |
+| `source_update` sign-normalization dot fusion | 删除一次独立 `psin_r` weighted sign 扫描；默认 paired `source_update≈0.977`、`evaluate≈0.995`、`evaluate_ring≈0.984`，worst topology paired 复测未见强回归 |
+| 删除 `weighted_profile_sign()` 死 helper | 避免后续把 sign 判定重新拆成 hot-path pass；无性能路径改变 |
+
+本轮拒绝：
+
+| 项目 | 拒绝依据 |
+| --- | --- |
+| Geometry theta-loop vectorization pragmas | 长 paired `evaluate≈1.015`、`evaluate_ring≈1.002`，且 `geometry≈0.998` 无实际 stage 收益 |
+| Residual pack `UnitWeights` marker | `residual_pack≈1.063`、`evaluate≈1.006`、`evaluate_ring≈1.007` 回归 |
+| Geometry surface row padding | 默认 early paired 已严重回归：`geometry≈2.33--2.35`、`evaluate≈1.54--1.59` |
+
+最终 `RELAXED` stage-all smoke（`taskset -c 2`、`repeat=15`、`warmup=5`、
+`inner=10000`、`ring-size=16`）：
+
+| stage | median ns/call |
+| --- | ---: |
+| `profiles_all` | 125.7 |
+| `geometry` | 1818.9 |
+| `source_materialize` | 773.1 |
+| `source_update` | 816.1 |
+| `residual_update` | 798.4 |
+| `residual_pack` | 136.8 |
+| `evaluate` | 4682.3 |
+| `evaluate_ring` | 4858.8 |
+
+最终验证：release/debug CTest 均 3/3 passed；RELAXED PF Python/C++ comparator
+passed，`max_abs≈7.66e-10`。
+
 目标：在 geometry/residual 结构性收益之后，再处理固定成本。
 
 建议动作：
