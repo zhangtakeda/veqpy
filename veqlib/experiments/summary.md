@@ -210,3 +210,10 @@ Compared with the previous RELAXED baseline (`evaluate=8907.0 ns/call`,
 `evaluate` by about 4.3%. Geometry remains the dominant hotspot, so Phase 1b/2
 should add the topology/state matrix and decompose geometry before attempting
 more source micro-optimizations.
+
+Phase 2 first geometry micro-results:
+
+| Candidate | Paired result | Decision |
+| --- | --- | --- |
+| Reuse `inv_JR` for `JdivR = J*J/(J*R)` | 5 paired runs: median `geometry` ratio≈0.992, `evaluate` ratio≈0.990, but evaluate had reverse runs (`1.031`, `1.009`) | reject; too small/noisy |
+| Hoist harmonic profile reads from theta loop to rho loop | 5 paired runs: median `geometry` ratio≈0.984, `evaluate` ratio≈0.993; all evaluate pairs improved | keep; small but stable low-risk gain |

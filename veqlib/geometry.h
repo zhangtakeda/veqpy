@@ -10,6 +10,7 @@ namespace geometry::detail
     using std::size_t;
     using tensor::Matrix;
     using tensor::Tensor;
+    using tensor::uninitialized;
 
     inline constexpr double pi = 3.141592653589793238462643383279502884;
 
@@ -105,6 +106,21 @@ namespace geometry::detail
                 const double c0_r_i  = runtime_profiles.c_family_fields(0, i, profile_radial);
                 const double c0_rr_i = runtime_profiles.c_family_fields(0, i, profile_radial2);
 
+                Matrix<double, c_limit, 3> c_fields{uninitialized};
+                Matrix<double, s_limit, 3> s_fields{uninitialized};
+                for (size_t order = 1; order < c_limit; ++order)
+                {
+                    c_fields(order, profile_value) = runtime_profiles.c_family_fields(order, i, profile_value);
+                    c_fields(order, profile_radial) = runtime_profiles.c_family_fields(order, i, profile_radial);
+                    c_fields(order, profile_radial2) = runtime_profiles.c_family_fields(order, i, profile_radial2);
+                }
+                for (size_t order = 1; order < s_limit; ++order)
+                {
+                    s_fields(order, profile_value) = runtime_profiles.s_family_fields(order, i, profile_value);
+                    s_fields(order, profile_radial) = runtime_profiles.s_family_fields(order, i, profile_radial);
+                    s_fields(order, profile_radial2) = runtime_profiles.s_family_fields(order, i, profile_radial2);
+                }
+
                 double sum_J           = 0.0;
                 double sum_JR          = 0.0;
                 double sum_gttdivJR    = 0.0;
@@ -128,9 +144,9 @@ namespace geometry::detail
                         const double cos_kt    = GridType::cos_mtheta(order, j);
                         const double k_sin_kt  = GridType::m_sin_mtheta(order, j);
                         const double k2_cos_kt = GridType::m2_cos_mtheta(order, j);
-                        const double c_i       = runtime_profiles.c_family_fields(order, i, profile_value);
-                        const double c_r_i     = runtime_profiles.c_family_fields(order, i, profile_radial);
-                        const double c_rr_i    = runtime_profiles.c_family_fields(order, i, profile_radial2);
+                        const double c_i       = c_fields(order, profile_value);
+                        const double c_r_i     = c_fields(order, profile_radial);
+                        const double c_rr_i    = c_fields(order, profile_radial2);
 
                         tb_ij += c_i * cos_kt;
                         tb_r_ij += c_r_i * cos_kt;
@@ -145,9 +161,9 @@ namespace geometry::detail
                         const double sin_kt    = GridType::sin_mtheta(order, j);
                         const double k_cos_kt  = GridType::m_cos_mtheta(order, j);
                         const double k2_sin_kt = GridType::m2_sin_mtheta(order, j);
-                        const double s_i       = runtime_profiles.s_family_fields(order, i, profile_value);
-                        const double s_r_i     = runtime_profiles.s_family_fields(order, i, profile_radial);
-                        const double s_rr_i    = runtime_profiles.s_family_fields(order, i, profile_radial2);
+                        const double s_i       = s_fields(order, profile_value);
+                        const double s_r_i     = s_fields(order, profile_radial);
+                        const double s_rr_i    = s_fields(order, profile_radial2);
 
                         tb_ij += s_i * sin_kt;
                         tb_r_ij += s_r_i * sin_kt;

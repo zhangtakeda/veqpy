@@ -75,6 +75,13 @@ Phase 1a 的 RELAXED stage 表（三轮同窗口；每轮 `taskset -c 2`、`repe
 4.3%。下一步进入 Phase 1b/2：补 topology/state-ring matrix，并把 Geometry
 拆成 phase synthesis / dynamic sincos / metric / stores 微阶段。
 
+Phase 2 首轮 micro A/B：
+
+| candidate | paired result | decision |
+| --- | --- | --- |
+| `JdivR = J*J/(J*R)` 复用 `inv_JR`，减少一个显式除法 | 5 组 paired median：`geometry` ratio≈0.992，`evaluate` ratio≈0.990；但 evaluate 有反向组（1.031、1.009） | 回滚；收益太小且不稳定 |
+| Geometry harmonic profile reads hoist 到 `i` 层 | 5 组 paired median：`geometry` ratio≈0.984，`evaluate` ratio≈0.993；5/5 evaluate 均快 | 保留；低风险小收益，为高 `M_max` topology 预期更有价值 |
+
 随后用独立 baseline worktree 重新测试 `a5c4d3c` 的 geometry surface layout 改动。复测仍然支持保留该改动：
 
 | metric | baseline | current layout | current / baseline |
