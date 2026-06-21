@@ -872,6 +872,15 @@ timing 一度显示 `evaluate` median ratio≈0.988、`evaluate_ring`≈0.994，
 一致，当前编译器更擅长处理原来的小 `RadialVector` 临时/标量化形式，不要继续追逐
 unit-weight 抽象替换。
 
+又测试了 geometry surface row padding：把物理 layout 从
+`Tensor<double, radial_nodes, 9, theta_rows>` 改成每个 radial row 含 1 个未用
+field padding slot，试图进一步打散 row stride/cache-set 关系。release CTest 与
+PF comparator 通过，但默认 paired timing 第 1--3 组已经严重回归：
+`geometry` ratio≈2.33--2.35、`residual_update`≈1.13、`evaluate`≈1.54--1.59、
+`evaluate_ring`≈1.56--1.59，因此中断长跑并回滚。结论：当前 `[rho][field][theta]`
+紧凑行布局已经是更好的局部性折中；不要再增加 row padding，除非原生 PMU/assembly
+明确证明新的 set 冲突。
+
 目标：在 geometry/residual 结构性收益之后，再处理固定成本。
 
 建议动作：

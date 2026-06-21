@@ -108,6 +108,7 @@ end-to-end timing neutral-to-slightly-positive.
 | Source sign-normalization dot fusion | default paired `source_update` 0.977 | default `evaluate` 0.995 and `evaluate_ring` 0.984; 45-topology median 0.995 | keep; removes one independent source-update scan with no route/finite/sentinel branch |
 | Geometry theta-loop vectorization pragmas | long paired `geometry` 0.998 | long paired `evaluate` 1.015 and `evaluate_ring` 1.002 | reject; explicit loop hints did not improve geometry and disturbed endpoint codegen |
 | Residual pack unit-weight marker | default paired `residual_pack` 1.063 | `evaluate` 1.006 and `evaluate_ring` 1.007 | reject; compiler handles tiny unit-weight vectors better than marker indirection |
+| Geometry surface row padding | early paired `geometry` 2.33--2.35 and `residual_update` 1.13 | `evaluate` 1.54--1.59 and `evaluate_ring` 1.56--1.59 | reject; padding destroys the compact row-locality that made `[rho][field][theta]` effective |
 | Remove independent `Pn_psin` buffer and read `materialized_heat_input` instead | `source_update` 1.008; `residual_update` 1.003 | `evaluate` 0.993 but mixed-sign pairs; `evaluate_ring` 0.998 | reject; aliasing the duplicate value is semantically clean but not a stable performance win |
 | Remove duplicate `source_psin_query/source_parameter_query` buffers | first pass: `source_materialize` 1.002; long rerun: `evaluate` 0.997 | long rerun `evaluate_ring` 1.004 | reject; direct root-psin interpolation did not survive state-ring timing |
 | Source `psin_r` regularization/pass reduction | `source_update` 0.954 | 1.000 | reject; no end-to-end gain |
@@ -580,3 +581,13 @@ the endpoint: `residual_pack` median ratio≈1.063, `evaluate`≈1.006, and
 `evaluate_ring`≈1.007. The patch was reverted. This reinforces the earlier
 static-weight-table rejection: the compiler currently scalarizes or optimizes
 the tiny vector temporaries better than extra weight-dispatch abstraction.
+
+A geometry surface row-padding candidate was rejected quickly. It changed the
+physical geometry slab from `[rho][9 fields][theta]` to `[rho][10 field slots][theta]`
+with one unused pad slot per radial row while preserving the logical accessor.
+Correctness passed release CTest and the RELAXED PF comparator, but the first
+paired default rounds already showed a severe regression: `geometry` ratios
+≈2.33--2.35, `residual_update`≈1.13, `evaluate`≈1.54--1.59, and
+`evaluate_ring`≈1.56--1.59. The long run was interrupted and the patch reverted.
+This confirms that, after the accepted `[rho][field][theta]` layout, extra row
+padding destroys useful compact row locality instead of improving cache behavior.
