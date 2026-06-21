@@ -6,8 +6,6 @@ import importlib.util
 import json
 import subprocess
 import sys
-import tempfile
-from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -18,6 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 BENCHMARK_PATH = REPO_ROOT / "tests" / "benchmark.py"
 DEFAULT_CXX_EXE = REPO_ROOT / "veqlib" / "build" / "debug" / "veqlib_pf_psin_uniform_benchmark"
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "tests" / "benchmark"
+FIXED_CONSTRAINT = "Ip"
 
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -26,12 +25,6 @@ from veqpy.operator import Operator  # noqa: E402
 from veqpy.solver import Solver  # noqa: E402
 from veqpy.solver.residual_scale import _build_block_rms_scale  # noqa: E402
 from veqpy.solver.solver import _build_x_block_scale_vector  # noqa: E402
-
-
-@dataclass(frozen=True)
-class PythonCaseRun:
-    payload: dict[str, Any]
-    report: dict[str, Any]
 
 
 def _load_benchmark_module() -> ModuleType:
@@ -93,12 +86,12 @@ def _relative_to_scale(value: float, *arrays: Any) -> float:
     return float(value / max(scale, 1.0e-12))
 
 
-def _benchmark_spec(benchmark: ModuleType, constraint: str):
+def _benchmark_spec(benchmark: ModuleType):
     return benchmark.BenchmarkCaseSpec(
         mode="PF",
         coordinate="psin",
         input_kind="uniform",
-        constraint=constraint,
+        constraint=FIXED_CONSTRAINT,
     )
 
 
@@ -121,14 +114,11 @@ def _boundary_payload(problem) -> dict[str, float]:
     }
 
 
-def _build_cxx_payload(
+def _python_case_inputs(
     benchmark: ModuleType,
     problem,
     spec,
-    *,
-    repeat: int,
-    warmup: int,
-) -> tuple[dict[str, Any], np.ndarray, np.ndarray, np.ndarray]:
+) -> dict[str, Any]:
     operator = Operator(benchmark.TEST_GRID, problem)
     x0 = _x0_for_case(benchmark, operator, spec)
     initial_raw = operator.residual_var(x0)
@@ -138,7 +128,7 @@ def _build_cxx_payload(
         raise RuntimeError(f"{spec.case_name} did not produce solver scaling vectors")
 
     source_plan = operator.plan.source_plan
-    payload = {
+    return {
         "case_name": spec.case_name,
         "boundary": _boundary_payload(problem),
         "scaled_heat": source_plan.scaled_heat.tolist(),
@@ -149,10 +139,10 @@ def _build_cxx_payload(
         "x0": x0.tolist(),
         "x_scale": x_scale.tolist(),
         "residual_scale": residual_scale.tolist(),
-        "repeat": int(repeat),
-        "warmup": int(warmup),
+        "initial_raw": initial_raw.tolist(),
+        "initial_raw_norm": float(np.linalg.norm(initial_raw)),
+        "residual_block_lengths": operator.residual_block_lengths().tolist(),
     }
-    return payload, x0, initial_raw, residual_scale
 
 
 def _solve_python_timed(
@@ -227,20 +217,16 @@ def _solve_python_timed(
     }
 
 
-def _run_cxx_case(executable: Path, payload: dict[str, Any]) -> dict[str, Any]:
+def _run_cxx_case(executable: Path, *, repeat: int, warmup: int) -> dict[str, Any]:
     if not executable.exists():
         raise FileNotFoundError(
             f"C++ benchmark executable not found: {executable}. "
             "Build it with `cmake --build --preset clang-debug --target "
             "veqlib_pf_psin_uniform_benchmark`."
         )
-    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as f:
-        json.dump(payload, f, allow_nan=False)
-        f.write("\n")
-        case_path = Path(f.name)
     try:
         completed = subprocess.run(
-            [str(executable), str(case_path)],
+            [str(executable), "--repeat", str(repeat), "--warmup", str(warmup)],
             check=True,
             cwd=executable.parent,
             text=True,
@@ -248,11 +234,7 @@ def _run_cxx_case(executable: Path, payload: dict[str, Any]) -> dict[str, Any]:
             stderr=subprocess.PIPE,
         )
     except subprocess.CalledProcessError as exc:
-        raise RuntimeError(
-            f"C++ benchmark failed for {payload['case_name']}:\n{exc.stderr}"
-        ) from exc
-    finally:
-        case_path.unlink(missing_ok=True)
+        raise RuntimeError(f"C++ benchmark failed:\n{exc.stderr}") from exc
     return json.loads(completed.stdout)
 
 
@@ -260,38 +242,48 @@ def _run_case(
     benchmark: ModuleType,
     executable: Path,
     reference,
-    constraint: str,
     *,
     repeat: int,
     warmup: int,
 ) -> dict[str, Any]:
-    spec = _benchmark_spec(benchmark, constraint)
+    spec = _benchmark_spec(benchmark)
     problem = benchmark._make_benchmark_case(spec, reference)
-    cxx_payload, x0, initial_raw, residual_scale = _build_cxx_payload(
-        benchmark,
-        problem,
-        spec,
-        repeat=repeat,
-        warmup=warmup,
-    )
+    python_inputs = _python_case_inputs(benchmark, problem, spec)
+    x0 = np.asarray(python_inputs["x0"], dtype=np.float64)
     python = _solve_python_timed(benchmark, problem, x0, repeat=repeat, warmup=warmup)
-    cxx = _run_cxx_case(executable, cxx_payload)
+    cxx = _run_cxx_case(executable, repeat=repeat, warmup=warmup)
 
     x_diff = _max_abs(cxx["final"]["x"], python["final"]["x"])
     raw_diff = _max_abs(cxx["final"]["raw_residual"], python["final"]["raw_residual"])
     alpha_diff = _max_abs(cxx["final"]["alpha"], python["final"]["alpha"])
-    initial_raw_diff = _max_abs(cxx["initial"]["raw_residual"], initial_raw)
+    initial_x_diff = _max_abs(cxx["initial"]["x"], python_inputs["x0"])
+    initial_raw_diff = _max_abs(cxx["initial"]["raw_residual"], python_inputs["initial_raw"])
+    source_heat_diff = _max_abs(cxx["source"]["scaled_heat"], python_inputs["scaled_heat"])
+    source_current_diff = _max_abs(cxx["source"]["scaled_current"], python_inputs["scaled_current"])
+    x_scale_diff = _max_abs(cxx["normalization"]["x_scale"], python_inputs["x_scale"])
+    residual_scale_diff = _max_abs(
+        cxx["normalization"]["residual_scale"],
+        python_inputs["residual_scale"],
+    )
     cxx_avg = float(cxx["timing"]["avg_ms"])
     python_avg = float(python["timing"]["avg_ms"])
 
     return {
         "case_name": spec.case_name,
-        "constraint": constraint,
+        "constraint": FIXED_CONSTRAINT,
         "active_profiles": dict(problem.active_profiles),
         "x_size": int(x0.size),
-        "initial_raw_norm": float(np.linalg.norm(initial_raw)),
-        "initial_residual_scale_max": float(np.max(residual_scale)),
+        "initial_raw_norm": float(python_inputs["initial_raw_norm"]),
+        "initial_residual_scale_max": float(np.max(python_inputs["residual_scale"])),
+        "initial_x_max_abs_diff": initial_x_diff,
         "initial_raw_max_abs_diff": initial_raw_diff,
+        "source_heat_max_abs_diff": source_heat_diff,
+        "source_current_max_abs_diff": source_current_diff,
+        "x_scale_max_abs_diff": x_scale_diff,
+        "residual_scale_max_abs_diff": residual_scale_diff,
+        "scaled_Ip_abs_diff": abs(
+            float(cxx["constraints"]["scaled_Ip"]) - float(python_inputs["scaled_Ip"])
+        ),
         "final_x_max_abs_diff": x_diff,
         "final_x_rel_diff": _relative_to_scale(x_diff, cxx["final"]["x"], python["final"]["x"]),
         "final_raw_max_abs_diff": raw_diff,
@@ -329,6 +321,16 @@ def _run_case(
 def _summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "case_count": len(rows),
+        "max_initial_x_abs_diff": max(float(row["initial_x_max_abs_diff"]) for row in rows),
+        "max_source_heat_abs_diff": max(float(row["source_heat_max_abs_diff"]) for row in rows),
+        "max_source_current_abs_diff": max(
+            float(row["source_current_max_abs_diff"]) for row in rows
+        ),
+        "max_x_scale_abs_diff": max(float(row["x_scale_max_abs_diff"]) for row in rows),
+        "max_residual_scale_abs_diff": max(
+            float(row["residual_scale_max_abs_diff"]) for row in rows
+        ),
+        "max_scaled_Ip_abs_diff": max(float(row["scaled_Ip_abs_diff"]) for row in rows),
         "max_final_x_abs_diff": max(float(row["final_x_max_abs_diff"]) for row in rows),
         "max_final_raw_abs_diff": max(float(row["final_raw_max_abs_diff"]) for row in rows),
         "max_initial_raw_abs_diff": max(float(row["initial_raw_max_abs_diff"]) for row in rows),
@@ -343,11 +345,17 @@ def _write_text_report(path: Path, payload: dict[str, Any]) -> None:
     rows = payload["rows"]
     summary = payload["summary"]
     lines = [
-        "PF/psin/uniform C++ cminpack vs VEQPy benchmark-style comparison",
+        "PF/psin/uniform/Ip inline C++ cminpack vs VEQPy benchmark-style comparison",
         "",
         f"repeat_count                  : {payload['repeat']}",
         f"warmup_count                  : {payload['warmup']}",
         f"case_count                    : {summary['case_count']}",
+        f"max_initial_x_abs_diff        : {summary['max_initial_x_abs_diff']:.6e}",
+        f"max_source_heat_abs_diff      : {summary['max_source_heat_abs_diff']:.6e}",
+        f"max_source_current_abs_diff   : {summary['max_source_current_abs_diff']:.6e}",
+        f"max_x_scale_abs_diff          : {summary['max_x_scale_abs_diff']:.6e}",
+        f"max_residual_scale_abs_diff   : {summary['max_residual_scale_abs_diff']:.6e}",
+        f"max_scaled_Ip_abs_diff        : {summary['max_scaled_Ip_abs_diff']:.6e}",
         f"max_initial_raw_abs_diff      : {summary['max_initial_raw_abs_diff']:.6e}",
         f"max_final_x_abs_diff          : {summary['max_final_x_abs_diff']:.6e}",
         f"max_final_raw_abs_diff        : {summary['max_final_raw_abs_diff']:.6e}",
@@ -403,12 +411,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--cxx-exe", type=Path, default=DEFAULT_CXX_EXE)
     parser.add_argument("--repeat", type=int, default=10)
     parser.add_argument("--warmup", type=int, default=1)
-    parser.add_argument(
-        "--constraints",
-        nargs="+",
-        default=["null", "Ip", "beta"],
-        choices=["null", "Ip", "beta"],
-    )
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--no-write", action="store_true")
     parser.add_argument("--quiet", action="store_true")
@@ -416,24 +418,20 @@ def main(argv: list[str] | None = None) -> int:
 
     benchmark = _load_benchmark_module()
     reference = benchmark._solve_reference(show_progress=not args.quiet)
-    rows: list[dict[str, Any]] = []
-    for constraint in args.constraints:
-        if not args.quiet:
-            print(f"running PF_psin_uniform_{constraint} ...", flush=True)
-        rows.append(
-            _run_case(
-                benchmark,
-                args.cxx_exe.resolve(),
-                reference,
-                constraint,
-                repeat=args.repeat,
-                warmup=args.warmup,
-            )
+    if not args.quiet:
+        print("running PF_psin_uniform_Ip ...", flush=True)
+    rows = [
+        _run_case(
+            benchmark,
+            args.cxx_exe.resolve(),
+            reference,
+            repeat=args.repeat,
+            warmup=args.warmup,
         )
-
+    ]
     payload = {
         "schema_version": 1,
-        "source": "tests/benchmark.py PF/psin/uniform subset",
+        "source": "tests/benchmark.py fixed PF/psin/uniform/Ip case",
         "repeat": int(args.repeat),
         "warmup": int(args.warmup),
         "rows": rows,
