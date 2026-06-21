@@ -112,8 +112,8 @@ The post-review priority is adjusted as follows:
    cache/conflict mechanism, not to decide whether the wall-clock improvement is
    real.
 2. Promote FP build semantics to P0. Split strict/FMA/relaxed modes before
-   testing vector sincos or approximate math backends, and separate true
-   finite-check semantics from magnitude-validity checks.
+   testing vector sincos or approximate math backends, and keep solve-success
+   decisions out of VEQlib route kernels.
 3. Fill the post-layout stage table before choosing the next absolute hot spot.
    Current formal retest only covers `geometry`, `evaluate`, and their share.
 4. Extend the benchmark beyond the default resonance-prone topology
@@ -142,11 +142,10 @@ Phase 0 is now implemented before further approximate/vector-math experiments:
 - Added `clang-release-strict` and `clang-release-fma` presets. The default
   `clang-release` remains `RELAXED` so existing performance comparisons keep
   the same baseline semantics.
-- Split validity helpers:
-  - `math::is_finite()` is now a bit-level NaN/inf test that is still
-    meaningful under `-ffinite-math-only`.
-  - `math::is_valid_magnitude()` preserves the previous `max_double / 4`
-    overflow margin and is used by source/operator hot-path acceptance checks.
+- Replaced the old hot-path magnitude/validity policy with a narrow diagnostic
+  helper: `math::is_finite()` is now a bit-level NaN/inf test that remains
+  meaningful under `-ffinite-math-only`. There is no source/operator
+  magnitude-validity guard in the route kernel path.
 
 Validation:
 
@@ -156,8 +155,9 @@ Validation:
 - RELAXED release CTest: 3/3 passed.
 - STRICT release CTest: 3/3 passed.
 - FMA release CTest: 3/3 passed.
-- RELAXED release Python/C++ PF-psin-uniform validation passed with
-  `max_abs=6.7622192567728945e-12`.
+- RELAXED release Python/C++ PF-psin-uniform/Ip validation passed with
+  `max_abs=6.7622192567728945e-12` before Phase 1a and
+  `max_abs=5.5774052043489064e-11` after the route-pure kernel split.
 - RELAXED release sanity benchmark (`taskset -c 2`, `repeat=15`, `warmup=5`,
   `inner=10000`) reported `geometry median=5554.3095 ns/call` and
   `evaluate median=9109.3373 ns/call`. This is not a paired optimization proof;
@@ -183,9 +183,30 @@ or inf. This is the only viable local finite probe under `-ffinite-math-only`,
 but the RELAXED contract still means NaN/inf should not be used as ordinary
 hot-path control flow.
 
-Next step: Phase 1a should split the timed benchmark path into a fully
-route-specific `PF/psin/uniform/Ip` unchecked evaluator. The timed loop should
-not branch on magnitude-validity / "too large" checks; those checks belong in
-outer C++ smoke tests, Python/C++ validation, and checked public facades. After
-that split, Phase 1b can add the post-layout RELAXED stage table and
-topology/state-ring matrix.
+Phase 1a outcome: the timed benchmark path is now a single route-specific
+`PF/psin/uniform/Ip` kernel path, not a checked/unchecked dual facade.
+`evaluate()`, source materialization, and source update return `void`; they do
+not branch on magnitude-validity, finite checks, or fallback sentinel values.
+Solve success is interpreted only by the outer solver/validation layer from the
+computed residual norm. The generic free/beta source branches were removed from
+this PF/psin/uniform/Ip path.
+
+Phase 1a RELAXED validation and timing (three same-window runs; per-run
+`taskset -c 2`, `repeat=25`, `warmup=8`, `inner=10000`; table uses the
+median of per-run medians):
+
+| Stage | ns/call | Share of `evaluate` |
+| --- | ---: | ---: |
+| `profiles_all` | 124.5 | 1.5% |
+| `geometry` | 5148.0 | 60.4% |
+| `source_materialize` | 895.6 | 10.5% |
+| `source_update` | 948.0 | 11.1% |
+| `residual_update` | 914.9 | 10.7% |
+| `residual_pack` | 135.5 | 1.6% |
+| `evaluate` | 8521.5 | 100% |
+
+Compared with the previous RELAXED baseline (`evaluate=8907.0 ns/call`,
+`geometry=5391.8 ns/call`), route purification plus guard removal improves
+`evaluate` by about 4.3%. Geometry remains the dominant hotspot, so Phase 1b/2
+should add the topology/state matrix and decompose geometry before attempting
+more source micro-optimizations.

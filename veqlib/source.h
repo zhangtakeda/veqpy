@@ -26,16 +26,6 @@ namespace source::detail
     inline constexpr size_t profile_radial  = 1;
     inline constexpr size_t profile_radial2 = 2;
 
-    inline constexpr double unset_constraint_threshold = 1.0e20;
-    inline constexpr double unset_constraint_value     = 1.0e300;
-
-    constexpr double unset_constraint() noexcept { return unset_constraint_value; }
-
-    constexpr bool constraint_is_set(double value) noexcept
-    {
-        return math::abs(value) <= unset_constraint_threshold;
-    }
-
     constexpr size_t clipped_stencil_size(size_t sample_count) noexcept
     {
         return sample_count < default_barycentric_stencil ? sample_count : default_barycentric_stencil;
@@ -105,8 +95,8 @@ namespace source::detail
         RootFields   source_target_root_fields{};
         RadialVector FFn_psin{};
         RadialVector Pn_psin{};
-        double       alpha1 = unset_constraint();
-        double       alpha2 = unset_constraint();
+        double       alpha1 = 0.0;
+        double       alpha2 = 0.0;
 
         constexpr void set_uniform_sources(std::span<const double, sample_count> heat,
                                            std::span<const double, sample_count> current) noexcept
@@ -119,7 +109,7 @@ namespace source::detail
         }
 
         template <typename ProfilesRuntime>
-        constexpr bool materialize_profile_owned_psin(const ProfilesRuntime& runtime_profiles,
+        constexpr void materialize_profile_owned_psin(const ProfilesRuntime& runtime_profiles,
                                                       size_t                 n_axis_fix) noexcept
         {
             using Shape       = typename ProfilesRuntime::shape;
@@ -137,8 +127,7 @@ namespace source::detail
             RadialVector psin_rr{uninitialized};
             matvec_into(psin_rr, GridType::differentiator, const_root_row<root_psin_r>());
             store_root_row<root_psin_rr>(psin_rr);
-            if (!update_psin_coordinate())
-                return false;
+            update_psin_coordinate();
             copy_source_target_to_profile_root();
 
             for (size_t i = 0; i < radial_nodes; ++i)
@@ -149,24 +138,14 @@ namespace source::detail
             }
 
             local_barycentric_interpolate_pair();
-            return math::is_valid_magnitude(source_target_root_fields) &&
-                   math::is_valid_magnitude(materialized_heat_input) &&
-                   math::is_valid_magnitude(materialized_current_input);
         }
 
         template <typename GeometryRuntime>
-        constexpr bool update_pf_from_psin_uniform(const GeometryRuntime& geometry,
-                                                   double                 B0,
-                                                   double                 Ip,
-                                                   double                 beta,
-                                                   size_t                 n_axis_fix) noexcept
+        constexpr void update_pf_ip_from_psin_uniform(const GeometryRuntime& geometry,
+                                                      double                 Ip,
+                                                      size_t                 n_axis_fix) noexcept
         {
             static_assert(GeometryRuntime::radial_nodes == radial_nodes, "source/geometry radial grids must match");
-
-            const bool has_Ip   = constraint_is_set(Ip);
-            const bool has_beta = constraint_is_set(beta);
-            if (has_Ip && has_beta)
-                return false;
 
             RadialVector integrand{uninitialized};
             fill_pf_psin_integrand(integrand, geometry);
@@ -189,9 +168,6 @@ namespace source::detail
             psin_r = const_root_row<root_psin_r>();
 
             const double integral_prof = dot(psin_r, GridType::weights);
-            if (math::abs(integral_prof) < 1.0e-14)
-                return false;
-
             for (size_t i = 0; i < radial_nodes; ++i)
                 psin_r[i] /= integral_prof;
             store_root_row<root_psin_r>(psin_r);
@@ -199,27 +175,7 @@ namespace source::detail
             RadialVector psin_rr{uninitialized};
             matvec_into(psin_rr, GridType::differentiator, psin_r);
             store_root_row<root_psin_rr>(psin_rr);
-            if (!update_psin_coordinate())
-                return false;
-
-            if (!has_Ip && !has_beta)
-            {
-                alpha2 = psi_scale_sign * integral_prof;
-                RadialVector pressure_profile{uninitialized};
-                for (size_t i = 0; i < radial_nodes; ++i)
-                    pressure_profile[i] = materialized_heat_input[i] * psin_r[i];
-                alpha1 = -dot(pressure_profile, GridType::weights);
-                if (math::abs(alpha1) < 1.0e-14)
-                    return false;
-                for (size_t i = 0; i < radial_nodes; ++i)
-                {
-                    Pn_psin[i]  = materialized_heat_input[i] / alpha1;
-                    FFn_psin[i] = materialized_current_input[i] / alpha1;
-                }
-                regularize_ffn_psin(n_axis_fix);
-                return math::is_valid_magnitude(FFn_psin) && math::is_valid_magnitude(Pn_psin) &&
-                       math::is_valid_magnitude(alpha1) && math::is_valid_magnitude(alpha2);
-            }
+            update_psin_coordinate();
 
             for (size_t i = 0; i < radial_nodes; ++i)
             {
@@ -228,31 +184,9 @@ namespace source::detail
             }
             regularize_ffn_psin(n_axis_fix);
 
-            if (has_Ip)
-            {
-                const double G1n_integral = g1n_psin_integral_from_radial_moments(geometry);
-                if (math::abs(G1n_integral) < 1.0e-14)
-                    return false;
-                alpha1 = -Ip / G1n_integral;
-            }
-            else
-            {
-                RadialVector scratch_Pn_r{uninitialized};
-                for (size_t i = 0; i < radial_nodes; ++i)
-                    scratch_Pn_r[i] = Pn_psin[i] * psin_r[i];
-
-                RadialVector Pn_out{uninitialized};
-                compute_Pn_out(Pn_out, scratch_Pn_r);
-
-                const double numerator = 0.5 * beta * B0 * B0 * dot_geometry_radial(geometry, geometry::radial_V_r);
-                const double denominator = weighted_dot(Pn_out, geometry, geometry::radial_V_r);
-                if (math::abs(denominator) < 1.0e-14)
-                    return false;
-                alpha1 = signed_sqrt_ratio(numerator, integral_prof * denominator);
-            }
-            alpha2 = integral_prof * alpha1;
-            return math::is_valid_magnitude(FFn_psin) && math::is_valid_magnitude(Pn_psin) &&
-                   math::is_valid_magnitude(alpha1) && math::is_valid_magnitude(alpha2);
+            const double G1n_integral = g1n_psin_integral_from_radial_moments(geometry);
+            alpha1                    = -Ip / G1n_integral;
+            alpha2                    = integral_prof * alpha1;
         }
 
         template <size_t Row>
@@ -312,7 +246,7 @@ namespace source::detail
                     source_target_root_fields(root_psin_r, i) = 1.0e-10;
         }
 
-        constexpr bool update_psin_coordinate() noexcept
+        constexpr void update_psin_coordinate() noexcept
         {
             const auto psin_r = const_root_row<root_psin_r>();
             RadialVector integrated{uninitialized};
@@ -320,14 +254,15 @@ namespace source::detail
 
             const double offset = integrated[0];
             const double scale  = integrated[radial_nodes - 1] - offset;
-            if (math::abs(scale) < 1.0e-12)
-                return false;
+            store_psin_coordinate(integrated, offset, scale);
+        }
 
+        constexpr void store_psin_coordinate(const RadialVector& integrated, double offset, double scale) noexcept
+        {
             for (size_t i = 0; i < radial_nodes; ++i)
                 source_target_root_fields(root_psin, i) = (integrated[i] - offset) / scale;
             source_target_root_fields(root_psin, 0) = 0.0;
             source_target_root_fields(root_psin, radial_nodes - 1) = 1.0;
-            return true;
         }
 
         static constexpr double clip_unit(double value) noexcept
@@ -449,37 +384,6 @@ namespace source::detail
             return dot(values, GridType::weights) < 0.0 ? -1.0 : 1.0;
         }
 
-        template <typename GeometryRuntime>
-        constexpr double dot_geometry_radial(const GeometryRuntime& geometry, size_t row) const noexcept
-        {
-            double total = 0.0;
-            for (size_t i = 0; i < radial_nodes; ++i)
-                total += GridType::weights[i] * geometry.radial_field(row, i);
-            return total;
-        }
-
-        template <typename GeometryRuntime>
-        constexpr double weighted_dot(const RadialVector& lhs, const GeometryRuntime& geometry, size_t row) const noexcept
-        {
-            double total = 0.0;
-            for (size_t i = 0; i < radial_nodes; ++i)
-                total += GridType::weights[i] * lhs[i] * geometry.radial_field(row, i);
-            return total;
-        }
-
-        static constexpr double signed_sqrt_ratio(double numerator, double denominator) noexcept
-        {
-            const double ratio = numerator / denominator;
-            return ratio < 0.0 ? -math::sqrt(-ratio) : math::sqrt(ratio);
-        }
-
-        constexpr void compute_Pn_out(RadialVector& out, const RadialVector& Pn_r) const noexcept
-        {
-            matvec_into(out, GridType::accumulator, Pn_r);
-            const double offset = dot(Pn_r, GridType::weights);
-            for (size_t i = 0; i < radial_nodes; ++i)
-                out[i] -= offset;
-        }
 
         template <typename GeometryRuntime>
         constexpr double g1n_psin_integral_from_radial_moments(const GeometryRuntime& geometry) const noexcept
@@ -523,12 +427,8 @@ namespace source
     using detail::ProfileOwnedPsinSourceRuntime;
     using detail::UniformSourceShape;
     using detail::axis_fix_count;
-    using detail::constraint_is_set;
     using detail::root_field_count;
     using detail::root_psin;
     using detail::root_psin_r;
     using detail::root_psin_rr;
-    using detail::unset_constraint_threshold;
-    using detail::unset_constraint_value;
-    using detail::unset_constraint;
 } // namespace source

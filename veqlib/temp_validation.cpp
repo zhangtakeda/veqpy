@@ -82,9 +82,6 @@ namespace
         Legendre,
         Spectral>;
 
-    static_assert(!source::constraint_is_set(source::unset_constraint()));
-    static_assert(source::unset_constraint() > source::unset_constraint_threshold);
-    static_assert(source::constraint_is_set(0.0));
     using ProbeProfilesFromCounts = profiles::Profiles<
         Topology::L_max,
         Topology::K_max,
@@ -670,13 +667,10 @@ namespace
         constexpr double large_finite = std::numeric_limits<double>::max() / 2.0;
 
         constexpr Vector<double, 2> finite_values{1.0, -large_finite};
-        constexpr Vector<double, 2> bounded_values{1.0, std::numeric_limits<double>::max() / 8.0};
-        constexpr Vector<double, 2> unbounded_values{1.0, large_finite};
         constexpr Vector<double, 2> nan_values{1.0, quiet_nan};
 
         return math::is_finite(1.0) && math::is_finite(large_finite) && !math::is_finite(positive_inf) &&
-               !math::is_finite(quiet_nan) && math::is_finite(finite_values) && !math::is_finite(nan_values) &&
-               math::is_valid_magnitude(bounded_values) && !math::is_valid_magnitude(unbounded_values);
+               !math::is_finite(quiet_nan) && math::is_finite(finite_values) && !math::is_finite(nan_values);
     }
 
     constexpr bool grid_constexpr_ok()
@@ -1106,8 +1100,7 @@ namespace
             std::span<const double, current.size()>{current.data(), current.size()}
         );
 
-        if (!source.materialize_profile_owned_psin(profiles, source::axis_fix_count<Grid>(0.0)))
-            return false;
+        source.materialize_profile_owned_psin(profiles, source::axis_fix_count<Grid>(0.0));
 
         if (!close(source.source_target_root_fields(root_psin, 0), 0.0, 0.0) ||
             !close(source.source_target_root_fields(root_psin, Grid::radial_nodes - 1), 1.0, 0.0))
@@ -1147,7 +1140,7 @@ namespace
         constexpr double a  = 0.42;
         constexpr double R0 = 1.8;
         constexpr double Z0 = -0.25;
-        constexpr double B0 = 2.1;
+        constexpr double Ip = 0.75;
 
         profiles::ProfileRuntimeParams<Shape> params{};
         params.offsets[Shape::h_profile_id] = 0.0;
@@ -1170,68 +1163,18 @@ namespace
                 std::span<const double, heat.size()>{heat.data(), heat.size()},
                 std::span<const double, current.size()>{current.data(), current.size()}
             );
-            return source.materialize_profile_owned_psin(profiles, source::axis_fix_count<Grid>(0.0));
+            source.materialize_profile_owned_psin(profiles, source::axis_fix_count<Grid>(0.0));
         };
 
-        Source free_source{};
-        if (!make_source(free_source) ||
-            !free_source.update_pf_from_psin_uniform(
-                geometry,
-                B0,
-                source::unset_constraint(),
-                source::unset_constraint(),
-                source::axis_fix_count<Grid>(0.0)
-            ))
-            return false;
-
-        if (!math::is_finite(free_source.alpha1) || !math::is_finite(free_source.alpha2))
-            return false;
-        for (size_t i = 0; i < Grid::radial_nodes; ++i)
-        {
-            if (free_source.source_target_root_fields(root_psin_r, i) <= 0.0 ||
-                !close(free_source.Pn_psin[i], free_source.materialized_heat_input[i] / free_source.alpha1, 1.0e-10) ||
-                !close(free_source.FFn_psin[i], free_source.materialized_current_input[i] / free_source.alpha1, 1.0e-10))
-                return false;
-        }
-
         Source ip_source{};
-        if (!make_source(ip_source) ||
-            !ip_source.update_pf_from_psin_uniform(
-                geometry,
-                B0,
-                0.75,
-                source::unset_constraint(),
-                source::axis_fix_count<Grid>(0.0)
-            ))
-            return false;
+        make_source(ip_source);
+        ip_source.update_pf_ip_from_psin_uniform(geometry, Ip, source::axis_fix_count<Grid>(0.0));
         for (size_t i = 0; i < Grid::radial_nodes; ++i)
             if (!close(ip_source.Pn_psin[i], ip_source.materialized_heat_input[i]) ||
                 !close(ip_source.FFn_psin[i], ip_source.materialized_current_input[i]))
                 return false;
 
-        Source beta_source{};
-        if (!make_source(beta_source) ||
-            !beta_source.update_pf_from_psin_uniform(
-                geometry,
-                B0,
-                source::unset_constraint(),
-                0.04,
-                source::axis_fix_count<Grid>(0.0)
-            ))
-            return false;
-        for (size_t i = 0; i < Grid::radial_nodes; ++i)
-            if (!close(beta_source.Pn_psin[i], beta_source.materialized_heat_input[i]) ||
-                !close(beta_source.FFn_psin[i], beta_source.materialized_current_input[i]))
-                return false;
-
-        Source invalid_source{};
-        if (!make_source(invalid_source))
-            return false;
-        if (invalid_source.update_pf_from_psin_uniform(geometry, B0, 0.75, 0.04, source::axis_fix_count<Grid>(0.0)))
-            return false;
-
-        return math::is_finite(ip_source.alpha1) && math::is_finite(ip_source.alpha2) &&
-               math::is_finite(beta_source.alpha1) && math::is_finite(beta_source.alpha2);
+        return math::is_finite(ip_source.alpha1) && math::is_finite(ip_source.alpha2);
     }
 
     constexpr bool residual_pack_constexpr_ok()
@@ -1280,15 +1223,8 @@ namespace
             std::span<const double, heat.size()>{heat.data(), heat.size()},
             std::span<const double, current.size()>{current.data(), current.size()}
         );
-        if (!source.materialize_profile_owned_psin(profiles, source::axis_fix_count<Grid>(0.0)) ||
-            !source.update_pf_from_psin_uniform(
-                geometry,
-                2.1,
-                source::unset_constraint(),
-                source::unset_constraint(),
-                source::axis_fix_count<Grid>(0.0)
-            ))
-            return false;
+        source.materialize_profile_owned_psin(profiles, source::axis_fix_count<Grid>(0.0));
+        source.update_pf_ip_from_psin_uniform(geometry, 0.75, source::axis_fix_count<Grid>(0.0));
 
         Residual residual{};
         residual.update_compact(source, geometry);
@@ -1303,7 +1239,7 @@ namespace
         return norm1 > 1.0e-12;
     }
 
-    constexpr bool pf_operator_facade_constexpr_ok()
+    constexpr bool pf_operator_constexpr_ok()
     {
         using Shape    = ResidualProbeShape;
         using Operator = ResidualProbeOperator;
@@ -1330,6 +1266,7 @@ namespace
         op.params.R0 = 1.8;
         op.params.Z0 = -0.25;
         op.params.B0 = 2.1;
+        op.params.Ip = 0.75;
         op.params.fix_rho = 0.0;
         op.params.profile_params.offsets[k_id] = 1.45;
         op.params.profile_params.offsets[c0_id] = 0.0;
@@ -1344,8 +1281,7 @@ namespace
         );
 
         typename Operator::PackedVector packed{};
-        if (!op.evaluate(std::span<const double, Shape::x_size>{x.data(), Shape::x_size}, packed))
-            return false;
+        op.evaluate(std::span<const double, Shape::x_size>{x.data(), Shape::x_size}, packed);
 
         double norm1 = 0.0;
         for (size_t i = 0; i < Shape::x_size; ++i)
@@ -1364,7 +1300,7 @@ namespace
     static_assert(source_materialization_constexpr_ok());
     static_assert(pf_source_constexpr_ok());
     static_assert(residual_pack_constexpr_ok());
-    static_assert(pf_operator_facade_constexpr_ok());
+    static_assert(pf_operator_constexpr_ok());
 
     int root_residual(void*, int n, const double* x, double* fvec, int iflag)
     {
@@ -1418,7 +1354,7 @@ int main()
         {"source_materialization", source_materialization_constexpr_ok()},
         {"pf_source", pf_source_constexpr_ok()},
         {"residual_pack", residual_pack_constexpr_ok()},
-        {"pf_operator_facade", pf_operator_facade_constexpr_ok()},
+        {"pf_operator", pf_operator_constexpr_ok()},
     };
     report["quadrature"] = {
         {"chebyshev_moment_error_n16_degree7", max_moment_error<Chebyshev, 16>(7)},
@@ -1441,7 +1377,7 @@ int main()
                     grid_constexpr_ok() && profiles_grid_constexpr_ok() && runtime_profiles_constexpr_ok() &&
                     runtime_profile_semantics_constexpr_ok() && geometry_circular_constexpr_ok() &&
                     source_materialization_constexpr_ok() && pf_source_constexpr_ok() &&
-                    residual_pack_constexpr_ok() && pf_operator_facade_constexpr_ok() &&
+                    residual_pack_constexpr_ok() && pf_operator_constexpr_ok() &&
                     runtime_library_ok(report);
 
     std::cout << report.dump(2) << '\n';

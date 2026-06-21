@@ -3,29 +3,30 @@
 更新时间：2026-06-21  
 范围：`TODO-1.md`、`TODO-2.md` 指向的 VEQlib hot path / cache / tooling 初步实验。
 
-## 0. 最新状态：Phase 0 FP 语义已拆分，layout 保留
+## 0. 最新状态：Phase 1a 已完成，PF/psin/uniform/Ip kernel 不再有 checked facade
 
-已把阶段性变更提交为 git commit：
+此前已把阶段性变更提交为 git commit：
 
 - `7566f97 Establish measurable VEQlib optimization baseline`
 - `a5c4d3c Reduce geometry cache interference before chasing trig`
 - `3851f62 Preserve VEQlib performance decision trail`
 - `a4637fd Reprioritize VEQlib optimization by evidence`
+- `4715b04 Separate VEQlib FP contracts before math experiments`
+- `e161475 Make RELAXED the VEQlib performance baseline`
 
-本轮开始执行修订计划中的 Phase 0：先修正 FP 构建语义和 validity
-contract，再继续 vector sincos / approximate math / residual fusion。当前
-实现决策：
+Phase 0 已把 FP 构建语义拆成 `STRICT` / `FMA` / `RELAXED`，并确认后续
+性能 A/B 应默认只在 `RELAXED` 下比较。根据最新修正，Phase 1a 进一步
+完成：VEQlib 作为 kernel 层不再返回“是否求解成功”，也不保留
+checked/unchecked 双 facade。当前 `PF/psin/uniform/Ip` 路径的实现决策：
 
-- 新增 `VEQLIB_FP_MODE=STRICT|FMA|RELAXED`：
-  - `STRICT`: `-fno-fast-math -ffp-contract=off`
-  - `FMA`: `-fno-fast-math -ffp-contract=fast`
-  - `RELAXED`: 保留历史 release benchmark 的 fast-math / reciprocal /
-    approximate-function flags
-- `math::is_finite()` 改为 bit-level NaN/inf 检查，避免在
-  `-ffinite-math-only` 下被编译器当成恒真有限性假设。
-- 旧的 `max_double / 4` overflow margin 独立命名为
-  `math::is_valid_magnitude()`；hot-path source/operator acceptance 使用该
-  guard，保持旧行为。
+- `evaluate()`、source materialization、source update 都是唯一的 `void`
+  route-kernel 路径。
+- timed/source/residual kernel 内不再调用 `is_valid_magnitude()`，也不再用
+  NaN/Inf/极大值 guard 或 `1e20` fallback 作为控制流。
+- `math::is_finite()` 只保留 bit-level NaN/inf 诊断/测试语义；C++ kernel
+  不据此判断求解成败。
+- `PF/psin/uniform/Ip` 路径已移除 free/beta source 分支；外层 solver 或
+  Python/C++ validation 只根据残差范数和 solver info 判断是否成功。
 - 新增 `clang-release-strict` 和 `clang-release-fma` preset，默认
   `clang-release` 仍是 `RELAXED`，因此不会破坏当前性能基线口径。
 
@@ -39,8 +40,9 @@ contract，再继续 vector sincos / approximate math / residual fusion。当前
   - `release-fma`: `VEQLIB_FP_MODE_FMA=1`，含 `-fno-fast-math`
     / `-ffp-contract=fast`
 - Debug / RELAXED release / STRICT release / FMA release CTest 均通过。
-- RELAXED release Python/C++ validation 仍通过，`max_abs≈6.762e-12`。
-- RELAXED sanity benchmark（非 paired，仅确认未明显破坏基线）：
+- Phase 1a 后 debug/release CTest 均通过；RELAXED release Python/C++
+  `PF/psin/uniform/Ip` validation 通过，`max_abs≈5.577e-11`。
+- Phase 0 RELAXED sanity benchmark（非 paired，仅确认未明显破坏基线）：
   `geometry median≈5554 ns/call`，`evaluate median≈9109 ns/call`。
 - 同窗口 FP mode A/B（3 轮 median-of-medians，`repeat=25`、
   `warmup=8`、`inner=10000`）显示 RELAXED 是后续性能实验的唯一合理主基线：
@@ -55,11 +57,23 @@ contract，再继续 vector sincos / approximate math / residual fusion。当前
   STRICT/FMA 只作为 correctness / error-budget 参照，不再作为热点优化的
   性能基线。
 
-下一步应进入 Phase 1a：先把测试/benchmark hot path 完全剥离为
-`PF/psin/uniform/Ip` 专用 unchecked 路径，再补 post-layout stage 表和
-topology/state-ring matrix。计时路径中不应继续用“是否极大值/是否有效幅度”
-作为控制流；正确性检查保留在 timed loop 外部的 Python/C++ validation 和
-route-specific checked smoke test 中。
+Phase 1a 的 RELAXED stage 表（三轮同窗口；每轮 `taskset -c 2`、`repeat=25`、`warmup=8`、
+`inner=10000`；表中为每轮 median 的中位数）如下：
+
+| stage | ns/call | `evaluate` share |
+| --- | ---: | ---: |
+| `profiles_all` | 124.5 | 1.5% |
+| `geometry` | 5148.0 | 60.4% |
+| `source_materialize` | 895.6 | 10.5% |
+| `source_update` | 948.0 | 11.1% |
+| `residual_update` | 914.9 | 10.7% |
+| `residual_pack` | 135.5 | 1.6% |
+| `evaluate` | 8521.5 | 100% |
+
+相对上一轮 RELAXED baseline（`evaluate≈8907.0 ns/call`、
+`geometry≈5391.8 ns/call`），route 纯化和 guard 删除让 `evaluate` 再降约
+4.3%。下一步进入 Phase 1b/2：补 topology/state-ring matrix，并把 Geometry
+拆成 phase synthesis / dynamic sincos / metric / stores 微阶段。
 
 随后用独立 baseline worktree 重新测试 `a5c4d3c` 的 geometry surface layout 改动。复测仍然支持保留该改动：
 
@@ -320,7 +334,7 @@ veqlib/experiments/tooling/
 
 目标：先拆清楚 Release 数学语义，避免后续 vector sincos、polynomial、FMA、reciprocal 实验的误差基准不稳定。
 
-当前风险：Release 同时启用了 `-ffast-math`、`-ffinite-math-only`、`-fapprox-func`、`-freciprocal-math`、`-funsafe-math-optimizations`，但 hot path 仍用 `math::is_finite()` 做有效性判断；该函数当前语义实际是 magnitude-bound check，不是标准 NaN/Inf finite check。
+当前风险（已处理）：Release 同时启用了 `-ffast-math`、`-ffinite-math-only`、`-fapprox-func`、`-freciprocal-math`、`-funsafe-math-optimizations`；因此 kernel 内不应依赖 NaN/Inf 或“极大值”判断来表达求解失败。
 
 建议动作：
 
@@ -328,33 +342,32 @@ veqlib/experiments/tooling/
    - `STRICT`: `-fno-fast-math -ffp-contract=off`
    - `FMA`: `-fno-fast-math -ffp-contract=fast`
    - `RELAXED`: 保留历史 fast-math 性能基线，作为所有后续性能 A/B 的主模式
-2. 将 `math::is_finite` 与 magnitude policy 分离：
-   - `is_finite`: 标准有限性语义
-   - `is_valid_magnitude`: 有限且不过大
-3. 不让包含 NaN/Inf validity check 的 TU 依赖 `-ffinite-math-only` 语义。
-4. 每个 FP mode 都跑 Python/C++ validation，记录 max_abs、solver nfev；性能 stage timing
+2. `math::is_finite` 只保留为 bit-level 诊断/测试 helper；kernel 不再用
+   finite/magnitude policy 做 hot-path 控制流。
+3. 每个 FP mode 都跑 Python/C++ validation，记录 max_abs、solver nfev；性能 stage timing
    只用 RELAXED 做主裁决。
 
 停止条件：三种 FP mode 的 correctness contract 明确；RELAXED 作为性能主基线，STRICT/FMA
-只用于解释误差/速度 tradeoff。
+只用于解释误差/速度 tradeoff；route kernel 不承载求解成功/失败语义。
 
-### Phase 1a：剥离 PF/psin/uniform/Ip unchecked benchmark 路径
+### Phase 1a：剥离为唯一 PF/psin/uniform/Ip route kernel 路径
 
 目标：先把当前实验路线彻底固定为 `PF/psin/uniform/Ip`，避免 generic source
-constraint / topology 逻辑和 hot-path validity guard 混入判断。
+constraint / topology 逻辑、checked facade 和 hot-path validity/magnitude guard 混入判断。
 
 建议动作：
 
 1. route 语义静态化：benchmark target 明确只测 `PF/psin/uniform/Ip`，
    不在 timed path 中处理 beta/free-source 分支。
-2. timed hot path 使用 unchecked evaluator：假设输入合法，不做
-   `is_valid_magnitude()` 或“极大值”判断。
-3. checked evaluator / public facade 暂时保留边界 guard，避免改动公共失败语义。
+2. timed hot path 是唯一 evaluator：假设 route 输入由外层保证合法，不做
+   `is_valid_magnitude()`、finite check 或“极大值”判断。
+3. 不保留 checked evaluator / public facade；C++ kernel 只产出残差，不表达
+   solve success。
 4. 正确性由 timed loop 外部的 C++ smoke test、Python/C++ compare 和
    STRICT/FMA/RELAXED 差异表承担。
 
-停止条件：能量化 checked vs unchecked 在 RELAXED 下的开销，并确认后续
-stage/topology benchmark 只测 route kernel 本身。
+停止条件：确认后续 stage/topology benchmark 只测 route kernel 本身；
+outer solver/validation 只从残差范数解释成功与否。
 
 ### Phase 1b：补齐 post-layout stage 表与 topology/state matrix
 
@@ -467,7 +480,7 @@ G*psin_R*sin(tb)
 
 建议动作：
 
-1. 对 `PF/psin/uniform/Ip` 编译期实例消除不可能的 route/beta 分支。
+1. `PF/psin/uniform/Ip` 编译期实例已先消除不可能的 route/beta 分支；后续只处理仍有实测占比的 source/profile 固定成本。
 2. fixed profiles 尽量迁到 setup/plan 阶段，只在参数变化时刷新。
 3. 检查 family slab 是否在 `refresh_fixed` 和 `refresh_active` 中重复清零/重建。
 4. 保持 source 单 pass 微调降级；只有端到端 `evaluate` 有同步收益才保留。

@@ -110,10 +110,9 @@ namespace
         return out;
     }
 
-    nlohmann::json snapshot_state(const SmokeOperator& op, const PackedVector& raw, bool ok)
+    nlohmann::json snapshot_state(const SmokeOperator& op, const PackedVector& raw)
     {
         return {
-            {"ok", ok},
             {"raw_residual", json_array(raw)},
             {"alpha", {op.source_runtime.alpha1, op.source_runtime.alpha2}},
             {"profiles",
@@ -202,6 +201,7 @@ namespace
             op.params.R0 = 1.8;
             op.params.Z0 = -0.25;
             op.params.B0 = 2.1;
+            op.params.Ip = 3.7699111843077517;
             op.params.fix_rho = 0.0;
             op.params.profile_params.offsets[SmokeShape::kappa_profile_id] = 1.45;
             op.params.profile_params.offsets[SmokeShape::c_profile_id<0>()] = 0.0;
@@ -226,16 +226,15 @@ namespace
             );
         }
 
-        bool raw_residual(
+        void raw_residual(
             std::span<const double, SmokeShape::x_size> x,
             std::span<double, SmokeShape::x_size>       residual
         ) noexcept
         {
             PackedVector raw{};
-            const bool   ok = op.evaluate(x, raw);
+            op.evaluate(x, raw);
             for (size_t i = 0; i < SmokeShape::x_size; ++i)
-                residual[i] = ok ? raw[i] : 1.0e20;
-            return ok;
+                residual[i] = raw[i];
         }
 
         void configure_veqpy_scales(const std::array<double, SmokeShape::x_size>& x0) noexcept
@@ -252,15 +251,14 @@ namespace
             );
 
             PackedVector initial_raw{};
-            const bool   ok = op.evaluate(
+            op.evaluate(
                 std::span<const double, SmokeShape::x_size>{x0.data(), SmokeShape::x_size},
                 initial_raw
             );
-            const double initial_norm = ok ? norm2(std::span<const double, SmokeShape::x_size>{
-                                               initial_raw.data(),
-                                               SmokeShape::x_size,
-                                           })
-                                           : 1.0e20;
+            const double initial_norm = norm2(std::span<const double, SmokeShape::x_size>{
+                initial_raw.data(),
+                SmokeShape::x_size,
+            });
             const double initial_rms =
                 initial_norm / std::sqrt(static_cast<double>(SmokeShape::x_size));
             const double block_scale = initial_rms > 1.0 ? initial_rms : 1.0;
@@ -283,16 +281,10 @@ namespace
         const auto x = decode_z_to_x(z_eval, context.x_scale);
 
         PackedVector raw{};
-        const bool   ok = context.raw_residual(
+        context.raw_residual(
             std::span<const double, SmokeShape::x_size>{x.data(), SmokeShape::x_size},
             std::span<double, SmokeShape::x_size>{raw.data(), SmokeShape::x_size}
         );
-        if (!ok)
-        {
-            for (size_t i = 0; i < SmokeShape::x_size; ++i)
-                fvec[i] = 1.0e20;
-            return 0;
-        }
 
         for (size_t i = 0; i < SmokeShape::x_size; ++i)
             fvec[i] = raw[i] / context.residual_scale[i];
@@ -308,15 +300,14 @@ int main()
     context.configure_veqpy_scales(x_initial);
 
     PackedVector initial{};
-    const bool   initial_ok = context.raw_residual(
+    context.raw_residual(
         std::span<const double, SmokeShape::x_size>{x_initial.data(), SmokeShape::x_size},
         std::span<double, SmokeShape::x_size>{initial.data(), SmokeShape::x_size}
     );
-    const double initial_norm = initial_ok ? norm2(std::span<const double, SmokeShape::x_size>{
-                                             initial.data(),
-                                             SmokeShape::x_size,
-                                         })
-                                          : 1.0e20;
+    const double initial_norm = norm2(std::span<const double, SmokeShape::x_size>{
+        initial.data(),
+        SmokeShape::x_size,
+    });
     PackedVector initial_scaled{};
     for (size_t i = 0; i < SmokeShape::x_size; ++i)
         initial_scaled[i] = initial[i] / context.residual_scale[i];
@@ -324,7 +315,7 @@ int main()
         initial_scaled.data(),
         SmokeShape::x_size,
     });
-    const auto initial_state = snapshot_state(context.op, initial, initial_ok);
+    const auto initial_state = snapshot_state(context.op, initial);
 
     auto z = encode_x_to_z(x_initial, context.x_scale);
     PackedVector fvec{};
@@ -372,15 +363,14 @@ int main()
 
     const auto x_final = decode_z_to_x(z, context.x_scale);
     PackedVector final{};
-    const bool   final_ok = context.raw_residual(
+    context.raw_residual(
         std::span<const double, SmokeShape::x_size>{x_final.data(), SmokeShape::x_size},
         std::span<double, SmokeShape::x_size>{final.data(), SmokeShape::x_size}
     );
-    const double final_norm = final_ok ? norm2(std::span<const double, SmokeShape::x_size>{
-                                         final.data(),
-                                         SmokeShape::x_size,
-                                     })
-                                      : 1.0e20;
+    const double final_norm = norm2(std::span<const double, SmokeShape::x_size>{
+        final.data(),
+        SmokeShape::x_size,
+    });
     PackedVector final_scaled{};
     for (size_t i = 0; i < SmokeShape::x_size; ++i)
         final_scaled[i] = final[i] / context.residual_scale[i];
@@ -388,11 +378,11 @@ int main()
         final_scaled.data(),
         SmokeShape::x_size,
     });
-    const bool accepted_by_veqpy = final_ok && final_norm <= veqpy_acceptance_threshold();
-    const auto final_state = snapshot_state(context.op, final, final_ok);
+    const bool accepted_by_veqpy = final_norm <= veqpy_acceptance_threshold();
+    const auto final_state = snapshot_state(context.op, final);
 
     nlohmann::json report = {
-        {"route", "PF/psin/uniform"},
+        {"route", "PF/psin/uniform/Ip"},
         {"x_size", SmokeShape::x_size},
         {"solver",
          {
@@ -418,7 +408,6 @@ int main()
          }},
         {"initial",
          {
-             {"ok", initial_ok},
              {"x", json_array(x_initial)},
              {"z", json_array(encode_x_to_z(x_initial, context.x_scale))},
              {"raw_residual", json_array(initial)},
@@ -429,7 +418,6 @@ int main()
          }},
         {"final",
          {
-             {"ok", final_ok},
              {"x", json_array(x_final)},
              {"z", json_array(z)},
              {"raw_residual", json_array(final)},

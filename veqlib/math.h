@@ -43,16 +43,13 @@ namespace math::detail
             return std::hypot(lhs, rhs);
     }
 
-    inline constexpr std::uint64_t double_exponent_mask  = 0x7ff0'0000'0000'0000ULL;
-    inline constexpr double        valid_magnitude_bound = std::numeric_limits<double>::max() / 4.0;
+    inline constexpr std::uint64_t double_exponent_mask = 0x7ff0'0000'0000'0000ULL;
 
     constexpr bool is_finite(double value) noexcept
     {
         const auto bits = std::bit_cast<std::uint64_t>(value);
         return (bits & double_exponent_mask) != double_exponent_mask;
     }
-
-    constexpr bool is_valid_magnitude(double value) { return is_finite(value) && abs(value) <= valid_magnitude_bound; }
 
     constexpr double sqrt(double value)
     {
@@ -390,15 +387,6 @@ namespace math::detail
     {
         for (size_t i = 0; i < values.count; ++i)
             if (!is_finite(values[i]))
-                return false;
-        return true;
-    }
-
-    template <size_t... Extents>
-    constexpr bool is_valid_magnitude(const tensor::Tensor<double, Extents...>& values)
-    {
-        for (size_t i = 0; i < values.count; ++i)
-            if (!is_valid_magnitude(values[i]))
                 return false;
         return true;
     }
@@ -816,7 +804,6 @@ namespace math
     using detail::abs;
     using detail::hypot;
     using detail::is_finite;
-    using detail::is_valid_magnitude;
     using detail::sqrt;
     using detail::pow;
     using detail::exp;

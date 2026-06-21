@@ -205,7 +205,6 @@ namespace
         double c0_offset = 0.0;
         double s1_offset = 0.52359877559829887308;
         double Ip        = 3.7699111867885415;
-        double beta      = source::unset_constraint();
         double fix_rho   = 0.05;
         int    repeat    = 10;
         int    warmup    = 1;
@@ -228,7 +227,6 @@ namespace
         int                                   jacobian_component_evaluations = 0;
         int                                   jvp_evaluations = 0;
         int                                   linear_iterations = 0;
-        bool                                  ok          = false;
         bool                                  accepted    = false;
     };
 
@@ -609,13 +607,6 @@ namespace
         return out;
     }
 
-    nlohmann::json json_constraint_or_null(double value)
-    {
-        if (source::constraint_is_set(value))
-            return value;
-        return nullptr;
-    }
-
     std::array<double, BenchShape::x_size> decode_z_to_x(
         std::span<const double, BenchShape::x_size> z,
         const std::array<double, BenchShape::x_size>& x_scale
@@ -645,7 +636,6 @@ namespace
         op.params.Z0             = input.Z0;
         op.params.B0             = input.B0;
         op.params.Ip             = input.Ip;
-        op.params.beta           = input.beta;
         op.params.fix_rho        = input.fix_rho;
         op.params.profile_params = profile_params_for_case(input);
         op.set_uniform_sources(
@@ -666,16 +656,15 @@ namespace
             configure_operator_for_case(op, input);
         }
 
-        bool raw_residual(
+        void raw_residual(
             std::span<const double, BenchShape::x_size> x,
             std::span<double, BenchShape::x_size>       residual
         ) noexcept
         {
             PackedVector raw{uninitialized};
-            const bool   ok = op.evaluate(x, raw);
+            op.evaluate(x, raw);
             for (size_t i = 0; i < BenchShape::x_size; ++i)
-                residual[i] = ok ? raw[i] : 1.0e20;
-            return ok;
+                residual[i] = raw[i];
         }
     };
 
@@ -709,12 +698,12 @@ namespace
         );
 
         PackedVector raw{uninitialized};
-        const bool ok = context.op.evaluate(
+        context.op.evaluate(
             std::span<const double, BenchShape::x_size>{x.data(), BenchShape::x_size},
             raw
         );
         for (size_t i = 0; i < BenchShape::x_size; ++i)
-            fvec[i] = ok ? raw[i] / context.residual_scale[i] : 1.0e20;
+            fvec[i] = raw[i] / context.residual_scale[i];
         return 0.0;
     }
 #endif
@@ -733,36 +722,28 @@ namespace
         );
 
         PackedVector raw{uninitialized};
-        const bool   ok = context.raw_residual(
+        context.raw_residual(
             std::span<const double, BenchShape::x_size>{x.data(), BenchShape::x_size},
             std::span<double, BenchShape::x_size>{raw.data(), BenchShape::x_size}
         );
-        if (!ok)
-        {
-            for (size_t i = 0; i < BenchShape::x_size; ++i)
-                fvec[i] = 1.0e20;
-            return 0;
-        }
-
         for (size_t i = 0; i < BenchShape::x_size; ++i)
             fvec[i] = raw[i] / context.input.residual_scale[i];
         return 0;
     }
 
-    bool scaled_residual_z_no_count(SolveContext& context, const double* z, double* fvec) noexcept
+    void scaled_residual_z_no_count(SolveContext& context, const double* z, double* fvec) noexcept
     {
         const auto x = decode_z_to_x(
             std::span<const double, BenchShape::x_size>{z, BenchShape::x_size},
             context.input.x_scale
         );
         PackedVector raw{uninitialized};
-        const bool   ok = context.raw_residual(
+        context.raw_residual(
             std::span<const double, BenchShape::x_size>{x.data(), BenchShape::x_size},
             std::span<double, BenchShape::x_size>{raw.data(), BenchShape::x_size}
         );
         for (size_t i = 0; i < BenchShape::x_size; ++i)
-            fvec[i] = ok ? raw[i] / context.input.residual_scale[i] : 1.0e20;
-        return ok;
+            fvec[i] = raw[i] / context.input.residual_scale[i];
     }
 
 #ifdef ENABLE_ENZYME
@@ -916,13 +897,13 @@ namespace
         }
     }
 
-    bool scaled_residual_z_array_no_count(
+    void scaled_residual_z_array_no_count(
         SolveContext&                                      context,
         const std::array<double, BenchShape::x_size>&      z,
         std::array<double, BenchShape::x_size>&            fvec
     ) noexcept
     {
-        return scaled_residual_z_no_count(context, z.data(), fvec.data());
+        scaled_residual_z_no_count(context, z.data(), fvec.data());
     }
 
     JacobianCheck check_enzyme_jacobian_at_initial(SolveContext& context)
@@ -1051,7 +1032,8 @@ namespace
         auto*  z      = N_VGetArrayPointer(u);
         auto*  f_data = N_VGetArrayPointer(fval);
         ++data.evaluations;
-        return scaled_residual_z_no_count(*data.context, z, f_data) ? 0 : 1;
+        scaled_residual_z_no_count(*data.context, z, f_data);
+        return 0;
     }
 
     void fill_finite_difference_jacobian_z(SolveContext& context, const double* z, double* jacobian)
@@ -1188,24 +1170,22 @@ namespace
             std::span<const double, BenchShape::x_size>{z, BenchShape::x_size},
             context.input.x_scale
         );
-        result.ok        = context.raw_residual(
+        context.raw_residual(
             std::span<const double, BenchShape::x_size>{result.x.data(), BenchShape::x_size},
             std::span<double, BenchShape::x_size>{result.raw.data(), BenchShape::x_size}
         );
         for (size_t i = 0; i < BenchShape::x_size; ++i)
             result.scaled[i] = result.raw[i] / context.input.residual_scale[i];
-        result.raw_norm = result.ok
-                              ? norm2(std::span<const double, BenchShape::x_size>{
-                                    result.raw.data(),
-                                    BenchShape::x_size,
-                                })
-                              : 1.0e20;
+        result.raw_norm = norm2(std::span<const double, BenchShape::x_size>{
+            result.raw.data(),
+            BenchShape::x_size,
+        });
         result.scaled_norm = norm2(std::span<const double, BenchShape::x_size>{
             result.scaled.data(),
             BenchShape::x_size,
         });
         result.alpha    = {context.op.source_runtime.alpha1, context.op.source_runtime.alpha2};
-        result.accepted = result.ok && result.raw_norm <= veqpy_acceptance_threshold();
+        result.accepted = result.raw_norm <= veqpy_acceptance_threshold();
     }
 
     SolveResult run_hybrd_once(SolveContext& context)
@@ -1542,7 +1522,6 @@ namespace
     nlohmann::json solve_result_json(const SolveResult& result)
     {
         return {
-            {"ok", result.ok},
             {"accepted_by_veqpy", result.accepted},
             {"x", json_array(result.x)},
             {"raw_residual", json_array(result.raw)},
@@ -1691,7 +1670,7 @@ int main(int argc, char** argv)
         SolveContext context{input};
 
         PackedVector initial_raw{uninitialized};
-        const bool   initial_ok = context.raw_residual(
+        context.raw_residual(
             std::span<const double, BenchShape::x_size>{input.x0.data(), BenchShape::x_size},
             std::span<double, BenchShape::x_size>{initial_raw.data(), BenchShape::x_size}
         );
@@ -1780,25 +1759,21 @@ int main(int argc, char** argv)
              }},
             {"constraints",
              {
-                 {"scaled_Ip", json_constraint_or_null(input.Ip)},
-                 {"beta", json_constraint_or_null(input.beta)},
+                 {"scaled_Ip", input.Ip},
              }},
             {"jacobian_check", jacobian_check_report},
             {"timing", timing_json(samples_ms)},
             {"initial",
              {
-                 {"ok", initial_ok},
                  {"x", json_array(input.x0)},
                  {"policy", "benchmark.py robust zero profile coefficients"},
                  {"raw_residual", json_array(initial_raw)},
                  {"scaled_residual", json_array(initial_scaled)},
                  {"raw_norm",
-                  initial_ok
-                      ? norm2(std::span<const double, BenchShape::x_size>{
-                            initial_raw.data(),
-                            BenchShape::x_size,
-                        })
-                      : 1.0e20},
+                  norm2(std::span<const double, BenchShape::x_size>{
+                      initial_raw.data(),
+                      BenchShape::x_size,
+                  })},
              }},
             {"final", solve_result_json(final)},
             {"success", final.accepted && solver_info_succeeded(input.solver, final.info)},

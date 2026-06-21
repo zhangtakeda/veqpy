@@ -65,6 +65,7 @@ def _fixed_case_operator() -> Operator:
         # same source samples at the engine boundary.
         heat_input=CPP_HEAT / MU0,
         current_input=CPP_CURRENT,
+        Ip=3.0e6,
     )
     grid = Grid(
         Nr=8,
@@ -267,7 +268,7 @@ def _solver_interface(cxx: dict[str, Any], python: dict[str, Any]) -> dict[str, 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Compare the fixed PF/psin/uniform VEQlib cminpack solve against VEQPy."
+        description="Compare the fixed PF/psin/uniform/Ip VEQlib cminpack solve against VEQPy."
     )
     parser.add_argument("--cxx-exe", type=Path, default=_repo_relative_default_exe())
     parser.add_argument("--tolerance", type=float, default=1.0e-9)
@@ -281,7 +282,7 @@ def main(argv: list[str] | None = None) -> int:
     passed = bool(max_abs <= args.tolerance)
 
     report = {
-        "case": "PF/psin/uniform active psin length=1, Grid(8,8,L=1,M=1,K=2)",
+        "case": "PF/psin/uniform/Ip active psin length=1, Grid(8,8,L=1,M=1,K=2)",
         "passed": passed,
         "tolerance": args.tolerance,
         "max_abs": max_abs,

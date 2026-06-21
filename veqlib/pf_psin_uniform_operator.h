@@ -17,8 +17,7 @@ namespace operator_pf::detail
         double R0      = 1.0;
         double Z0      = 0.0;
         double B0      = 1.0;
-        double Ip      = source::unset_constraint();
-        double beta    = source::unset_constraint();
+        double Ip      = 0.0;
         double fix_rho = 0.0;
     };
 
@@ -56,34 +55,18 @@ namespace operator_pf::detail
             source_runtime.set_uniform_sources(heat, current);
         }
 
-        constexpr bool evaluate(std::span<const double, Shape::x_size> x, PackedVector& out) noexcept
+        constexpr void evaluate(std::span<const double, Shape::x_size> x, PackedVector& out) noexcept
         {
             profiles.refresh_fixed(params.profile_params);
             profiles.refresh_active(x, params.profile_params);
             geometry.update(params.a, params.R0, params.Z0, profiles);
 
             const auto n_axis_fix = source::axis_fix_count<GridType>(params.fix_rho);
-            if (!source_runtime.materialize_profile_owned_psin(profiles, n_axis_fix))
-                return false;
-            if (!source_runtime.update_pf_from_psin_uniform(
-                    geometry,
-                    params.B0,
-                    params.Ip,
-                    params.beta,
-                    n_axis_fix
-                ))
-                return false;
+            source_runtime.materialize_profile_owned_psin(profiles, n_axis_fix);
+            source_runtime.update_pf_ip_from_psin_uniform(geometry, params.Ip, n_axis_fix);
 
             residual.update_compact(source_runtime, geometry);
             residual.pack_into(out, params.a, params.R0, params.B0);
-            return math::is_valid_magnitude(out);
-        }
-
-        constexpr PackedVector evaluate(std::span<const double, Shape::x_size> x, bool& ok) noexcept
-        {
-            PackedVector out{};
-            ok = evaluate(x, out);
-            return out;
         }
     };
 } // namespace operator_pf::detail
@@ -93,4 +76,3 @@ namespace operator_pf
     using detail::PfPsinUniformOperator;
     using detail::PfPsinUniformRuntimeParams;
 } // namespace operator_pf
-

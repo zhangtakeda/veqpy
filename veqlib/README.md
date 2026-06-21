@@ -285,11 +285,11 @@ including NaN/inf propagation, trapping, signed zero, errno, and operation
 reassociation. Use `STRICT` and `FMA` builds to define correctness and error
 budgets before comparing approximate or vector math kernels.
 
-Runtime validity checks deliberately distinguish true finiteness from the
-solver's old magnitude guard. `math::is_finite()` is a bit-level NaN/inf test
-that remains meaningful under `-ffinite-math-only`; hot-path solver acceptance
-uses `math::is_valid_magnitude()` to retain the previous `max_double / 4`
-overflow margin.
+VEQlib route kernels deliberately do not make solve-success decisions.
+`math::is_finite()` is a bit-level NaN/inf helper for diagnostics and tests,
+but timed/source/residual kernels should not branch on finiteness, magnitude,
+or fallback sentinel values. Solver acceptance belongs in the outer solver or
+validation layer that interprets the residual norm.
 
 For source-correlated performance diagnostics, configure a separate analysis
 build with `VEQLIB_ANALYSIS_BUILD=ON`. This keeps `-O3` but disables ThinLTO for

@@ -33,7 +33,6 @@ namespace
     using residual::surface_G;
     using source::axis_fix_count;
     using source::UniformSourceShape;
-    using source::unset_constraint;
     using std::size_t;
 
     template <auto Counts>
@@ -205,7 +204,6 @@ namespace
         op.params.Z0                                                    = 0.0;
         op.params.B0                                                    = 3.0;
         op.params.Ip                                                    = 3.7699111867885415;
-        op.params.beta                                                  = unset_constraint();
         op.params.fix_rho                                               = 0.05;
         op.params.profile_params.offsets[BenchShape::kappa_profile_id]  = 2.2;
         op.params.profile_params.offsets[BenchShape::c_profile_id<0>()] = 0.0;
@@ -227,37 +225,31 @@ namespace
         op.profiles.refresh_active(x, op.params.profile_params);
     }
 
-    bool prepare_geometry(BenchOperator& op, std::span<const double, BenchShape::x_size> x) noexcept
+    void prepare_geometry(BenchOperator& op, std::span<const double, BenchShape::x_size> x) noexcept
     {
         refresh_profiles(op, x);
         op.geometry.update(op.params.a, op.params.R0, op.params.Z0, op.profiles);
-        return true;
     }
 
-    bool prepare_source_materialized(BenchOperator& op, std::span<const double, BenchShape::x_size> x) noexcept
+    void prepare_source_materialized(BenchOperator& op, std::span<const double, BenchShape::x_size> x) noexcept
     {
         refresh_profiles(op, x);
         const size_t n_axis_fix = axis_fix_count<BenchGrid>(op.params.fix_rho);
-        return op.source_runtime.materialize_profile_owned_psin(op.profiles, n_axis_fix);
+        op.source_runtime.materialize_profile_owned_psin(op.profiles, n_axis_fix);
     }
 
-    bool prepare_source_updated(BenchOperator& op, std::span<const double, BenchShape::x_size> x) noexcept
+    void prepare_source_updated(BenchOperator& op, std::span<const double, BenchShape::x_size> x) noexcept
     {
-        if (!prepare_geometry(op, x))
-            return false;
+        prepare_geometry(op, x);
         const size_t n_axis_fix = axis_fix_count<BenchGrid>(op.params.fix_rho);
-        if (!op.source_runtime.materialize_profile_owned_psin(op.profiles, n_axis_fix))
-            return false;
-        return op.source_runtime.update_pf_from_psin_uniform(
-            op.geometry, op.params.B0, op.params.Ip, op.params.beta, n_axis_fix);
+        op.source_runtime.materialize_profile_owned_psin(op.profiles, n_axis_fix);
+        op.source_runtime.update_pf_ip_from_psin_uniform(op.geometry, op.params.Ip, n_axis_fix);
     }
 
-    bool prepare_residual_updated(BenchOperator& op, std::span<const double, BenchShape::x_size> x) noexcept
+    void prepare_residual_updated(BenchOperator& op, std::span<const double, BenchShape::x_size> x) noexcept
     {
-        if (!prepare_source_updated(op, x))
-            return false;
+        prepare_source_updated(op, x);
         op.residual.update_compact(op.source_runtime, op.geometry);
-        return true;
     }
 
     double consume_state(const BenchOperator& op, const PackedVector& packed) noexcept
@@ -292,14 +284,11 @@ namespace
             compiler_barrier(op.geometry.surface_fields.data());
             break;
         case StageKind::SourceMaterialize:
-            if (!op.source_runtime.materialize_profile_owned_psin(op.profiles, n_axis_fix))
-                throw std::runtime_error("source materialize failed");
+            op.source_runtime.materialize_profile_owned_psin(op.profiles, n_axis_fix);
             compiler_barrier(op.source_runtime.materialized_heat_input.data());
             break;
         case StageKind::SourceUpdate:
-            if (!op.source_runtime.update_pf_from_psin_uniform(
-                    op.geometry, op.params.B0, op.params.Ip, op.params.beta, n_axis_fix))
-                throw std::runtime_error("source update failed");
+            op.source_runtime.update_pf_ip_from_psin_uniform(op.geometry, op.params.Ip, n_axis_fix);
             compiler_barrier(op.source_runtime.FFn_psin.data());
             break;
         case StageKind::ResidualUpdate:
@@ -311,8 +300,7 @@ namespace
             compiler_barrier(packed.data());
             break;
         case StageKind::Evaluate:
-            if (!op.evaluate(x, packed))
-                throw std::runtime_error("operator evaluate failed");
+            op.evaluate(x, packed);
             compiler_barrier(packed.data());
             break;
         }
@@ -481,17 +469,14 @@ namespace
             refresh_profiles(op, x);
             break;
         case StageKind::SourceUpdate:
-            if (!prepare_source_materialized(op, x))
-                throw std::runtime_error("source materialize setup failed");
+            prepare_source_materialized(op, x);
             op.geometry.update(op.params.a, op.params.R0, op.params.Z0, op.profiles);
             break;
         case StageKind::ResidualUpdate:
-            if (!prepare_source_updated(op, x))
-                throw std::runtime_error("source update setup failed");
+            prepare_source_updated(op, x);
             break;
         case StageKind::ResidualPack:
-            if (!prepare_residual_updated(op, x))
-                throw std::runtime_error("residual update setup failed");
+            prepare_residual_updated(op, x);
             break;
         case StageKind::Evaluate:
             break;
