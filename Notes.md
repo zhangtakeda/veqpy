@@ -102,6 +102,7 @@ Phase 2 首轮 micro A/B：
 | Residual surface physical layout 改为 `[rho][field][theta]` | 5 组 paired median：`residual_update` ratio≈0.931，`residual_pack` ratio≈1.004，`evaluate` ratio≈0.994 | 保留；端到端收益小但未见显著回归，且 producer 语义与 geometry layout 对齐 |
 | Residual theta-moment fusion，直接累计 active block moments | active-only 5 组 paired median：`residual_fused / (update+pack)`≈1.090，`evaluate` ratio≈1.007；naive 全 moments 约 1.166 / 1.021 | 回滚；当前 materialized update + vectorized pack 更快 |
 | Geometry residual-ready descriptor compression（`qR/qZ/R2/dmetric`，9 fields -> 7 fields） | 5 组 paired median：`residual_update` ratio≈0.809，但 `geometry` ratio≈1.021，`evaluate` ratio≈1.004，`evaluate_ring` ratio≈1.008 | 回滚；只是把成本从 residual 移到 geometry，端到端无收益 |
+| Geometry absent Fourier order static skip（仅 `harmonic_rows>2`） | 默认 `32x16x1` geometry 基本中性（短 all-stage median≈0.998，长 geometry-only median≈1.006）；`32x16x4` geometry-only median ratio≈0.925；`32x16x8` geometry-only median ratio≈0.808 | 保留；默认 topology 走原始 loop，高 `Mmax` 跳过 absent c-family order，stage sink 与 baseline 一致 |
 
 Residual layout 本轮的逐项中位数：baseline `residual_update≈912.2 ns`、candidate
 `≈846.1 ns`；baseline `evaluate≈8288.7 ns`、candidate `≈8230.4 ns`。
@@ -584,6 +585,24 @@ G*psin_R*sin(tb)
 在一次 theta sweep 中直接累计 `rowwise_sum` / `rowwise_weighted_sum` 所需 moments，再做 radial projection。
 
 ### Phase 6：Source/profile route 静态化
+
+已完成一项局部静态化：Geometry Fourier order accumulation 现在在
+`harmonic_rows>2` 时按 `Shape::c_slot(order).enabled()` /
+`Shape::s_slot(order).enabled()` 做 compile-time fold，absent order 不再加载或
+参与 phase synthesis。为了保护当前默认 `Mmax=1` 性能，`harmonic_rows<=2`
+仍保留原始小 loop。验证结果：
+
+- default `32x16x1`：geometry 基本中性；paired geometry-only median ratio≈1.006，
+  all-stage 短测 geometry median ratio≈0.998。
+- `32x16x4`：geometry-only 7 组 median ratio≈0.925，all-stage evaluate median
+  ratio≈0.946--0.971（按不同窗口）。
+- `32x16x8`：geometry-only 7 组 median ratio≈0.808，all-stage evaluate median
+  ratio≈0.885--0.894。
+- `32x16x4/8` 的 stage `geometry` 和 `evaluate` sink 与 baseline 完全一致。
+
+结论：这是高 `Mmax` topology 的真实收益，不改变默认 topology 的语义；若未来
+启用 cosine family，也应继续依赖 `ProfileShape` 的 enabled slot，而不是运行期
+读取 absent family 的零 slab。
 
 目标：在 geometry/residual 结构性收益之后，再处理固定成本。
 

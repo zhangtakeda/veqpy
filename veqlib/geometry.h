@@ -4,6 +4,7 @@
 #include "profiles.h"
 #include "tensor.h"
 #include <cstddef>
+#include <utility>
 
 namespace geometry::detail
 {
@@ -76,6 +77,179 @@ namespace geometry::detail
             return radial_fields(row, radial_node);
         }
 
+        enum class FourierFamily
+        {
+            Cosine,
+            Sine,
+        };
+
+        template <FourierFamily Family, typename Shape, size_t Order>
+        static consteval bool family_order_enabled() noexcept
+        {
+            if constexpr (Family == FourierFamily::Cosine)
+                return Shape::c_slot(Order).enabled();
+            else
+                return Shape::s_slot(Order).enabled();
+        }
+
+        template <FourierFamily Family, typename ProfilesRuntime>
+        static constexpr double family_field(
+            const ProfilesRuntime& runtime_profiles,
+            size_t                 order,
+            size_t                 node,
+            size_t                 component
+        ) noexcept
+        {
+            if constexpr (Family == FourierFamily::Cosine)
+                return runtime_profiles.c_family_fields(order, node, component);
+            else
+                return runtime_profiles.s_family_fields(order, node, component);
+        }
+
+        template <FourierFamily Family, typename Shape, typename ProfilesRuntime, size_t Limit, size_t Order>
+        static constexpr void load_family_field_order(
+            Matrix<double, Limit, 3>& fields,
+            const ProfilesRuntime&    runtime_profiles,
+            size_t                    node
+        ) noexcept
+        {
+            if constexpr (family_order_enabled<Family, Shape, Order>())
+            {
+                fields(Order, profile_value) = family_field<Family>(runtime_profiles, Order, node, profile_value);
+                fields(Order, profile_radial) = family_field<Family>(runtime_profiles, Order, node, profile_radial);
+                fields(Order, profile_radial2) = family_field<Family>(runtime_profiles, Order, node, profile_radial2);
+            }
+        }
+
+        template <FourierFamily Family, typename Shape, typename ProfilesRuntime, size_t Limit, size_t... Indices>
+        static constexpr void load_family_fields_impl(
+            Matrix<double, Limit, 3>& fields,
+            const ProfilesRuntime&    runtime_profiles,
+            size_t                    node,
+            std::index_sequence<Indices...>
+        ) noexcept
+        {
+            (load_family_field_order<Family, Shape, ProfilesRuntime, Limit, Indices + 1>(
+                 fields,
+                 runtime_profiles,
+                 node
+             ),
+             ...);
+        }
+
+        template <FourierFamily Family, typename Shape, typename ProfilesRuntime, size_t Limit>
+        static constexpr void load_family_fields(
+            Matrix<double, Limit, 3>& fields,
+            const ProfilesRuntime&    runtime_profiles,
+            size_t                    node
+        ) noexcept
+        {
+            load_family_fields_impl<Family, Shape, ProfilesRuntime, Limit>(
+                fields,
+                runtime_profiles,
+                node,
+                std::make_index_sequence<Limit - 1>{}
+            );
+        }
+
+        template <FourierFamily Family, typename Shape, size_t Limit, size_t Order>
+        static constexpr void accumulate_phase_order(
+            double&                         tb,
+            double&                         tb_r,
+            double&                         tb_t,
+            double&                         tb_rr,
+            double&                         tb_rt,
+            double&                         tb_tt,
+            const Matrix<double, Limit, 3>& fields,
+            size_t                          theta_node
+        ) noexcept
+        {
+            if constexpr (family_order_enabled<Family, Shape, Order>())
+            {
+                const double value    = fields(Order, profile_value);
+                const double radial   = fields(Order, profile_radial);
+                const double radial2  = fields(Order, profile_radial2);
+
+                if constexpr (Family == FourierFamily::Cosine)
+                {
+                    const double cos_kt    = GridType::cos_mtheta(Order, theta_node);
+                    const double k_sin_kt  = GridType::m_sin_mtheta(Order, theta_node);
+                    const double k2_cos_kt = GridType::m2_cos_mtheta(Order, theta_node);
+
+                    tb += value * cos_kt;
+                    tb_r += radial * cos_kt;
+                    tb_t -= value * k_sin_kt;
+                    tb_rr += radial2 * cos_kt;
+                    tb_rt -= radial * k_sin_kt;
+                    tb_tt -= value * k2_cos_kt;
+                }
+                else
+                {
+                    const double sin_kt    = GridType::sin_mtheta(Order, theta_node);
+                    const double k_cos_kt  = GridType::m_cos_mtheta(Order, theta_node);
+                    const double k2_sin_kt = GridType::m2_sin_mtheta(Order, theta_node);
+
+                    tb += value * sin_kt;
+                    tb_r += radial * sin_kt;
+                    tb_t += value * k_cos_kt;
+                    tb_rr += radial2 * sin_kt;
+                    tb_rt += radial * k_cos_kt;
+                    tb_tt -= value * k2_sin_kt;
+                }
+            }
+        }
+
+        template <FourierFamily Family, typename Shape, size_t Limit, size_t... Indices>
+        static constexpr void accumulate_phase_impl(
+            double&                         tb,
+            double&                         tb_r,
+            double&                         tb_t,
+            double&                         tb_rr,
+            double&                         tb_rt,
+            double&                         tb_tt,
+            const Matrix<double, Limit, 3>& fields,
+            size_t                          theta_node,
+            std::index_sequence<Indices...>
+        ) noexcept
+        {
+            (accumulate_phase_order<Family, Shape, Limit, Indices + 1>(
+                 tb,
+                 tb_r,
+                 tb_t,
+                 tb_rr,
+                 tb_rt,
+                 tb_tt,
+                 fields,
+                 theta_node
+             ),
+             ...);
+        }
+
+        template <FourierFamily Family, typename Shape, size_t Limit>
+        static constexpr void accumulate_phase(
+            double&                         tb,
+            double&                         tb_r,
+            double&                         tb_t,
+            double&                         tb_rr,
+            double&                         tb_rt,
+            double&                         tb_tt,
+            const Matrix<double, Limit, 3>& fields,
+            size_t                          theta_node
+        ) noexcept
+        {
+            accumulate_phase_impl<Family, Shape, Limit>(
+                tb,
+                tb_r,
+                tb_t,
+                tb_rr,
+                tb_rt,
+                tb_tt,
+                fields,
+                theta_node,
+                std::make_index_sequence<Limit - 1>{}
+            );
+        }
+
         template <typename ProfilesRuntime>
         constexpr void update(double a, double R0, double Z0, const ProfilesRuntime& runtime_profiles) noexcept
         {
@@ -108,17 +282,25 @@ namespace geometry::detail
 
                 Matrix<double, c_limit, 3> c_fields{uninitialized};
                 Matrix<double, s_limit, 3> s_fields{uninitialized};
-                for (size_t order = 1; order < c_limit; ++order)
+                if constexpr (GridType::harmonic_rows <= 2)
                 {
-                    c_fields(order, profile_value) = runtime_profiles.c_family_fields(order, i, profile_value);
-                    c_fields(order, profile_radial) = runtime_profiles.c_family_fields(order, i, profile_radial);
-                    c_fields(order, profile_radial2) = runtime_profiles.c_family_fields(order, i, profile_radial2);
+                    for (size_t order = 1; order < c_limit; ++order)
+                    {
+                        c_fields(order, profile_value) = runtime_profiles.c_family_fields(order, i, profile_value);
+                        c_fields(order, profile_radial) = runtime_profiles.c_family_fields(order, i, profile_radial);
+                        c_fields(order, profile_radial2) = runtime_profiles.c_family_fields(order, i, profile_radial2);
+                    }
+                    for (size_t order = 1; order < s_limit; ++order)
+                    {
+                        s_fields(order, profile_value) = runtime_profiles.s_family_fields(order, i, profile_value);
+                        s_fields(order, profile_radial) = runtime_profiles.s_family_fields(order, i, profile_radial);
+                        s_fields(order, profile_radial2) = runtime_profiles.s_family_fields(order, i, profile_radial2);
+                    }
                 }
-                for (size_t order = 1; order < s_limit; ++order)
+                else
                 {
-                    s_fields(order, profile_value) = runtime_profiles.s_family_fields(order, i, profile_value);
-                    s_fields(order, profile_radial) = runtime_profiles.s_family_fields(order, i, profile_radial);
-                    s_fields(order, profile_radial2) = runtime_profiles.s_family_fields(order, i, profile_radial2);
+                    load_family_fields<FourierFamily::Cosine, Shape, ProfilesRuntime, c_limit>(c_fields, runtime_profiles, i);
+                    load_family_fields<FourierFamily::Sine, Shape, ProfilesRuntime, s_limit>(s_fields, runtime_profiles, i);
                 }
 
                 double sum_J           = 0.0;
@@ -139,38 +321,64 @@ namespace geometry::detail
                     double tb_rt_ij = 0.0;
                     double tb_tt_ij = 0.0;
 
-                    for (size_t order = 1; order < c_limit; ++order)
+                    if constexpr (GridType::harmonic_rows <= 2)
                     {
-                        const double cos_kt    = GridType::cos_mtheta(order, j);
-                        const double k_sin_kt  = GridType::m_sin_mtheta(order, j);
-                        const double k2_cos_kt = GridType::m2_cos_mtheta(order, j);
-                        const double c_i       = c_fields(order, profile_value);
-                        const double c_r_i     = c_fields(order, profile_radial);
-                        const double c_rr_i    = c_fields(order, profile_radial2);
+                        for (size_t order = 1; order < c_limit; ++order)
+                        {
+                            const double cos_kt    = GridType::cos_mtheta(order, j);
+                            const double k_sin_kt  = GridType::m_sin_mtheta(order, j);
+                            const double k2_cos_kt = GridType::m2_cos_mtheta(order, j);
+                            const double c_i       = c_fields(order, profile_value);
+                            const double c_r_i     = c_fields(order, profile_radial);
+                            const double c_rr_i    = c_fields(order, profile_radial2);
 
-                        tb_ij += c_i * cos_kt;
-                        tb_r_ij += c_r_i * cos_kt;
-                        tb_t_ij -= c_i * k_sin_kt;
-                        tb_rr_ij += c_rr_i * cos_kt;
-                        tb_rt_ij -= c_r_i * k_sin_kt;
-                        tb_tt_ij -= c_i * k2_cos_kt;
+                            tb_ij += c_i * cos_kt;
+                            tb_r_ij += c_r_i * cos_kt;
+                            tb_t_ij -= c_i * k_sin_kt;
+                            tb_rr_ij += c_rr_i * cos_kt;
+                            tb_rt_ij -= c_r_i * k_sin_kt;
+                            tb_tt_ij -= c_i * k2_cos_kt;
+                        }
+
+                        for (size_t order = 1; order < s_limit; ++order)
+                        {
+                            const double sin_kt    = GridType::sin_mtheta(order, j);
+                            const double k_cos_kt  = GridType::m_cos_mtheta(order, j);
+                            const double k2_sin_kt = GridType::m2_sin_mtheta(order, j);
+                            const double s_i       = s_fields(order, profile_value);
+                            const double s_r_i     = s_fields(order, profile_radial);
+                            const double s_rr_i    = s_fields(order, profile_radial2);
+
+                            tb_ij += s_i * sin_kt;
+                            tb_r_ij += s_r_i * sin_kt;
+                            tb_t_ij += s_i * k_cos_kt;
+                            tb_rr_ij += s_rr_i * sin_kt;
+                            tb_rt_ij += s_r_i * k_cos_kt;
+                            tb_tt_ij -= s_i * k2_sin_kt;
+                        }
                     }
-
-                    for (size_t order = 1; order < s_limit; ++order)
+                    else
                     {
-                        const double sin_kt    = GridType::sin_mtheta(order, j);
-                        const double k_cos_kt  = GridType::m_cos_mtheta(order, j);
-                        const double k2_sin_kt = GridType::m2_sin_mtheta(order, j);
-                        const double s_i       = s_fields(order, profile_value);
-                        const double s_r_i     = s_fields(order, profile_radial);
-                        const double s_rr_i    = s_fields(order, profile_radial2);
-
-                        tb_ij += s_i * sin_kt;
-                        tb_r_ij += s_r_i * sin_kt;
-                        tb_t_ij += s_i * k_cos_kt;
-                        tb_rr_ij += s_rr_i * sin_kt;
-                        tb_rt_ij += s_r_i * k_cos_kt;
-                        tb_tt_ij -= s_i * k2_sin_kt;
+                        accumulate_phase<FourierFamily::Cosine, Shape, c_limit>(
+                            tb_ij,
+                            tb_r_ij,
+                            tb_t_ij,
+                            tb_rr_ij,
+                            tb_rt_ij,
+                            tb_tt_ij,
+                            c_fields,
+                            j
+                        );
+                        accumulate_phase<FourierFamily::Sine, Shape, s_limit>(
+                            tb_ij,
+                            tb_r_ij,
+                            tb_t_ij,
+                            tb_rr_ij,
+                            tb_rt_ij,
+                            tb_tt_ij,
+                            s_fields,
+                            j
+                        );
                     }
 
                     const double cos_tb_ij = math::cos(tb_ij);
@@ -268,4 +476,3 @@ namespace geometry
     using detail::surface_sin_tb;
     using detail::surface_Z_t;
 } // namespace geometry
-

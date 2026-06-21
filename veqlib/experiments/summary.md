@@ -102,6 +102,7 @@ end-to-end timing neutral-to-slightly-positive.
 | Residual surface physical layout `[rho][field][theta]` | re-test: `residual_update` 0.931; `residual_pack` 1.004 | 0.994 | retain; semantic layout alignment, no significant end-to-end regression |
 | Residual theta-moment fusion | active-only `residual_fused / (update+pack)` 1.090; naive 1.166 | active-only 1.007; naive 1.021 | reject; scalar moment accumulation lost to materialized update + vectorized rowwise pack |
 | Geometry residual-ready descriptor compression | `residual_update` 0.809, but `geometry` 1.021 | `evaluate` 1.004; `evaluate_ring` 1.008 | reject; moved arithmetic into dominant geometry stage without end-to-end gain |
+| Geometry absent Fourier order static skip for `harmonic_rows>2` | `32x16x4` geometry-only 0.925; `32x16x8` geometry-only 0.808 | default `32x16x1` neutral; high-Mmax all-stage evaluate about 0.95 / 0.89 | keep; default topology keeps original loop, high Mmax skips absent c-family orders at compile time |
 | Source `psin_r` regularization/pass reduction | `source_update` 0.954 | 1.000 | reject; no end-to-end gain |
 | Geometry hot-loop pointer/index flattening | `geometry` 1.003 | 1.000 | reject; compiler already removes most accessor overhead |
 
@@ -254,6 +255,14 @@ against Python (`max_abs≈5.578e-11`), but paired RELAXED timing rejected it:
 `residual_update=0.809`, `geometry=1.021`, `evaluate=1.004`, and
 `evaluate_ring=1.008`. Do not move residual recomputation into Geometry unless
 the full `evaluate` path improves.
+
+A later high-`Mmax` specialization is retained: Geometry now skips absent Fourier
+orders with a compile-time fold when `harmonic_rows>2`, while preserving the old
+small loop for the default `Mmax=1` path. The default `32x16x1` geometry timing
+is effectively neutral (short all-stage median ratio≈0.998; longer geometry-only
+median ratio≈1.006). For `32x16x4`, geometry-only paired median ratio≈0.925; for
+`32x16x8`, geometry-only paired median ratio≈0.808. Stage `geometry` and
+`evaluate` sink checks matched the baseline exactly for both high-Mmax topologies.
 
 Phase 1a RELAXED validation and timing (three same-window runs; per-run
 `taskset -c 2`, `repeat=25`, `warmup=8`, `inner=10000`; table uses the
