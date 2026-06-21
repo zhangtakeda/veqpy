@@ -103,6 +103,7 @@ end-to-end timing neutral-to-slightly-positive.
 | Residual theta-moment fusion | active-only `residual_fused / (update+pack)` 1.090; naive 1.166 | active-only 1.007; naive 1.021 | reject; scalar moment accumulation lost to materialized update + vectorized rowwise pack |
 | Geometry residual-ready descriptor compression | `residual_update` 0.809, but `geometry` 1.021 | `evaluate` 1.004; `evaluate_ring` 1.008 | reject; moved arithmetic into dominant geometry stage without end-to-end gain |
 | Geometry absent Fourier order static skip for `harmonic_rows>2` | `32x16x4` geometry-only 0.925; `32x16x8` geometry-only 0.808 | default `32x16x1` neutral; high-Mmax all-stage evaluate about 0.95 / 0.89 | keep; default topology keeps original loop, high Mmax skips absent c-family orders at compile time |
+| Remove independent `Pn_psin` buffer and read `materialized_heat_input` instead | `source_update` 1.008; `residual_update` 1.003 | `evaluate` 0.993 but mixed-sign pairs; `evaluate_ring` 0.998 | reject; aliasing the duplicate value is semantically clean but not a stable performance win |
 | Source `psin_r` regularization/pass reduction | `source_update` 0.954 | 1.000 | reject; no end-to-end gain |
 | Geometry hot-loop pointer/index flattening | `geometry` 1.003 | 1.000 | reject; compiler already removes most accessor overhead |
 
@@ -264,6 +265,14 @@ committed. Across all 45 topologies, median `geometry/evaluate` share was
 Only `32x8x{1,4,8}` fell below 0.5 Geometry share. For normal and larger
 `Nt`, Geometry remains the optimization priority; small-`Nt` cases are the main
 reason to keep source/profile fixed-overhead cleanup as a parallel line.
+
+A first source fixed-overhead cleanup removed the independent `Pn_psin` array and
+used `materialized_heat_input` as the synonymous PF/psin/uniform/Ip value. It
+passed release CTest and PF validation, and all paired stage sinks matched the
+baseline, but timing did not justify keeping it: `source_update` median ratio was
+1.008, `residual_update` 1.003, `evaluate` 0.993 with mixed-sign pairs, and
+`evaluate_ring` 0.998. The patch was reverted; future source cleanup should aim
+at larger duplicate traffic or fixed-refresh policy instead of this single alias.
 
 Geometry residual-ready descriptor compression was tested after `c56a5b6`: the
 prototype replaced the 9 raw geometry surface fields with 7 residual-ready fields
