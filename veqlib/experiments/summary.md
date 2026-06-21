@@ -104,6 +104,7 @@ end-to-end timing neutral-to-slightly-positive.
 | Geometry residual-ready descriptor compression | `residual_update` 0.809, but `geometry` 1.021 | `evaluate` 1.004; `evaluate_ring` 1.008 | reject; moved arithmetic into dominant geometry stage without end-to-end gain |
 | Geometry absent Fourier order static skip for `harmonic_rows>2` | `32x16x4` geometry-only 0.925; `32x16x8` geometry-only 0.808 | default `32x16x1` neutral; high-Mmax all-stage evaluate about 0.95 / 0.89 | keep; default topology keeps original loop, high Mmax skips absent c-family orders at compile time |
 | Remove independent `Pn_psin` buffer and read `materialized_heat_input` instead | `source_update` 1.008; `residual_update` 1.003 | `evaluate` 0.993 but mixed-sign pairs; `evaluate_ring` 0.998 | reject; aliasing the duplicate value is semantically clean but not a stable performance win |
+| Remove duplicate `source_psin_query/source_parameter_query` buffers | first pass: `source_materialize` 1.002; long rerun: `evaluate` 0.997 | long rerun `evaluate_ring` 1.004 | reject; direct root-psin interpolation did not survive state-ring timing |
 | Source `psin_r` regularization/pass reduction | `source_update` 0.954 | 1.000 | reject; no end-to-end gain |
 | Geometry hot-loop pointer/index flattening | `geometry` 1.003 | 1.000 | reject; compiler already removes most accessor overhead |
 
@@ -271,8 +272,12 @@ used `materialized_heat_input` as the synonymous PF/psin/uniform/Ip value. It
 passed release CTest and PF validation, and all paired stage sinks matched the
 baseline, but timing did not justify keeping it: `source_update` median ratio was
 1.008, `residual_update` 1.003, `evaluate` 0.993 with mixed-sign pairs, and
-`evaluate_ring` 0.998. The patch was reverted; future source cleanup should aim
-at larger duplicate traffic or fixed-refresh policy instead of this single alias.
+`evaluate_ring` 0.998. A second source cleanup removed duplicate
+`source_psin_query/source_parameter_query` buffers and let interpolation read
+the root `psin` row directly; the long rerun was `evaluate` 0.997 and
+`evaluate_ring` 1.004. Both patches were reverted; future source cleanup should
+aim at fixed-refresh policy or larger interpolation/regularization structure
+rather than single alias buffers.
 
 Geometry residual-ready descriptor compression was tested after `c56a5b6`: the
 prototype replaced the 9 raw geometry surface fields with 7 residual-ready fields

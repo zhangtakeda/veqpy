@@ -104,6 +104,7 @@ Phase 2 首轮 micro A/B：
 | Geometry residual-ready descriptor compression（`qR/qZ/R2/dmetric`，9 fields -> 7 fields） | 5 组 paired median：`residual_update` ratio≈0.809，但 `geometry` ratio≈1.021，`evaluate` ratio≈1.004，`evaluate_ring` ratio≈1.008 | 回滚；只是把成本从 residual 移到 geometry，端到端无收益 |
 | Geometry absent Fourier order static skip（仅 `harmonic_rows>2`） | 默认 `32x16x1` geometry 基本中性（短 all-stage median≈0.998，长 geometry-only median≈1.006）；`32x16x4` geometry-only median ratio≈0.925；`32x16x8` geometry-only median ratio≈0.808 | 保留；默认 topology 走原始 loop，高 `Mmax` 跳过 absent c-family order，stage sink 与 baseline 一致 |
 | 去掉 `Pn_psin` 独立 array，改由 `materialized_heat_input` 作为同义源 | 7 组 paired：`source_update` median ratio≈1.008，`residual_update`≈1.003，`evaluate`≈0.993 但正负混合，`evaluate_ring`≈0.998；sink diff=0 | 回滚；减少一个重复 buffer 的语义方向可行，但当前代码形状没有稳定端到端收益 |
+| 去掉 `source_psin_query/source_parameter_query` 两个同义 array，插值直接读 root `psin` | 首轮 7 组：`source_materialize`≈1.002，`evaluate`≈0.973 但 `evaluate_ring`≈1.015；追加 11 组长跑：`evaluate`≈0.997，`evaluate_ring`≈1.004；sink diff=0 | 回滚；删除重复 query buffer 未形成稳定收益，且 state-ring 口径不支持保留 |
 
 Residual layout 本轮的逐项中位数：baseline `residual_update≈912.2 ns`、candidate
 `≈846.1 ns`；baseline `evaluate≈8288.7 ns`、candidate `≈8230.4 ns`。
@@ -501,9 +502,11 @@ Source fixed-overhead 首个候选尝试删除 `Pn_psin` 独立 array：`Pn_psin
 PF/psin/uniform/Ip 下只是 `materialized_heat_input` 的同义值，理论上可减少
 `source_update` 的一次复制和 residual/g1n 的重复读取。实现验证通过 release CTest
 和 PF validation，但 paired timing 显示 `source_update`、`residual_update` 中位数反而
-略退，`evaluate`/`evaluate_ring` 没有稳定正收益，因此已回滚。后续 source cleanup
-应优先看更大的重复搬运（例如 query/root copy 或 fixed-profile refresh policy），
-而不是单个同义 vector。
+略退，`evaluate`/`evaluate_ring` 没有稳定正收益，因此已回滚。第二个候选删除
+`source_psin_query/source_parameter_query` 两个同义 query buffers，让插值直接读
+root `psin`；它同样通过 validation 且 sink 一致，但长跑中 `evaluate≈0.997`、
+`evaluate_ring≈1.004`，没有达到保留门槛。后续 source cleanup 应优先看真正改变
+算法结构的固定刷新策略或插值/regularization 形状，而不是单个同义 vector。
 
 停止条件：确认 `[rho][field][theta]` 在默认 topology 是默认选择；对其它 topology 只声明“已测范围内”的结论，必要时保留 `GeometryLayoutPolicy<GridType>` 设计空间。
 
