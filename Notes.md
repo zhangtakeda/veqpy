@@ -620,23 +620,31 @@ topology 的 `geometry` 和 `evaluate` 都改善：
 不是默认 `32x16x1` resonance，而是在已测 full matrix 内稳定改善；较大 `Nt`
 的 `geometry` ratio 仍改善，但端到端收益会被其它固定/投影成本稀释。
 
-split 后默认 topology 的最新 stage 表（单次 pinned `--stage all`，`repeat=15`、
-`warmup=5`、`inner=10000`，原始 JSON `/tmp/veqlib_stage_all_after_split.json`）：
+split 后默认 topology 的最新 stage 表已在 residual local-hoist 和
+post-split metric probe 修正后重测（单次 pinned `--stage all`，`repeat=15`、
+`warmup=5`、`inner=10000`、`ring-size=16`，原始 JSON
+`/tmp/veqlib_stage_all_metric_probe_split.json`）：
 
 | stage | ns/call | `evaluate` share |
 | --- | ---: | ---: |
-| `profiles_all` | 124.5 | 1.6% |
-| `geometry` | 4586.1 | 59.7% |
-| `source_materialize` | 888.3 | 11.6% |
-| `source_update` | 813.1 | 10.6% |
-| `residual_update` | 862.8 | 11.2% |
-| `residual_pack` | 132.7 | 1.7% |
-| `evaluate` | 7675.9 | 100% |
-| `evaluate_ring` | 7708.7 | 100.4% |
+| `profiles_all` | 130.8 | 1.7% |
+| `geometry_phase` | 510.2 | 6.5% |
+| `geometry_phase_sincos` | 3715.6 | 47.7% |
+| `geometry_phase_split_sincos` | 3576.1 | 45.9% |
+| `geometry_metric_no_store` | 4508.9 | 57.8% |
+| `geometry` | 4532.1 | 58.1% |
+| `source_materialize` | 888.5 | 11.4% |
+| `source_update` | 812.3 | 10.4% |
+| `residual_update` | 803.4 | 10.3% |
+| `residual_pack` | 134.9 | 1.7% |
+| `evaluate` | 7794.5 | 100% |
+| `evaluate_ring` | 7723.5 | 99.1% |
 
-注意：`geometry_metric_no_store` 仍是旧 fused benchmark probe，split 后不再适合作为
-production Geometry 的直接拆分差值；后续若继续做 Geometry micro-stage，需要先把
-metric probe 改成 split 结构。
+`geometry_metric_no_store` 现在已改成与 production split 结构一致的
+phase-materialize / sin-cos / metric accumulation probe，只省掉九个 surface
+field 写入；因此 `geometry - geometry_metric_no_store≈23 ns` 只能作为
+surface-output proxy，不能解释为硬件 store counter。新的排序仍然显示：
+动态 `sin/cos(tb)` 是最大 bucket，Geometry 总体仍约占 `evaluate` 的 58%。
 
 ### Phase 4：压缩 Geometry descriptor，减少 Residual 重算
 

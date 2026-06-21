@@ -344,11 +344,17 @@ namespace
                 double sum_JdivR      = 0.0;
                 double sum_grtdivJR_t = 0.0;
 
+                alignas(tensor::detail::simd_alignment) std::array<double, BenchGrid::theta_rows> tb_values;
+                alignas(tensor::detail::simd_alignment) std::array<double, BenchGrid::theta_rows> tb_r_values;
+                alignas(tensor::detail::simd_alignment) std::array<double, BenchGrid::theta_rows> tb_t_values;
+                alignas(tensor::detail::simd_alignment) std::array<double, BenchGrid::theta_rows> tb_rr_values;
+                alignas(tensor::detail::simd_alignment) std::array<double, BenchGrid::theta_rows> tb_rt_values;
+                alignas(tensor::detail::simd_alignment) std::array<double, BenchGrid::theta_rows> tb_tt_values;
+                alignas(tensor::detail::simd_alignment) std::array<double, BenchGrid::theta_rows> sin_tb_values;
+                alignas(tensor::detail::simd_alignment) std::array<double, BenchGrid::theta_rows> cos_tb_values;
+
                 for (size_t j = 0; j < BenchGrid::theta_rows; ++j)
                 {
-                    const double sin_t = BenchGrid::sin_mtheta(1, j);
-                    const double cos_t = BenchGrid::cos_mtheta(1, j);
-
                     double tb_ij    = BenchGrid::theta[j] + c0_i;
                     double tb_r_ij  = c0_r_i;
                     double tb_t_ij  = 1.0;
@@ -390,8 +396,34 @@ namespace
                         tb_tt_ij -= s_i * k2_sin_kt;
                     }
 
-                    const double cos_tb_ij = cos(tb_ij);
-                    const double sin_tb_ij = sin(tb_ij);
+                    tb_values[j] = tb_ij;
+                    tb_r_values[j] = tb_r_ij;
+                    tb_t_values[j] = tb_t_ij;
+                    tb_rr_values[j] = tb_rr_ij;
+                    tb_rt_values[j] = tb_rt_ij;
+                    tb_tt_values[j] = tb_tt_ij;
+                }
+
+#pragma clang loop vectorize(enable)
+                for (size_t j = 0; j < BenchGrid::theta_rows; ++j)
+                {
+                    const double tb_ij = tb_values[j];
+                    cos_tb_values[j] = std::cos(tb_ij);
+                    sin_tb_values[j] = std::sin(tb_ij);
+                }
+
+                for (size_t j = 0; j < BenchGrid::theta_rows; ++j)
+                {
+                    const double sin_t = BenchGrid::sin_mtheta(1, j);
+                    const double cos_t = BenchGrid::cos_mtheta(1, j);
+
+                    const double tb_r_ij   = tb_r_values[j];
+                    const double tb_t_ij   = tb_t_values[j];
+                    const double tb_rr_ij  = tb_rr_values[j];
+                    const double tb_rt_ij  = tb_rt_values[j];
+                    const double tb_tt_ij  = tb_tt_values[j];
+                    const double cos_tb_ij = cos_tb_values[j];
+                    const double sin_tb_ij = sin_tb_values[j];
 
                     double R_ij = op.params.R0 + op.params.a * (h_i + rho_i * cos_tb_ij);
                     if (R_ij < 1.0e-6)

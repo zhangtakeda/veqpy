@@ -377,13 +377,17 @@ the same 45-entry full preset as the pre-split pinned matrix
 the median `evaluate` ratios were 0.948, 0.929, 0.918, 0.925, and 0.945 for
 `Nt=8,16,24,32,64`, respectively.
 
-After split-trig, the default-stage table was remeasured once with `--stage all`
-(`taskset -c 2`, `repeat=15`, `warmup=5`, `inner=10000`). `evaluate` is now
-7675.9 ns/call; `geometry` is 4586.1 ns/call (59.7%), `source_materialize`
-888.3 (11.6%), `source_update` 813.1 (10.6%), `residual_update` 862.8 (11.2%),
-and `residual_pack` 132.7 (1.7%). `evaluate_ring` was 7708.7 ns/call. The
-existing `geometry_metric_no_store` probe still reflects the old fused probe
-shape and should be split before using it for post-split micro-stage accounting.
+After split-trig, residual local-hoisting, and the post-split metric-probe fix,
+the default-stage table was remeasured once with `--stage all` (`taskset -c 2`,
+`repeat=15`, `warmup=5`, `inner=10000`, `ring-size=16`). `evaluate` is now
+7794.5 ns/call; `geometry` is 4532.1 ns/call (58.1%), `source_materialize`
+888.5 (11.4%), `source_update` 812.3 (10.4%), `residual_update` 803.4 (10.3%),
+and `residual_pack` 134.9 (1.7%). `evaluate_ring` was 7723.5 ns/call. The
+corrected `geometry_metric_no_store` probe now mirrors the production split
+shape while omitting the nine surface-field writes; it measured 4508.9 ns/call,
+so `geometry - geometry_metric_no_store≈23 ns` is only a surface-output proxy,
+not a hardware store counter. The largest bucket remains dynamic `sin/cos(tb)`:
+`geometry_phase_split_sincos` measured 3576.1 ns/call.
 
 Phase 2 first geometry micro-results:
 
