@@ -100,13 +100,15 @@ end-to-end timing neutral-to-slightly-positive.
 | Hoist repeated residual geometry loads | `residual_update` 0.974 | 0.996 | reject; end-to-end effect too small |
 | Explicit glibc `sincos` path | `geometry` 2.386 | 1.835 | reject; severe regression |
 | Residual surface physical layout `[rho][field][theta]` | re-test: `residual_update` 0.931; `residual_pack` 1.004 | 0.994 | retain; semantic layout alignment, no significant end-to-end regression |
+| Residual theta-moment fusion | active-only `residual_fused / (update+pack)` 1.090; naive 1.166 | active-only 1.007; naive 1.021 | reject; scalar moment accumulation lost to materialized update + vectorized rowwise pack |
 | Source `psin_r` regularization/pass reduction | `source_update` 0.954 | 1.000 | reject; no end-to-end gain |
 | Geometry hot-loop pointer/index flattening | `geometry` 1.003 | 1.000 | reject; compiler already removes most accessor overhead |
 
 Next optimization work should not repeat the rejected micro-candidates. Residual
-surface layout is now an accepted physical-layout cleanup, but it does not remove
-the structural update/pack locality conflict; residual theta-moment fusion remains
-the larger candidate if residual work is prioritized.
+surface layout is now an accepted physical-layout cleanup, but simple
+theta-moment fusion is also rejected for this topology; residual work should only
+resume with a vector-friendly or blocked moment design, otherwise return to
+geometry/source structural candidates.
 
 ## Planning update after 3851f62 review
 
@@ -201,6 +203,14 @@ now uses `[rho][field][theta]` with the logical accessor preserved as
 `repeat=25`, `warmup=8`, `inner=10000`, `taskset -c 2`. Median ratios were
 `residual_update=0.931`, `residual_pack=1.004`, and `evaluate=0.994`; the change
 is retained as a small producer-locality and semantic-alignment cleanup.
+
+Residual theta-moment fusion was tested next against `c307d2c`. A naive variant
+that accumulated all possible moments regressed (`residual_fused / materialized
+update+pack=1.166`, `evaluate=1.021`). An active-only variant was better but
+still slower (`residual_fused / materialized update+pack=1.090`, `evaluate=1.007`).
+Reject the simple fusion shape: it removes slab traffic but replaces vectorized
+rowwise passes with scalar accumulation dependency chains. Any future fusion
+should start with a vector-friendly or blocked moment design.
 
 Phase 1a RELAXED validation and timing (three same-window runs; per-run
 `taskset -c 2`, `repeat=25`, `warmup=8`, `inner=10000`; table uses the

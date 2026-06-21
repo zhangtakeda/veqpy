@@ -84,12 +84,25 @@ Phase 2 首轮 micro A/B：
 | `JdivR = J*J/(J*R)` 复用 `inv_JR`，减少一个显式除法 | 5 组 paired median：`geometry` ratio≈0.992，`evaluate` ratio≈0.990；但 evaluate 有反向组（1.031、1.009） | 回滚；收益太小且不稳定 |
 | Geometry harmonic profile reads hoist 到 `i` 层 | 5 组 paired median：`geometry` ratio≈0.984，`evaluate` ratio≈0.993；5/5 evaluate 均快 | 保留；低风险小收益，为高 `M_max` topology 预期更有价值 |
 | Residual surface physical layout 改为 `[rho][field][theta]` | 5 组 paired median：`residual_update` ratio≈0.931，`residual_pack` ratio≈1.004，`evaluate` ratio≈0.994 | 保留；端到端收益小但未见显著回归，且 producer 语义与 geometry layout 对齐 |
+| Residual theta-moment fusion，直接累计 active block moments | active-only 5 组 paired median：`residual_fused / (update+pack)`≈1.090，`evaluate` ratio≈1.007；naive 全 moments 约 1.166 / 1.021 | 回滚；当前 materialized update + vectorized pack 更快 |
 
 Residual layout 本轮的逐项中位数：baseline `residual_update≈912.2 ns`、candidate
 `≈846.1 ns`；baseline `evaluate≈8288.7 ns`、candidate `≈8230.4 ns`。
 这不是替代 Residual fusion 的结构性结论，只是把 materialized residual slab 的物理
 布局改到更符合当前 producer 的 `[rho][field][theta]`。后续若做 theta-moment
 fusion，这个 slab 本身仍可能被删除。
+
+Residual fusion 随后做了两轮未保留实验：
+
+- naive fused moments：一次 theta sweep 同时累计所有 residual moments，
+  `residual_fused / (residual_update+residual_pack)≈1.166`，`evaluate≈1.021`。
+- active-only fused moments：只累计当前 active blocks 需要的 moments，
+  `residual_fused / (residual_update+residual_pack)≈1.090`，`evaluate≈1.007`。
+
+结论：当前 topology 下 materialized residual surface + 后续 rowwise projection 更容易被
+编译器向量化；直接在 theta sweep 内做多个 radial moment 累加会引入更长的标量
+依赖链。下一次若重做 fusion，应先设计 vector-friendly / blocked moment accumulation，
+而不是简单把 update 和 pack 合并。
 
 随后用独立 baseline worktree 重新测试 `a5c4d3c` 的 geometry surface layout 改动。复测仍然支持保留该改动：
 
@@ -472,7 +485,7 @@ dmetric = gttdivJR_r - grtdivJR_t
 
 目标：删除四个 residual 二维中间场，而不是再尝试单一 residual layout。
 
-已知证据：residual physical layout 已改成 `[rho][field][theta]` 并保留；paired A/B 显示 `residual_update` 快约 6.9%，`residual_pack` 小幅退化，`evaluate` 只有噪声级收益。这说明 update 和 pack 仍需要相反 locality：
+已知证据：residual physical layout 已改成 `[rho][field][theta]` 并保留；paired A/B 显示 `residual_update` 快约 6.9%，`residual_pack` 小幅退化，`evaluate` 只有噪声级收益。直接 theta-moment fusion 已实测退化：active-only fused moments 仍比 materialized update+pack 慢约 9.0%，`evaluate` 慢约 0.7%。这说明 update 和 pack 仍需要相反 locality，但简单融合会丢失现有 rowwise pass 的向量化优势：
 
 ```text
 update：同一点生成多个 field
