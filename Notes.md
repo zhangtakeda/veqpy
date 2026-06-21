@@ -836,6 +836,13 @@ default paired timing 明显失败：`residual_pack` median ratio≈1.390，`eva
 `evaluate_ring`≈1.018。结论：回滚；当前编译器更擅长内联/标量化小临时表，强制静态
 对象反而引入全局地址读取或阻碍优化。
 
+又测试了 reduced-Taylor `sincos(tb)` 的 Estrin 分组，把 Horner 链改成
+`r2/r4/r8` 分组以尝试降低依赖链。release CTest 与 PF comparator 通过，但默认
+9 组 paired timing 不支持：`geometry_phase_split_sincos` median ratio≈1.019，
+`geometry`≈1.007，`evaluate`≈0.996，`evaluate_ring`≈1.006。结论：回滚；
+当前 Horner 形式更容易被编译器优化，Estrin 增加的临时乘法/寄存器压力抵消了
+理论依赖链优势。
+
 目标：在 geometry/residual 结构性收益之后，再处理固定成本。
 
 建议动作：

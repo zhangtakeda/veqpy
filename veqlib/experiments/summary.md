@@ -530,3 +530,13 @@ paired timing was clearly worse: `residual_pack` median ratio≈1.390,
 `evaluate`≈1.009, and `evaluate_ring`≈1.018. The patch was reverted because the
 compiler appears to scalarize or inline the tiny temporary tables better than it
 handles forced static-object loads in this hot pack path.
+
+
+A reduced-Taylor Estrin polynomial candidate was rejected. It regrouped the
+retained `sin x^11` / `cos x^10` Horner form into `r2/r4/r8` terms to shorten the
+apparent dependency chain. Correctness passed release CTest and the PF
+comparator, but default paired timing was worse in the target bucket:
+`geometry_phase_split_sincos` median ratio≈1.019, `geometry`≈1.007,
+`evaluate`≈0.996, and `evaluate_ring`≈1.006. The patch was reverted because the
+extra temporaries/multiplies and register pressure outweighed any dependency
+benefit under the current compiler and RELAXED flags.
