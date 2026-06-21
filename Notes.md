@@ -801,6 +801,16 @@ paired timing 只是小幅改善（`source_materialize≈0.969`、`source_update
 最近节点检查；不要继续追逐这类单指令级插值分支重排，除非新的 profile/assembly
 证据显示它阻塞了向量化或分支预测。
 
+随后测试了一个 residual pointwise 算术折叠候选：把 `psin_r_i / J_ij` 先合并成
+`psin_over_J`，再生成 `psin_R` 与 `psin_Z`，理论上可减少两次乘法。该改动
+通过 release CTest 与 PF Python/C++ comparator（`max_abs≈7.66e-10`），默认
+9 组 paired timing 也显示 `residual_update` 有极小改善（median ratio≈0.995），
+但端到端 `evaluate` 只有噪声级收益（≈0.998）。完整 45 topology matrix 的
+median ratio≈0.993，不过 worst topology 的 paired 复测并不稳健：`32x8x4`
+median≈1.007，`64x8x4` median≈1.002。结论：回滚；这种单点算术折叠不足以
+作为保留优化，后续 residual 应继续转向结构性 moment/fusion，而不是继续追逐
+乘法重排。
+
 目标：在 geometry/residual 结构性收益之后，再处理固定成本。
 
 建议动作：

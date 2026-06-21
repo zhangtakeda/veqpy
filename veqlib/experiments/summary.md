@@ -482,3 +482,17 @@ default-topology runs measured `source_materialize`≈1.005, `source_update`≈0
 `evaluate`≈0.999, and `evaluate_ring`≈0.992. The code was reverted because the
 retained nearest-node exact-hit optimization already captures the useful source
 materialization win, while this branch reorder is only noise-level.
+
+
+A residual `psin_over_J` arithmetic-fold candidate was rejected. The patch
+computed `psin_r_i / J_ij` once and reused it for `psin_R` and `psin_Z`, reducing
+the apparent pointwise multiplication count. Correctness passed release CTest
+and the PF Python/C++ comparison (`max_abs≈7.66e-10`). Nine paired default runs
+showed only a tiny residual-stage signal (`residual_update` median ratio≈0.995)
+and noise-level endpoint movement (`evaluate`≈0.998, `evaluate_ring`≈0.994). The
+full 45-topology evaluate matrix had a positive median (≈0.993, 30/45 improved)
+but exposed unstable outliers; paired retests of the worst small-theta cases
+measured `32x8x4` at≈1.007 and `64x8x4` at≈1.002. The candidate was reverted:
+single-expression residual arithmetic folds are not robust enough to keep unless
+they produce clear endpoint gains across topology or stronger assembly/PMU
+evidence.
