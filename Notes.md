@@ -3,7 +3,7 @@
 更新时间：2026-06-21  
 范围：`TODO-1.md`、`TODO-2.md` 指向的 VEQlib hot path / cache / tooling 初步实验。
 
-## 0. 最新状态：kernel 纯化已完成，Residual surface layout 已按语义对齐保留
+## 0. 最新状态：kernel 纯化已完成，Residual surface layout 与 source sign pass 已保留
 
 此前已把阶段性变更提交为 git commit：
 
@@ -842,6 +842,19 @@ default paired timing 明显失败：`residual_pack` median ratio≈1.390，`eva
 `geometry`≈1.007，`evaluate`≈0.996，`evaluate_ring`≈1.006。结论：回滚；
 当前 Horner 形式更容易被编译器优化，Estrin 增加的临时乘法/寄存器压力抵消了
 理论依赖链优势。
+
+本轮随后保留了一个 source sign-normalization pass reduction：在 `psin_r`
+经 `Kn` 归一化的同一个循环里顺手累计加权和，用这个和决定是否整体翻符号，
+从而删除一次独立的 `weighted_profile_sign(psin_r)` 扫描。该改动没有引入
+route/finite/sentinel/solve-success 分支，仍然是纯 `PF/psin/uniform/Ip` kernel
+路径。release/debug CTest 均通过，RELAXED release PF Python/C++ comparator
+通过（`max_abs≈7.66e-10`）。默认 9 组 paired timing 显示
+`source_update` median ratio≈0.977、`evaluate`≈0.995、`evaluate_ring`≈0.984。
+完整 45 topology `evaluate` matrix 为 26/45 改善、median ratio≈0.995、
+mean≈0.994、range≈0.851--1.035；三个 apparent worst topology 的 paired
+复测未复现强回归：`32x8x8` 的 `evaluate/evaluate_ring` median≈0.998/0.994，
+`16x8x4`≈0.995/0.986，`64x16x1`≈0.996/1.001。结论：保留；这是小幅但语义清晰的
+source_update pass 删除，后续不要再把它包装成 checked facade 或有效值 guard。
 
 目标：在 geometry/residual 结构性收益之后，再处理固定成本。
 

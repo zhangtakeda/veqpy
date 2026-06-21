@@ -152,14 +152,15 @@ namespace source::detail
 
             RadialVector psin_r{uninitialized};
             matvec_into(psin_r, GridType::accumulator, integrand);
+            double psin_r_weighted_total = 0.0;
             for (size_t i = 0; i < radial_nodes; ++i)
             {
                 psin_r[i] *= -1.0;
                 psin_r[i] /= geometry.radial_field(geometry::radial_Kn, i);
+                psin_r_weighted_total += psin_r[i] * GridType::weights[i];
             }
 
-            const double psi_scale_sign = weighted_profile_sign(psin_r);
-            if (psi_scale_sign < 0.0)
+            if (psin_r_weighted_total < 0.0)
                 for (size_t i = 0; i < radial_nodes; ++i)
                     psin_r[i] *= -1.0;
 
