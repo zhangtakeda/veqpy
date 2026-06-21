@@ -12,6 +12,7 @@ option(VEQLIB_ENABLE_NATIVE_OPTIMIZATIONS "Enable native CPU, fast-math, and loo
 option(VEQLIB_ENABLE_THIN_LTO "Enable clang ThinLTO and lld for optimized builds" ON)
 option(VEQLIB_FORCE_OPENBLAS_SINGLE_THREAD "Force OpenBLAS to one runtime thread inside veqlib targets" ON)
 set(VEQLIB_ENZYME_PLUGIN "" CACHE FILEPATH "Path to ClangEnzyme shared library")
+set(VEQLIB_ENZYME_INCLUDE_DIR "$ENV{HOME}/opt/Enzyme/enzyme/include" CACHE PATH "Path to Enzyme C++ headers")
 set(VEQLIB_GCEM_ROOT "$ENV{HOME}/opt/gcem-install" CACHE PATH "GCEM install prefix")
 set(VEQLIB_CONSTEXPR_STEP_LIMIT "67108864")
 set(VEQLIB_CONSTEXPR_STEPS "${VEQLIB_CONSTEXPR_STEP_LIMIT}" CACHE STRING "Clang constexpr evaluation step budget")
@@ -220,6 +221,23 @@ function(veqlib_link_dependencies target)
     target_include_directories("${target}" PRIVATE "${CMINPACK_INCLUDE_DIR}")
     target_link_libraries("${target}" PRIVATE "${CMINPACK_LIBRARY}")
 
+    find_path(SUNDIALS_INCLUDE_DIR NAMES kinsol/kinsol.h REQUIRED)
+    find_library(SUNDIALS_KINSOL_LIBRARY NAMES sundials_kinsol REQUIRED)
+    find_library(SUNDIALS_NVEC_SERIAL_LIBRARY NAMES sundials_nvecserial REQUIRED)
+    find_library(SUNDIALS_SUNLINSOL_DENSE_LIBRARY NAMES sundials_sunlinsoldense REQUIRED)
+    find_library(SUNDIALS_SUNLINSOL_SPGMR_LIBRARY NAMES sundials_sunlinsolspgmr REQUIRED)
+    find_library(SUNDIALS_SUNMATRIX_DENSE_LIBRARY NAMES sundials_sunmatrixdense REQUIRED)
+    target_include_directories("${target}" PRIVATE "${SUNDIALS_INCLUDE_DIR}")
+    target_link_libraries(
+        "${target}"
+        PRIVATE
+            "${SUNDIALS_KINSOL_LIBRARY}"
+            "${SUNDIALS_NVEC_SERIAL_LIBRARY}"
+            "${SUNDIALS_SUNLINSOL_DENSE_LIBRARY}"
+            "${SUNDIALS_SUNLINSOL_SPGMR_LIBRARY}"
+            "${SUNDIALS_SUNMATRIX_DENSE_LIBRARY}"
+    )
+
     find_path(LAPACKE_INCLUDE_DIR NAMES lapacke.h REQUIRED)
     find_library(LAPACKE_LIBRARY NAMES lapacke REQUIRED)
     find_library(LAPACK_LIBRARY NAMES lapack REQUIRED)
@@ -291,6 +309,9 @@ function(veqlib_enable_enzyme target)
     message(STATUS "Using Enzyme plugin: ${enzyme_plugin}")
     target_compile_options("${target}" PRIVATE "-fplugin=${enzyme_plugin}")
     target_compile_definitions("${target}" PRIVATE ENABLE_ENZYME=1)
+    if(VEQLIB_ENZYME_INCLUDE_DIR AND EXISTS "${VEQLIB_ENZYME_INCLUDE_DIR}")
+        target_include_directories("${target}" PRIVATE "${VEQLIB_ENZYME_INCLUDE_DIR}")
+    endif()
 endfunction()
 
 function(veqlib_enable_strict_conversions target)
@@ -416,6 +437,7 @@ veqlib_configure_executable(veqlib_pf_psin_uniform_validation)
 
 add_executable(veqlib_pf_psin_uniform_benchmark pf_psin_uniform_benchmark.cpp ${VEQLIB_COMMON_SOURCES})
 veqlib_configure_executable(veqlib_pf_psin_uniform_benchmark)
+veqlib_enable_enzyme(veqlib_pf_psin_uniform_benchmark)
 
 enable_testing()
 add_test(NAME veqlib_probe COMMAND veqlib_probe)

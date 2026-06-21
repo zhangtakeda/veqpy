@@ -102,14 +102,13 @@ namespace residual::detail
 
         constexpr PackedVector pack(double a, double R0, double B0) noexcept
         {
-            PackedVector out{};
+            PackedVector out{uninitialized};
             pack_profile<0>(out, a, R0, B0);
             return out;
         }
 
         constexpr void pack_into(PackedVector& out, double a, double R0, double B0) noexcept
         {
-            out.clear();
             pack_profile<0>(out, a, R0, B0);
         }
 

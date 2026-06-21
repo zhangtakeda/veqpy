@@ -160,6 +160,45 @@ row `Bandwidth / 2 + i - j` stores entry `(i, j)`. Thomas contexts own only the
 band factorization and `substitute_inplace`; solve orchestration stays in the
 free `linalg` functions.
 
+## Nonlinear Solver Notes
+
+VEQPy's production solve path is currently modeled by the CMINPACK `hybrd`
+configuration used in `veqlib_pf_psin_uniform_validation`. The
+`veqlib_pf_psin_uniform_benchmark` target keeps the same PF-psin-uniform-Ip
+case inline and can compare several candidate solve paths:
+
+```bash
+./build/enzyme-release/veqlib_pf_psin_uniform_benchmark \
+  --solver residual|enzyme|lm|newton|nk|nr|powell|sundials-nk|sundials-nr
+```
+
+Solver meanings are intentionally explicit:
+
+- `residual` is CMINPACK `hybrd`, matching the VEQPy-style residual-only path.
+- `enzyme` is CMINPACK `hybrj` with an Enzyme dense Jacobian.
+- `lm` is CMINPACK Levenberg-Marquardt.
+- `newton` is a hand-written full-step dense Newton method.
+- `nr` is a hand-written dense Newton-Raphson method with backtracking.
+- `nk` is a hand-written Newton-Krylov method using Enzyme JVPs and local GMRES.
+- `powell` is the CMINPACK Powell hybrid path.
+- `sundials-nr` and `sundials-nk` use SUNDIALS KINSOL with dense and SPGMR
+  linear solvers respectively.
+
+SciPy's `root(method="krylov")` should not be treated as a thin wrapper around
+KINSOL or CMINPACK. It is SciPy's own Newton-Krylov facade built around
+`KrylovJacobian`: by default the inner linear solve uses
+`scipy.sparse.linalg.lgmres`, Jacobian-vector products are finite-difference
+approximations of the residual, and the nonlinear step uses Armijo line search.
+That makes it a useful behavioral reference, but not a library implementation
+that VEQlib can call directly from C++.
+
+The current PF-psin-uniform-Ip benchmark shows that dense Newton variants are
+not automatically faster for the small fixed topology. Even when they converge
+in fewer nonlinear iterations, repeated dense Jacobian construction dominates
+runtime unless the Jacobian is generated much more cheaply than a batch of
+residual evaluations. Powell/hybrd therefore remains the baseline until VEQlib
+has a route-specific analytic or template-generated Jacobian path.
+
 ## Dependency Versions
 
 The versions below are the currently validated local toolchain versions.
@@ -173,6 +212,7 @@ The versions below are the currently validated local toolchain versions.
 | nlohmann/json      | JSON I/O                             | 3.11.3, package `nlohmann-json3-dev 3.11.3-1`              |
 | GCEM               | Compile-time math                    | source install `v1.18.0` at `/home/rhzhang/opt/gcem-install` |
 | CMINPACK           | MINPACK-style nonlinear solvers      | package `libcminpack-dev 1.3.6-5build1`                    |
+| SUNDIALS KINSOL    | Newton / Newton-Krylov experiments   | package `libsundials-dev 6.4.1+dfsg1-3build4`              |
 | LAPACKE / LAPACK   | Dense linear algebra interface       | package `liblapacke-dev 3.12.0-3build1.1`                  |
 | OpenBLAS           | BLAS backend                         | package `libopenblas-dev 0.3.26+ds-1ubuntu0.1`             |
 | LLVM dev files     | Enzyme build dependency              | package `llvm-18-dev 1:18.1.3-1ubuntu1`                    |
@@ -326,6 +366,7 @@ sudo apt install -y \
   llvm-18-dev \
   nlohmann-json3-dev \
   libcminpack-dev \
+  libsundials-dev \
   liblapacke-dev \
   libopenblas-dev
 ```

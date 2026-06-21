@@ -238,6 +238,7 @@ namespace profiles
     using tensor::Matrix;
     using tensor::Tensor;
     using tensor::Vector;
+    using tensor::uninitialized;
 
     template <typename Shape>
     struct ProfileEvaluator
@@ -294,7 +295,7 @@ namespace profiles
                                        const Matrix<double, basis_rows, Nr>& T_rr,
                                        const Matrix<double, rho_rows, Nr>&   rhos) noexcept
         {
-            Matrix<double, Nr, 3> polys{};
+            Matrix<double, Nr, 3> polys{uninitialized};
             detail::update_polys<basis_rows, h_count>(polys, coeffs, T, T_r, T_rr);
             detail::update_enveloped_profiles<rho_rows>(profiles, polys, rhos);
         }
@@ -308,7 +309,7 @@ namespace profiles
                                        const Matrix<double, basis_rows, Nr>& T_rr,
                                        const Matrix<double, rho_rows, Nr>&   rhos) noexcept
         {
-            Matrix<double, Nr, 3> polys{};
+            Matrix<double, Nr, 3> polys{uninitialized};
             detail::update_polys<basis_rows, v_count>(polys, coeffs, T, T_r, T_rr);
             detail::update_enveloped_profiles<rho_rows>(profiles, polys, rhos);
         }
@@ -323,7 +324,7 @@ namespace profiles
                                            const Matrix<double, rho_rows, Nr>&   rhos,
                                            double                            ka) noexcept
         {
-            Matrix<double, Nr, 3> polys{};
+            Matrix<double, Nr, 3> polys{uninitialized};
             detail::update_polys<basis_rows, kappa_count>(polys, coeffs, T, T_r, T_rr);
             detail::update_kappa_from_polys<rho_rows>(profiles, polys, rhos, ka);
         }
@@ -337,7 +338,7 @@ namespace profiles
                                           const Matrix<double, basis_rows, Nr>& T_rr,
                                           const Matrix<double, rho_rows, Nr>&   rhos) noexcept
         {
-            Matrix<double, Nr, 3> polys{};
+            Matrix<double, Nr, 3> polys{uninitialized};
             detail::update_polys<basis_rows, psin_count>(polys, coeffs, T, T_r, T_rr);
             detail::update_psin_from_polys<rho_rows>(profiles, polys, rhos);
         }
@@ -352,7 +353,7 @@ namespace profiles
                                        const Matrix<double, rho_rows, Nr>&   rhos,
                                        double                          scale) noexcept
         {
-            Matrix<double, Nr, 3> polys{};
+            Matrix<double, Nr, 3> polys{uninitialized};
             detail::update_polys<basis_rows, F_count>(polys, coeffs, T, T_r, T_rr);
             detail::update_F_from_polys<rho_rows>(profiles, polys, rhos, scale);
         }
@@ -371,7 +372,7 @@ namespace profiles
             constexpr size_t Count = c_count<Order>();
             constexpr size_t Power = fourier_power<Order>();
 
-            Matrix<double, Nr, 3> polys{};
+            Matrix<double, Nr, 3> polys{uninitialized};
             detail::update_polys<basis_rows, Count>(polys, coeffs, T, T_r, T_rr);
             detail::update_fourier_from_polys<rho_rows, Power>(profiles, polys, rhos, offset);
         }
@@ -390,7 +391,7 @@ namespace profiles
             constexpr size_t Count = s_count<Order>();
             constexpr size_t Power = fourier_power<Order>();
 
-            Matrix<double, Nr, 3> polys{};
+            Matrix<double, Nr, 3> polys{uninitialized};
             detail::update_polys<basis_rows, Count>(polys, coeffs, T, T_r, T_rr);
             detail::update_fourier_from_polys<rho_rows, Power>(profiles, polys, rhos, offset);
         }
@@ -549,7 +550,7 @@ namespace profiles
         {
             static_assert(ProfileId < profile_field_count, "profile id exceeds runtime profile slab");
 
-            ProfileField out{};
+            ProfileField out{uninitialized};
             for (size_t node = 0; node < radial_nodes; ++node)
                 for (size_t component = 0; component < 3; ++component)
                     out(node, component) = profile_fields(ProfileId, node, component);
@@ -605,10 +606,7 @@ namespace profiles
 
         constexpr void refresh_fourier_family_fields() noexcept
         {
-            c_family_fields.clear();
-            s_family_fields.clear();
-            c_family_base_fields.clear();
-            s_family_base_fields.clear();
+            // Active/fixed family rows are overwritten below; absent rows stay zero from construction.
             refresh_c_family_order<0>();
             refresh_s_family_order<1>();
         }
@@ -617,7 +615,7 @@ namespace profiles
         template <size_t ProfileId, size_t Count>
         static constexpr Vector<double, Count> coefficients_from_x(std::span<const double, Shape::x_size> x) noexcept
         {
-            Vector<double, Count> out{};
+            Vector<double, Count> out{uninitialized};
             for (size_t degree = 0; degree < Count; ++degree)
             {
                 const int x_index = Shape::coeff_index[ProfileId][degree];
@@ -669,7 +667,7 @@ namespace profiles
                 constexpr size_t profile_id = Shape::h_profile_id;
                 constexpr size_t count      = evaluator::h_count;
                 const auto       coeffs     = coefficients_from_x<profile_id, count>(x);
-                ProfileField     out{};
+                ProfileField     out{uninitialized};
                 evaluator::update_h(out, coeffs, GridType::T, GridType::T_r, GridType::T_rr, GridType::rhos);
                 store_profile<profile_id>(out);
             }
@@ -682,7 +680,7 @@ namespace profiles
                 constexpr size_t profile_id = Shape::v_profile_id;
                 constexpr size_t count      = evaluator::v_count;
                 const auto       coeffs     = coefficients_from_x<profile_id, count>(x);
-                ProfileField     out{};
+                ProfileField     out{uninitialized};
                 evaluator::update_v(out, coeffs, GridType::T, GridType::T_r, GridType::T_rr, GridType::rhos);
                 store_profile<profile_id>(out);
             }
@@ -696,7 +694,7 @@ namespace profiles
                 constexpr size_t profile_id = Shape::kappa_profile_id;
                 constexpr size_t count      = evaluator::kappa_count;
                 const auto       coeffs     = coefficients_from_x<profile_id, count>(x);
-                ProfileField     out{};
+                ProfileField     out{uninitialized};
                 evaluator::update_kappa(
                     out,
                     coeffs,
@@ -717,7 +715,7 @@ namespace profiles
                 constexpr size_t profile_id = Shape::psin_profile_id;
                 constexpr size_t count      = evaluator::psin_count;
                 const auto       coeffs     = coefficients_from_x<profile_id, count>(x);
-                ProfileField     out{};
+                ProfileField     out{uninitialized};
                 evaluator::update_psin(out, coeffs, GridType::T, GridType::T_r, GridType::T_rr, GridType::rhos);
                 store_profile<profile_id>(out);
             }
@@ -731,7 +729,7 @@ namespace profiles
                 constexpr size_t profile_id = Shape::F_profile_id;
                 constexpr size_t count      = evaluator::F_count;
                 const auto       coeffs     = coefficients_from_x<profile_id, count>(x);
-                ProfileField     out{};
+                ProfileField     out{uninitialized};
                 evaluator::update_F(
                     out,
                     coeffs,
@@ -756,7 +754,7 @@ namespace profiles
                     constexpr size_t profile_id = Shape::template c_profile_id<Order>();
                     constexpr size_t count      = evaluator::template c_count<Order>();
                     const auto       coeffs     = coefficients_from_x<profile_id, count>(x);
-                    ProfileField     out{};
+                    ProfileField     out{uninitialized};
                     evaluator::template update_c<Order>(
                         out,
                         coeffs,
@@ -783,7 +781,7 @@ namespace profiles
                     constexpr size_t profile_id = Shape::template s_profile_id<Order>();
                     constexpr size_t count      = evaluator::template s_count<Order>();
                     const auto       coeffs     = coefficients_from_x<profile_id, count>(x);
-                    ProfileField     out{};
+                    ProfileField     out{uninitialized};
                     evaluator::template update_s<Order>(
                         out,
                         coeffs,
