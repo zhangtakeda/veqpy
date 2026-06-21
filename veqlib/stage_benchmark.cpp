@@ -263,7 +263,7 @@ namespace
     double consume_state(const BenchOperator& op, const PackedVector& packed) noexcept
     {
         return op.profiles.profile_field(BenchShape::psin_profile_id, 0, 0) +
-               op.geometry.surface_fields(surface_R, 0, 0) + op.source_runtime.alpha1 +
+               op.geometry.surface_field(surface_R, 0, 0) + op.source_runtime.alpha1 +
                op.residual.surface_fields(surface_G, 0, 0) + packed[0];
     }
 

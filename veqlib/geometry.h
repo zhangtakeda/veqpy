@@ -41,7 +41,9 @@ namespace geometry::detail
         static constexpr size_t radial_nodes = GridType::radial_nodes;
         static constexpr size_t theta_rows   = GridType::theta_rows;
 
-        using SurfaceSlab = Tensor<double, surface_field_count, radial_nodes, theta_rows>;
+        // Store [rho][field][theta]: theta stays contiguous while field starts no longer
+        // alias at the default 4096 B plane stride.
+        using SurfaceSlab = Tensor<double, radial_nodes, surface_field_count, theta_rows>;
         using RadialSlab  = Matrix<double, radial_field_count, radial_nodes>;
 
         SurfaceSlab surface_fields{};
@@ -55,12 +57,12 @@ namespace geometry::detail
 
         constexpr double& surface_field(size_t row, size_t radial_node, size_t theta_node) noexcept
         {
-            return surface_fields(row, radial_node, theta_node);
+            return surface_fields(radial_node, row, theta_node);
         }
 
         constexpr double surface_field(size_t row, size_t radial_node, size_t theta_node) const noexcept
         {
-            return surface_fields(row, radial_node, theta_node);
+            return surface_fields(radial_node, row, theta_node);
         }
 
         constexpr double& radial_field(size_t row, size_t radial_node) noexcept
@@ -200,15 +202,15 @@ namespace geometry::detail
                     const double gttdivJR_ij   = gtt_ij * inv_JR;
                     const double gttdivJR_r_ij = gtt_r_ij * inv_JR - gtt_ij * JR_r_ij * inv_JR * inv_JR;
 
-                    surface_fields(surface_sin_tb, i, j)     = sin_tb_ij;
-                    surface_fields(surface_R, i, j)          = R_ij;
-                    surface_fields(surface_R_t, i, j)        = R_t_ij;
-                    surface_fields(surface_Z_t, i, j)        = Z_t_ij;
-                    surface_fields(surface_J, i, j)          = J_ij;
-                    surface_fields(surface_JdivR, i, j)      = JdivR_ij;
-                    surface_fields(surface_grtdivJR_t, i, j) = grtdivJR_t_ij;
-                    surface_fields(surface_gttdivJR, i, j)   = gttdivJR_ij;
-                    surface_fields(surface_gttdivJR_r, i, j) = gttdivJR_r_ij;
+                    surface_field(surface_sin_tb, i, j)     = sin_tb_ij;
+                    surface_field(surface_R, i, j)          = R_ij;
+                    surface_field(surface_R_t, i, j)        = R_t_ij;
+                    surface_field(surface_Z_t, i, j)        = Z_t_ij;
+                    surface_field(surface_J, i, j)          = J_ij;
+                    surface_field(surface_JdivR, i, j)      = JdivR_ij;
+                    surface_field(surface_grtdivJR_t, i, j) = grtdivJR_t_ij;
+                    surface_field(surface_gttdivJR, i, j)   = gttdivJR_ij;
+                    surface_field(surface_gttdivJR_r, i, j) = gttdivJR_r_ij;
 
                     sum_J += J_ij;
                     sum_JR += JR_ij;

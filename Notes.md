@@ -134,6 +134,20 @@ VEQLIB_ANALYSIS_BUILD=ON
 - Release binary 的动态符号和 objdump 证据显示存在 `sincos@plt` 调用，支持 TODO 中“geometry 标量三角函数可能是当前首要瓶颈”的判断。
 - Clang analysis build 显示 residual 相关循环已有 vectorization width 4 的优化 remarks；因此下一步不要先盲目手写 residual AVX2，应先针对 geometry 做 A/B。
 
+### 4.2 后续 A/B 更新：geometry surface layout
+
+已完成一个最小 kernel A/B：保持 logical accessor `surface_field(row, radial_node, theta_node)` 不变，把 geometry surface slab 的物理布局从 `[field][rho][theta]` 改成 `[rho][field][theta]`。这样 `theta` 仍连续，同时默认 topology 下不再让每个 field plane 起点按 4096 B 间隔排列。
+
+同一时间窗口 paired timing，`repeat=30`、`warmup=8`、`inner=10000`、3 轮 median-of-medians：
+
+| metric | baseline | candidate | candidate / baseline |
+| --- | ---: | ---: | ---: |
+| `geometry` ns/call | 9476.8 | 5457.7 | 0.576 |
+| `evaluate` ns/call | 13149.6 | 8796.7 | 0.669 |
+| `geometry / evaluate` share | 0.721 | 0.620 | - |
+
+结论：layout 假设在当前工作站 wall-clock A/B 中得到强支持。由于 WSL2 下 PMU 不可用，不能把“4 KiB set conflict”机制当作硬件计数器已证实结论；但按相对变化口径，这个布局改动已经让 `geometry` 和端到端 `evaluate` 同步明显下降，应该保留并作为下一轮 baseline。
+
 ### 4.1 性能评价口径：占比和相对变化优先
 
 当前 `veqlib_stage_benchmark` 的原始时间是进程内 `std::chrono::steady_clock` wall-clock timing，经 `--inner` 除成 ns/stage-call。这个绝对 ns 值只应作为原始观测记录，不应作为主要裁决口径。后续优化应主要看：
@@ -233,7 +247,7 @@ git diff --check
 
 目标：验证 `geometry` 的 9.3 us median 是否主要来自三角函数和 9-plane surface 更新。
 
-建议按以下顺序做小步 A/B：
+已完成一项布局 A/B：`[field][rho][theta] -> [rho][field][theta]`，端到端 `evaluate` ratio 约 0.669。后续仍建议按以下顺序继续做小步 A/B：
 
 1. **三角函数证据增强**
    - 在 analysis/objdump 中定位 `sincos@plt` 所在调用块。
@@ -244,9 +258,9 @@ git diff --check
    - 对包含 profile-dependent phase/shape 的项，先不要改变数学语义；可先做局部缓存或 recurrence A/B。
 
 3. **geometry layout A/B**
-   - Padded field plane：把每个 4096 B plane 间距改成 4160 B，验证是否改善 geometry timing。
-   - Alternative layout：`[rho][field][theta]`，保持 theta 连续，同时让同 rho 的 field 聚集。
-   - 这两项必须以 correctness validation + stage timing 为准；当前没有 PMU，不应仅凭推理保留。
+   - 已完成 Alternative layout：`[rho][field][theta]`，保持 theta 连续，同时让同 rho 的 field 聚集。
+   - Padded field plane：可作为后续对照，但当前 `[rho][field][theta]` 已显著改善，优先级下降。
+   - 当前没有 PMU，不应仅凭推理解释机制；保留依据是 correctness validation + paired stage/evaluate timing。
 
 4. **只在实测支持后再考虑 AVX2 intrinsic**
    - 当前首选让 Clang 自动向量化或使用更利于向量化的数据布局。

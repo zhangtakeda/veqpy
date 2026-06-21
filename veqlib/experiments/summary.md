@@ -47,3 +47,24 @@
 - First optimization target should be geometry (`sin/cos` path and 9-plane update), not solver dispatch.
 - Residual materialization remains structurally suspicious: it is a smaller wall-time slice than geometry, but Cachegrind reports high D1 activity in `residual_update`; fusion should be tested after geometry baseline improvements or as a separate A/B.
 - Direct PMU validation of the 4 KiB plane conflict is blocked on this WSL environment; use a native Linux boot or a perf-capable VM for final L1 replacement evidence.
+
+## Follow-up A/B: geometry surface layout
+
+Change tested: geometry surface storage order changed from logical field planes
+`[field][rho][theta]` to physical `[rho][field][theta]`. The public accessor
+`surface_field(row, radial_node, theta_node)` preserves logical read/write
+semantics; `theta` remains contiguous.
+
+Paired local wall-clock timing (`repeat=30`, `warmup=8`, `inner=10000`,
+3 rounds; compare same time window, not absolute ns):
+
+| metric | baseline | candidate | candidate / baseline |
+| --- | ---: | ---: | ---: |
+| `geometry` median-of-medians ns/call | 9476.8 | 5457.7 | 0.576 |
+| `evaluate` median-of-medians ns/call | 13149.6 | 8796.7 | 0.669 |
+| `geometry / evaluate` share | 0.721 | 0.620 | - |
+
+Interpretation: the layout hypothesis is strongly supported in this workstation
+run. Because PMU counters are unavailable under WSL2, treat the exact cache-set
+mechanism as still requiring hardware-counter confirmation, but keep the layout
+change unless a native-PMU run contradicts the wall-clock A/B.
