@@ -355,7 +355,7 @@ def test_solver_auto_policy_selects_refined_only_above_curve_strain_threshold(
             Z0=boundary.Z0,
             B0=boundary.B0,
             ka=boundary.ka,
-            c_offsets=np.array([0.0, 0.6], dtype=np.float64),
+            c_offsets=np.array([0.0, 0.45], dtype=np.float64),
         )
     )
     large_projection_auto = capture_x_guess(large_projection_problem, "auto")

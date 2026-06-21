@@ -78,6 +78,89 @@ namespace
         return out;
     }
 
+    template <typename MatrixType>
+    nlohmann::json json_matrix_row(const MatrixType& values, size_t row)
+    {
+        nlohmann::json out = nlohmann::json::array();
+        for (size_t col = 0; col < MatrixType::shape[1]; ++col)
+            out.push_back(values(row, col));
+        return out;
+    }
+
+    template <typename MatrixType>
+    nlohmann::json json_matrix_col(const MatrixType& values, size_t col)
+    {
+        nlohmann::json out = nlohmann::json::array();
+        for (size_t row = 0; row < MatrixType::shape[0]; ++row)
+            out.push_back(values(row, col));
+        return out;
+    }
+
+    template <typename SlabType>
+    nlohmann::json json_slab_row(const SlabType& values, size_t row)
+    {
+        nlohmann::json out = nlohmann::json::array();
+        for (size_t i = 0; i < SlabType::shape[1]; ++i)
+        {
+            nlohmann::json radial = nlohmann::json::array();
+            for (size_t j = 0; j < SlabType::shape[2]; ++j)
+                radial.push_back(values(row, i, j));
+            out.push_back(radial);
+        }
+        return out;
+    }
+
+    nlohmann::json snapshot_state(const SmokeOperator& op, const PackedVector& raw, bool ok)
+    {
+        return {
+            {"ok", ok},
+            {"raw_residual", json_array(raw)},
+            {"alpha", {op.source_runtime.alpha1, op.source_runtime.alpha2}},
+            {"profiles",
+             {
+                 {"psin", json_matrix_col(op.profiles.profile_matrix<SmokeShape::psin_profile_id>(), 0)},
+                 {"psin_r", json_matrix_col(op.profiles.profile_matrix<SmokeShape::psin_profile_id>(), 1)},
+                 {"psin_rr", json_matrix_col(op.profiles.profile_matrix<SmokeShape::psin_profile_id>(), 2)},
+                 {"k", json_matrix_col(op.profiles.profile_matrix<SmokeShape::kappa_profile_id>(), 0)},
+                 {"c0", json_matrix_col(op.profiles.profile_matrix<SmokeShape::c_profile_id<0>()>(), 0)},
+             }},
+            {"source",
+             {
+                 {"source_psin_query", json_array(op.source_runtime.source_psin_query)},
+                 {"source_parameter_query", json_array(op.source_runtime.source_parameter_query)},
+                 {"materialized_heat_input", json_array(op.source_runtime.materialized_heat_input)},
+                 {"materialized_current_input", json_array(op.source_runtime.materialized_current_input)},
+                 {"profile_root_psin", json_matrix_row(op.source_runtime.profile_root_fields, source::root_psin)},
+                 {"profile_root_psin_r", json_matrix_row(op.source_runtime.profile_root_fields, source::root_psin_r)},
+                 {"profile_root_psin_rr", json_matrix_row(op.source_runtime.profile_root_fields, source::root_psin_rr)},
+                 {"source_target_psin",
+                  json_matrix_row(op.source_runtime.source_target_root_fields, source::root_psin)},
+                 {"source_target_psin_r",
+                  json_matrix_row(op.source_runtime.source_target_root_fields, source::root_psin_r)},
+                 {"source_target_psin_rr",
+                  json_matrix_row(op.source_runtime.source_target_root_fields, source::root_psin_rr)},
+                 {"FFn_psin", json_array(op.source_runtime.FFn_psin)},
+                 {"Pn_psin", json_array(op.source_runtime.Pn_psin)},
+             }},
+            {"geometry",
+             {
+                 {"S_r", json_matrix_row(op.geometry.radial_fields, geometry::radial_S_r)},
+                 {"V_r", json_matrix_row(op.geometry.radial_fields, geometry::radial_V_r)},
+                 {"Kn", json_matrix_row(op.geometry.radial_fields, geometry::radial_Kn)},
+                 {"Kn_r", json_matrix_row(op.geometry.radial_fields, geometry::radial_Kn_r)},
+                 {"Ln_r", json_matrix_row(op.geometry.radial_fields, geometry::radial_Ln_r)},
+             }},
+            {"residual_surface",
+             {
+                 {"G", json_slab_row(op.residual.surface_fields, residual::surface_G)},
+                 {"Gpsin_R", json_slab_row(op.residual.surface_fields, residual::surface_Gpsin_R)},
+                 {"Gpsin_Z", json_slab_row(op.residual.surface_fields, residual::surface_Gpsin_Z)},
+                 {"Gpsin_R_sin_tb",
+                  json_slab_row(op.residual.surface_fields, residual::surface_Gpsin_R_sin_tb)},
+             }},
+        };
+    }
+
     constexpr double veqpy_acceptance_threshold() noexcept
     {
         constexpr double scaled = veqpy_max_residual * veqpy_accepted_residual_factor;
@@ -241,6 +324,7 @@ int main()
         initial_scaled.data(),
         SmokeShape::x_size,
     });
+    const auto initial_state = snapshot_state(context.op, initial, initial_ok);
 
     auto z = encode_x_to_z(x_initial, context.x_scale);
     PackedVector fvec{};
@@ -305,6 +389,7 @@ int main()
         SmokeShape::x_size,
     });
     const bool accepted_by_veqpy = final_ok && final_norm <= veqpy_acceptance_threshold();
+    const auto final_state = snapshot_state(context.op, final, final_ok);
 
     nlohmann::json report = {
         {"route", "PF/psin/uniform"},
@@ -340,6 +425,7 @@ int main()
              {"scaled_residual", json_array(initial_scaled)},
              {"raw_norm", initial_norm},
              {"scaled_norm", initial_scaled_norm},
+             {"state", initial_state},
          }},
         {"final",
          {
@@ -351,6 +437,7 @@ int main()
              {"raw_norm", final_norm},
              {"scaled_norm", final_scaled_norm},
              {"accepted_by_veqpy", accepted_by_veqpy},
+             {"state", final_state},
          }},
         {"cminpack",
          {

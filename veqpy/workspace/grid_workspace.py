@@ -168,7 +168,14 @@ class GridWorkspace:
             differentiator=grid.differentiator.copy(),
             accumulator=grid.accumulator.copy(),
             radial_fields=_pack_radial_fields(
-                grid.rho, grid.x, grid.y, grid.rho_powers, grid.T, grid.T_r, grid.T_rr
+                grid.rho,
+                grid.x,
+                grid.y,
+                grid.rho_powers,
+                grid.T,
+                grid.T_r,
+                grid.T_rr,
+                grid.K_max or grid.M_max,
             ),
             poloidal_fields=_pack_poloidal_fields(
                 grid.theta,
@@ -205,11 +212,12 @@ def _pack_radial_fields(
     T: np.ndarray,
     T_r: np.ndarray,
     T_rr: np.ndarray,
+    K_max: int,
 ) -> np.ndarray:
     """Pack radial fields into a read-only (R, Nr) 2D array according to the layout contract."""
     Nr = rho.shape[0]
-    K_max = rho_powers.shape[0] - 2
     L_max = T.shape[0] - 1
+    K_max = int(K_max)
 
     fields = np.empty((8 + K_max + 3 * L_max, Nr), dtype=np.float64)
     fields[GRID_RADIAL_RHO] = rho
@@ -222,12 +230,21 @@ def _pack_radial_fields(
     T_stop = T_start + L_max + 1
     T_r_stop = T_stop + L_max + 1
 
-    fields[rho_start:rho_stop] = rho_powers
+    _copy_or_extend_rho_powers(fields[rho_start:rho_stop], rho, rho_powers)
     fields[T_start:T_stop] = T
     fields[T_stop:T_r_stop] = T_r
     fields[T_r_stop : T_r_stop + L_max + 1] = T_rr
     fields.flags.writeable = False
     return fields
+
+
+def _copy_or_extend_rho_powers(out: np.ndarray, rho: np.ndarray, rho_powers: np.ndarray) -> None:
+    """Fill the workspace ABI's fixed rho-power block, padding powers if needed."""
+
+    copied = min(out.shape[0], rho_powers.shape[0])
+    out[:copied] = rho_powers[:copied]
+    for power in range(copied, out.shape[0]):
+        out[power] = rho**power
 
 
 def _pack_poloidal_fields(
