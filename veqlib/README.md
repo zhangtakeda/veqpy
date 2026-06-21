@@ -106,8 +106,9 @@ measured layout-local optimization.
 Geometry computes dynamic phase values and their radial/theta derivatives in a
 separate theta pass before evaluating dynamic `sincos(tb)` and metric
 quantities. In the default RELAXED kernel, that dynamic trig backend reduces
-`tb` to the nearest `pi/2` quadrant and uses high-order Taylor polynomials on
-`|r|<=pi/4`, followed by branchless quadrant reconstruction. This is validated
+`tb` to the nearest `pi/2` quadrant and uses the validated `sin x^11` /
+`cos x^10` Taylor truncation on `|r|<=pi/4`, followed by branchless
+quadrant reconstruction. This is validated
 against the Python reference and is part of the performance kernel contract; use
 `STRICT`/`FMA` builds when establishing error budgets for future math backends.
 

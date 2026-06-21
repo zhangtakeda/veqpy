@@ -105,6 +105,7 @@ Phase 2 首轮 micro A/B：
 | 去掉 `Pn_psin` 独立 array，改由 `materialized_heat_input` 作为同义源 | 7 组 paired：`source_update` median ratio≈1.008，`residual_update`≈1.003，`evaluate`≈0.993 但正负混合，`evaluate_ring`≈0.998；sink diff=0 | 回滚；减少一个重复 buffer 的语义方向可行，但当前代码形状没有稳定端到端收益 |
 | 去掉 `source_psin_query/source_parameter_query` 两个同义 array，插值直接读 root `psin` | 首轮 7 组：`source_materialize`≈1.002，`evaluate`≈0.973 但 `evaluate_ring`≈1.015；追加 11 组长跑：`evaluate`≈0.997，`evaluate_ring`≈1.004；sink diff=0 | 回滚；删除重复 query buffer 未形成稳定收益，且 state-ring 口径不支持保留 |
 | Geometry reduced-Taylor dynamic `sincos(tb)` | 默认 5 组 paired：`geometry_phase_split_sincos`≈0.253，`geometry`≈0.424，`evaluate`≈0.643；full matrix 45/45 改善，`evaluate` median≈0.609 | 保留；这是 split 后最大的单项收益，需继续用 Python/C++ comparator 锁误差 |
+| Geometry reduced-Taylor order 降到 `sin x^11` / `cos x^10` | 默认 9 组 paired：`geometry_phase_split_sincos`≈0.928，`geometry`≈0.946，`evaluate`≈0.975，`evaluate_ring`≈0.969；45 topology `evaluate` matrix median≈0.985，37/45 改善 | 保留；`x^9/x^8` 因 `max_abs≈1.65e-7` 拒绝，`x^11/x^10` 仍通过 1e-9 comparator（`max_abs≈7.66e-10`） |
 
 Residual layout 本轮的逐项中位数：baseline `residual_update≈912.2 ns`、candidate
 `≈846.1 ns`；baseline `evaluate≈8288.7 ns`、candidate `≈8230.4 ns`。
@@ -622,6 +623,17 @@ split 本身也有效（geometry ratio≈0.902），但 final `libmvec/normal` �
 
 这是目前最大的单项收益；后续如要继续提高 trig backend，应先检查生成汇编和
 是否真正 vectorize，而不是退回 libmvec flag-only 路径。
+
+2026-06-21 继续测试了 reduced-Taylor 阶数收缩。把原来的 `sin x^15` /
+`cos x^14` 截断改为 `sin x^11` / `cos x^10` 后，release CTest 与 PF
+Python/C++ comparator 通过，但误差预算明显更紧（`max_abs≈7.66e-10`，主要来自
+`geometry_V_r`，仍低于 1e-9 门槛）。默认 topology 9 组 paired RELAXED timing
+显示 `geometry_phase_split_sincos≈0.928`、`geometry≈0.946`、`evaluate≈0.975`、
+`evaluate_ring≈0.969`。45 topology `evaluate` matrix 为 37/45 改善、median
+ratio≈0.985、range≈0.939--1.150；其中 `64x8x1` 的非配对 +15% 回归经单独
+paired 复测为 median≈0.982，`32x16x8` 复测为 median≈0.979，因此保留。
+更低的 `sin x^9` / `cos x^8` 版本 PF comparator 失败（`max_abs≈1.65e-7`），
+明确拒绝。
 
 采用后又按 full topology matrix 复测（45 点：`Nr={16,32,64}`、
 `Nt={8,16,24,32,64}`、`Mmax={1,4,8}`；`taskset -c 2`、`repeat=6`、

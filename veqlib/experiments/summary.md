@@ -100,6 +100,7 @@ end-to-end timing neutral-to-slightly-positive.
 | Hoist repeated residual geometry loads | `residual_update` 0.974 | 0.996 | reject; end-to-end effect too small |
 | Explicit glibc `sincos` path | `geometry` 2.386 | 1.835 | reject; severe regression |
 | Reduced-Taylor dynamic `sincos(tb)` after split-trig | final full matrix: `geometry` 0.443 median, 45/45 improved | full matrix `evaluate` 0.609 median, 45/45 improved | keep; large RELAXED-only gain with PF Python/C++ max_abs≈5.578e-11 |
+| Reduced-Taylor order trim to `sin x^11` / `cos x^10` | default paired: `geometry_phase_split_sincos` 0.928, `geometry` 0.946 | default `evaluate` 0.975, `evaluate_ring` 0.969; 45-topology evaluate median 0.985, 37/45 improved | keep; `x^9/x^8` failed comparator, `x^11/x^10` passed with max_abs≈7.66e-10 |
 | Residual surface physical layout `[rho][field][theta]` | re-test: `residual_update` 0.931; `residual_pack` 1.004 | 0.994 | retain; semantic layout alignment, no significant end-to-end regression |
 | Residual theta-moment fusion | active-only `residual_fused / (update+pack)` 1.090; naive 1.166 | active-only 1.007; naive 1.021 | reject; scalar moment accumulation lost to materialized update + vectorized rowwise pack |
 | Geometry residual-ready descriptor compression | `residual_update` 0.809, but `geometry` 1.021 | `evaluate` 1.004; `evaluate_ring` 1.008 | reject; moved arithmetic into dominant geometry stage without end-to-end gain |
@@ -380,6 +381,18 @@ Release/debug CTest and PF Python/C++ comparison passed (`max_abs≈5.578e-11`,
 worst field `final.x`). Five paired RELAXED default-topology runs measured
 `geometry_phase_split_sincos≈0.253`, `geometry≈0.424`, `evaluate≈0.643`, and
 `evaluate_ring≈0.635` against the pre-polynomial split baseline.
+
+The retained polynomial was then trimmed from `sin x^15` / `cos x^14` to
+`sin x^11` / `cos x^10`. Release CTest and PF Python/C++ comparison still pass,
+with a tighter but accepted comparator margin (`max_abs≈7.66e-10`, worst field
+`initial.geometry_V_r`). Nine paired default-topology runs measured
+`geometry_phase_split_sincos≈0.928`, `geometry≈0.946`, `evaluate≈0.975`, and
+`evaluate_ring≈0.969` relative to the higher-order polynomial baseline. The full
+45-topology `evaluate` matrix measured 37/45 improved, median ratio≈0.985 and
+range≈0.939--1.150; the apparent worst non-paired `64x8x1` regression was
+retested with paired binaries and measured median ratio≈0.982, while
+`32x16x8` retested at≈0.979. A lower `sin x^9` / `cos x^8` candidate failed the
+1e-9 comparator (`max_abs≈1.65e-7`) and was rejected.
 
 The post-adoption full topology matrix also supports keeping split-trig. Using
 the same 45-entry full preset as the pre-split pinned matrix

@@ -18,7 +18,7 @@ namespace geometry::detail
     inline constexpr double half_pi = 0.5 * pi;
 
     // RELAXED hot-path backend for dynamic tb: reduce to |r|<=pi/4, then use
-    // high-order Taylor polynomials validated against the Python reference.
+    // x^11/x^10 Taylor polynomials validated against the Python reference.
     inline void reduced_taylor_sincos(double value, double& sin_value, double& cos_value) noexcept
     {
         constexpr double inv_half_pi = 2.0 / pi;
@@ -29,9 +29,7 @@ namespace geometry::detail
         const double     reduced        = value - q * half_pi;
         const double     r2             = reduced * reduced;
 
-        double sin_poly = -1.0 / 1307674368000.0;
-        sin_poly = sin_poly * r2 + 1.0 / 6227020800.0;
-        sin_poly = sin_poly * r2 - 1.0 / 39916800.0;
+        double sin_poly = -1.0 / 39916800.0;
         sin_poly = sin_poly * r2 + 1.0 / 362880.0;
         sin_poly = sin_poly * r2 - 1.0 / 5040.0;
         sin_poly = sin_poly * r2 + 1.0 / 120.0;
@@ -39,9 +37,7 @@ namespace geometry::detail
         sin_poly = sin_poly * r2 + 1.0;
         const double sin_reduced = reduced * sin_poly;
 
-        double cos_poly = -1.0 / 87178291200.0;
-        cos_poly = cos_poly * r2 + 1.0 / 479001600.0;
-        cos_poly = cos_poly * r2 - 1.0 / 3628800.0;
+        double cos_poly = -1.0 / 3628800.0;
         cos_poly = cos_poly * r2 + 1.0 / 40320.0;
         cos_poly = cos_poly * r2 - 1.0 / 720.0;
         cos_poly = cos_poly * r2 + 1.0 / 24.0;
