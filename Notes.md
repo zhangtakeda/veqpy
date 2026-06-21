@@ -864,6 +864,14 @@ timing 一度显示 `evaluate` median ratio≈0.988、`evaluate_ring`≈0.994，
 `geometry`≈0.998、`evaluate`≈1.015、`evaluate_ring`≈1.002。结论：回滚；
 当前 loop hints 没有带来稳定 geometry 改善，反而可能扰动整体 codegen。
 
+又测试了 residual pack `unit_weights()` marker：把全 1 `RadialVector` 临时对象
+换成零存储 `UnitWeights` marker，并在 `project_scaled()` 中通过 `weight_value()`
+返回 1.0，试图跳过 unit 权重构造和读取。release CTest 与 PF comparator 通过，
+但 9 组默认 paired timing 明显变差：`residual_pack` median ratio≈1.063、
+`evaluate`≈1.006、`evaluate_ring`≈1.007。结论：回滚；这与此前静态权重表失败
+一致，当前编译器更擅长处理原来的小 `RadialVector` 临时/标量化形式，不要继续追逐
+unit-weight 抽象替换。
+
 目标：在 geometry/residual 结构性收益之后，再处理固定成本。
 
 建议动作：

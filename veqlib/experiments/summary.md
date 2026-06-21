@@ -107,6 +107,7 @@ end-to-end timing neutral-to-slightly-positive.
 | Geometry absent Fourier order static skip for `harmonic_rows>2` | `32x16x4` geometry-only 0.925; `32x16x8` geometry-only 0.808 | default `32x16x1` neutral; high-Mmax all-stage evaluate about 0.95 / 0.89 | keep; default topology keeps original loop, high Mmax skips absent c-family orders at compile time |
 | Source sign-normalization dot fusion | default paired `source_update` 0.977 | default `evaluate` 0.995 and `evaluate_ring` 0.984; 45-topology median 0.995 | keep; removes one independent source-update scan with no route/finite/sentinel branch |
 | Geometry theta-loop vectorization pragmas | long paired `geometry` 0.998 | long paired `evaluate` 1.015 and `evaluate_ring` 1.002 | reject; explicit loop hints did not improve geometry and disturbed endpoint codegen |
+| Residual pack unit-weight marker | default paired `residual_pack` 1.063 | `evaluate` 1.006 and `evaluate_ring` 1.007 | reject; compiler handles tiny unit-weight vectors better than marker indirection |
 | Remove independent `Pn_psin` buffer and read `materialized_heat_input` instead | `source_update` 1.008; `residual_update` 1.003 | `evaluate` 0.993 but mixed-sign pairs; `evaluate_ring` 0.998 | reject; aliasing the duplicate value is semantically clean but not a stable performance win |
 | Remove duplicate `source_psin_query/source_parameter_query` buffers | first pass: `source_materialize` 1.002; long rerun: `evaluate` 0.997 | long rerun `evaluate_ring` 1.004 | reject; direct root-psin interpolation did not survive state-ring timing |
 | Source `psin_r` regularization/pass reduction | `source_update` 0.954 | 1.000 | reject; no end-to-end gain |
@@ -569,3 +570,13 @@ not move (`geometry`≈0.999). A longer 7-pair retest reversed the decision:
 `geometry`≈0.998, `evaluate`≈1.015, and `evaluate_ring`≈1.002. The patch was
 reverted because explicit loop hints do not create stable geometry work removal
 here and can perturb surrounding codegen.
+
+A residual pack unit-weight marker candidate was rejected. It changed
+`unit_weights()` from a small all-ones `RadialVector` temporary into a zero-state
+`UnitWeights` marker and routed `project_scaled()` through `weight_value()` so
+unit weights returned `1.0` directly. Correctness passed release CTest and the
+RELAXED PF comparator, but default paired timing regressed the target bucket and
+the endpoint: `residual_pack` median ratio≈1.063, `evaluate`≈1.006, and
+`evaluate_ring`≈1.007. The patch was reverted. This reinforces the earlier
+static-weight-table rejection: the compiler currently scalarizes or optimizes
+the tiny vector temporaries better than extra weight-dispatch abstraction.
