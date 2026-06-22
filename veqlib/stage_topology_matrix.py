@@ -8,7 +8,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-
 DEFAULT_TOPOLOGIES = ("32x16x1", "32x32x1", "64x16x1")
 REPRESENTATIVE_TOPOLOGIES = (
     "16x16x1",
@@ -27,10 +26,16 @@ FULL_MATRIX_TOPOLOGIES = tuple(
     for nt in (8, 16, 24, 32, 64)
     for mmax in (1, 4, 8)
 )
+SIMD_TAIL_TOPOLOGIES = tuple(
+    f"{nr}x{nt}x1"
+    for nr in (17, 31, 32, 33, 63, 64, 65)
+    for nt in (15, 16, 17)
+)
 MATRIX_PRESETS = {
     "default": DEFAULT_TOPOLOGIES,
     "representative": REPRESENTATIVE_TOPOLOGIES,
     "full": FULL_MATRIX_TOPOLOGIES,
+    "simd-tail": SIMD_TAIL_TOPOLOGIES,
 }
 
 

@@ -50,6 +50,16 @@
       }
     },
     {
+      "name": "clang-analysis",
+      "displayName": "clang vectorization analysis",
+      "inherits": "clang-release-fma",
+      "binaryDir": "${sourceDir}/build/analysis",
+      "cacheVariables": {
+        "VEQLIB_ANALYSIS_BUILD": "ON",
+        "VEQLIB_ENABLE_THIN_LTO": "OFF"
+      }
+    },
+    {
       "name": "clang-enzyme-release",
       "displayName": "clang release + Enzyme",
       "inherits": "clang-release",
@@ -97,6 +107,10 @@
     {
       "name": "clang-release-fma",
       "configurePreset": "clang-release-fma"
+    },
+    {
+      "name": "clang-analysis",
+      "configurePreset": "clang-analysis"
     },
     {
       "name": "clang-enzyme-release",
