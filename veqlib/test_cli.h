@@ -1,5 +1,15 @@
 #pragma once
 
+// Temporary diagnostic aggregation surface. This file intentionally folds the
+// current benchmark/validation/stage CLI code into one removable header while
+// VEQlib route kernels are still moving. Once the kernel/operator surface is
+// stable, delete the diagnostic CLI pieces instead of preserving them as kernel
+// API. Before deleting the file, first split the nanobind-dependent solve facade
+// used by python_bindings.cpp (CaseInput, SolveContext, SolveResult,
+// run_solver_once, build_inline_case, solver metadata helpers, etc.) into its own
+// non-diagnostic binding runtime file so veqlib_ext.PfPsinUniformIpSolver does
+// not depend on disposable tests.
+
 // ---- PF/psin/uniform/Ip solve benchmark CLI ----
 #include <algorithm>
 #include <array>
