@@ -255,18 +255,24 @@ CMINPACK solve loop:
 
 Available stages are `profiles_fixed`, `profiles_active`, `profiles_all`,
 `geometry_phase`, `geometry_phase_sincos`, `geometry_phase_split_sincos`,
-`geometry_metric_no_store`, `geometry`, `source_materialize`, `source_update`,
-`residual_update`, `residual_pack`, `evaluate`, and `evaluate_ring`. Each reported sample is
-nanoseconds per stage call after dividing by `--inner`. The `geometry_*` probe
-stages are benchmark-only cumulative approximations of phase synthesis, dynamic
-`sin/cos(tb)`, split metric arithmetic without surface writes, and full
-geometry; they are meant to locate the next hotspot bucket and should not be
-treated as separate production kernels or as exact hardware-event attribution.
-`geometry - geometry_metric_no_store` is only a surface-output proxy, not a
-hardware store counter. `evaluate_ring` cycles through a
-deterministic synthetic solver-state ring controlled by `--ring-size`; use it to
-compare warm repeated callbacks against state-varying callback traffic, not as a
-real nonlinear-solver trajectory.
+`geometry_metric_no_store`, `geometry`, `source_materialize`,
+`source_copy_regularize`, `source_D_psin`, `source_A_psin`,
+`source_interpolate_pair`, `source_integrand`, `source_A_integrand`,
+`source_normalize`, `source_D_normalized`, `source_alpha`, `source_update`,
+`residual_update`, `residual_theta_reduce`, `residual_radial_project`,
+`residual_pack`, `evaluate`, and `evaluate_ring`. Each reported sample is
+nanoseconds per stage call after dividing by `--inner`. The `geometry_*`,
+`source_*`, and `residual_*` fine-grained probe stages are benchmark-only
+decompositions of the current route-specific hot path; they are meant to locate
+the next hotspot bucket and should not be treated as separate production kernels
+or as exact hardware-event attribution. `geometry - geometry_metric_no_store` is
+only a surface-output proxy, not a hardware store counter. The residual
+theta/radial split materializes moment rows so projection can be timed
+separately; use it to compare candidate code shapes, not as a claim that the
+current `residual_pack` has identical memory traffic. `evaluate_ring` cycles
+through a deterministic synthetic solver-state ring controlled by `--ring-size`;
+use it to compare warm repeated callbacks against state-varying callback
+traffic, not as a real nonlinear-solver trajectory.
 
 To compare VEQPy's Python solve latency against a direct VEQlib nanobind call,
 build the Release module and run the Python comparison script:

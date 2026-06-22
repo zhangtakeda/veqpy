@@ -1,0 +1,47 @@
+{
+  "affinity": "taskset -c 2 for pinned stage/solve/nanobind comparison",
+  "comparator_release": {
+    "max_abs": 7.655671652173623e-10,
+    "passed": true,
+    "tolerance": 1e-09
+  },
+  "git_sha": "7e4229dcd044b43c4414cb793826c29a705bf98b",
+  "python_vs_cxx_nanobind": {
+    "cxx_inner_median_ms": 0.2151285,
+    "cxx_median_ms": 0.21861950000000002,
+    "interface_median_ms": 0.0022850000000000092,
+    "max_final_raw_abs_diff": 7.735375924869392e-16,
+    "python_median_ms": 1.0861260000000001,
+    "speedup_python_over_cxx_median": 4.968111261804185
+  },
+  "run_dir": "veqlib/experiments/7e4229d-20260622-p0-baseline",
+  "schema_version": 1,
+  "solve_residual_taskset_c2": {
+    "accepted_by_veqpy": true,
+    "callback_evaluations": 38,
+    "median_ms": 0.206484,
+    "nfev": 38,
+    "p95_ms": 0.26359409999999994,
+    "raw_norm": 9.809034120518876e-09
+  },
+  "stage_median_ns": {
+    "evaluate": 4655.114666666666,
+    "evaluate_ring": 4696.011,
+    "geometry": 1753.0295,
+    "profiles_all": 123.25633333333333,
+    "residual_pack": 132.501,
+    "residual_update": 777.3261666666667,
+    "source_materialize": 797.029,
+    "source_update": 781.591
+  },
+  "stage_p95_ns": {
+    "evaluate": 5168.589333333333,
+    "evaluate_ring": 5345.768333333333,
+    "geometry": 1916.7136666666668,
+    "profiles_all": 156.578,
+    "residual_pack": 187.69966666666667,
+    "residual_update": 858.7113333333333,
+    "source_materialize": 863.853,
+    "source_update": 945.028
+  }
+}

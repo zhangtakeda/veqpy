@@ -51,6 +51,7 @@ namespace
     using source::UniformSourceShape;
     using std::size_t;
     using tensor::Matrix;
+    using tensor::Vector;
     using tensor::uninitialized;
 
     template <auto Counts>
@@ -151,7 +152,9 @@ namespace
     using BenchGrid     = BenchTopology::Grid;
     using BenchSource   = BenchTopology::Source;
     using BenchOperator = BenchTopology::Operator;
-    using PackedVector  = BenchOperator::PackedVector;
+    using PackedVector        = BenchOperator::PackedVector;
+    using SourceRadialVector  = Vector<double, BenchGrid::radial_nodes>;
+    using ResidualMomentRows  = BenchOperator::Residual::MomentRows;
 
     static_assert(BenchShape::L_max == DefaultTopology::L_max);
     static_assert(BenchShape::M_max == DefaultTopology::M_max);
@@ -196,8 +199,19 @@ namespace
         GeometryMetricNoStore,
         Geometry,
         SourceMaterialize,
+        SourceCopyRegularize,
+        SourceDpsin,
+        SourceApsin,
+        SourceInterpolatePair,
+        SourceIntegrand,
+        SourceAIntegrand,
+        SourceNormalize,
+        SourceDNormalized,
+        SourceAlpha,
         SourceUpdate,
         ResidualUpdate,
+        ResidualThetaReduce,
+        ResidualRadialProject,
         ResidualPack,
         Evaluate,
         EvaluateRing,
@@ -284,6 +298,43 @@ namespace
     {
         prepare_source_updated(op, x);
         op.residual.update_compact(op.source_runtime, op.geometry);
+    }
+
+    void prepare_source_profile_root(BenchOperator& op, std::span<const double, BenchShape::x_size> x) noexcept
+    {
+        refresh_profiles(op, x);
+        const size_t n_axis_fix = axis_fix_count<BenchGrid>(op.params.fix_rho);
+        op.source_runtime.benchmark_copy_profile_psin_r(op.profiles);
+        op.source_runtime.benchmark_regularize_psin_r(n_axis_fix);
+    }
+
+    void prepare_source_integrand(BenchOperator&                              op,
+                                  std::span<const double, BenchShape::x_size> x,
+                                  SourceRadialVector&                         integrand) noexcept
+    {
+        prepare_source_materialized(op, x);
+        op.geometry.update(op.params.a, op.params.R0, op.params.Z0, op.profiles);
+        op.source_runtime.benchmark_fill_pf_psin_integrand(integrand, op.geometry);
+    }
+
+    void prepare_source_accumulated_integrand(BenchOperator&                              op,
+                                              std::span<const double, BenchShape::x_size> x,
+                                              SourceRadialVector&                         accumulated) noexcept
+    {
+        SourceRadialVector integrand{uninitialized};
+        prepare_source_integrand(op, x, integrand);
+        op.source_runtime.benchmark_A_integrand_into(accumulated, integrand);
+    }
+
+    void prepare_source_normalized_psin(BenchOperator&                              op,
+                                        std::span<const double, BenchShape::x_size> x,
+                                        SourceRadialVector&                         normalized) noexcept
+    {
+        SourceRadialVector accumulated{uninitialized};
+        prepare_source_accumulated_integrand(op, x, accumulated);
+        const size_t n_axis_fix = axis_fix_count<BenchGrid>(op.params.fix_rho);
+        (void)op.source_runtime.benchmark_normalize_psin_r_into(
+            normalized, accumulated, op.geometry, n_axis_fix);
     }
 
     enum class GeometryProbeMode
@@ -621,17 +672,23 @@ namespace
             op.geometry.radial_fields(radial_S_r, 0) = sink;
     }
 
-    double consume_state(const BenchOperator& op, const PackedVector& packed) noexcept
+    double consume_state(const BenchOperator&       op,
+                         const PackedVector&        packed,
+                         const SourceRadialVector&  source_scratch,
+                         const ResidualMomentRows&  residual_moments) noexcept
     {
         return op.profiles.profile_field(BenchShape::psin_profile_id, 0, 0) +
                op.geometry.surface_field(surface_R, 0, 0) + op.source_runtime.alpha1 +
-               op.residual.surface_field(surface_G, 0, 0) + packed[0];
+               op.residual.surface_field(surface_G, 0, 0) + packed[0] + source_scratch[0] + residual_moments(0, 0);
     }
 
     void run_stage_once(StageKind                                   stage,
                         BenchOperator&                              op,
                         std::span<const double, BenchShape::x_size> x,
-                        PackedVector&                               packed)
+                        PackedVector&                               packed,
+                        SourceRadialVector&                         source_scratch,
+                        SourceRadialVector&                         source_aux,
+                        ResidualMomentRows&                         residual_moments)
     {
         const size_t n_axis_fix = axis_fix_count<BenchGrid>(op.params.fix_rho);
         switch (stage)
@@ -672,6 +729,45 @@ namespace
             op.source_runtime.materialize_profile_owned_psin(op.profiles, n_axis_fix);
             compiler_barrier(op.source_runtime.materialized_heat_input.data());
             break;
+        case StageKind::SourceCopyRegularize:
+            op.source_runtime.benchmark_copy_profile_psin_r(op.profiles);
+            op.source_runtime.benchmark_regularize_psin_r(n_axis_fix);
+            compiler_barrier(op.source_runtime.source_target_root_fields.data());
+            break;
+        case StageKind::SourceDpsin:
+            op.source_runtime.benchmark_D_psin_into_rr();
+            compiler_barrier(op.source_runtime.source_target_root_fields.data());
+            break;
+        case StageKind::SourceApsin:
+            op.source_runtime.benchmark_A_psin_into(source_scratch);
+            compiler_barrier(source_scratch.data());
+            break;
+        case StageKind::SourceInterpolatePair:
+            op.source_runtime.benchmark_prepare_psin_queries();
+            op.source_runtime.benchmark_interpolate_pair();
+            compiler_barrier(op.source_runtime.materialized_heat_input.data());
+            break;
+        case StageKind::SourceIntegrand:
+            op.source_runtime.benchmark_fill_pf_psin_integrand(source_scratch, op.geometry);
+            compiler_barrier(source_scratch.data());
+            break;
+        case StageKind::SourceAIntegrand:
+            op.source_runtime.benchmark_A_integrand_into(source_aux, source_scratch);
+            compiler_barrier(source_aux.data());
+            break;
+        case StageKind::SourceNormalize:
+            (void)op.source_runtime.benchmark_normalize_psin_r_into(
+                source_aux, source_scratch, op.geometry, n_axis_fix);
+            compiler_barrier(source_aux.data());
+            break;
+        case StageKind::SourceDNormalized:
+            op.source_runtime.benchmark_D_normalized_psin_into_rr(source_scratch);
+            compiler_barrier(op.source_runtime.source_target_root_fields.data());
+            break;
+        case StageKind::SourceAlpha:
+            op.source_runtime.benchmark_update_alpha_from_integral(op.geometry, op.params.Ip, 1.0);
+            compiler_barrier(&op.source_runtime.alpha1);
+            break;
         case StageKind::SourceUpdate:
             op.source_runtime.update_pf_ip_from_psin_uniform(op.geometry, op.params.Ip, n_axis_fix);
             compiler_barrier(op.source_runtime.FFn_psin.data());
@@ -679,6 +775,14 @@ namespace
         case StageKind::ResidualUpdate:
             op.residual.update_compact(op.source_runtime, op.geometry);
             compiler_barrier(op.residual.surface_fields.data());
+            break;
+        case StageKind::ResidualThetaReduce:
+            op.residual.benchmark_theta_reduce_into(residual_moments);
+            compiler_barrier(residual_moments.data());
+            break;
+        case StageKind::ResidualRadialProject:
+            op.residual.benchmark_radial_project_from(packed, residual_moments, op.params.a, op.params.R0, op.params.B0);
+            compiler_barrier(packed.data());
             break;
         case StageKind::ResidualPack:
             op.residual.pack_into(packed, op.params.a, op.params.R0, op.params.B0);
@@ -717,10 +821,32 @@ namespace
             return "geometry";
         case StageKind::SourceMaterialize:
             return "source_materialize";
+        case StageKind::SourceCopyRegularize:
+            return "source_copy_regularize";
+        case StageKind::SourceDpsin:
+            return "source_D_psin";
+        case StageKind::SourceApsin:
+            return "source_A_psin";
+        case StageKind::SourceInterpolatePair:
+            return "source_interpolate_pair";
+        case StageKind::SourceIntegrand:
+            return "source_integrand";
+        case StageKind::SourceAIntegrand:
+            return "source_A_integrand";
+        case StageKind::SourceNormalize:
+            return "source_normalize";
+        case StageKind::SourceDNormalized:
+            return "source_D_normalized";
+        case StageKind::SourceAlpha:
+            return "source_alpha";
         case StageKind::SourceUpdate:
             return "source_update";
         case StageKind::ResidualUpdate:
             return "residual_update";
+        case StageKind::ResidualThetaReduce:
+            return "residual_theta_reduce";
+        case StageKind::ResidualRadialProject:
+            return "residual_radial_project";
         case StageKind::ResidualPack:
             return "residual_pack";
         case StageKind::Evaluate:
@@ -751,10 +877,32 @@ namespace
             return StageKind::Geometry;
         if (value == "source_materialize")
             return StageKind::SourceMaterialize;
+        if (value == "source_copy_regularize")
+            return StageKind::SourceCopyRegularize;
+        if (value == "source_D_psin")
+            return StageKind::SourceDpsin;
+        if (value == "source_A_psin")
+            return StageKind::SourceApsin;
+        if (value == "source_interpolate_pair")
+            return StageKind::SourceInterpolatePair;
+        if (value == "source_integrand")
+            return StageKind::SourceIntegrand;
+        if (value == "source_A_integrand")
+            return StageKind::SourceAIntegrand;
+        if (value == "source_normalize")
+            return StageKind::SourceNormalize;
+        if (value == "source_D_normalized")
+            return StageKind::SourceDNormalized;
+        if (value == "source_alpha")
+            return StageKind::SourceAlpha;
         if (value == "source_update")
             return StageKind::SourceUpdate;
         if (value == "residual_update")
             return StageKind::ResidualUpdate;
+        if (value == "residual_theta_reduce")
+            return StageKind::ResidualThetaReduce;
+        if (value == "residual_radial_project")
+            return StageKind::ResidualRadialProject;
         if (value == "residual_pack")
             return StageKind::ResidualPack;
         if (value == "evaluate")
@@ -778,8 +926,19 @@ namespace
             StageKind::GeometryMetricNoStore,
             StageKind::Geometry,
             StageKind::SourceMaterialize,
+            StageKind::SourceCopyRegularize,
+            StageKind::SourceDpsin,
+            StageKind::SourceApsin,
+            StageKind::SourceInterpolatePair,
+            StageKind::SourceIntegrand,
+            StageKind::SourceAIntegrand,
+            StageKind::SourceNormalize,
+            StageKind::SourceDNormalized,
+            StageKind::SourceAlpha,
             StageKind::SourceUpdate,
             StageKind::ResidualUpdate,
+            StageKind::ResidualThetaReduce,
+            StageKind::ResidualRadialProject,
             StageKind::ResidualPack,
             StageKind::Evaluate,
             StageKind::EvaluateRing,
@@ -812,7 +971,10 @@ namespace
             {
                 std::cout << "usage: veqlib_main --mode stage [--stage all|profiles_fixed|profiles_active|"
                              "profiles_all|geometry_phase|geometry_phase_sincos|geometry_phase_split_sincos|"
-                             "geometry_metric_no_store|geometry|source_materialize|source_update|residual_update|residual_pack|"
+                             "geometry_metric_no_store|geometry|source_materialize|source_copy_regularize|"
+                             "source_D_psin|source_A_psin|source_interpolate_pair|source_integrand|"
+                             "source_A_integrand|source_normalize|source_D_normalized|source_alpha|"
+                             "source_update|residual_update|residual_theta_reduce|residual_radial_project|residual_pack|"
                              "evaluate|evaluate_ring] [--repeat N] [--warmup N] "
                              "[--inner N] [--ring-size N]\n";
                 std::exit(0);
@@ -869,7 +1031,12 @@ namespace
         };
     }
 
-    void prepare_for_stage(StageKind stage, BenchOperator& op, std::span<const double, BenchShape::x_size> x)
+    void prepare_for_stage(StageKind                                   stage,
+                           BenchOperator&                              op,
+                           std::span<const double, BenchShape::x_size> x,
+                           SourceRadialVector&                         source_scratch,
+                           SourceRadialVector&                         source_aux,
+                           ResidualMomentRows&                         residual_moments)
     {
         switch (stage)
         {
@@ -890,12 +1057,45 @@ namespace
         case StageKind::SourceMaterialize:
             refresh_profiles(op, x);
             break;
+        case StageKind::SourceCopyRegularize:
+            refresh_profiles(op, x);
+            break;
+        case StageKind::SourceDpsin:
+        case StageKind::SourceApsin:
+            prepare_source_profile_root(op, x);
+            break;
+        case StageKind::SourceInterpolatePair:
+            prepare_source_materialized(op, x);
+            break;
+        case StageKind::SourceIntegrand:
+            prepare_source_materialized(op, x);
+            op.geometry.update(op.params.a, op.params.R0, op.params.Z0, op.profiles);
+            break;
+        case StageKind::SourceAIntegrand:
+            prepare_source_integrand(op, x, source_scratch);
+            break;
+        case StageKind::SourceNormalize:
+            prepare_source_accumulated_integrand(op, x, source_scratch);
+            break;
+        case StageKind::SourceDNormalized:
+            prepare_source_normalized_psin(op, x, source_scratch);
+            break;
+        case StageKind::SourceAlpha:
+            prepare_source_updated(op, x);
+            break;
         case StageKind::SourceUpdate:
             prepare_source_materialized(op, x);
             op.geometry.update(op.params.a, op.params.R0, op.params.Z0, op.profiles);
             break;
         case StageKind::ResidualUpdate:
             prepare_source_updated(op, x);
+            break;
+        case StageKind::ResidualThetaReduce:
+            prepare_residual_updated(op, x);
+            break;
+        case StageKind::ResidualRadialProject:
+            prepare_residual_updated(op, x);
+            op.residual.benchmark_theta_reduce_into(residual_moments);
             break;
         case StageKind::ResidualPack:
             prepare_residual_updated(op, x);
@@ -929,9 +1129,12 @@ namespace
         std::array<double, BenchShape::x_size> x{};
         auto                                  state_ring = make_state_ring(options.ring_size);
         PackedVector                           packed{};
+        SourceRadialVector                     source_scratch{};
+        SourceRadialVector                     source_aux{};
+        ResidualMomentRows                     residual_moments{};
         const auto                             x_values = x_span(x);
 
-        prepare_for_stage(stage, *op, x_values);
+        prepare_for_stage(stage, *op, x_values, source_scratch, source_aux, residual_moments);
 
         for (size_t sample = 0; sample < options.warmup; ++sample)
             for (size_t i = 0; i < options.inner; ++i)
@@ -939,7 +1142,7 @@ namespace
                 const auto input = stage == StageKind::EvaluateRing
                     ? x_span(state_ring[(sample * options.inner + i) % state_ring.size()])
                     : x_values;
-                run_stage_once(stage, *op, input, packed);
+                run_stage_once(stage, *op, input, packed, source_scratch, source_aux, residual_moments);
             }
 
         std::vector<double> samples;
@@ -953,14 +1156,14 @@ namespace
                 const auto input = stage == StageKind::EvaluateRing
                     ? x_span(state_ring[(sample * options.inner + i) % state_ring.size()])
                     : x_values;
-                run_stage_once(stage, *op, input, packed);
+                run_stage_once(stage, *op, input, packed, source_scratch, source_aux, residual_moments);
             }
             const auto                                     stop    = clock::now();
             const std::chrono::duration<double, std::nano> elapsed = stop - start;
             samples.push_back(elapsed.count() / static_cast<double>(options.inner));
         }
 
-        benchmark_sink += consume_state(*op, packed);
+        benchmark_sink += consume_state(*op, packed, source_scratch, residual_moments);
         const Stats stats = compute_stats(samples);
 
         return {

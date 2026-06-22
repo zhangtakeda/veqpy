@@ -12,6 +12,86 @@
 - Debug CTest: 3/3 passed (`veqlib/experiments/baseline/ctest-debug-after-review-fixes.log`).
 - Python/C++ PF-psin-uniform validation: passed=True, max_abs=6.762e-12.
 
+## 2026-06-22 P0 reproducible baseline
+
+Baseline run directory: `veqlib/experiments/7e4229d-20260622-p0-baseline`.
+The run uses commit `7e4229dcd044b43c4414cb793826c29a705bf98b`; both
+`worktree.diff` and `index.diff` are empty in the saved manifest. Release and
+debug CTest both passed 4/4, including the nanobind binding smoke test. The
+RELAXED Python/C++ comparator passed with `max_abs=7.66e-10` under the existing
+`1e-9` tolerance.
+
+Pinned RELAXED timing used `taskset -c 2`, `repeat=30`, `warmup=5`, and
+`ring-size=16`; stage timing used `inner=3000`.
+
+| stage | median ns/call | p95 ns/call |
+| --- | ---: | ---: |
+| `profiles_all` | 123.3 | 156.6 |
+| `geometry` | 1753.0 | 1916.7 |
+| `source_materialize` | 797.0 | 863.9 |
+| `source_update` | 781.6 | 945.0 |
+| `residual_update` | 777.3 | 858.7 |
+| `residual_pack` | 132.5 | 187.7 |
+| `evaluate` | 4655.1 | 5168.6 |
+| `evaluate_ring` | 4696.0 | 5345.8 |
+
+Pinned residual-only C++ solve timing reported median `0.206 ms`, p95
+`0.264 ms`, `nfev=38`, `callback_evaluations=38`, and
+`raw_norm=9.81e-09`. The nanobind comparison reported Python median
+`1.086 ms`, Python-perceived C++ median `0.219 ms`, direct inner C++ median
+`0.215 ms`, and interface median overhead `0.0023 ms`; median speedup is
+`4.97x` over the Python reference. Treat these numbers as the P0 baseline for
+the next Source/Residual/Solver substage split. The current WSL2 environment
+still has no usable hardware-PMU path, so PMU remains a later native-Linux
+mechanism check rather than a P0/P1 gate.
+
+## 2026-06-22 P0-B Source/Residual substage probes
+
+Benchmark-only Source and Residual fine stages were added without changing the
+production `evaluate()` sequence. Source wrappers expose individual current-path
+operations such as psin copy/regularization, D/A fixed-size matvecs,
+interpolation, integrand fill, normalization, and alpha update. Residual wrappers
+split the materialized-surface pack path into moment-row theta reduction and
+radial projection from those materialized moments. The residual split is a probe
+shape, not an exact decomposition of current `residual_pack`, because it writes a
+moment-row buffer so projection can be timed separately.
+
+Validation after adding the probes:
+
+- Release CTest: 4/4 passed.
+- Debug CTest: 4/4 passed.
+- RELAXED Python/C++ comparator: passed with `max_abs=7.66e-10`.
+
+Pinned stage timing (`taskset -c 2`, `repeat=30`, `warmup=5`, `inner=3000`) was
+saved under `veqlib/experiments/7e4229d-20260622-p0-substages`.
+
+| probe | median ns/call | p95 ns/call |
+| --- | ---: | ---: |
+| `source_materialize` | 800.3 | 968.5 |
+| `source_copy_regularize` | 9.7 | 9.9 |
+| `source_D_psin` | 249.5 | 549.1 |
+| `source_A_psin` | 243.6 | 330.6 |
+| `source_interpolate_pair` | 212.4 | 239.7 |
+| `source_integrand` | 4.0 | 4.4 |
+| `source_A_integrand` | 240.6 | 258.3 |
+| `source_normalize` | 39.5 | 42.5 |
+| `source_D_normalized` | 242.2 | 318.4 |
+| `source_alpha` | 5.8 | 5.9 |
+| `source_update` | 831.6 | 1176.1 |
+| `residual_update` | 794.6 | 884.8 |
+| `residual_theta_reduce` | 359.2 | 493.1 |
+| `residual_radial_project` | 35.1 | 37.6 |
+| `residual_pack` | 132.5 | 163.0 |
+| `evaluate` | 4578.5 | 4823.6 |
+| `evaluate_ring` | 4812.8 | 5080.4 |
+
+Immediate interpretation: Source cost is dominated by the repeated fixed-size
+D/A matvec shape plus interpolation, not by scalar integrand or alpha arithmetic.
+The residual materialized-moment probe shows that a future `MomentPlan` must
+avoid merely adding a moment buffer around the current scalar reductions; the
+next viable residual candidate should batch/merge moments with a vector-friendly
+theta loop before claiming projection savings.
+
 ## Stable release stage timing
 
 | stage | median ns/call | avg ns/call | p95/median | CV |

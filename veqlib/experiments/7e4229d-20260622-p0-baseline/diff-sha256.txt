@@ -1,0 +1,2 @@
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  veqlib/experiments/7e4229d-20260622-p0-baseline/worktree.diff
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  veqlib/experiments/7e4229d-20260622-p0-baseline/index.diff

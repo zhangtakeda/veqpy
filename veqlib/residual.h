@@ -46,6 +46,7 @@ namespace residual::detail
         // producer. The logical accessor remains [field, rho, theta].
         using SurfaceSlab  = Tensor<double, radial_nodes, residual_surface_count, theta_rows>;
         using RadialVector = Vector<double, radial_nodes>;
+        using MomentRows   = Matrix<double, Shape::profile_count, radial_nodes>;
         using PackedVector = Vector<double, Shape::x_size>;
 
         SurfaceSlab  surface_fields{};
@@ -126,6 +127,20 @@ namespace residual::detail
             pack_profile<0>(out, a, R0, B0);
         }
 
+        constexpr void benchmark_theta_reduce_into(MomentRows& moments) noexcept
+        {
+            benchmark_theta_reduce_profile<0>(moments);
+        }
+
+        constexpr void benchmark_radial_project_from(PackedVector&    out,
+                                                     const MomentRows& moments,
+                                                     double            a,
+                                                     double            R0,
+                                                     double            B0) const noexcept
+        {
+            benchmark_radial_project_profile<0>(out, moments, a, R0, B0);
+        }
+
     private:
         template <size_t ProfileId>
         constexpr void pack_profile(PackedVector& out, double a, double R0, double B0) noexcept
@@ -189,6 +204,83 @@ namespace residual::detail
                 project_scaled<Count, ProfileId>(
                     out, GridType::y, GridType::y, unit_weights(), base_scale() * (R0 * B0) * (R0 * B0));
             }
+        }
+
+        template <size_t ProfileId>
+        constexpr void benchmark_theta_reduce_profile(MomentRows& moments) noexcept
+        {
+            if constexpr (ProfileId < Shape::profile_count)
+            {
+                constexpr profiles::ProfileSlot slot = Shape::slot_for_profile_id(ProfileId);
+                if constexpr (slot.optimized())
+                    benchmark_theta_reduce_one<ProfileId>(moments);
+                benchmark_theta_reduce_profile<ProfileId + 1>(moments);
+            }
+        }
+
+        template <size_t ProfileId>
+        constexpr void benchmark_theta_reduce_one(MomentRows& moments) noexcept
+        {
+            constexpr size_t code  = block_code<ProfileId>();
+            constexpr size_t order = block_order<ProfileId>();
+
+            if constexpr (code == block_h)
+                rowwise_sum_into(moments, ProfileId, surface_Gpsin_R);
+            else if constexpr (code == block_v)
+                rowwise_sum_into(moments, ProfileId, surface_Gpsin_Z);
+            else if constexpr (code == block_kappa)
+                rowwise_weighted_sum_into(moments, ProfileId, surface_Gpsin_Z, theta_sin<1>());
+            else if constexpr (code == block_c0)
+                rowwise_sum_into(moments, ProfileId, surface_Gpsin_R_sin_tb);
+            else if constexpr (code == block_c)
+                rowwise_weighted_sum_into(moments, ProfileId, surface_Gpsin_R_sin_tb, theta_cos<order>());
+            else if constexpr (code == block_s)
+                rowwise_weighted_sum_into(moments, ProfileId, surface_Gpsin_R_sin_tb, theta_sin<order>());
+            else
+                rowwise_sum_into(moments, ProfileId, surface_G);
+        }
+
+        template <size_t ProfileId>
+        constexpr void benchmark_radial_project_profile(PackedVector&    out,
+                                                        const MomentRows& moments,
+                                                        double            a,
+                                                        double            R0,
+                                                        double            B0) const noexcept
+        {
+            if constexpr (ProfileId < Shape::profile_count)
+            {
+                constexpr profiles::ProfileSlot slot = Shape::slot_for_profile_id(ProfileId);
+                if constexpr (slot.optimized())
+                    benchmark_radial_project_one<ProfileId, slot.coefficient_count>(out, moments, a, R0, B0);
+                benchmark_radial_project_profile<ProfileId + 1>(out, moments, a, R0, B0);
+            }
+        }
+
+        template <size_t ProfileId, size_t Count>
+        constexpr void benchmark_radial_project_one(PackedVector&    out,
+                                                    const MomentRows& moments,
+                                                    double            a,
+                                                    double            R0,
+                                                    double            B0) const noexcept
+        {
+            constexpr size_t code         = block_code<ProfileId>();
+            constexpr size_t radial_power = block_radial_power<ProfileId>();
+
+            if constexpr (code == block_h || code == block_v)
+                project_moment_scaled<Count, ProfileId>(
+                    out, moments, GridType::y, unit_weights(), unit_weights(), a * base_scale());
+            else if constexpr (code == block_kappa || code == block_c0)
+                project_moment_scaled<Count, ProfileId>(
+                    out, moments, rho_power<1>(), GridType::y, unit_weights(), -a * base_scale());
+            else if constexpr (code == block_c || code == block_s)
+                project_moment_scaled<Count, ProfileId>(
+                    out, moments, rho_power<radial_power + 1>(), GridType::y, unit_weights(), -a * base_scale());
+            else if constexpr (code == block_psin)
+                project_moment_scaled<Count, ProfileId>(
+                    out, moments, rho_power<2>(), GridType::y, unit_weights(), base_scale());
+            else if constexpr (code == block_F)
+                project_moment_scaled<Count, ProfileId>(
+                    out, moments, GridType::y, GridType::y, unit_weights(), base_scale() * (R0 * B0) * (R0 * B0));
         }
 
         static constexpr double base_scale() noexcept
@@ -261,6 +353,32 @@ namespace residual::detail
             }
         }
 
+        constexpr void rowwise_sum_into(MomentRows& moments, size_t profile_id, size_t surface_row) const noexcept
+        {
+            for (size_t i = 0; i < radial_nodes; ++i)
+            {
+                double total = 0.0;
+                for (size_t j = 0; j < theta_rows; ++j)
+                    total += surface_field(surface_row, i, j);
+                moments(profile_id, i) = total;
+            }
+        }
+
+        template <typename ThetaWeights>
+        constexpr void rowwise_weighted_sum_into(MomentRows&         moments,
+                                                 size_t              profile_id,
+                                                 size_t              surface_row,
+                                                 const ThetaWeights& theta_weights) const noexcept
+        {
+            for (size_t i = 0; i < radial_nodes; ++i)
+            {
+                double total = 0.0;
+                for (size_t j = 0; j < theta_rows; ++j)
+                    total += surface_field(surface_row, i, j) * theta_weights[j];
+                moments(profile_id, i) = total;
+            }
+        }
+
         template <size_t Count, size_t ProfileId, typename WeightA, typename WeightB, typename WeightC>
         constexpr void project_scaled(PackedVector&  out,
                                       const WeightA& weight_a,
@@ -275,6 +393,26 @@ namespace residual::detail
                 {
                     total += projection_basis(degree, i) * scratch[i] * weight_a[i] * weight_b[i] * weight_c[i] *
                              GridType::weights[i] * scalar;
+                }
+                out[static_cast<size_t>(Shape::coeff_index[ProfileId][degree])] = total;
+            }
+        }
+
+        template <size_t Count, size_t ProfileId, typename WeightA, typename WeightB, typename WeightC>
+        constexpr void project_moment_scaled(PackedVector&    out,
+                                             const MomentRows& moments,
+                                             const WeightA&    weight_a,
+                                             const WeightB&    weight_b,
+                                             const WeightC&    weight_c,
+                                             double            scalar) const noexcept
+        {
+            for (size_t degree = 0; degree < Count; ++degree)
+            {
+                double total = 0.0;
+                for (size_t i = 0; i < radial_nodes; ++i)
+                {
+                    total += projection_basis(degree, i) * moments(ProfileId, i) * weight_a[i] * weight_b[i] *
+                             weight_c[i] * GridType::weights[i] * scalar;
                 }
                 out[static_cast<size_t>(Shape::coeff_index[ProfileId][degree])] = total;
             }

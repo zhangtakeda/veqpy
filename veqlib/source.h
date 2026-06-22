@@ -207,6 +207,112 @@ namespace source::detail
                 source_target_root_fields(Row, i) = values[i];
         }
 
+        template <typename ProfilesRuntime>
+        constexpr void benchmark_copy_profile_psin_r(const ProfilesRuntime& runtime_profiles) noexcept
+        {
+            using Shape       = typename ProfilesRuntime::shape;
+            using ProfileGrid = typename ProfilesRuntime::grid;
+
+            static_assert(ProfileGrid::radial_nodes == radial_nodes, "source/profile radial grids must match");
+            static_assert(Shape::slot_for_profile_id(Shape::psin_profile_id).optimized(),
+                          "PF psin-uniform materialization requires an active psin profile");
+
+            for (size_t i = 0; i < radial_nodes; ++i)
+                source_target_root_fields(root_psin_r, i) =
+                    runtime_profiles.profile_field(Shape::psin_profile_id, i, profile_radial);
+        }
+
+        constexpr void benchmark_regularize_psin_r(size_t n_axis_fix) noexcept
+        {
+            regularize_psin_r(n_axis_fix);
+        }
+
+        constexpr void benchmark_D_psin_into_rr() noexcept
+        {
+            RadialVector psin_rr{uninitialized};
+            matvec_into(psin_rr, GridType::differentiator, const_root_row<root_psin_r>());
+            store_root_row<root_psin_rr>(psin_rr);
+        }
+
+        constexpr void benchmark_A_psin_into(RadialVector& out) const noexcept
+        {
+            matvec_into(out, GridType::accumulator, const_root_row<root_psin_r>());
+        }
+
+        constexpr void benchmark_prepare_psin_queries() noexcept
+        {
+            for (size_t i = 0; i < radial_nodes; ++i)
+            {
+                const double psin_value   = source_target_root_fields(root_psin, i);
+                source_psin_query[i]      = psin_value;
+                source_parameter_query[i] = psin_value;
+            }
+        }
+
+        constexpr void benchmark_interpolate_pair() noexcept
+        {
+            local_barycentric_interpolate_pair();
+        }
+
+        template <typename GeometryRuntime>
+        constexpr void benchmark_fill_pf_psin_integrand(RadialVector& out,
+                                                        const GeometryRuntime& geometry) const noexcept
+        {
+            fill_pf_psin_integrand(out, geometry);
+        }
+
+        constexpr void benchmark_A_integrand_into(RadialVector& out, const RadialVector& integrand) const noexcept
+        {
+            matvec_into(out, GridType::accumulator, integrand);
+        }
+
+        template <typename GeometryRuntime>
+        constexpr double benchmark_normalize_psin_r_into(RadialVector&           out,
+                                                         const RadialVector&     integrated,
+                                                         const GeometryRuntime& geometry,
+                                                         size_t                 n_axis_fix) noexcept
+        {
+            out = integrated;
+            double psin_r_weighted_total = 0.0;
+            for (size_t i = 0; i < radial_nodes; ++i)
+            {
+                out[i] *= -1.0;
+                out[i] /= geometry.radial_field(geometry::radial_Kn, i);
+                psin_r_weighted_total += out[i] * GridType::weights[i];
+            }
+
+            if (psin_r_weighted_total < 0.0)
+                for (size_t i = 0; i < radial_nodes; ++i)
+                    out[i] *= -1.0;
+
+            store_root_row<root_psin_r>(out);
+            regularize_psin_r(n_axis_fix);
+            out = const_root_row<root_psin_r>();
+
+            const double integral_prof = dot(out, GridType::weights);
+            for (size_t i = 0; i < radial_nodes; ++i)
+                out[i] /= integral_prof;
+            store_root_row<root_psin_r>(out);
+            return integral_prof;
+        }
+
+        constexpr void benchmark_D_normalized_psin_into_rr(const RadialVector& psin_r) noexcept
+        {
+            RadialVector psin_rr{uninitialized};
+            matvec_into(psin_rr, GridType::differentiator, psin_r);
+            store_root_row<root_psin_rr>(psin_rr);
+        }
+
+        template <typename GeometryRuntime>
+        constexpr void benchmark_update_alpha_from_integral(const GeometryRuntime& geometry,
+                                                            double                 Ip,
+                                                            double                 integral_prof) noexcept
+        {
+            const double G1n_integral = g1n_psin_integral_from_radial_moments(geometry);
+            alpha1                    = -Ip / G1n_integral;
+            alpha2                    = integral_prof * alpha1;
+        }
+
     private:
         template <size_t Row>
         constexpr RadialVector const_root_row() const noexcept
