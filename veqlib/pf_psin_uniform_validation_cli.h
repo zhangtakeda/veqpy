@@ -12,7 +12,7 @@
 
 #include "grid.h"
 #include "math.h"
-#include "pf_psin_uniform_operator.h"
+#include "source/pf_psin_uniform_ip.h"
 #include "profiles.h"
 #include "source.h"
 #include "tensor.h"
@@ -25,7 +25,7 @@ namespace
     using grid::Grid;
     using grid::Legendre;
     using grid::Spectral;
-    using operator_pf::PfPsinUniformOperator;
+    using source::PfPsinUniformIpOperator;
     using std::size_t;
     using tensor::Vector;
 
@@ -46,7 +46,7 @@ namespace
         no_s_slots>;
     using SmokeGrid     = Grid<8, 8, 1, 1, 2, Legendre, Spectral>;
     using SmokeSource   = source::UniformSourceShape<5>;
-    using SmokeOperator = PfPsinUniformOperator<SmokeShape, SmokeGrid, SmokeSource>;
+    using SmokeOperator = PfPsinUniformIpOperator<SmokeShape, SmokeGrid, SmokeSource>;
     using PackedVector  = SmokeOperator::PackedVector;
 
     static_assert(SmokeShape::x_size == 1);

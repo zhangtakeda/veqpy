@@ -7,12 +7,12 @@
 #include <cstddef>
 #include <span>
 
-namespace operator_pf::detail
+namespace source::detail
 {
     using std::size_t;
 
     template <typename Shape>
-    struct PfPsinUniformRuntimeParams
+    struct PfPsinUniformIpRuntimeParams
     {
         profiles::ProfileRuntimeParams<Shape> profile_params{};
         double                                a       = 1.0;
@@ -24,7 +24,7 @@ namespace operator_pf::detail
     };
 
     template <typename Shape, typename GridType, typename SourceShape>
-    struct PfPsinUniformOperator
+    struct PfPsinUniformIpOperator
     {
         static_assert(Shape::L_max == GridType::basis_rows, "operator/profile basis rows must match");
         static_assert(Shape::K_max == GridType::rho_power_rows, "operator/profile rho rows must match");
@@ -38,10 +38,10 @@ namespace operator_pf::detail
         using shape         = Shape;
         using grid          = GridType;
         using source_shape  = SourceShape;
-        using RuntimeParams = PfPsinUniformRuntimeParams<Shape>;
+        using RuntimeParams = PfPsinUniformIpRuntimeParams<Shape>;
         using Profiles      = profiles::RuntimeProfiles<Shape, GridType>;
         using Geometry      = geometry::GeometryRuntime<GridType>;
-        using Source        = source::ProfileOwnedPsinSourceRuntime<GridType, SourceShape>;
+        using Source        = source::PfPsinUniformIpSourceRuntime<GridType, SourceShape>;
         using Residual      = residual::ResidualRuntime<Shape, GridType>;
         using PackedVector  = typename Residual::PackedVector;
 
@@ -101,7 +101,7 @@ namespace operator_pf::detail
             workspace.geometry.update(params_.a, params_.R0, params_.Z0, workspace.profiles);
 
             workspace.source_runtime.materialize_profile_owned_psin(workspace.profiles, plan.n_axis_fix);
-            workspace.source_runtime.update_pf_ip_from_psin_uniform(workspace.geometry, params_.Ip, plan.n_axis_fix);
+            workspace.source_runtime.update_pf_psin_uniform_ip(workspace.geometry, params_.Ip, plan.n_axis_fix);
 
             workspace.residual.update_compact(workspace.source_runtime, workspace.geometry);
             workspace.residual.pack_into(out, params_.a, params_.R0, params_.B0);
@@ -110,10 +110,10 @@ namespace operator_pf::detail
     private:
         RuntimeParams params_{};
     };
-} // namespace operator_pf::detail
+} // namespace source::detail
 
-namespace operator_pf
+namespace source
 {
-    using detail::PfPsinUniformOperator;
-    using detail::PfPsinUniformRuntimeParams;
-} // namespace operator_pf
+    using detail::PfPsinUniformIpOperator;
+    using detail::PfPsinUniformIpRuntimeParams;
+} // namespace source

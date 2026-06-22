@@ -326,7 +326,7 @@ namespace source::detail
     }
 
     template <typename GridType, typename SourceShape>
-    struct ProfileOwnedPsinSourceRuntime
+    struct PfPsinUniformIpSourceRuntime
     {
         static constexpr size_t radial_nodes = GridType::radial_nodes;
         static constexpr size_t sample_count = SourceShape::sample_count;
@@ -397,7 +397,7 @@ namespace source::detail
 
         template <typename GeometryRuntime>
         constexpr void
-        update_pf_ip_from_psin_uniform(const GeometryRuntime& geometry, double Ip, size_t n_axis_fix) noexcept
+        update_pf_psin_uniform_ip(const GeometryRuntime& geometry, double Ip, size_t n_axis_fix) noexcept
         {
             static_assert(GeometryRuntime::radial_nodes == radial_nodes, "source/geometry radial grids must match");
 
@@ -794,7 +794,7 @@ namespace source::detail
 
 namespace source
 {
-    using detail::ProfileOwnedPsinSourceRuntime;
+    using detail::PfPsinUniformIpSourceRuntime;
     using detail::UniformSourceShape;
     using detail::axis_fix_count;
     using detail::root_field_count;

@@ -31,7 +31,7 @@ extern int enzyme_width;
 #include "grid.h"
 #include "math.h"
 #include "nonlinear.h"
-#include "pf_psin_uniform_operator.h"
+#include "source/pf_psin_uniform_ip.h"
 #include "profiles.h"
 #include "source.h"
 #include "tensor.h"
@@ -43,7 +43,7 @@ namespace
 {
     using grid::Legendre;
     using grid::Spectral;
-    using operator_pf::PfPsinUniformOperator;
+    using source::PfPsinUniformIpOperator;
     using std::size_t;
     using tensor::uninitialized;
 
@@ -136,7 +136,7 @@ namespace
             QuadratureScheme,
             CalculusScheme>;
         using Source   = source::UniformSourceShape<SourceSamples>;
-        using Operator = PfPsinUniformOperator<Shape, Grid, Source>;
+        using Operator = PfPsinUniformIpOperator<Shape, Grid, Source>;
     };
 
     constexpr auto bench_c_counts = std::array<size_t, 1>{0};

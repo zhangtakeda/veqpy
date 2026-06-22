@@ -21,7 +21,7 @@
 #include "geometry.h"
 #include "grid.h"
 #include "math.h"
-#include "pf_psin_uniform_operator.h"
+#include "source/pf_psin_uniform_ip.h"
 #include "profiles.h"
 #include "residual.h"
 #include "source.h"
@@ -44,7 +44,7 @@ namespace
     using grid::Spectral;
     using math::cos;
     using math::sin;
-    using operator_pf::PfPsinUniformOperator;
+    using source::PfPsinUniformIpOperator;
     using profiles::OptimizedProfileShapeFromCountsT;
     using residual::surface_G;
     using source::axis_fix_count;
@@ -129,7 +129,7 @@ namespace
                                                           SFamilyCounts>;
         using Grid     = Grid<Nr, Nt, Shape::L_max, Shape::M_max, Shape::K_max, QuadratureScheme, CalculusScheme>;
         using Source   = UniformSourceShape<SourceSamples>;
-        using Operator = PfPsinUniformOperator<Shape, Grid, Source>;
+        using Operator = PfPsinUniformIpOperator<Shape, Grid, Source>;
     };
 
     constexpr auto bench_c_counts = DefaultTopology::c_family_counts;
@@ -297,7 +297,7 @@ namespace
         const auto& params = op.runtime_params();
         prepare_geometry(op, x);
         op.workspace.source_runtime.materialize_profile_owned_psin(op.workspace.profiles, op.plan.n_axis_fix);
-        op.workspace.source_runtime.update_pf_ip_from_psin_uniform(
+        op.workspace.source_runtime.update_pf_psin_uniform_ip(
             op.workspace.geometry, params.Ip, op.plan.n_axis_fix);
     }
 
@@ -789,7 +789,7 @@ namespace
             compiler_barrier(&op.workspace.source_runtime.alpha1);
             break;
         case StageKind::SourceUpdate:
-            op.workspace.source_runtime.update_pf_ip_from_psin_uniform(
+            op.workspace.source_runtime.update_pf_psin_uniform_ip(
                 op.workspace.geometry, params.Ip, op.plan.n_axis_fix);
             compiler_barrier(op.workspace.source_runtime.FFn_psin.data());
             break;

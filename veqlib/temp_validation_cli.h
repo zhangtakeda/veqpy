@@ -19,7 +19,7 @@
 #include "grid.h"
 #include "linalg.h"
 #include "math.h"
-#include "pf_psin_uniform_operator.h"
+#include "source/pf_psin_uniform_ip.h"
 #include "profiles.h"
 #include "residual.h"
 #include "source.h"
@@ -57,7 +57,7 @@ namespace
     using linalg::GolubReinsch;
     using linalg::Householder;
     using linalg::Thomas;
-    using operator_pf::PfPsinUniformOperator;
+    using source::PfPsinUniformIpOperator;
     using residual::ResidualRuntime;
     using linalg::factorize;
     using linalg::factorize_into;
@@ -68,7 +68,7 @@ namespace
     using linalg::transpose;
     using linalg::transpose_into;
     using std::size_t;
-    using source::ProfileOwnedPsinSourceRuntime;
+    using source::PfPsinUniformIpSourceRuntime;
     using source::UniformSourceShape;
     using source::root_psin;
     using source::root_psin_r;
@@ -162,7 +162,7 @@ namespace
     using SourceMaterializationGrid     = Grid<8, 8, 3, 1, 2, Legendre, Spectral>;
     using SourceMaterializationProfiles = profiles::RuntimeProfiles<SourceMaterializationShape, SourceMaterializationGrid>;
     using SourceMaterializationRuntime =
-        ProfileOwnedPsinSourceRuntime<SourceMaterializationGrid, UniformSourceShape<5>>;
+        PfPsinUniformIpSourceRuntime<SourceMaterializationGrid, UniformSourceShape<5>>;
 
     constexpr auto residual_c_slots = std::array{
         profiles::optimized_slot(2),
@@ -185,10 +185,10 @@ namespace
         residual_s_slots>;
     using ResidualProbeGrid     = Grid<8, 8, 2, 1, 2, Legendre, Spectral>;
     using ResidualProbeProfiles = profiles::RuntimeProfiles<ResidualProbeShape, ResidualProbeGrid>;
-    using ResidualProbeSource   = ProfileOwnedPsinSourceRuntime<ResidualProbeGrid, UniformSourceShape<5>>;
+    using ResidualProbeSource   = PfPsinUniformIpSourceRuntime<ResidualProbeGrid, UniformSourceShape<5>>;
     using ResidualProbeGeometry = GeometryRuntime<ResidualProbeGrid>;
     using ResidualProbeRuntime  = ResidualRuntime<ResidualProbeShape, ResidualProbeGrid>;
-    using ResidualProbeOperator = PfPsinUniformOperator<ResidualProbeShape, ResidualProbeGrid, UniformSourceShape<5>>;
+    using ResidualProbeOperator = PfPsinUniformIpOperator<ResidualProbeShape, ResidualProbeGrid, UniformSourceShape<5>>;
 
     constexpr auto mixed_c_slots = std::array{
         profiles::optimized_slot(2),
@@ -1174,7 +1174,7 @@ namespace
 
         Source ip_source{};
         make_source(ip_source);
-        ip_source.update_pf_ip_from_psin_uniform(geometry, Ip, source::axis_fix_count<Grid>(0.0));
+        ip_source.update_pf_psin_uniform_ip(geometry, Ip, source::axis_fix_count<Grid>(0.0));
         for (size_t i = 0; i < Grid::radial_nodes; ++i)
             if (!close(ip_source.Pn_psin[i], ip_source.materialized_heat_input[i]) ||
                 !close(ip_source.FFn_psin[i], ip_source.materialized_current_input[i]))
@@ -1230,7 +1230,7 @@ namespace
             std::span<const double, current.size()>{current.data(), current.size()}
         );
         source.materialize_profile_owned_psin(profiles, source::axis_fix_count<Grid>(0.0));
-        source.update_pf_ip_from_psin_uniform(geometry, 0.75, source::axis_fix_count<Grid>(0.0));
+        source.update_pf_psin_uniform_ip(geometry, 0.75, source::axis_fix_count<Grid>(0.0));
 
         Residual residual{};
         residual.update_compact(source, geometry);
@@ -1301,7 +1301,7 @@ namespace
     {
         using Shape    = SourceMaterializationShape;
         using Grid     = SourceMaterializationGrid;
-        using Operator = PfPsinUniformOperator<Shape, Grid, UniformSourceShape<5>>;
+        using Operator = PfPsinUniformIpOperator<Shape, Grid, UniformSourceShape<5>>;
 
         constexpr size_t h_id    = Shape::h_profile_id;
         constexpr size_t v_id    = Shape::v_profile_id;
