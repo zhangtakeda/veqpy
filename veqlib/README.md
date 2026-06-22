@@ -139,15 +139,13 @@ overwritten by `refresh_active()`.
 
 ## Source Matvec Shape
 
-The PF/psin/uniform/Ip Source path now routes its production dense radial
-matvecs through `SourceMatvecPlan<GridType, 4>`. The plan packs grid matrices by
-output blocks of four rows, so runtime AVX2/FMA kernels can broadcast each input
-value once and update four output rows. The paired D/A psin passes use a dual
-block-4 kernel for materialization and normalized source update; the
-accumulator-only `A * integrand` pass uses the same packed block-4 shape for
-the unnormalized `psin_r` solve. Generic packed fallbacks are kept for non-AVX
-builds and constexpr validation. Row-dot probes remain available as
-stage-benchmark baselines: `source_DA_psin` beside `source_DA_psin_block4`, and
+The PF/psin/uniform/Ip Source path routes production dense radial matvecs
+through `tensor_layout::RadialGridMatvecPlan<GridType>`. The plan keeps typed
+`tensor_layout::MultiMatvecPlan<K, Rows, Cols>` storage for the K=1 accumulator
+path and K=2 D/A path, while `tensor_kernels::matvec_into()` and
+`tensor_kernels::multi_matvec_into()` select constexpr-safe scalar fallback or
+the native SIMD backend. Row-dot probes remain available as stage-benchmark
+baselines: `source_DA_psin` beside `source_DA_psin_packed`, and
 `source_A_integrand_rowdot` beside the production `source_A_integrand`.
 
 ## Hot-path Surface Layout
