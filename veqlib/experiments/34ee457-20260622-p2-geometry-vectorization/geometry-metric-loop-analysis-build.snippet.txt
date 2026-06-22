@@ -1,0 +1,461 @@
+; /home/rhzhang/veqpy/veqlib/tensor.h:205
+;             for (size_type axis = 0; axis < rank; ++axis)
+   34242: 41 f6 c3 01                  	testb	$0x1, %r11b
+   34246: 41 bb 00 00 00 00            	movl	$0x0, %r11d
+   3424c: 75 e2                        	jne	0x34230 <void geometry::detail::GeometryRuntime<grid::detail::Grid<32ul, 16ul, 5ul, 1ul, 2ul, grid::detail::Legendre, grid::detail::Spectral>>::update<profiles::RuntimeProfiles<profiles::ProfileShape<5ul, 2ul, 1ul, profiles::ProfileSlot{(profiles::ProfileMode)2, 3ul}, profiles::ProfileSlot{}, profiles::ProfileSlot{(profiles::ProfileMode)2, 6ul}, profiles::ProfileSlot{}, profiles::ProfileSlot{(profiles::ProfileMode)2, 6ul}, profiles::ProfileSlot{}, std::array<profiles::ProfileSlot, 0ul>{}, std::array<profiles::ProfileSlot, 1ul>{profiles::ProfileSlot [1]{profiles::ProfileSlot{(profiles::ProfileMode)2, 3ul}}}>, grid::detail::Grid<32ul, 16ul, 5ul, 1ul, 2ul, grid::detail::Legendre, grid::detail::Spectral>>>(double, double, double, profiles::RuntimeProfiles<profiles::ProfileShape<5ul, 2ul, 1ul, profiles::ProfileSlot{(profiles::ProfileMode)2, 3ul}, profiles::ProfileSlot{}, profiles::ProfileSlot{(profiles::ProfileMode)2, 6ul}, profiles::ProfileSlot{}, profiles::ProfileSlot{(profiles::ProfileMode)2, 6ul}, profiles::ProfileSlot{}, std::array<profiles::ProfileSlot, 0ul>{}, std::array<profiles::ProfileSlot, 1ul>{profiles::ProfileSlot [1]{profiles::ProfileSlot{(profiles::ProfileMode)2, 3ul}}}>, grid::detail::Grid<32ul, 16ul, 5ul, 1ul, 2ul, grid::detail::Legendre, grid::detail::Spectral>> const&)+0x1090>
+; /home/rhzhang/veqpy/veqlib/tensor.h:203
+;             const array<size_type, rank> values_ = {indices...};
+   3424e: 48 c7 44 24 18 01 00 00 00   	movq	$0x1, 0x18(%rsp)
+; /home/rhzhang/veqpy/veqlib/geometry.h:389
+;                     const double sin_t = GridType::sin_mtheta(1, j);
+   34257: c4 01 7b 10 3c c6            	vmovsd	(%r14,%r8,8), %xmm15
+; /home/rhzhang/veqpy/veqlib/tensor.h:203
+;             const array<size_type, rank> values_ = {indices...};
+   3425d: 48 89 4c 24 20               	movq	%rcx, 0x20(%rsp)
+   34262: 41 b0 01                     	movb	$0x1, %r8b
+   34265: 31 db                        	xorl	%ebx, %ebx
+   34267: 45 31 db                     	xorl	%r11d, %r11d
+   3426a: 66 0f 1f 44 00 00            	nopw	(%rax,%rax)
+; /home/rhzhang/veqpy/veqlib/tensor.h:208
+;                 result += values_[axis] * strides[axis];
+   34270: 4d 8b 3c d9                  	movq	(%r9,%rbx,8), %r15
+   34274: 4c 0f af 7c dc 18            	imulq	0x18(%rsp,%rbx,8), %r15
+   3427a: 4d 01 fb                     	addq	%r15, %r11
+   3427d: bb 01 00 00 00               	movl	$0x1, %ebx
+; /home/rhzhang/veqpy/veqlib/tensor.h:205
+;             for (size_type axis = 0; axis < rank; ++axis)
+   34282: 41 f6 c0 01                  	testb	$0x1, %r8b
+   34286: 41 b8 00 00 00 00            	movl	$0x0, %r8d
+   3428c: 75 e2                        	jne	0x34270 <void geometry::detail::GeometryRuntime<grid::detail::Grid<32ul, 16ul, 5ul, 1ul, 2ul, grid::detail::Legendre, grid::detail::Spectral>>::update<profiles::RuntimeProfiles<profiles::ProfileShape<5ul, 2ul, 1ul, profiles::ProfileSlot{(profiles::ProfileMode)2, 3ul}, profiles::ProfileSlot{}, profiles::ProfileSlot{(profiles::ProfileMode)2, 6ul}, profiles::ProfileSlot{}, profiles::ProfileSlot{(profiles::ProfileMode)2, 6ul}, profiles::ProfileSlot{}, std::array<profiles::ProfileSlot, 0ul>{}, std::array<profiles::ProfileSlot, 1ul>{profiles::ProfileSlot [1]{profiles::ProfileSlot{(profiles::ProfileMode)2, 3ul}}}>, grid::detail::Grid<32ul, 16ul, 5ul, 1ul, 2ul, grid::detail::Legendre, grid::detail::Spectral>>>(double, double, double, profiles::RuntimeProfiles<profiles::ProfileShape<5ul, 2ul, 1ul, profiles::ProfileSlot{(profiles::ProfileMode)2, 3ul}, profiles::ProfileSlot{}, profiles::ProfileSlot{(profiles::ProfileMode)2, 6ul}, profiles::ProfileSlot{}, profiles::ProfileSlot{(profiles::ProfileMode)2, 6ul}, profiles::ProfileSlot{}, std::array<profiles::ProfileSlot, 0ul>{}, std::array<profiles::ProfileSlot, 1ul>{profiles::ProfileSlot [1]{profiles::ProfileSlot{(profiles::ProfileMode)2, 3ul}}}>, grid::detail::Grid<32ul, 16ul, 5ul, 1ul, 2ul, grid::detail::Legendre, grid::detail::Spectral>> const&)+0x10d0>
+; /home/rhzhang/veqpy/veqlib/geometry.h:390
+;                     const double cos_t = GridType::cos_mtheta(1, j);
+   3428e: c4 81 7b 10 24 da            	vmovsd	(%r10,%r11,8), %xmm4
+; /home/rhzhang/veqpy/veqlib/geometry.h:392
+;                     const double tb_r_ij   = tb_r_values[j];
+   34294: c5 fb 10 84 cc 40 07 00 00   	vmovsd	0x740(%rsp,%rcx,8), %xmm0
+; /home/rhzhang/veqpy/veqlib/geometry.h:393
+;                     const double tb_t_ij   = tb_t_values[j];
+   3429d: c5 fb 10 8c cc c0 06 00 00   	vmovsd	0x6c0(%rsp,%rcx,8), %xmm1
+; /home/rhzhang/veqpy/veqlib/geometry.h:397
+;                     const double cos_tb_ij = cos_tb_values[j];
+   342a6: c5 fb 10 94 cc c0 04 00 00   	vmovsd	0x4c0(%rsp,%rcx,8), %xmm2
+; /home/rhzhang/veqpy/veqlib/geometry.h:398
+;                     const double sin_tb_ij = sin_tb_values[j];
+   342af: c5 7b 10 ac cc 00 01 00 00   	vmovsd	0x100(%rsp,%rcx,8), %xmm13
+   342b8: c5 7b 10 84 24 f8 00 00 00   	vmovsd	0xf8(%rsp), %xmm8
+; /home/rhzhang/veqpy/veqlib/geometry.h:400
+;                     double R_ij = R0 + a * (h_i + rho_i * cos_tb_ij);
+   342c1: c5 79 29 c5                  	vmovapd	%xmm8, %xmm5
+   342c5: c4 e2 e9 a9 ac 24 d0 01 00 00	vfmadd213sd	0x1d0(%rsp), %xmm2, %xmm5 # xmm5 = (xmm2 * xmm5) + mem
+   342cf: c5 79 28 8c 24 00 02 00 00   	vmovapd	0x200(%rsp), %xmm9
+   342d8: c4 e2 b1 a9 ac 24 80 01 00 00	vfmadd213sd	0x180(%rsp), %xmm9, %xmm5 # xmm5 = (xmm9 * xmm5) + mem
+   342e2: c5 fb 10 35 de 73 02 00      	vmovsd	0x273de(%rip), %xmm6    # 0x5b6c8 <strlen@GLIBC_2.2.5+0x5b6c8>
+; /home/rhzhang/veqpy/veqlib/geometry.h:401
+;                     if (R_ij < 1.0e-6)
+   342ea: c5 d3 5f de                  	vmaxsd	%xmm6, %xmm5, %xmm3
+   342ee: c5 fb 11 9c 24 d8 01 00 00   	vmovsd	%xmm3, 0x1d8(%rsp)
+; /home/rhzhang/veqpy/veqlib/geometry.h:404
+;                     const double R_r_ij  = a * (h_r_i + cos_tb_ij - rho_i * sin_tb_ij * tb_r_ij);
+   342f7: c5 eb 58 ac 24 c8 01 00 00   	vaddsd	0x1c8(%rsp), %xmm2, %xmm5
+   34300: c5 93 59 f0                  	vmulsd	%xmm0, %xmm13, %xmm6
+   34304: c4 e2 b9 bd ee               	vfnmadd231sd	%xmm6, %xmm8, %xmm5 # xmm5 = -(xmm8 * xmm6) + xmm5
+   34309: c5 33 59 f5                  	vmulsd	%xmm5, %xmm9, %xmm14
+; /home/rhzhang/veqpy/veqlib/geometry.h:405
+;                     const double R_t_ij  = -a * rho_i * sin_tb_ij * tb_t_ij;
+   3430d: c5 93 59 f9                  	vmulsd	%xmm1, %xmm13, %xmm7
+   34311: c5 fb 10 9c 24 a8 01 00 00   	vmovsd	0x1a8(%rsp), %xmm3
+   3431a: c5 c3 59 eb                  	vmulsd	%xmm3, %xmm7, %xmm5
+; /home/rhzhang/veqpy/veqlib/geometry.h:407
+;                                                 rho_i * (cos_tb_ij * tb_r_ij * tb_r_ij + sin_tb_ij * tb_rr_ij));
+   3431e: c5 6b 59 d0                  	vmulsd	%xmm0, %xmm2, %xmm10
+   34322: c5 13 59 a4 cc 40 06 00 00   	vmulsd	0x640(%rsp,%rcx,8), %xmm13, %xmm12
+   3432b: c4 62 a9 b9 e0               	vfmadd231sd	%xmm0, %xmm10, %xmm12 # xmm12 = (xmm10 * xmm0) + xmm12
+; /home/rhzhang/veqpy/veqlib/geometry.h:406
+;                     const double R_rr_ij = a * (h_rr_i - 2.0 * sin_tb_ij * tb_r_ij -
+   34330: c5 cb 58 c6                  	vaddsd	%xmm6, %xmm6, %xmm0
+   34334: c5 fb 10 b4 24 c0 01 00 00   	vmovsd	0x1c0(%rsp), %xmm6
+; /home/rhzhang/veqpy/veqlib/geometry.h:406
+;                     const double R_rr_ij = a * (h_rr_i - 2.0 * sin_tb_ij * tb_r_ij -
+   3433d: c5 4b 5c d8                  	vsubsd	%xmm0, %xmm6, %xmm11
+   34341: c4 42 b9 bb dc               	vfmsub231sd	%xmm12, %xmm8, %xmm11 # xmm11 = (xmm8 * xmm12) - xmm11
+; /home/rhzhang/veqpy/veqlib/geometry.h:409
+;                         -a * (sin_tb_ij * tb_t_ij + rho_i * (cos_tb_ij * tb_r_ij * tb_t_ij + sin_tb_ij * tb_rt_ij));
+   34346: c5 93 59 84 cc c0 05 00 00   	vmulsd	0x5c0(%rsp,%rcx,8), %xmm13, %xmm0
+   3434f: c4 c2 f1 b9 c2               	vfmadd231sd	%xmm10, %xmm1, %xmm0 # xmm0 = (xmm1 * xmm10) + xmm0
+   34354: c4 e2 b9 a9 c7               	vfmadd213sd	%xmm7, %xmm8, %xmm0 # xmm0 = (xmm8 * xmm0) + xmm7
+; /home/rhzhang/veqpy/veqlib/geometry.h:410
+;                     const double R_tt_ij = -a * rho_i * (cos_tb_ij * tb_t_ij * tb_t_ij + sin_tb_ij * tb_tt_ij);
+   34359: c5 f3 59 c9                  	vmulsd	%xmm1, %xmm1, %xmm1
+   3435d: c5 f3 59 ca                  	vmulsd	%xmm2, %xmm1, %xmm1
+   34361: c4 e2 91 b9 8c cc 40 05 00 00	vfmadd231sd	0x540(%rsp,%rcx,8), %xmm13, %xmm1 # xmm1 = (xmm13 * mem) + xmm1
+; /home/rhzhang/veqpy/veqlib/geometry.h:409
+;                         -a * (sin_tb_ij * tb_t_ij + rho_i * (cos_tb_ij * tb_r_ij * tb_t_ij + sin_tb_ij * tb_rt_ij));
+   3436b: c5 fb 59 94 24 f0 01 00 00   	vmulsd	0x1f0(%rsp), %xmm0, %xmm2
+; /home/rhzhang/veqpy/veqlib/geometry.h:410
+;                     const double R_tt_ij = -a * rho_i * (cos_tb_ij * tb_t_ij * tb_t_ij + sin_tb_ij * tb_tt_ij);
+   34374: c5 f3 59 f3                  	vmulsd	%xmm3, %xmm1, %xmm6
+   34378: c5 fb 11 b4 24 e0 01 00 00   	vmovsd	%xmm6, 0x1e0(%rsp)
+   34381: c5 fb 10 84 24 a0 01 00 00   	vmovsd	0x1a0(%rsp), %xmm0
+; /home/rhzhang/veqpy/veqlib/geometry.h:412
+;                     const double Z_r_ij  = a * (v_r_i - (k_i + rho_i * k_r_i) * sin_t);
+   3438a: c4 e2 81 ad 84 24 b8 01 00 00	vfnmadd213sd	0x1b8(%rsp), %xmm15, %xmm0 # xmm0 = -(xmm15 * xmm0) + mem
+   34394: c5 b3 59 c8                  	vmulsd	%xmm0, %xmm9, %xmm1
+; /home/rhzhang/veqpy/veqlib/geometry.h:413
+;                     const double Z_t_ij  = -a * rho_i * k_i * cos_t;
+   34398: c5 db 59 84 24 98 01 00 00   	vmulsd	0x198(%rsp), %xmm4, %xmm0
+   343a1: c5 fb 10 bc 24 e0 00 00 00   	vmovsd	0xe0(%rsp), %xmm7
+; /home/rhzhang/veqpy/veqlib/geometry.h:414
+;                     const double Z_rr_ij = a * (v_rr_i - (2.0 * k_r_i + rho_i * k_rr_i) * sin_t);
+   343aa: c4 e2 81 ab bc 24 b0 01 00 00	vfmsub213sd	0x1b0(%rsp), %xmm15, %xmm7 # xmm7 = (xmm15 * xmm7) - mem
+   343b4: c5 33 59 c7                  	vmulsd	%xmm7, %xmm9, %xmm8
+; /home/rhzhang/veqpy/veqlib/geometry.h:415
+;                     const double Z_rt_ij = -a * (k_i + rho_i * k_r_i) * cos_t;
+   343b8: c5 db 59 bc 24 90 01 00 00   	vmulsd	0x190(%rsp), %xmm4, %xmm7
+; /home/rhzhang/veqpy/veqlib/geometry.h:416
+;                     const double Z_tt_ij = a * rho_i * k_i * sin_t;
+   343c1: c5 03 59 94 24 88 01 00 00   	vmulsd	0x188(%rsp), %xmm15, %xmm10
+; /home/rhzhang/veqpy/veqlib/geometry.h:418
+;                     double J_ij = R_t_ij * Z_r_ij - R_r_ij * Z_t_ij;
+   343ca: c5 8b 59 d8                  	vmulsd	%xmm0, %xmm14, %xmm3
+   343ce: c4 e2 d1 bb d9               	vfmsub231sd	%xmm1, %xmm5, %xmm3 # xmm3 = (xmm5 * xmm1) - xmm3
+; /home/rhzhang/veqpy/veqlib/geometry.h:419
+;                     if (J_ij < 1.0e-6)
+   343d3: c5 63 5f 25 ed 72 02 00      	vmaxsd	0x272ed(%rip), %xmm3, %xmm12 # 0x5b6c8 <strlen@GLIBC_2.2.5+0x5b6c8>
+; /home/rhzhang/veqpy/veqlib/geometry.h:422
+;                     const double J_r_ij  = -(R_rr_ij * Z_t_ij - R_rt_ij * Z_r_ij + R_r_ij * Z_rt_ij - R_t_ij * Z_rr_ij);
+   343db: c5 eb 59 d9                  	vmulsd	%xmm1, %xmm2, %xmm3
+   343df: c5 b3 59 e0                  	vmulsd	%xmm0, %xmm9, %xmm4
+   343e3: c4 c2 d1 bb d8               	vfmsub231sd	%xmm8, %xmm5, %xmm3 # xmm3 = (xmm5 * xmm8) - xmm3
+   343e8: c4 e2 89 b9 df               	vfmadd231sd	%xmm7, %xmm14, %xmm3 # xmm3 = (xmm14 * xmm7) + xmm3
+   343ed: c4 e2 a1 bd dc               	vfnmadd231sd	%xmm4, %xmm11, %xmm3 # xmm3 = -(xmm11 * xmm4) + xmm3
+; /home/rhzhang/veqpy/veqlib/geometry.h:423
+;                     const double J_t_ij  = -(R_rt_ij * Z_t_ij - R_tt_ij * Z_r_ij + R_r_ij * Z_tt_ij - R_t_ij * Z_rt_ij);
+   343f2: c5 d3 59 e7                  	vmulsd	%xmm7, %xmm5, %xmm4
+   343f6: c4 e2 c9 bf e1               	vfnmsub231sd	%xmm1, %xmm6, %xmm4 # xmm4 = -(xmm6 * xmm1) - xmm4
+   343fb: c4 c2 89 b9 e2               	vfmadd231sd	%xmm10, %xmm14, %xmm4 # xmm4 = (xmm14 * xmm10) + xmm4
+   34400: c4 e2 e9 b9 e0               	vfmadd231sd	%xmm0, %xmm2, %xmm4 # xmm4 = (xmm2 * xmm0) + xmm4
+; /home/rhzhang/veqpy/veqlib/geometry.h:425
+;                     const double JR_r_ij = J_r_ij * R_ij + J_ij * R_r_ij;
+   34405: c4 c1 1b 59 f6               	vmulsd	%xmm14, %xmm12, %xmm6
+   3440a: c5 7b 10 bc 24 d8 01 00 00   	vmovsd	0x1d8(%rsp), %xmm15
+   34413: c4 e2 81 bb f3               	vfmsub231sd	%xmm3, %xmm15, %xmm6 # xmm6 = (xmm15 * xmm3) - xmm6
+; /home/rhzhang/veqpy/veqlib/geometry.h:426
+;                     const double JR_t_ij = J_t_ij * R_ij + J_ij * R_t_ij;
+   34418: c5 9b 59 dd                  	vmulsd	%xmm5, %xmm12, %xmm3
+   3441c: c4 e2 81 bb dc               	vfmsub231sd	%xmm4, %xmm15, %xmm3 # xmm3 = (xmm15 * xmm4) - xmm3
+; /home/rhzhang/veqpy/veqlib/geometry.h:428
+;                     const double grt_ij   = R_r_ij * R_t_ij + Z_r_ij * Z_t_ij;
+   34421: c5 fb 59 e1                  	vmulsd	%xmm1, %xmm0, %xmm4
+   34425: c4 e2 89 b9 e5               	vfmadd231sd	%xmm5, %xmm14, %xmm4 # xmm4 = (xmm14 * xmm5) + xmm4
+   3442a: c5 db 59 e3                  	vmulsd	%xmm3, %xmm4, %xmm4
+; /home/rhzhang/veqpy/veqlib/tensor.h:203
+;             const array<size_type, rank> values_ = {indices...};
+   3442e: 48 89 44 24 18               	movq	%rax, 0x18(%rsp)
+   34433: 48 c7 44 24 20 00 00 00 00   	movq	$0x0, 0x20(%rsp)
+   3443c: 48 89 4c 24 28               	movq	%rcx, 0x28(%rsp)
+   34441: c5 7d 6f 1d 17 6f 02 00      	vmovdqa	0x26f17(%rip), %ymm11   # 0x5b360 <strlen@GLIBC_2.2.5+0x5b360>
+; /home/rhzhang/veqpy/veqlib/tensor.h:208
+;                 result += values_[axis] * strides[axis];
+   34449: c4 e2 a5 8c 5c 24 18         	vpmaskmovq	0x18(%rsp), %ymm11, %ymm3
+   34450: c5 7d 6f 0d 68 70 02 00      	vmovdqa	0x27068(%rip), %ymm9    # 0x5b4c0 <strlen@GLIBC_2.2.5+0x5b4c0>
+   34458: c5 35 f4 c3                  	vpmuludq	%ymm3, %ymm9, %ymm8
+   3445c: c5 e5 73 d3 20               	vpsrlq	$0x20, %ymm3, %ymm3
+   34461: c5 b5 f4 db                  	vpmuludq	%ymm3, %ymm9, %ymm3
+   34465: c5 e5 73 f3 20               	vpsllq	$0x20, %ymm3, %ymm3
+   3446a: c5 bd d4 db                  	vpaddq	%ymm3, %ymm8, %ymm3
+   3446e: c4 41 39 ef c0               	vpxor	%xmm8, %xmm8, %xmm8
+   34473: c4 43 65 02 c0 c0            	vpblendd	$0xc0, %ymm8, %ymm3, %ymm8 # ymm8 = ymm3[0,1,2,3,4,5],ymm8[6,7]
+; /home/rhzhang/veqpy/veqlib/tensor.h:205
+;             for (size_type axis = 0; axis < rank; ++axis)
+   34479: c4 43 7d 39 c0 01            	vextracti128	$0x1, %ymm8, %xmm8
+   3447f: c5 b9 d4 db                  	vpaddq	%xmm3, %xmm8, %xmm3
+   34483: c5 79 70 c3 ee               	vpshufd	$0xee, %xmm3, %xmm8     # xmm8 = xmm3[2,3,2,3]
+   34488: c5 b9 d4 db                  	vpaddq	%xmm3, %xmm8, %xmm3
+   3448c: c4 c1 f9 7e d8               	vmovq	%xmm3, %r8
+; /home/rhzhang/veqpy/veqlib/geometry.h:429
+;                     const double grt_t_ij = R_rt_ij * R_t_ij + R_r_ij * R_tt_ij + Z_rt_ij * Z_t_ij + Z_r_ij * Z_tt_ij;
+   34491: c5 c3 59 d8                  	vmulsd	%xmm0, %xmm7, %xmm3
+; /home/rhzhang/veqpy/veqlib/geometry.h:437
+;                     surface_field(surface_sin_tb, i, j)     = sin_tb_ij;
+   34495: c4 21 7b 11 2c c7            	vmovsd	%xmm13, (%rdi,%r8,8)
+; /home/rhzhang/veqpy/veqlib/tensor.h:203
+;             const array<size_type, rank> values_ = {indices...};
+   3449b: 48 89 44 24 18               	movq	%rax, 0x18(%rsp)
+   344a0: 48 c7 44 24 20 01 00 00 00   	movq	$0x1, 0x20(%rsp)
+; /home/rhzhang/veqpy/veqlib/geometry.h:431
+;                     const double gtt_r_ij = 2.0 * (R_t_ij * R_rt_ij + Z_t_ij * Z_rt_ij);
+   344a9: c4 e2 d1 b9 da               	vfmadd231sd	%xmm2, %xmm5, %xmm3 # xmm3 = (xmm5 * xmm2) + xmm3
+; /home/rhzhang/veqpy/veqlib/tensor.h:203
+;             const array<size_type, rank> values_ = {indices...};
+   344ae: 48 89 4c 24 28               	movq	%rcx, 0x28(%rsp)
+; /home/rhzhang/veqpy/veqlib/tensor.h:208
+;                 result += values_[axis] * strides[axis];
+   344b3: c4 e2 a5 8c 54 24 18         	vpmaskmovq	0x18(%rsp), %ymm11, %ymm2
+   344ba: c5 b5 f4 fa                  	vpmuludq	%ymm2, %ymm9, %ymm7
+   344be: c5 ed 73 d2 20               	vpsrlq	$0x20, %ymm2, %ymm2
+   344c3: c5 b5 f4 d2                  	vpmuludq	%ymm2, %ymm9, %ymm2
+   344c7: c5 ed 73 f2 20               	vpsllq	$0x20, %ymm2, %ymm2
+   344cc: c5 c5 d4 d2                  	vpaddq	%ymm2, %ymm7, %ymm2
+   344d0: c4 41 39 ef c0               	vpxor	%xmm8, %xmm8, %xmm8
+   344d5: c4 c3 6d 02 f8 c0            	vpblendd	$0xc0, %ymm8, %ymm2, %ymm7 # ymm7 = ymm2[0,1,2,3,4,5],ymm8[6,7]
+; /home/rhzhang/veqpy/veqlib/tensor.h:205
+;             for (size_type axis = 0; axis < rank; ++axis)
+   344db: c4 e3 7d 39 ff 01            	vextracti128	$0x1, %ymm7, %xmm7
+   344e1: c5 e9 d4 d7                  	vpaddq	%xmm7, %xmm2, %xmm2
+   344e5: c5 f9 70 fa ee               	vpshufd	$0xee, %xmm2, %xmm7     # xmm7 = xmm2[2,3,2,3]
+   344ea: c5 e9 d4 d7                  	vpaddq	%xmm7, %xmm2, %xmm2
+   344ee: c4 c1 f9 7e d0               	vmovq	%xmm2, %r8
+; /home/rhzhang/veqpy/veqlib/geometry.h:438
+;                     surface_field(surface_R, i, j)          = R_ij;
+   344f3: c4 21 7b 11 3c c7            	vmovsd	%xmm15, (%rdi,%r8,8)
+; /home/rhzhang/veqpy/veqlib/tensor.h:203
+;             const array<size_type, rank> values_ = {indices...};
+   344f9: 48 89 44 24 18               	movq	%rax, 0x18(%rsp)
+   344fe: 48 c7 44 24 20 02 00 00 00   	movq	$0x2, 0x20(%rsp)
+   34507: 48 89 4c 24 28               	movq	%rcx, 0x28(%rsp)
+; /home/rhzhang/veqpy/veqlib/geometry.h:429
+;                     const double grt_t_ij = R_rt_ij * R_t_ij + R_r_ij * R_tt_ij + Z_rt_ij * Z_t_ij + Z_r_ij * Z_tt_ij;
+   3450c: c4 62 f1 a9 d3               	vfmadd213sd	%xmm3, %xmm1, %xmm10 # xmm10 = (xmm1 * xmm10) + xmm3
+; /home/rhzhang/veqpy/veqlib/tensor.h:208
+;                 result += values_[axis] * strides[axis];
+   34511: c4 e2 a5 8c 4c 24 18         	vpmaskmovq	0x18(%rsp), %ymm11, %ymm1
+   34518: c5 b5 f4 d1                  	vpmuludq	%ymm1, %ymm9, %ymm2
+   3451c: c5 f5 73 d1 20               	vpsrlq	$0x20, %ymm1, %ymm1
+   34521: c5 b5 f4 c9                  	vpmuludq	%ymm1, %ymm9, %ymm1
+   34525: c5 f5 73 f1 20               	vpsllq	$0x20, %ymm1, %ymm1
+   3452a: c5 ed d4 c9                  	vpaddq	%ymm1, %ymm2, %ymm1
+   3452e: c4 c3 75 02 d0 c0            	vpblendd	$0xc0, %ymm8, %ymm1, %ymm2 # ymm2 = ymm1[0,1,2,3,4,5],ymm8[6,7]
+   34534: c5 c1 ef ff                  	vpxor	%xmm7, %xmm7, %xmm7
+; /home/rhzhang/veqpy/veqlib/tensor.h:205
+;             for (size_type axis = 0; axis < rank; ++axis)
+   34538: c4 e3 7d 39 d2 01            	vextracti128	$0x1, %ymm2, %xmm2
+   3453e: c5 f1 d4 ca                  	vpaddq	%xmm2, %xmm1, %xmm1
+   34542: c5 f9 70 d1 ee               	vpshufd	$0xee, %xmm1, %xmm2     # xmm2 = xmm1[2,3,2,3]
+   34547: c5 f1 d4 ca                  	vpaddq	%xmm2, %xmm1, %xmm1
+   3454b: c4 c1 f9 7e c8               	vmovq	%xmm1, %r8
+; /home/rhzhang/veqpy/veqlib/geometry.h:430
+;                     const double gtt_ij   = R_t_ij * R_t_ij + Z_t_ij * Z_t_ij;
+   34550: c5 7b 59 e8                  	vmulsd	%xmm0, %xmm0, %xmm13
+   34554: c4 62 d1 b9 ed               	vfmadd231sd	%xmm5, %xmm5, %xmm13 # xmm13 = (xmm5 * xmm5) + xmm13
+; /home/rhzhang/veqpy/veqlib/geometry.h:439
+;                     surface_field(surface_R_t, i, j)        = R_t_ij;
+   34559: c4 a1 7b 11 2c c7            	vmovsd	%xmm5, (%rdi,%r8,8)
+; /home/rhzhang/veqpy/veqlib/tensor.h:203
+;             const array<size_type, rank> values_ = {indices...};
+   3455f: 48 89 44 24 18               	movq	%rax, 0x18(%rsp)
+   34564: 48 c7 44 24 20 03 00 00 00   	movq	$0x3, 0x20(%rsp)
+   3456d: 48 89 4c 24 28               	movq	%rcx, 0x28(%rsp)
+; /home/rhzhang/veqpy/veqlib/geometry.h:429
+;                     const double grt_t_ij = R_rt_ij * R_t_ij + R_r_ij * R_tt_ij + Z_rt_ij * Z_t_ij + Z_r_ij * Z_tt_ij;
+   34572: c4 62 89 b9 94 24 e0 01 00 00	vfmadd231sd	0x1e0(%rsp), %xmm14, %xmm10 # xmm10 = (xmm14 * mem) + xmm10
+; /home/rhzhang/veqpy/veqlib/tensor.h:208
+;                 result += values_[axis] * strides[axis];
+   3457c: c4 e2 a5 8c 4c 24 18         	vpmaskmovq	0x18(%rsp), %ymm11, %ymm1
+   34583: c5 b5 f4 d1                  	vpmuludq	%ymm1, %ymm9, %ymm2
+   34587: c5 f5 73 d1 20               	vpsrlq	$0x20, %ymm1, %ymm1
+   3458c: c5 b5 f4 c9                  	vpmuludq	%ymm1, %ymm9, %ymm1
+   34590: c5 f5 73 f1 20               	vpsllq	$0x20, %ymm1, %ymm1
+   34595: c5 ed d4 c9                  	vpaddq	%ymm1, %ymm2, %ymm1
+   34599: c4 e3 75 02 d7 c0            	vpblendd	$0xc0, %ymm7, %ymm1, %ymm2 # ymm2 = ymm1[0,1,2,3,4,5],ymm7[6,7]
+; /home/rhzhang/veqpy/veqlib/tensor.h:205
+;             for (size_type axis = 0; axis < rank; ++axis)
+   3459f: c4 e3 7d 39 d2 01            	vextracti128	$0x1, %ymm2, %xmm2
+   345a5: c5 f1 d4 ca                  	vpaddq	%xmm2, %xmm1, %xmm1
+   345a9: c5 f9 70 d1 ee               	vpshufd	$0xee, %xmm1, %xmm2     # xmm2 = xmm1[2,3,2,3]
+   345ae: c5 f1 d4 ca                  	vpaddq	%xmm2, %xmm1, %xmm1
+; /home/rhzhang/veqpy/veqlib/geometry.h:424
+;                     const double JR_ij   = J_ij * R_ij;
+   345b2: c4 c1 1b 59 ef               	vmulsd	%xmm15, %xmm12, %xmm5
+; /home/rhzhang/veqpy/veqlib/tensor.h:205
+;             for (size_type axis = 0; axis < rank; ++axis)
+   345b7: c4 c1 f9 7e c8               	vmovq	%xmm1, %r8
+; /home/rhzhang/veqpy/veqlib/geometry.h:432
+;                     const double inv_JR   = 1.0 / JR_ij;
+   345bc: c5 fb 10 0d dc 70 02 00      	vmovsd	0x270dc(%rip), %xmm1    # 0x5b6a0 <strlen@GLIBC_2.2.5+0x5b6a0>
+   345c4: c5 f3 5e cd                  	vdivsd	%xmm5, %xmm1, %xmm1
+; /home/rhzhang/veqpy/veqlib/geometry.h:440
+;                     surface_field(surface_Z_t, i, j)        = Z_t_ij;
+   345c8: c4 a1 7b 11 04 c7            	vmovsd	%xmm0, (%rdi,%r8,8)
+; /home/rhzhang/veqpy/veqlib/tensor.h:203
+;             const array<size_type, rank> values_ = {indices...};
+   345ce: 48 89 44 24 18               	movq	%rax, 0x18(%rsp)
+   345d3: 48 c7 44 24 20 04 00 00 00   	movq	$0x4, 0x20(%rsp)
+   345dc: 48 89 4c 24 28               	movq	%rcx, 0x28(%rsp)
+; /home/rhzhang/veqpy/veqlib/geometry.h:433
+;                     const double grtdivJR_t_ij = (grt_t_ij - grt_ij * JR_t_ij * inv_JR) * inv_JR;
+   345e1: c4 62 f1 b9 d4               	vfmadd231sd	%xmm4, %xmm1, %xmm10 # xmm10 = (xmm1 * xmm4) + xmm10
+; /home/rhzhang/veqpy/veqlib/tensor.h:208
+;                 result += values_[axis] * strides[axis];
+   345e6: c4 e2 a5 8c 44 24 18         	vpmaskmovq	0x18(%rsp), %ymm11, %ymm0
+   345ed: c5 b5 f4 d0                  	vpmuludq	%ymm0, %ymm9, %ymm2
+   345f1: c5 fd 73 d0 20               	vpsrlq	$0x20, %ymm0, %ymm0
+   345f6: c5 b5 f4 c0                  	vpmuludq	%ymm0, %ymm9, %ymm0
+   345fa: c5 fd 73 f0 20               	vpsllq	$0x20, %ymm0, %ymm0
+   345ff: c5 ed d4 c0                  	vpaddq	%ymm0, %ymm2, %ymm0
+   34603: c4 e3 7d 02 d7 c0            	vpblendd	$0xc0, %ymm7, %ymm0, %ymm2 # ymm2 = ymm0[0,1,2,3,4,5],ymm7[6,7]
+; /home/rhzhang/veqpy/veqlib/tensor.h:205
+;             for (size_type axis = 0; axis < rank; ++axis)
+   34609: c4 e3 7d 39 d2 01            	vextracti128	$0x1, %ymm2, %xmm2
+   3460f: c5 f9 d4 c2                  	vpaddq	%xmm2, %xmm0, %xmm0
+   34613: c5 f9 70 d0 ee               	vpshufd	$0xee, %xmm0, %xmm2     # xmm2 = xmm0[2,3,2,3]
+   34618: c5 f9 d4 c2                  	vpaddq	%xmm2, %xmm0, %xmm0
+   3461c: c4 c1 f9 7e c0               	vmovq	%xmm0, %r8
+; /home/rhzhang/veqpy/veqlib/geometry.h:441
+;                     surface_field(surface_J, i, j)          = J_ij;
+   34621: c4 21 7b 11 24 c7            	vmovsd	%xmm12, (%rdi,%r8,8)
+; /home/rhzhang/veqpy/veqlib/tensor.h:203
+;             const array<size_type, rank> values_ = {indices...};
+   34627: 48 89 44 24 18               	movq	%rax, 0x18(%rsp)
+   3462c: 48 c7 44 24 20 05 00 00 00   	movq	$0x5, 0x20(%rsp)
+   34635: 48 89 4c 24 28               	movq	%rcx, 0x28(%rsp)
+; /home/rhzhang/veqpy/veqlib/tensor.h:208
+;                 result += values_[axis] * strides[axis];
+   3463a: c4 e2 a5 8c 54 24 18         	vpmaskmovq	0x18(%rsp), %ymm11, %ymm2
+; /home/rhzhang/veqpy/veqlib/geometry.h:427
+;                     const double JdivR_ij = J_ij / R_ij;
+   34641: c4 c1 1b 5e c7               	vdivsd	%xmm15, %xmm12, %xmm0
+; /home/rhzhang/veqpy/veqlib/tensor.h:208
+;                 result += values_[axis] * strides[axis];
+   34646: c5 b5 f4 e2                  	vpmuludq	%ymm2, %ymm9, %ymm4
+   3464a: c5 ed 73 d2 20               	vpsrlq	$0x20, %ymm2, %ymm2
+   3464f: c5 b5 f4 d2                  	vpmuludq	%ymm2, %ymm9, %ymm2
+   34653: c5 ed 73 f2 20               	vpsllq	$0x20, %ymm2, %ymm2
+   34658: c5 dd d4 d2                  	vpaddq	%ymm2, %ymm4, %ymm2
+   3465c: c4 e3 6d 02 e7 c0            	vpblendd	$0xc0, %ymm7, %ymm2, %ymm4 # ymm4 = ymm2[0,1,2,3,4,5],ymm7[6,7]
+; /home/rhzhang/veqpy/veqlib/tensor.h:205
+;             for (size_type axis = 0; axis < rank; ++axis)
+   34662: c4 e3 7d 39 e4 01            	vextracti128	$0x1, %ymm4, %xmm4
+   34668: c5 e9 d4 d4                  	vpaddq	%xmm4, %xmm2, %xmm2
+   3466c: c5 f9 70 e2 ee               	vpshufd	$0xee, %xmm2, %xmm4     # xmm4 = xmm2[2,3,2,3]
+   34671: c5 e9 d4 d4                  	vpaddq	%xmm4, %xmm2, %xmm2
+   34675: c4 c1 f9 7e d0               	vmovq	%xmm2, %r8
+; /home/rhzhang/veqpy/veqlib/geometry.h:442
+;                     surface_field(surface_JdivR, i, j)      = JdivR_ij;
+   3467a: c4 a1 7b 11 04 c7            	vmovsd	%xmm0, (%rdi,%r8,8)
+; /home/rhzhang/veqpy/veqlib/tensor.h:203
+;             const array<size_type, rank> values_ = {indices...};
+   34680: 48 89 44 24 18               	movq	%rax, 0x18(%rsp)
+   34685: 48 c7 44 24 20 06 00 00 00   	movq	$0x6, 0x20(%rsp)
+   3468e: 48 89 4c 24 28               	movq	%rcx, 0x28(%rsp)
+; /home/rhzhang/veqpy/veqlib/tensor.h:208
+;                 result += values_[axis] * strides[axis];
+   34693: c4 e2 a5 8c 54 24 18         	vpmaskmovq	0x18(%rsp), %ymm11, %ymm2
+   3469a: c5 b5 f4 e2                  	vpmuludq	%ymm2, %ymm9, %ymm4
+   3469e: c5 ed 73 d2 20               	vpsrlq	$0x20, %ymm2, %ymm2
+   346a3: c5 b5 f4 d2                  	vpmuludq	%ymm2, %ymm9, %ymm2
+   346a7: c5 ed 73 f2 20               	vpsllq	$0x20, %ymm2, %ymm2
+   346ac: c5 dd d4 d2                  	vpaddq	%ymm2, %ymm4, %ymm2
+   346b0: c4 e3 6d 02 e7 c0            	vpblendd	$0xc0, %ymm7, %ymm2, %ymm4 # ymm4 = ymm2[0,1,2,3,4,5],ymm7[6,7]
+; /home/rhzhang/veqpy/veqlib/tensor.h:205
+;             for (size_type axis = 0; axis < rank; ++axis)
+   346b6: c4 e3 7d 39 e4 01            	vextracti128	$0x1, %ymm4, %xmm4
+   346bc: c5 e9 d4 d4                  	vpaddq	%xmm4, %xmm2, %xmm2
+   346c0: c5 f9 70 e2 ee               	vpshufd	$0xee, %xmm2, %xmm4     # xmm4 = xmm2[2,3,2,3]
+   346c5: c5 e9 d4 d4                  	vpaddq	%xmm4, %xmm2, %xmm2
+   346c9: c4 c1 f9 7e d0               	vmovq	%xmm2, %r8
+; /home/rhzhang/veqpy/veqlib/geometry.h:435
+;                     const double gttdivJR_r_ij = gtt_r_ij * inv_JR - gtt_ij * JR_r_ij * inv_JR * inv_JR;
+   346ce: c5 f3 59 d1                  	vmulsd	%xmm1, %xmm1, %xmm2
+   346d2: c5 93 59 e6                  	vmulsd	%xmm6, %xmm13, %xmm4
+; /home/rhzhang/veqpy/veqlib/geometry.h:433
+;                     const double grtdivJR_t_ij = (grt_t_ij - grt_ij * JR_t_ij * inv_JR) * inv_JR;
+   346d6: c5 ab 59 f1                  	vmulsd	%xmm1, %xmm10, %xmm6
+; /home/rhzhang/veqpy/veqlib/geometry.h:443
+;                     surface_field(surface_grtdivJR_t, i, j) = grtdivJR_t_ij;
+   346da: c4 a1 7b 11 34 c7            	vmovsd	%xmm6, (%rdi,%r8,8)
+; /home/rhzhang/veqpy/veqlib/tensor.h:203
+;             const array<size_type, rank> values_ = {indices...};
+   346e0: 48 89 44 24 18               	movq	%rax, 0x18(%rsp)
+   346e5: 48 c7 44 24 20 07 00 00 00   	movq	$0x7, 0x20(%rsp)
+; /home/rhzhang/veqpy/veqlib/geometry.h:435
+;                     const double gttdivJR_r_ij = gtt_r_ij * inv_JR - gtt_ij * JR_r_ij * inv_JR * inv_JR;
+   346ee: c5 eb 59 f4                  	vmulsd	%xmm4, %xmm2, %xmm6
+; /home/rhzhang/veqpy/veqlib/tensor.h:203
+;             const array<size_type, rank> values_ = {indices...};
+   346f2: 48 89 4c 24 28               	movq	%rcx, 0x28(%rsp)
+; /home/rhzhang/veqpy/veqlib/tensor.h:208
+;                 result += values_[axis] * strides[axis];
+   346f7: c4 e2 a5 8c 54 24 18         	vpmaskmovq	0x18(%rsp), %ymm11, %ymm2
+   346fe: c5 b5 f4 e2                  	vpmuludq	%ymm2, %ymm9, %ymm4
+   34702: c5 ed 73 d2 20               	vpsrlq	$0x20, %ymm2, %ymm2
+   34707: c5 b5 f4 d2                  	vpmuludq	%ymm2, %ymm9, %ymm2
+   3470b: c5 ed 73 f2 20               	vpsllq	$0x20, %ymm2, %ymm2
+   34710: c5 dd d4 d2                  	vpaddq	%ymm2, %ymm4, %ymm2
+   34714: c4 e3 6d 02 e7 c0            	vpblendd	$0xc0, %ymm7, %ymm2, %ymm4 # ymm4 = ymm2[0,1,2,3,4,5],ymm7[6,7]
+; /home/rhzhang/veqpy/veqlib/tensor.h:205
+;             for (size_type axis = 0; axis < rank; ++axis)
+   3471a: c4 e3 7d 39 e4 01            	vextracti128	$0x1, %ymm4, %xmm4
+   34720: c5 e9 d4 d4                  	vpaddq	%xmm4, %xmm2, %xmm2
+   34724: c5 f9 70 e2 ee               	vpshufd	$0xee, %xmm2, %xmm4     # xmm4 = xmm2[2,3,2,3]
+   34729: c5 e9 d4 d4                  	vpaddq	%xmm4, %xmm2, %xmm2
+   3472d: c4 c1 f9 7e d0               	vmovq	%xmm2, %r8
+; /home/rhzhang/veqpy/veqlib/geometry.h:434
+;                     const double gttdivJR_ij   = gtt_ij * inv_JR;
+   34732: c5 93 59 e1                  	vmulsd	%xmm1, %xmm13, %xmm4
+; /home/rhzhang/veqpy/veqlib/geometry.h:431
+;                     const double gtt_r_ij = 2.0 * (R_t_ij * R_rt_ij + Z_t_ij * Z_rt_ij);
+   34736: c5 e3 58 d3                  	vaddsd	%xmm3, %xmm3, %xmm2
+; /home/rhzhang/veqpy/veqlib/geometry.h:444
+;                     surface_field(surface_gttdivJR, i, j)   = gttdivJR_ij;
+   3473a: c4 a1 7b 11 24 c7            	vmovsd	%xmm4, (%rdi,%r8,8)
+; /home/rhzhang/veqpy/veqlib/tensor.h:203
+;             const array<size_type, rank> values_ = {indices...};
+   34740: 48 89 44 24 18               	movq	%rax, 0x18(%rsp)
+   34745: 48 c7 44 24 20 08 00 00 00   	movq	$0x8, 0x20(%rsp)
+   3474e: 48 89 4c 24 28               	movq	%rcx, 0x28(%rsp)
+; /home/rhzhang/veqpy/veqlib/geometry.h:435
+;                     const double gttdivJR_r_ij = gtt_r_ij * inv_JR - gtt_ij * JR_r_ij * inv_JR * inv_JR;
+   34753: c4 e2 f1 a9 d6               	vfmadd213sd	%xmm6, %xmm1, %xmm2 # xmm2 = (xmm1 * xmm2) + xmm6
+; /home/rhzhang/veqpy/veqlib/tensor.h:208
+;                 result += values_[axis] * strides[axis];
+   34758: c4 e2 a5 8c 4c 24 18         	vpmaskmovq	0x18(%rsp), %ymm11, %ymm1
+   3475f: c5 b5 f4 d9                  	vpmuludq	%ymm1, %ymm9, %ymm3
+   34763: c5 f5 73 d1 20               	vpsrlq	$0x20, %ymm1, %ymm1
+   34768: c5 b5 f4 c9                  	vpmuludq	%ymm1, %ymm9, %ymm1
+   3476c: c5 f5 73 f1 20               	vpsllq	$0x20, %ymm1, %ymm1
+   34771: c5 e5 d4 c9                  	vpaddq	%ymm1, %ymm3, %ymm1
+   34775: c4 e3 75 02 df c0            	vpblendd	$0xc0, %ymm7, %ymm1, %ymm3 # ymm3 = ymm1[0,1,2,3,4,5],ymm7[6,7]
+; /home/rhzhang/veqpy/veqlib/tensor.h:205
+;             for (size_type axis = 0; axis < rank; ++axis)
+   3477b: c4 e3 7d 39 db 01            	vextracti128	$0x1, %ymm3, %xmm3
+   34781: c5 f1 d4 cb                  	vpaddq	%xmm3, %xmm1, %xmm1
+   34785: c5 f9 70 d9 ee               	vpshufd	$0xee, %xmm1, %xmm3     # xmm3 = xmm1[2,3,2,3]
+   3478a: c5 f1 d4 cb                  	vpaddq	%xmm3, %xmm1, %xmm1
+   3478e: c4 c1 f9 7e c8               	vmovq	%xmm1, %r8
+   34793: c5 fb 10 9c 24 e8 01 00 00   	vmovsd	0x1e8(%rsp), %xmm3
+; /home/rhzhang/veqpy/veqlib/geometry.h:447
+;                     sum_J += J_ij;
+   3479c: c5 9b 58 db                  	vaddsd	%xmm3, %xmm12, %xmm3
+   347a0: c5 fb 10 8c 24 e8 00 00 00   	vmovsd	0xe8(%rsp), %xmm1
+; /home/rhzhang/veqpy/veqlib/geometry.h:448
+;                     sum_JR += JR_ij;
+   347a9: c5 d3 58 c9                  	vaddsd	%xmm1, %xmm5, %xmm1
+   347ad: c5 fb 11 8c 24 e8 00 00 00   	vmovsd	%xmm1, 0xe8(%rsp)
+   347b6: c5 fb 10 8c 24 f0 00 00 00   	vmovsd	0xf0(%rsp), %xmm1
+; /home/rhzhang/veqpy/veqlib/geometry.h:449
+;                     sum_gttdivJR += gttdivJR_ij;
+   347bf: c5 db 58 c9                  	vaddsd	%xmm1, %xmm4, %xmm1
+   347c3: c5 fb 11 8c 24 f0 00 00 00   	vmovsd	%xmm1, 0xf0(%rsp)
+; /home/rhzhang/veqpy/veqlib/geometry.h:445
+;                     surface_field(surface_gttdivJR_r, i, j) = gttdivJR_r_ij;
+   347cc: c4 a1 7b 11 14 c7            	vmovsd	%xmm2, (%rdi,%r8,8)
+   347d2: c5 fb 10 4c 24 30            	vmovsd	0x30(%rsp), %xmm1
+; /home/rhzhang/veqpy/veqlib/geometry.h:450
+;                     sum_gttdivJR_r += gttdivJR_r_ij;
+   347d8: c5 eb 58 c9                  	vaddsd	%xmm1, %xmm2, %xmm1
+   347dc: c5 fb 11 4c 24 30            	vmovsd	%xmm1, 0x30(%rsp)
+   347e2: c5 fb 10 4c 24 38            	vmovsd	0x38(%rsp), %xmm1
+; /home/rhzhang/veqpy/veqlib/geometry.h:451
+;                     sum_JdivR += JdivR_ij;
+   347e8: c5 fb 58 c9                  	vaddsd	%xmm1, %xmm0, %xmm1
+   347ec: c5 fb 11 4c 24 38            	vmovsd	%xmm1, 0x38(%rsp)
+; /home/rhzhang/veqpy/veqlib/geometry.h:387
+;                 for (size_t j = 0; j < theta_rows; ++j)
+   347f2: 48 ff c1                     	incq	%rcx
+   347f5: 48 83 f9 10                  	cmpq	$0x10, %rcx
+   347f9: 0f 85 11 fa ff ff            	jne	0x34210 <void geometry::detail::GeometryRuntime<grid::detail::Grid<32ul, 16ul, 5ul, 1ul, 2ul, grid::detail::Legendre, grid::detail::Spectral>>::update<profiles::RuntimeProfiles<profiles::ProfileShape<5ul, 2ul, 1ul, profiles::ProfileSlot{(profiles::ProfileMode)2, 3ul}, profiles::ProfileSlot{}, profiles::ProfileSlot{(profiles::ProfileMode)2, 6ul}, profiles::ProfileSlot{}, profiles::ProfileSlot{(profiles::ProfileMode)2, 6ul}, profiles::ProfileSlot{}, std::array<profiles::ProfileSlot, 0ul>{}, std::array<profiles::ProfileSlot, 1ul>{profiles::ProfileSlot [1]{profiles::ProfileSlot{(profiles::ProfileMode)2, 3ul}}}>, grid::detail::Grid<32ul, 16ul, 5ul, 1ul, 2ul, grid::detail::Legendre, grid::detail::Spectral>>>(double, double, double, profiles::RuntimeProfiles<profiles::ProfileShape<5ul, 2ul, 1ul, profiles::ProfileSlot{(profiles::ProfileMode)2, 3ul}, profiles::ProfileSlot{}, profiles::ProfileSlot{(profiles::ProfileMode)2, 6ul}, profiles::ProfileSlot{}, profiles::ProfileSlot{(profiles::ProfileMode)2, 6ul}, profiles::ProfileSlot{}, std::array<profiles::ProfileSlot, 0ul>{}, std::array<profiles::ProfileSlot, 1ul>{profiles::ProfileSlot [1]{profiles::ProfileSlot{(profiles::ProfileMode)2, 3ul}}}>, grid::detail::Grid<32ul, 16ul, 5ul, 1ul, 2ul, grid::detail::Legendre, grid::detail::Spectral>> const&)+0x1070>
+; /home/rhzhang/veqpy/veqlib/tensor.h:203
+;             const array<size_type, rank> values_ = {indices...};
+   347ff: 48 c7 44 24 18 00 00 00 00   	movq	$0x0, 0x18(%rsp)
+   34808: 48 89 44 24 20               	movq	%rax, 0x20(%rsp)
+   3480d: b1 01                        	movb	$0x1, %cl

@@ -338,6 +338,29 @@ the representative full-evaluate geomean gate. The `64x16x1` full-evaluate row
 should be revisited only if that topology becomes a priority; it is not enough
 to reject the overall positive Source shape.
 
+## 2026-06-22 P2 Geometry vectorization evidence
+
+Before attempting a manual metric-loop rewrite, the current Geometry codegen was
+checked with a RELAXED analysis build and the default release binary. Artifacts
+are saved under
+`veqlib/experiments/34ee457-20260622-p2-geometry-vectorization`.
+
+| evidence | result |
+| --- | --- |
+| Clang loop remarks | `geometry.h:381` dynamic `sincos(tb)` pass vectorized at width 4; analysis build also vectorizes the small phase loop at `geometry.h:319` for validation topologies. |
+| Release objdump | Default `GeometryRuntime::update` contains 557 instruction lines referencing `%ymm`, two `vdivpd` instruction lines, and no `vdivsd`; the metric/reduction body is packed-double, not scalar-double. |
+| Stack usage | Analysis `veqlib_main` reports the default Geometry frame as 2040 B, below the 4096 B warning gate. |
+| llvm-mca | Extracted release metric vector block reports block throughput about 30 cycles for a 4-lane body, with load/store and FP ports both active. |
+
+Decision: do not implement the proposed manual “vector radial accumulator”
+rewrite as the next production candidate. In the actual release code, Clang
+already emits vector metric arithmetic and vector reductions; a hand rewrite
+would mostly duplicate the existing shape while risking higher register or stack
+pressure. Future Geometry work should target a more specific remaining cost,
+such as reducing stack-resident phase arrays, simplifying metric formulas, or a
+measured two-pass metric/store split, and must be gated by release `geometry`,
+`evaluate`, and topology timing.
+
 ## Stable release stage timing
 
 | stage | median ns/call | avg ns/call | p95/median | CV |

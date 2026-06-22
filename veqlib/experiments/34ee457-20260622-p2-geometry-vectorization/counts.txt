@@ -1,0 +1,5 @@
+release_ymm_instruction_lines: 557
+release_xmm_instruction_lines: 198
+release_vdivpd_instruction_lines: 2
+release_vdivsd_instruction_lines: 0
+release_stack_reference_lines: 209
