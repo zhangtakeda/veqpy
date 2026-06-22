@@ -219,6 +219,29 @@ evaluate path. The two source-stage regressions are small/low-cost topology
 rows in absolute terms (`16x16x1` is sub-300 ns; `64x16x1` ratio 1.041), and
 only one full `evaluate_ring` row exceeds 1.0 materially.
 
+## 2026-06-22 P1-B Residual MomentPlan gate
+
+Before writing production `MomentPlan` code, the existing benchmark-only
+materialized moment probe was rerun as a lower-bound gate under the current
+P1-A baseline. Focused timing used `taskset -c 2`, `repeat=40`, `warmup=8`, and
+`inner=10000`; artifacts are saved under
+`veqlib/experiments/f1fb208-20260622-p1-residual-momentplan-gate`.
+
+| stage / probe | median ns | p95 ns |
+| --- | ---: | ---: |
+| `residual_theta_reduce` | 372.3 | 496.0 |
+| `residual_radial_project` | 34.6 | 43.1 |
+| theta + project combo | 406.9 | - |
+| production `residual_pack` | 131.3 | 148.9 |
+| `evaluate_ring` smoke | 4429.5 | 4620.4 |
+
+Decision: reject a production moment-buffer `MomentPlan` rewrite in this phase.
+The best available materialized-moment proxy is about `3.10x` slower than the
+current vectorized `residual_pack`; implementing it would knowingly move away
+from the requested end state. Residual work should resume only with a
+vector-friendly/blocked moment design that does not replace vectorized rowwise
+passes with scalar dependency chains.
+
 ## Stable release stage timing
 
 | stage | median ns/call | avg ns/call | p95/median | CV |
