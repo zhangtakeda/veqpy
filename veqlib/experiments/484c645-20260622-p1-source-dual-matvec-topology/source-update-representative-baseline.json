@@ -1,0 +1,419 @@
+{
+  "schema_version": 1,
+  "topologies": [
+    {
+      "case_name": "PF_psin_uniform_Ip",
+      "results": [
+        {
+          "avg_ns": 231.32109999999997,
+          "calls": 50000,
+          "inner": 5000,
+          "max_ns": 284.97,
+          "median_ns": 222.6712,
+          "min_ns": 216.2452,
+          "p95_ns": 284.97,
+          "repeat": 10,
+          "ring_size": 1,
+          "samples_ns": [
+            223.9386,
+            256.604,
+            219.0946,
+            227.9262,
+            284.97,
+            218.9202,
+            218.5058,
+            225.6026,
+            221.4038,
+            216.2452
+          ],
+          "stage": "source_update",
+          "std_ns": 20.998320255153747,
+          "warmup": 4
+        }
+      ],
+      "schema_version": 1,
+      "sink": 2.7961930716281005,
+      "topology": {
+        "K_max": 2,
+        "L_max": 5,
+        "M_max": 1,
+        "Nr": 16,
+        "Nt": 16,
+        "x_size": 18
+      },
+      "matrix_topology": {
+        "Nr": 16,
+        "Nt": 16,
+        "Mmax": 1
+      }
+    },
+    {
+      "case_name": "PF_psin_uniform_Ip",
+      "results": [
+        {
+          "avg_ns": 799.5916599999998,
+          "calls": 50000,
+          "inner": 5000,
+          "max_ns": 900.7542,
+          "median_ns": 784.2,
+          "min_ns": 772.5754,
+          "p95_ns": 900.7542,
+          "repeat": 10,
+          "ring_size": 1,
+          "samples_ns": [
+            782.276,
+            832.9364,
+            781.229,
+            900.7542,
+            788.4268,
+            772.5754,
+            786.124,
+            775.896,
+            802.4478,
+            773.251
+          ],
+          "stage": "source_update",
+          "std_ns": 37.79170944173339,
+          "warmup": 4
+        }
+      ],
+      "schema_version": 1,
+      "sink": 2.7797617273082085,
+      "topology": {
+        "K_max": 2,
+        "L_max": 5,
+        "M_max": 1,
+        "Nr": 32,
+        "Nt": 16,
+        "x_size": 18
+      },
+      "matrix_topology": {
+        "Nr": 32,
+        "Nt": 16,
+        "Mmax": 1
+      }
+    },
+    {
+      "case_name": "PF_psin_uniform_Ip",
+      "results": [
+        {
+          "avg_ns": 665.55016,
+          "calls": 50000,
+          "inner": 5000,
+          "max_ns": 755.7864,
+          "median_ns": 646.0761,
+          "min_ns": 630.682,
+          "p95_ns": 755.7864,
+          "repeat": 10,
+          "ring_size": 1,
+          "samples_ns": [
+            634.1212,
+            755.7864,
+            747.215,
+            669.0094,
+            638.441,
+            630.682,
+            653.7112,
+            655.3372,
+            636.7582,
+            634.44
+          ],
+          "stage": "source_update",
+          "std_ns": 44.5010681321516,
+          "warmup": 4
+        }
+      ],
+      "schema_version": 1,
+      "sink": 2.775743508291681,
+      "topology": {
+        "K_max": 2,
+        "L_max": 5,
+        "M_max": 1,
+        "Nr": 64,
+        "Nt": 16,
+        "x_size": 18
+      },
+      "matrix_topology": {
+        "Nr": 64,
+        "Nt": 16,
+        "Mmax": 1
+      }
+    },
+    {
+      "case_name": "PF_psin_uniform_Ip",
+      "results": [
+        {
+          "avg_ns": 839.80764,
+          "calls": 50000,
+          "inner": 5000,
+          "max_ns": 1038.5478,
+          "median_ns": 809.3216,
+          "min_ns": 795.3336,
+          "p95_ns": 1038.5478,
+          "repeat": 10,
+          "ring_size": 1,
+          "samples_ns": [
+            807.298,
+            796.4604,
+            871.2098,
+            834.6028,
+            811.3452,
+            799.6256,
+            795.9422,
+            1038.5478,
+            795.3336,
+            847.711
+          ],
+          "stage": "source_update",
+          "std_ns": 70.59460610158825,
+          "warmup": 4
+        }
+      ],
+      "schema_version": 1,
+      "sink": 2.779761716319969,
+      "topology": {
+        "K_max": 2,
+        "L_max": 5,
+        "M_max": 1,
+        "Nr": 32,
+        "Nt": 8,
+        "x_size": 18
+      },
+      "matrix_topology": {
+        "Nr": 32,
+        "Nt": 8,
+        "Mmax": 1
+      }
+    },
+    {
+      "case_name": "PF_psin_uniform_Ip",
+      "results": [
+        {
+          "avg_ns": 817.67028,
+          "calls": 50000,
+          "inner": 5000,
+          "max_ns": 937.1432,
+          "median_ns": 792.4345000000001,
+          "min_ns": 777.7826,
+          "p95_ns": 937.1432,
+          "repeat": 10,
+          "ring_size": 1,
+          "samples_ns": [
+            851.3016,
+            937.1432,
+            796.4446,
+            785.9216,
+            783.445,
+            847.9536,
+            778.881,
+            777.7826,
+            788.4244,
+            829.4052
+          ],
+          "stage": "source_update",
+          "std_ns": 48.00048628488673,
+          "warmup": 4
+        }
+      ],
+      "schema_version": 1,
+      "sink": 2.779761727314388,
+      "topology": {
+        "K_max": 2,
+        "L_max": 5,
+        "M_max": 1,
+        "Nr": 32,
+        "Nt": 24,
+        "x_size": 18
+      },
+      "matrix_topology": {
+        "Nr": 32,
+        "Nt": 24,
+        "Mmax": 1
+      }
+    },
+    {
+      "case_name": "PF_psin_uniform_Ip",
+      "results": [
+        {
+          "avg_ns": 975.3579399999999,
+          "calls": 50000,
+          "inner": 5000,
+          "max_ns": 1068.1364,
+          "median_ns": 955.3206,
+          "min_ns": 942.3724,
+          "p95_ns": 1068.1364,
+          "repeat": 10,
+          "ring_size": 1,
+          "samples_ns": [
+            998.3848,
+            954.3514,
+            994.674,
+            944.1344,
+            942.3724,
+            998.919,
+            956.2898,
+            1068.1364,
+            945.6306,
+            950.6866
+          ],
+          "stage": "source_update",
+          "std_ns": 37.982267427845876,
+          "warmup": 4
+        }
+      ],
+      "schema_version": 1,
+      "sink": 2.7797617273131667,
+      "topology": {
+        "K_max": 2,
+        "L_max": 5,
+        "M_max": 1,
+        "Nr": 32,
+        "Nt": 32,
+        "x_size": 18
+      },
+      "matrix_topology": {
+        "Nr": 32,
+        "Nt": 32,
+        "Mmax": 1
+      }
+    },
+    {
+      "case_name": "PF_psin_uniform_Ip",
+      "results": [
+        {
+          "avg_ns": 809.92302,
+          "calls": 50000,
+          "inner": 5000,
+          "max_ns": 859.0802,
+          "median_ns": 812.0137,
+          "min_ns": 773.6186,
+          "p95_ns": 859.0802,
+          "repeat": 10,
+          "ring_size": 1,
+          "samples_ns": [
+            805.2728,
+            774.4038,
+            831.8762,
+            859.0802,
+            856.8352,
+            780.7038,
+            773.6186,
+            775.856,
+            822.829,
+            818.7546
+          ],
+          "stage": "source_update",
+          "std_ns": 31.558294204782356,
+          "warmup": 4
+        }
+      ],
+      "schema_version": 1,
+      "sink": 2.7797617273125255,
+      "topology": {
+        "K_max": 2,
+        "L_max": 5,
+        "M_max": 1,
+        "Nr": 32,
+        "Nt": 64,
+        "x_size": 18
+      },
+      "matrix_topology": {
+        "Nr": 32,
+        "Nt": 64,
+        "Mmax": 1
+      }
+    },
+    {
+      "case_name": "PF_psin_uniform_Ip",
+      "results": [
+        {
+          "avg_ns": 821.2349399999999,
+          "calls": 50000,
+          "inner": 5000,
+          "max_ns": 880.6066,
+          "median_ns": 805.5550000000001,
+          "min_ns": 785.727,
+          "p95_ns": 880.6066,
+          "repeat": 10,
+          "ring_size": 1,
+          "samples_ns": [
+            859.5474,
+            790.4728,
+            880.6066,
+            797.8382,
+            845.4476,
+            795.1674,
+            849.1838,
+            813.2718,
+            795.0868,
+            785.727
+          ],
+          "stage": "source_update",
+          "std_ns": 32.46754418000227,
+          "warmup": 4
+        }
+      ],
+      "schema_version": 1,
+      "sink": 2.7797617273082085,
+      "topology": {
+        "K_max": 4,
+        "L_max": 5,
+        "M_max": 4,
+        "Nr": 32,
+        "Nt": 16,
+        "x_size": 27
+      },
+      "matrix_topology": {
+        "Nr": 32,
+        "Nt": 16,
+        "Mmax": 4
+      }
+    },
+    {
+      "case_name": "PF_psin_uniform_Ip",
+      "results": [
+        {
+          "avg_ns": 814.2810199999998,
+          "calls": 50000,
+          "inner": 5000,
+          "max_ns": 866.39,
+          "median_ns": 804.8684000000001,
+          "min_ns": 797.2772,
+          "p95_ns": 866.39,
+          "repeat": 10,
+          "ring_size": 1,
+          "samples_ns": [
+            866.39,
+            802.9814,
+            804.6834,
+            801.7112,
+            843.4144,
+            804.9672,
+            797.2772,
+            809.7984,
+            806.8174,
+            804.7696
+          ],
+          "stage": "source_update",
+          "std_ns": 21.17555070612332,
+          "warmup": 4
+        }
+      ],
+      "schema_version": 1,
+      "sink": 2.7797617273082085,
+      "topology": {
+        "K_max": 8,
+        "L_max": 5,
+        "M_max": 8,
+        "Nr": 32,
+        "Nt": 16,
+        "x_size": 39
+      },
+      "matrix_topology": {
+        "Nr": 32,
+        "Nt": 16,
+        "Mmax": 8
+      }
+    }
+  ]
+}

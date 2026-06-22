@@ -201,6 +201,24 @@ retention gate without changing route semantics. The individual single-output
 old single-output helpers; the retained benefit is from avoiding two consecutive
 passes over the same `psin_r` vector in the production Source sequence.
 
+### P1-A representative topology check
+
+A temporary worktree at baseline `0601ecf` was compared against candidate
+`484c645` with the representative topology preset, `taskset -c 2`, `repeat=10`,
+`warmup=4`, `inner=5000`, and `ring-size=16`. Artifacts are saved under
+`veqlib/experiments/484c645-20260622-p1-source-dual-matvec-topology`.
+
+| stage | geomean ratio | improved rows | worst row |
+| --- | ---: | ---: | --- |
+| `evaluate_ring` | 0.949 | 7 / 9 | `32x24x1` ratio 1.051 |
+| `source_update` | 0.932 | 7 / 9 | `16x16x1` ratio 1.251 |
+
+Decision: the representative matrix supports keeping the candidate. The
+geomean is positive for both the direct source stage and state-ring full
+evaluate path. The two source-stage regressions are small/low-cost topology
+rows in absolute terms (`16x16x1` is sub-300 ns; `64x16x1` ratio 1.041), and
+only one full `evaluate_ring` row exceeds 1.0 materially.
+
 ## Stable release stage timing
 
 | stage | median ns/call | avg ns/call | p95/median | CV |

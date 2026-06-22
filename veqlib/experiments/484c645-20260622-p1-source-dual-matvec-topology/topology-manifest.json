@@ -1,0 +1,27 @@
+{
+  "artifacts": [
+    "evaluate-ring-representative.json",
+    "source-update-representative.json",
+    "evaluate-ring-representative-baseline.json",
+    "source-update-representative-baseline.json",
+    "topology-summary.json"
+  ],
+  "baseline_commit": "0601ecf",
+  "candidate_commit": "484c645",
+  "commands": [
+    "taskset -c 2 ./stage_topology_matrix.py --matrix-preset representative --stage evaluate_ring --repeat 10 --warmup 4 --inner 5000 --ring-size 16",
+    "taskset -c 2 ./stage_topology_matrix.py --matrix-preset representative --stage source_update --repeat 10 --warmup 4 --inner 5000 --ring-size 16",
+    "git worktree add --detach /tmp/veqpy-p1a-baseline 0601ecf and same matrix commands with PATH pointing at repo .venv"
+  ],
+  "current_head": "484c645d3cfb3cf4dab6bdb3abab0f207ffa5d5f",
+  "dirty_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "git_status_short": "?? veqlib/experiments/484c645-20260622-p1-source-dual-matvec-topology/",
+  "notes": "Representative matrix compares candidate 484c645 against baseline 0601ecf in a temporary worktree; WSL2 taskset wall-clock only.",
+  "phase": "P1-A Source dual matvec representative topology verification",
+  "schema_version": 1,
+  "system": {
+    "machine": "x86_64",
+    "platform": "Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "processor": "x86_64"
+  }
+}
