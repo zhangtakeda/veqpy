@@ -726,26 +726,40 @@ namespace
         return z;
     }
 
-    void configure_operator_for_case(BenchOperator& op, const CaseInput& input) noexcept
+    BenchOperator::Setup setup_for_case(const CaseInput& input) noexcept
     {
-        BenchOperator::RuntimeParams params{};
-        params.a              = input.a;
-        params.R0             = input.R0;
-        params.Z0             = input.Z0;
-        params.B0             = input.B0;
-        params.Ip             = input.Ip;
-        params.fix_rho        = input.fix_rho;
-        params.profile_params = profile_params_for_case(input);
-        op.set_runtime_params(params);
-        op.set_uniform_sources(
-            std::span<const double, BenchSource::sample_count>{input.heat.data(), input.heat.size()},
-            std::span<const double, BenchSource::sample_count>{input.current.data(), input.current.size()}
-        );
+        BenchOperator::Setup setup{};
+        setup.profile_params = profile_params_for_case(input);
+        setup.fix_rho        = input.fix_rho;
+        for (size_t i = 0; i < BenchSource::sample_count; ++i)
+        {
+            setup.heat[i]    = input.heat[i];
+            setup.current[i] = input.current[i];
+        }
+        return setup;
+    }
+
+    BenchOperator::SolveParams solve_params_for_case(const CaseInput& input) noexcept
+    {
+        BenchOperator::SolveParams params{};
+        params.a  = input.a;
+        params.R0 = input.R0;
+        params.Z0 = input.Z0;
+        params.B0 = input.B0;
+        params.Ip = input.Ip;
+        return params;
+    }
+
+    BenchOperator make_operator_for_case(const CaseInput& input) noexcept
+    {
+        BenchOperator op{setup_for_case(input)};
+        op.set_solve_params(solve_params_for_case(input));
+        return op;
     }
 
     struct SolveContext
     {
-        BenchOperator op{};
+        BenchOperator op;
         CaseInput     input{};
         int           evaluations = 0;
         int           jacobian_component_evaluations = 0;
@@ -757,9 +771,10 @@ namespace
         double        jvp_callback_ms      = 0.0;
         double        linear_solve_ms      = 0.0;
 
-        explicit SolveContext(const CaseInput& case_input) : input(case_input)
+        explicit SolveContext(const CaseInput& case_input)
+            : op(make_operator_for_case(case_input)),
+              input(case_input)
         {
-            configure_operator_for_case(op, input);
         }
 
         void reset_solve_counters() noexcept
@@ -812,15 +827,14 @@ namespace
 #ifdef ENABLE_ENZYME
     struct EnzymeResidualContext
     {
-        BenchOperator                                op{};
+        BenchOperator                                op;
         std::array<double, BenchShape::x_size>       x_scale{};
         std::array<double, BenchShape::x_size>       residual_scale{};
     };
 
     EnzymeResidualContext enzyme_context_for_input(const CaseInput& input) noexcept
     {
-        EnzymeResidualContext context{};
-        configure_operator_for_case(context.op, input);
+        EnzymeResidualContext context{make_operator_for_case(input)};
         context.x_scale        = input.x_scale;
         context.residual_scale = input.residual_scale;
         return context;
@@ -1851,6 +1865,8 @@ namespace
         int nfev_total                = 0;
         int callback_total            = 0;
 
+        SolveContext scan_context{base_input};
+
         for (int index = 0; index < point_count; ++index)
         {
             CaseInput point_input = base_input;
@@ -1915,12 +1931,14 @@ namespace
                 ++predictor_fallback_count;
 
             rebuild_scanned_case_scales(point_input);
-            SolveContext    context{point_input};
-            InitialResidual initial = prepare_initial_residual(context);
-            point_input.residual_scale = context.input.residual_scale;
+            scan_context.input = point_input;
+            scan_context.op.set_solve_params(solve_params_for_case(point_input));
+            InitialResidual initial = prepare_initial_residual(scan_context);
+            point_input.residual_scale = scan_context.input.residual_scale;
+            scan_context.input = point_input;
 
             const auto started = std::chrono::steady_clock::now();
-            SolveResult final  = run_solver_once(context);
+            SolveResult final  = run_solver_once(scan_context);
             const double solve_ms = elapsed_ms_since(started);
             samples_ms.push_back(solve_ms);
 
@@ -2390,44 +2408,55 @@ namespace
         return z;
     }
 
+    SmokeOperator::Setup smoke_setup() noexcept
+    {
+        SmokeOperator::Setup setup{};
+        setup.fix_rho = 0.0;
+        setup.profile_params.offsets[SmokeShape::kappa_profile_id] = 1.45;
+        setup.profile_params.offsets[SmokeShape::c_profile_id<0>()] = 0.0;
+        constexpr std::array<double, SmokeSource::sample_count> heat{
+            2.0,
+            2.75,
+            3.5,
+            4.25,
+            5.0,
+        };
+        constexpr std::array<double, SmokeSource::sample_count> current{
+            0.5,
+            0.625,
+            0.75,
+            0.875,
+            1.0,
+        };
+        for (size_t i = 0; i < SmokeSource::sample_count; ++i)
+        {
+            setup.heat[i]    = heat[i];
+            setup.current[i] = current[i];
+        }
+        return setup;
+    }
+
+    SmokeOperator::SolveParams smoke_solve_params() noexcept
+    {
+        SmokeOperator::SolveParams params{};
+        params.a  = 0.42;
+        params.R0 = 1.8;
+        params.Z0 = -0.25;
+        params.B0 = 2.1;
+        params.Ip = 3.7699111843077517;
+        return params;
+    }
+
     struct SolveContext
     {
-        SmokeOperator op{};
+        SmokeOperator op;
         std::array<double, SmokeShape::x_size> x_scale{};
         std::array<double, SmokeShape::x_size> residual_scale{};
         int                                    evaluations = 0;
 
-        SolveContext()
+        SolveContext() : op(smoke_setup())
         {
-            SmokeOperator::RuntimeParams params{};
-            params.a = 0.42;
-            params.R0 = 1.8;
-            params.Z0 = -0.25;
-            params.B0 = 2.1;
-            params.Ip = 3.7699111843077517;
-            params.fix_rho = 0.0;
-            params.profile_params.offsets[SmokeShape::kappa_profile_id] = 1.45;
-            params.profile_params.offsets[SmokeShape::c_profile_id<0>()] = 0.0;
-            op.set_runtime_params(params);
-
-            constexpr std::array<double, SmokeSource::sample_count> heat{
-                2.0,
-                2.75,
-                3.5,
-                4.25,
-                5.0,
-            };
-            constexpr std::array<double, SmokeSource::sample_count> current{
-                0.5,
-                0.625,
-                0.75,
-                0.875,
-                1.0,
-            };
-            op.set_uniform_sources(
-                std::span<const double, SmokeSource::sample_count>{heat.data(), heat.size()},
-                std::span<const double, SmokeSource::sample_count>{current.data(), current.size()}
-            );
+            op.set_solve_params(smoke_solve_params());
         }
 
         void raw_residual(
@@ -2895,40 +2924,47 @@ namespace
         return std::span<const double, BenchShape::x_size>{x.data(), BenchShape::x_size};
     }
 
-    void configure_operator(BenchOperator& op) noexcept
+    BenchOperator::Setup benchmark_setup() noexcept
     {
-        BenchOperator::RuntimeParams params{};
-        params.a                                                     = 1.05 / 1.85;
-        params.R0                                                    = 1.05;
-        params.Z0                                                    = 0.0;
-        params.B0                                                    = 3.0;
-        params.Ip                                                    = 3.7699111867885415;
-        params.fix_rho                                               = 0.05;
-        params.profile_params.offsets[BenchShape::kappa_profile_id]  = 2.2;
-        params.profile_params.offsets[BenchShape::c_profile_id<0>()] = 0.0;
-        params.profile_params.offsets[BenchShape::s_profile_id<1>()] = 0.52359877559829887308;
-        op.set_runtime_params(params);
-        op.set_uniform_sources(
-            std::span<const double, BenchSource::sample_count>{
-                benchmark_scaled_heat.data(),
-                BenchSource::sample_count,
-            },
-            std::span<const double, BenchSource::sample_count>{
-                benchmark_scaled_current.data(),
-                BenchSource::sample_count,
-            });
+        BenchOperator::Setup setup{};
+        setup.fix_rho                                               = 0.05;
+        setup.profile_params.offsets[BenchShape::kappa_profile_id]  = 2.2;
+        setup.profile_params.offsets[BenchShape::c_profile_id<0>()] = 0.0;
+        setup.profile_params.offsets[BenchShape::s_profile_id<1>()] = 0.52359877559829887308;
+        for (size_t i = 0; i < BenchSource::sample_count; ++i)
+        {
+            setup.heat[i]    = benchmark_scaled_heat[i];
+            setup.current[i] = benchmark_scaled_current[i];
+        }
+        return setup;
+    }
+
+    BenchOperator::SolveParams benchmark_solve_params() noexcept
+    {
+        BenchOperator::SolveParams params{};
+        params.a  = 1.05 / 1.85;
+        params.R0 = 1.05;
+        params.Z0 = 0.0;
+        params.B0 = 3.0;
+        params.Ip = 3.7699111867885415;
+        return params;
+    }
+
+    std::unique_ptr<BenchOperator> make_benchmark_operator()
+    {
+        auto op = std::make_unique<BenchOperator>(benchmark_setup());
+        op->set_solve_params(benchmark_solve_params());
+        return op;
     }
 
     void refresh_profiles(BenchOperator& op, std::span<const double, BenchShape::x_size> x) noexcept
     {
-        const auto& params = op.runtime_params();
-        op.refresh_static_plan();
-        op.workspace.profiles.refresh_active(x, params.profile_params);
+        op.workspace.profiles.refresh_active(x, op.plan.profile_params);
     }
 
     void prepare_geometry(BenchOperator& op, std::span<const double, BenchShape::x_size> x) noexcept
     {
-        const auto& params = op.runtime_params();
+        const auto& params = op.solve_params();
         refresh_profiles(op, x);
         op.workspace.geometry.update(params.a, params.R0, params.Z0, op.workspace.profiles);
     }
@@ -2941,7 +2977,7 @@ namespace
 
     void prepare_source_updated(BenchOperator& op, std::span<const double, BenchShape::x_size> x) noexcept
     {
-        const auto& params = op.runtime_params();
+        const auto& params = op.solve_params();
         prepare_geometry(op, x);
         op.workspace.source_runtime.materialize_profile_owned_psin(op.workspace.profiles, op.plan.n_axis_fix);
         op.workspace.source_runtime.update_pf_psin_uniform_ip(
@@ -2965,7 +3001,7 @@ namespace
                                   std::span<const double, BenchShape::x_size> x,
                                   SourceRadialVector&                         integrand) noexcept
     {
-        const auto& params = op.runtime_params();
+        const auto& params = op.solve_params();
         prepare_source_materialized(op, x);
         op.workspace.geometry.update(params.a, params.R0, params.Z0, op.workspace.profiles);
         op.workspace.source_runtime.benchmark_fill_pf_psin_integrand(integrand, op.workspace.geometry);
@@ -3001,7 +3037,7 @@ namespace
     template <GeometryProbeMode Mode>
     void run_geometry_probe(BenchOperator& op) noexcept
     {
-        const auto& params = op.runtime_params();
+        const auto& params = op.solve_params();
         using Shape = BenchShape;
 
         constexpr size_t profile_value   = 0;
@@ -3345,15 +3381,15 @@ namespace
                         SourceRadialVector&                         source_aux,
         ResidualMomentRows&                         residual_moments)
     {
-        const auto& params = op.runtime_params();
+        const auto& params = op.solve_params();
         switch (stage)
         {
         case StageKind::ProfilesFixed:
-            op.workspace.profiles.refresh_fixed(params.profile_params);
+            op.workspace.profiles.refresh_fixed(op.plan.profile_params);
             compiler_barrier(op.workspace.profiles.profile_fields.data());
             break;
         case StageKind::ProfilesActive:
-            op.workspace.profiles.refresh_active(x, params.profile_params);
+            op.workspace.profiles.refresh_active(x, op.plan.profile_params);
             compiler_barrier(op.workspace.profiles.profile_fields.data());
             break;
         case StageKind::ProfilesAll:
@@ -3724,13 +3760,13 @@ namespace
                            SourceRadialVector&                         source_aux,
                            ResidualMomentRows&                         residual_moments)
     {
-        const auto& params = op.runtime_params();
+        const auto& params = op.solve_params();
         switch (stage)
         {
         case StageKind::ProfilesFixed:
             break;
         case StageKind::ProfilesActive:
-            op.refresh_static_plan();
+            op.workspace.profiles.load_fixed_from(op.plan.fixed_profiles);
             break;
         case StageKind::ProfilesAll:
             break;
@@ -3814,8 +3850,7 @@ namespace
 
     nlohmann::json run_benchmark(StageKind stage, const Options& options)
     {
-        auto op = std::make_unique<BenchOperator>();
-        configure_operator(*op);
+        auto op = make_benchmark_operator();
         std::array<double, BenchShape::x_size> x{};
         auto                                  state_ring = make_state_ring(options.ring_size);
         PackedVector                           packed{};
@@ -5179,26 +5214,28 @@ namespace
         write_profile_coefficients<Shape, s1_id>(x, make_profile_coefficients<2>(-0.002, 0.0001));
         write_profile_coefficients<Shape, psin_id>(x, make_profile_coefficients<2>(0.010, -0.0002));
 
-        Operator op{};
-        Operator::RuntimeParams params{};
+        typename Operator::Setup setup{};
+        setup.fix_rho = 0.0;
+        setup.profile_params.offsets[k_id] = 1.45;
+        setup.profile_params.offsets[c0_id] = 0.0;
+        setup.profile_params.offsets[c1_id] = 0.0;
+        setup.profile_params.offsets[s1_id] = 0.0;
+        constexpr std::array<double, 5> heat{2.0, 2.75, 3.5, 4.25, 5.0};
+        constexpr std::array<double, 5> current{0.5, 0.625, 0.75, 0.875, 1.0};
+        for (size_t i = 0; i < heat.size(); ++i)
+        {
+            setup.heat[i] = heat[i];
+            setup.current[i] = current[i];
+        }
+
+        Operator op{setup};
+        typename Operator::SolveParams params{};
         params.a = 0.42;
         params.R0 = 1.8;
         params.Z0 = -0.25;
         params.B0 = 2.1;
         params.Ip = 0.75;
-        params.fix_rho = 0.0;
-        params.profile_params.offsets[k_id] = 1.45;
-        params.profile_params.offsets[c0_id] = 0.0;
-        params.profile_params.offsets[c1_id] = 0.0;
-        params.profile_params.offsets[s1_id] = 0.0;
-        op.set_runtime_params(params);
-
-        constexpr std::array<double, 5> heat{2.0, 2.75, 3.5, 4.25, 5.0};
-        constexpr std::array<double, 5> current{0.5, 0.625, 0.75, 0.875, 1.0};
-        op.set_uniform_sources(
-            std::span<const double, heat.size()>{heat.data(), heat.size()},
-            std::span<const double, current.size()>{current.data(), current.size()}
-        );
+        op.set_solve_params(params);
 
         typename Operator::PackedVector packed{};
         op.evaluate(std::span<const double, Shape::x_size>{x.data(), Shape::x_size}, packed);
@@ -5209,7 +5246,7 @@ namespace
         return math::is_finite(packed) && norm1 > 1.0e-12;
     }
 
-    constexpr bool pf_operator_plan_invalidation_ok()
+    constexpr bool pf_operator_setup_lifecycle_ok()
     {
         using Shape    = SourceMaterializationShape;
         using Grid     = SourceMaterializationGrid;
@@ -5224,41 +5261,48 @@ namespace
         Vector<double, Shape::x_size> x{};
         write_profile_coefficients<Shape, psin_id>(x, make_profile_coefficients<3>(0.010, -0.0002));
 
-        Operator op{};
-        Operator::RuntimeParams params{};
+        typename Operator::Setup setup{};
+        setup.fix_rho = 0.0;
+        setup.profile_params.offsets[h_id] = 0.02;
+        setup.profile_params.offsets[v_id] = -0.01;
+        setup.profile_params.offsets[k_id] = 1.45;
+        setup.profile_params.offsets[c0_id] = 0.0;
+        constexpr std::array<double, 5> heat{2.0, 2.75, 3.5, 4.25, 5.0};
+        constexpr std::array<double, 5> current{0.5, 0.625, 0.75, 0.875, 1.0};
+        for (size_t i = 0; i < heat.size(); ++i)
+        {
+            setup.heat[i] = heat[i];
+            setup.current[i] = current[i];
+        }
+
+        Operator op{setup};
+        typename Operator::SolveParams params{};
         params.a = 0.42;
         params.R0 = 1.8;
         params.Z0 = -0.25;
         params.B0 = 2.1;
         params.Ip = 0.75;
-        params.fix_rho = 0.0;
-        params.profile_params.offsets[h_id] = 0.02;
-        params.profile_params.offsets[v_id] = -0.01;
-        params.profile_params.offsets[k_id] = 1.45;
-        params.profile_params.offsets[c0_id] = 0.0;
-        op.set_runtime_params(params);
-
-        constexpr std::array<double, 5> heat{2.0, 2.75, 3.5, 4.25, 5.0};
-        constexpr std::array<double, 5> current{0.5, 0.625, 0.75, 0.875, 1.0};
-        op.set_uniform_sources(
-            std::span<const double, heat.size()>{heat.data(), heat.size()},
-            std::span<const double, current.size()>{current.data(), current.size()}
-        );
+        op.set_solve_params(params);
 
         typename Operator::PackedVector packed{};
         op.evaluate(std::span<const double, Shape::x_size>{x.data(), Shape::x_size}, packed);
-        if (!op.plan.prepared || op.plan.n_axis_fix != source::axis_fix_count<Grid>(0.0))
+        if (op.plan.n_axis_fix != source::axis_fix_count<Grid>(0.0))
             return false;
 
-        auto next = op.runtime_params();
-        next.fix_rho = 0.5;
-        next.profile_params.offsets[k_id] = 1.80;
-        op.set_runtime_params(next);
-        if (op.plan.prepared)
+        auto next_solve = op.solve_params();
+        next_solve.Ip = 1.50;
+        op.set_solve_params(next_solve);
+        if (op.plan.n_axis_fix != source::axis_fix_count<Grid>(0.0) ||
+            !close(op.plan.fixed_profiles.profile_field<k_id>(0, 0), 1.45))
             return false;
+
+        auto next_setup = setup;
+        next_setup.fix_rho = 0.5;
+        next_setup.profile_params.offsets[k_id] = 1.80;
+        op.reprepare(next_setup);
 
         op.evaluate(std::span<const double, Shape::x_size>{x.data(), Shape::x_size}, packed);
-        return op.plan.prepared && op.plan.n_axis_fix == source::axis_fix_count<Grid>(0.5) &&
+        return op.plan.n_axis_fix == source::axis_fix_count<Grid>(0.5) &&
                close(op.plan.fixed_profiles.profile_field<k_id>(0, 0), 1.80);
     }
 
@@ -5324,7 +5368,7 @@ int run(int, char**)
         {"pf_source", pf_source_constexpr_ok()},
         {"residual_pack", residual_pack_constexpr_ok()},
         {"pf_operator", pf_operator_constexpr_ok()},
-        {"pf_operator_plan_invalidation", pf_operator_plan_invalidation_ok()},
+        {"pf_operator_setup_lifecycle", pf_operator_setup_lifecycle_ok()},
     };
     report["quadrature"] = {
         {"chebyshev_moment_error_n16_degree7", max_moment_error<Chebyshev, 16>(7)},
@@ -5348,7 +5392,7 @@ int run(int, char**)
                     runtime_profile_semantics_constexpr_ok() && geometry_circular_constexpr_ok() &&
                     source_materialization_constexpr_ok() && pf_source_constexpr_ok() &&
                     residual_pack_constexpr_ok() && pf_operator_constexpr_ok() &&
-                    pf_operator_plan_invalidation_ok() &&
+                    pf_operator_setup_lifecycle_ok() &&
                     runtime_library_ok(report);
 
     std::cout << report.dump(2) << '\n';
