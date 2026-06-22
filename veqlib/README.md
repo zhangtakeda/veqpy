@@ -120,7 +120,10 @@ family lengths, or packed coefficient layout from runtime state.
 
 ## Kernel Plan and Workspace Boundary
 
-`source::PfPsinUniformIpOperator` separates repeated callback state into a
+`operators.h` is the route-operator expansion surface: it currently carries the
+single `operators::PfPsinUniformIpOperator` instantiation shell and is intended to
+collect the benchmark-route operator family as those routes are expanded.
+`operators::PfPsinUniformIpOperator` separates repeated callback state into a
 small read-mostly `KernelPlan` and a mutable `KernelWorkspace`. The plan owns
 setup-derived fixed profile rows and the precomputed `fix_rho` axis-count for
 the concrete topology. The workspace owns the active/fixed profile slab,

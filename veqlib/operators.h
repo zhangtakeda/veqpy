@@ -7,7 +7,7 @@
 #include <cstddef>
 #include <span>
 
-namespace source::detail
+namespace operators::detail
 {
     using std::size_t;
 
@@ -110,10 +110,10 @@ namespace source::detail
     private:
         RuntimeParams params_{};
     };
-} // namespace source::detail
+} // namespace operators::detail
 
-namespace source
+namespace operators
 {
     using detail::PfPsinUniformIpOperator;
     using detail::PfPsinUniformIpRuntimeParams;
-} // namespace source
+} // namespace operators

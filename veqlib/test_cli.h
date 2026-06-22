@@ -32,7 +32,7 @@ extern int enzyme_width;
 #include "grid.h"
 #include "math.h"
 #include "nonlinear.h"
-#include "source/pf_psin_uniform_ip.h"
+#include "operators.h"
 #include "profiles.h"
 #include "source.h"
 #include "tensor.h"
@@ -44,7 +44,7 @@ namespace
 {
     using grid::Legendre;
     using grid::Spectral;
-    using source::PfPsinUniformIpOperator;
+    using operators::PfPsinUniformIpOperator;
     using std::size_t;
     using tensor::uninitialized;
 
@@ -2196,7 +2196,7 @@ int run(int argc, char** argv)
 
 #include "grid.h"
 #include "math.h"
-#include "source/pf_psin_uniform_ip.h"
+#include "operators.h"
 #include "profiles.h"
 #include "source.h"
 #include "tensor.h"
@@ -2209,7 +2209,7 @@ namespace
     using grid::Grid;
     using grid::Legendre;
     using grid::Spectral;
-    using source::PfPsinUniformIpOperator;
+    using operators::PfPsinUniformIpOperator;
     using std::size_t;
     using tensor::Vector;
 
@@ -2658,7 +2658,7 @@ int run(int, char**)
 #include "geometry.h"
 #include "grid.h"
 #include "math.h"
-#include "source/pf_psin_uniform_ip.h"
+#include "operators.h"
 #include "profiles.h"
 #include "residual.h"
 #include "source.h"
@@ -2681,7 +2681,7 @@ namespace
     using grid::Spectral;
     using math::cos;
     using math::sin;
-    using source::PfPsinUniformIpOperator;
+    using operators::PfPsinUniformIpOperator;
     using profiles::OptimizedProfileShapeFromCountsT;
     using residual::surface_G;
     using source::axis_fix_count;
@@ -3920,7 +3920,7 @@ int run(int argc, char** argv)
 #include "grid.h"
 #include "linalg.h"
 #include "math.h"
-#include "source/pf_psin_uniform_ip.h"
+#include "operators.h"
 #include "profiles.h"
 #include "residual.h"
 #include "source.h"
@@ -3958,7 +3958,7 @@ namespace
     using linalg::GolubReinsch;
     using linalg::Householder;
     using linalg::Thomas;
-    using source::PfPsinUniformIpOperator;
+    using operators::PfPsinUniformIpOperator;
     using residual::ResidualRuntime;
     using linalg::factorize;
     using linalg::factorize_into;
