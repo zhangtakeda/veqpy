@@ -55,7 +55,7 @@ artifacts when the environment supports it.
 | --- | --- | ---: | --- | --- | --- | --- |
 | Source radial multi-matvec (`tensor_layout::RadialGridMatvecPlan<GridType>`) | `source_update` / `source_materialize` | 32x16x1 | RELAXED/FMA | Explicit AVX2/FMA path exists; analysis artifact still required after extraction | P1 source dual-output packed experiment summaries show retained source/evaluate gains | Keep extracted `tensor_layout.h` / `tensor_kernels.h` boundary |
 | Geometry dynamic trig + metric sweep | `geometry` / `evaluate` | 32x16x1 and topology matrix | RELAXED | Reduced-Taylor path is part of current kernel contract; add `clang-analysis` record before further edits | Existing experiments record reduced-Taylor as retained across topology matrix | Keep; do not hand-write new SIMD without A/B evidence |
-| Source normalization/sign/root-row passes | `source_update` | 32x16x1 plus `simd-tail` | RELAXED/FMA | Missing | Missing for fused candidates in the current tree | Candidate for source fusion PR |
+| Source normalization/sign/root-row passes | `source_normalize` / `source_update` | 32x16x1 | FMA | No retained explicit SIMD; scalar/fused candidates only | `experiments/8657d0a-20260622-pr5-source-fusion/stage-ab.json` rejects sign-store/direct-normalize candidates because production `source_update` did not clear the gate | Keep current production order; revisit only with source-update + solve evidence |
 | Residual materialize/update + pack | `residual_update` / `residual_pack` | 32x16x1 | RELAXED | Missing final assembly record | Prior residual fusion probes did not justify replacing materialized update + pack | Keep current shape until a stronger moment-plan candidate clears stage + solve gates |
 
 ## Required artifact fields

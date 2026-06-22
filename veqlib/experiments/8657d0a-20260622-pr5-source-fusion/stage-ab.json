@@ -1,0 +1,234 @@
+{
+  "schema_version": 1,
+  "decision": "reject-candidate",
+  "description": "PR5 source fusion candidate A/B: base 8657d0a vs discarded working tree with transform helper and sign-application/store fusion. A direct root-row normalize fusion was also tested earlier and rejected because source_update regressed.",
+  "build_preset": "clang-release-fma",
+  "cpu_pinning": "taskset -c 2",
+  "base_worktree": "/tmp/veqpy-pr5-base",
+  "stage_results": [
+    {
+      "stage": "source_normalize",
+      "rows": [
+        {
+          "label": "base",
+          "commit": "8657d0a",
+          "command": [
+            "taskset",
+            "-c",
+            "2",
+            "/tmp/veqpy-pr5-base/veqlib/build/release-fma/veqlib_main",
+            "--mode",
+            "stage",
+            "--stage",
+            "source_normalize",
+            "--repeat",
+            "30",
+            "--warmup",
+            "5",
+            "--inner",
+            "10000"
+          ],
+          "avg_ns": 76.19784,
+          "median_ns": 73.84604999999999,
+          "p95_ns": 88.6185,
+          "repeat": 30,
+          "warmup": 5,
+          "inner": 10000
+        },
+        {
+          "label": "candidate",
+          "commit": "discarded-working-tree",
+          "command": [
+            "taskset",
+            "-c",
+            "2",
+            "/home/rhzhang/veqpy/veqlib/build/release-fma/veqlib_main",
+            "--mode",
+            "stage",
+            "--stage",
+            "source_normalize",
+            "--repeat",
+            "30",
+            "--warmup",
+            "5",
+            "--inner",
+            "10000"
+          ],
+          "avg_ns": 73.46747000000002,
+          "median_ns": 68.64775,
+          "p95_ns": 85.3149,
+          "repeat": 30,
+          "warmup": 5,
+          "inner": 10000
+        }
+      ],
+      "median_ratio_candidate_over_base": 0.9296062551754631,
+      "avg_ratio_candidate_over_base": 0.9641673569749486
+    },
+    {
+      "stage": "source_update",
+      "rows": [
+        {
+          "label": "base",
+          "commit": "8657d0a",
+          "command": [
+            "taskset",
+            "-c",
+            "2",
+            "/tmp/veqpy-pr5-base/veqlib/build/release-fma/veqlib_main",
+            "--mode",
+            "stage",
+            "--stage",
+            "source_update",
+            "--repeat",
+            "30",
+            "--warmup",
+            "5",
+            "--inner",
+            "10000"
+          ],
+          "avg_ns": 292.37122333333343,
+          "median_ns": 288.26955,
+          "p95_ns": 319.877,
+          "repeat": 30,
+          "warmup": 5,
+          "inner": 10000
+        },
+        {
+          "label": "candidate",
+          "commit": "discarded-working-tree",
+          "command": [
+            "taskset",
+            "-c",
+            "2",
+            "/home/rhzhang/veqpy/veqlib/build/release-fma/veqlib_main",
+            "--mode",
+            "stage",
+            "--stage",
+            "source_update",
+            "--repeat",
+            "30",
+            "--warmup",
+            "5",
+            "--inner",
+            "10000"
+          ],
+          "avg_ns": 301.6305966666667,
+          "median_ns": 294.42665,
+          "p95_ns": 342.2909,
+          "repeat": 30,
+          "warmup": 5,
+          "inner": 10000
+        }
+      ],
+      "median_ratio_candidate_over_base": 1.0213588289155064,
+      "avg_ratio_candidate_over_base": 1.0316699202738453
+    },
+    {
+      "stage": "evaluate",
+      "rows": [
+        {
+          "label": "base",
+          "commit": "8657d0a",
+          "command": [
+            "taskset",
+            "-c",
+            "2",
+            "/tmp/veqpy-pr5-base/veqlib/build/release-fma/veqlib_main",
+            "--mode",
+            "stage",
+            "--stage",
+            "evaluate",
+            "--repeat",
+            "30",
+            "--warmup",
+            "5",
+            "--inner",
+            "3000"
+          ],
+          "avg_ns": 7466.631411111112,
+          "median_ns": 7411.292166666666,
+          "p95_ns": 7782.803333333333,
+          "repeat": 30,
+          "warmup": 5,
+          "inner": 3000
+        },
+        {
+          "label": "candidate",
+          "commit": "discarded-working-tree",
+          "command": [
+            "taskset",
+            "-c",
+            "2",
+            "/home/rhzhang/veqpy/veqlib/build/release-fma/veqlib_main",
+            "--mode",
+            "stage",
+            "--stage",
+            "evaluate",
+            "--repeat",
+            "30",
+            "--warmup",
+            "5",
+            "--inner",
+            "3000"
+          ],
+          "avg_ns": 7408.0342666666675,
+          "median_ns": 7411.337333333333,
+          "p95_ns": 7652.441,
+          "repeat": 30,
+          "warmup": 5,
+          "inner": 3000
+        }
+      ],
+      "median_ratio_candidate_over_base": 1.000006094303888,
+      "avg_ratio_candidate_over_base": 0.9921521310992737
+    }
+  ],
+  "solve_results": [
+    {
+      "label": "base",
+      "commit": "8657d0a",
+      "command": [
+        "taskset",
+        "-c",
+        "2",
+        "/tmp/veqpy-pr5-base/veqlib/build/release-fma/veqlib_main",
+        "--mode",
+        "solve",
+        "--repeat",
+        "15",
+        "--warmup",
+        "5"
+      ],
+      "median_ms": 0.319759,
+      "avg_ms": 0.3492852666666667,
+      "p95_ms": 0.4683876999999999,
+      "nfev": 38,
+      "accepted_by_veqpy": true,
+      "raw_norm": 9.809034834971342e-09
+    },
+    {
+      "label": "candidate",
+      "commit": "discarded-working-tree",
+      "command": [
+        "taskset",
+        "-c",
+        "2",
+        "/home/rhzhang/veqpy/veqlib/build/release-fma/veqlib_main",
+        "--mode",
+        "solve",
+        "--repeat",
+        "15",
+        "--warmup",
+        "5"
+      ],
+      "median_ms": 0.315971,
+      "avg_ms": 0.32903486666666665,
+      "p95_ms": 0.37764019999999987,
+      "nfev": 38,
+      "accepted_by_veqpy": true,
+      "raw_norm": 9.809034834971342e-09
+    }
+  ],
+  "interpretation": "Candidate improves the isolated source_normalize probe and this pinned solve sample, but production source_update regresses; source.h changes are not retained."
+}
