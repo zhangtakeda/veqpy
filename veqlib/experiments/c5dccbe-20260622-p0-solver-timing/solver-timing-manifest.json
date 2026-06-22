@@ -1,0 +1,27 @@
+{
+  "artifacts": [
+    "solve-solver-timing-relaxed-taskset-c2.json",
+    "comparator-after-solver-timing.json",
+    "solver-timing-summary.json"
+  ],
+  "base_commit": "c5dccbe",
+  "commands": [
+    "cmake --build --preset clang-debug -j$(nproc)",
+    "ctest --test-dir build/debug --output-on-failure",
+    "cmake --build --preset clang-release -j$(nproc)",
+    "ctest --test-dir build/release --output-on-failure",
+    "../.venv/bin/python compare_pf_psin_uniform_veqpy.py --cxx-exe build/release/veqlib_main --tolerance 1e-9",
+    "taskset -c 2 build/release/veqlib_main --mode pf-benchmark --repeat 30 --warmup 5"
+  ],
+  "current_head": "c5dccbe10e21f36957d3c6f2da57d114a8d71dfc",
+  "dirty_diff_sha256": "411e625b7b0755781ccfa13077d2e27e633649cf3f2edcfe745cd355af9672a6",
+  "git_status_short": "M veqlib/pf_psin_uniform_benchmark_cli.h\n?? veqlib/experiments/0d68ce3-20260622-p0-kernelplan/comparator-after-solver-timing.json\n?? veqlib/experiments/c5dccbe-20260622-p0-solver-timing/",
+  "notes": "Callback timing uses std::chrono inside diagnostic benchmark callbacks; use counters and split proportions, not absolute solver timing, as optimization evidence.",
+  "phase": "P0-D solver timing split",
+  "schema_version": 1,
+  "system": {
+    "machine": "x86_64",
+    "platform": "Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "processor": "x86_64"
+  }
+}

@@ -232,6 +232,13 @@ namespace
         int                                   jacobian_component_evaluations = 0;
         int                                   jvp_evaluations = 0;
         int                                   linear_iterations = 0;
+        double                                residual_callback_ms = 0.0;
+        double                                residual_kernel_ms = 0.0;
+        double                                residual_scale_ms = 0.0;
+        double                                final_residual_ms = 0.0;
+        double                                jacobian_callback_ms = 0.0;
+        double                                jvp_callback_ms = 0.0;
+        double                                linear_solve_ms = 0.0;
         bool                                  accepted    = false;
     };
 
@@ -249,6 +256,11 @@ namespace
         for (double value : values)
             total += value * value;
         return std::sqrt(total);
+    }
+
+    double elapsed_ms_since(std::chrono::steady_clock::time_point started) noexcept
+    {
+        return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
     }
 
     constexpr double veqpy_acceptance_threshold() noexcept
@@ -655,10 +667,30 @@ namespace
         CaseInput     input{};
         int           evaluations = 0;
         int           jacobian_component_evaluations = 0;
+        double        residual_callback_ms = 0.0;
+        double        residual_kernel_ms   = 0.0;
+        double        residual_scale_ms    = 0.0;
+        double        final_residual_ms    = 0.0;
+        double        jacobian_callback_ms = 0.0;
+        double        jvp_callback_ms      = 0.0;
+        double        linear_solve_ms      = 0.0;
 
         explicit SolveContext(const CaseInput& case_input) : input(case_input)
         {
             configure_operator_for_case(op, input);
+        }
+
+        void reset_solve_counters() noexcept
+        {
+            evaluations                      = 0;
+            jacobian_component_evaluations   = 0;
+            residual_callback_ms             = 0.0;
+            residual_kernel_ms               = 0.0;
+            residual_scale_ms                = 0.0;
+            final_residual_ms                = 0.0;
+            jacobian_callback_ms             = 0.0;
+            jvp_callback_ms                  = 0.0;
+            linear_solve_ms                  = 0.0;
         }
 
         void raw_residual(
@@ -672,6 +704,8 @@ namespace
                 residual[i] = raw[i];
         }
     };
+
+    void scaled_residual_z_no_count(SolveContext& context, const double* z, double* fvec) noexcept;
 
 #ifdef ENABLE_ENZYME
     struct EnzymeResidualContext
@@ -720,35 +754,29 @@ namespace
 
         auto& context = *static_cast<SolveContext*>(data);
         ++context.evaluations;
-
-        const auto x = decode_z_to_x(
-            std::span<const double, BenchShape::x_size>{z, BenchShape::x_size},
-            context.input.x_scale
-        );
-
-        PackedVector raw{uninitialized};
-        context.raw_residual(
-            std::span<const double, BenchShape::x_size>{x.data(), BenchShape::x_size},
-            std::span<double, BenchShape::x_size>{raw.data(), BenchShape::x_size}
-        );
-        for (size_t i = 0; i < BenchShape::x_size; ++i)
-            fvec[i] = raw[i] / context.input.residual_scale[i];
+        scaled_residual_z_no_count(context, z, fvec);
         return 0;
     }
 
     void scaled_residual_z_no_count(SolveContext& context, const double* z, double* fvec) noexcept
     {
+        const auto callback_started = std::chrono::steady_clock::now();
         const auto x = decode_z_to_x(
             std::span<const double, BenchShape::x_size>{z, BenchShape::x_size},
             context.input.x_scale
         );
         PackedVector raw{uninitialized};
+        const auto kernel_started = std::chrono::steady_clock::now();
         context.raw_residual(
             std::span<const double, BenchShape::x_size>{x.data(), BenchShape::x_size},
             std::span<double, BenchShape::x_size>{raw.data(), BenchShape::x_size}
         );
+        context.residual_kernel_ms += elapsed_ms_since(kernel_started);
+        const auto scale_started = std::chrono::steady_clock::now();
         for (size_t i = 0; i < BenchShape::x_size; ++i)
             fvec[i] = raw[i] / context.input.residual_scale[i];
+        context.residual_scale_ms += elapsed_ms_since(scale_started);
+        context.residual_callback_ms += elapsed_ms_since(callback_started);
     }
 
 #ifdef ENABLE_ENZYME
@@ -974,7 +1002,9 @@ namespace
         if (iflag == 2)
         {
             auto& context = *static_cast<SolveContext*>(data);
+            const auto started = std::chrono::steady_clock::now();
             fill_enzyme_jacobian_z(context, z, fjac, ldfjac);
+            context.jacobian_callback_ms += elapsed_ms_since(started);
         }
         return 0;
     }
@@ -1091,6 +1121,7 @@ namespace
         auto&            data = *static_cast<SundialsSolveData*>(user_data);
         auto*            z    = N_VGetArrayPointer(u);
         ++data.jacobian_evaluations;
+        const auto started = std::chrono::steady_clock::now();
 
 #ifdef ENABLE_ENZYME
         std::array<double, n * n> column_major{};
@@ -1107,6 +1138,7 @@ namespace
                 SM_ELEMENT_D(jacobian, static_cast<sunindextype>(row), static_cast<sunindextype>(col)) =
                     row_major[row * n + col];
 #endif
+        data.context->jacobian_callback_ms += elapsed_ms_since(started);
         return 0;
     }
 
@@ -1114,6 +1146,7 @@ namespace
     {
         auto& data = *static_cast<SundialsSolveData*>(user_data);
         ++data.jvp_evaluations;
+        const auto started = std::chrono::steady_clock::now();
 #ifdef ENABLE_ENZYME
         fill_enzyme_jvp_z(
             *data.context,
@@ -1129,6 +1162,7 @@ namespace
             N_VGetArrayPointer(jv)
         );
 #endif
+        data.context->jvp_callback_ms += elapsed_ms_since(started);
         return 0;
     }
 
@@ -1175,10 +1209,12 @@ namespace
             std::span<const double, BenchShape::x_size>{z, BenchShape::x_size},
             context.input.x_scale
         );
+        const auto final_residual_started = std::chrono::steady_clock::now();
         context.raw_residual(
             std::span<const double, BenchShape::x_size>{result.x.data(), BenchShape::x_size},
             std::span<double, BenchShape::x_size>{result.raw.data(), BenchShape::x_size}
         );
+        result.final_residual_ms = elapsed_ms_since(final_residual_started);
         for (size_t i = 0; i < BenchShape::x_size; ++i)
             result.scaled[i] = result.raw[i] / context.input.residual_scale[i];
         result.raw_norm = norm2(std::span<const double, BenchShape::x_size>{
@@ -1189,14 +1225,19 @@ namespace
             result.scaled.data(),
             BenchShape::x_size,
         });
+        result.residual_callback_ms = context.residual_callback_ms;
+        result.residual_kernel_ms   = context.residual_kernel_ms;
+        result.residual_scale_ms    = context.residual_scale_ms;
+        result.jacobian_callback_ms = context.jacobian_callback_ms;
+        result.jvp_callback_ms      = context.jvp_callback_ms;
+        result.linear_solve_ms      = context.linear_solve_ms;
         result.alpha    = {context.op.workspace.source_runtime.alpha1, context.op.workspace.source_runtime.alpha2};
         result.accepted = result.raw_norm <= veqpy_acceptance_threshold();
     }
 
     SolveResult run_hybrd_once(SolveContext& context)
     {
-        context.evaluations = 0;
-        context.jacobian_component_evaluations = 0;
+        context.reset_solve_counters();
         auto z = encode_x_to_z(context.input.x0, context.input.x_scale);
         PackedVector fvec{uninitialized};
 
@@ -1249,8 +1290,7 @@ namespace
 #ifdef ENABLE_ENZYME
     SolveResult run_hybrj_once(SolveContext& context)
     {
-        context.evaluations = 0;
-        context.jacobian_component_evaluations = 0;
+        context.reset_solve_counters();
         auto z = encode_x_to_z(context.input.x0, context.input.x_scale);
         PackedVector fvec{uninitialized};
 
@@ -1301,8 +1341,7 @@ namespace
     template <typename Policy>
     SolveResult run_nonlinear_policy_once(SolveContext& context)
     {
-        context.evaluations = 0;
-        context.jacobian_component_evaluations = 0;
+        context.reset_solve_counters();
         const auto encoded = encode_x_to_z(context.input.x0, context.input.x_scale);
         tensor::Vector<double, BenchShape::x_size> z{uninitialized};
         std::copy(encoded.begin(), encoded.end(), z.begin());
@@ -1336,8 +1375,7 @@ namespace
     template <typename Policy>
     SolveResult run_nonlinear_residual_policy_once(SolveContext& context)
     {
-        context.evaluations = 0;
-        context.jacobian_component_evaluations = 0;
+        context.reset_solve_counters();
         const auto encoded = encode_x_to_z(context.input.x0, context.input.x_scale);
         tensor::Vector<double, BenchShape::x_size> z{uninitialized};
         std::copy(encoded.begin(), encoded.end(), z.begin());
@@ -1387,8 +1425,7 @@ namespace
     SolveResult run_sundials_once(SolveContext& context, SolverKind solver)
     {
         constexpr size_t n = BenchShape::x_size;
-        context.evaluations = 0;
-        context.jacobian_component_evaluations = 0;
+        context.reset_solve_counters();
         auto z = encode_x_to_z(context.input.x0, context.input.x_scale);
 
         SUNContext      sunctx        = nullptr;
@@ -1541,6 +1578,16 @@ namespace
             {"jacobian_component_evaluations", result.jacobian_component_evaluations},
             {"jvp_evaluations", result.jvp_evaluations},
             {"linear_iterations", result.linear_iterations},
+            {"callback_timing_ms",
+             {
+                 {"residual_total", result.residual_callback_ms},
+                 {"residual_kernel", result.residual_kernel_ms},
+                 {"residual_scale", result.residual_scale_ms},
+                 {"final_residual", result.final_residual_ms},
+                 {"jacobian_total", result.jacobian_callback_ms},
+                 {"jvp_total", result.jvp_callback_ms},
+                 {"linear_solve", result.linear_solve_ms},
+             }},
         };
     }
 

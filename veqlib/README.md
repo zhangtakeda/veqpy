@@ -289,6 +289,15 @@ through a deterministic synthetic solver-state ring controlled by `--ring-size`;
 use it to compare warm repeated callbacks against state-varying callback
 traffic, not as a real nonlinear-solver trajectory.
 
+`veqlib_main --mode pf-benchmark` keeps the solver-level JSON compatible while
+adding diagnostic callback timing under `final.callback_timing_ms`. The current
+fields split scaled residual callbacks into `residual_total`,
+`residual_kernel`, and `residual_scale`, keep post-solve diagnostic residual
+time as `final_residual`, and reserve `jacobian_total`, `jvp_total`, and
+`linear_solve` for Jacobian/JVP/linear-solver paths. These timings use
+`std::chrono` instrumentation inside callbacks, so use them for attribution and
+counter alignment rather than as the cleanest absolute solve-time baseline.
+
 To compare VEQPy's Python solve latency against a direct VEQlib nanobind call,
 build the Release module and run the Python comparison script:
 

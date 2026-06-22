@@ -130,6 +130,40 @@ median improved. `profiles_all` now includes explicit static-plan refresh plus
 fixed-row seeding and is not the callback gate; it remains close enough to keep
 the boundary because static refresh is outside repeated solver callbacks.
 
+## 2026-06-22 P0-D Solver callback timing split
+
+Solver benchmark JSON now preserves the existing counters while adding
+`final.callback_timing_ms`. The new fields separate scaled residual callback
+time into total callback, raw residual kernel, and residual-scaling portions;
+the post-solve diagnostic residual is reported separately as `final_residual`.
+Jacobian, JVP, and linear-solver timing fields are present for non-residual-only
+solver paths and remain zero for the residual-only CMINPACK `hybrd` baseline.
+
+Validation after adding solver timing:
+
+- Release CTest: 4/4 passed.
+- Debug CTest: 4/4 passed.
+- RELAXED Python/C++ comparator: passed with `max_abs=7.66e-10`.
+
+Pinned residual-only solve timing artifact:
+`veqlib/experiments/c5dccbe-20260622-p0-solver-timing`.
+
+| field | value |
+| --- | ---: |
+| solve median | 0.209 ms |
+| solve p95 | 0.249 ms |
+| `nfev` / callbacks | 38 / 38 |
+| residual callback total | 0.182 ms |
+| residual raw-kernel total | 0.179 ms |
+| residual scale total | 0.001 ms |
+| final diagnostic residual | 0.004 ms |
+
+Interpretation: for the current residual-only path, almost all callback time is
+inside the route raw-residual kernel, not z/x scaling or residual normalization.
+Because the timing probes use `std::chrono` inside callbacks, these artifacts
+are diagnostic attribution evidence; use the P0-C uninstrumented solve/stage
+samples for cleaner absolute performance comparisons.
+
 ## Stable release stage timing
 
 | stage | median ns/call | avg ns/call | p95/median | CV |

@@ -1,0 +1,69 @@
+{
+  "artifact": "experiments/c5dccbe-20260622-p0-solver-timing/solve-solver-timing-relaxed-taskset-c2.json",
+  "callback_timing_ms": {
+    "final_residual": 0.004438999999999999,
+    "jacobian_total": 0.0,
+    "jvp_total": 0.0,
+    "linear_solve": 0.0,
+    "residual_kernel": 0.17882399999999998,
+    "residual_scale": 0.001196,
+    "residual_total": 0.18216100000000002
+  },
+  "final_counters": {
+    "callback_evaluations": 38,
+    "jacobian_component_evaluations": 0,
+    "jvp_evaluations": 0,
+    "linear_iterations": 0,
+    "nfev": 38,
+    "njev": 0
+  },
+  "notes": [
+    "Timing fields are diagnostic and include std::chrono instrumentation overhead inside solver callbacks.",
+    "residual_kernel measures VEQlib raw residual evaluation inside scaled residual callbacks.",
+    "final_residual is the post-solve diagnostic residual and is kept separate from callback totals."
+  ],
+  "phase": "P0-D solver callback timing split",
+  "schema_version": 1,
+  "solve_timing": {
+    "avg_ms": 0.21490216666666664,
+    "max_ms": 0.255139,
+    "median_ms": 0.208532,
+    "min_ms": 0.20571199999999998,
+    "p95_ms": 0.24928734999999996,
+    "repeat_count": 30,
+    "samples_ms": [
+      0.208343,
+      0.254704,
+      0.218167,
+      0.208025,
+      0.207248,
+      0.207112,
+      0.214411,
+      0.20751599999999998,
+      0.20627199999999998,
+      0.206513,
+      0.20624699999999999,
+      0.214174,
+      0.20642,
+      0.206333,
+      0.20707199999999998,
+      0.206843,
+      0.22075599999999998,
+      0.223437,
+      0.20571199999999998,
+      0.20687799999999998,
+      0.242667,
+      0.255139,
+      0.209858,
+      0.20846699999999999,
+      0.209838,
+      0.20859699999999998,
+      0.21029899999999999,
+      0.224898,
+      0.21426299999999998,
+      0.220856
+    ],
+    "std_ms": 0.013274331850312555
+  },
+  "success": true
+}
