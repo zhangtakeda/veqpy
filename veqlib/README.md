@@ -26,10 +26,13 @@ setup data should be `constexpr` wherever the compile-time cost is acceptable.
 
 ## Current Target
 
-The current CMake target is `veqlib_main`. It is the canonical C++ validation
-and benchmark executable; all optimization comparisons should run through
-`main.cpp` subcommands instead of separate test binaries. Its default `probe`
-mode is a dependency smoke test, not the final VEQ kernel:
+The current CMake targets are `veqlib_main` and the optional nanobind module
+`veqlib_ext`. `veqlib_main` is the canonical C++ validation and benchmark
+executable; all executable-side optimization comparisons should run through
+`main.cpp` subcommands instead of separate test binaries. `veqlib_ext` exposes
+the same PF-psin-uniform-Ip benchmark path to Python so Python can measure the
+latency of a direct VEQlib call without launching a subprocess. The default
+`veqlib_main probe` mode is a dependency smoke test, not the final VEQ kernel:
 
 - instantiates compile-time quadrature nodes/weights for Chebyshev, Legendre,
   Lobatto, and Radau rules on the unit interval;
@@ -48,6 +51,25 @@ The generated-topology validation suite is now `veqlib_main --mode
 temp-validation`. It checks that generated `config::DefaultTopology` values can
 instantiate one concrete `grid::Grid` and `profiles::Profiles` pair without
 making those generic types depend on `config.h`.
+
+The Python extension currently exposes a deliberately narrow, single-thread
+surface:
+
+```python
+import veqlib_ext
+
+veqlib_ext.validate_pf_psin_uniform_ip_json()
+veqlib_ext.solve_pf_psin_uniform_ip_json(repeat=10, warmup=1)
+veqlib_ext.stage_pf_psin_uniform_ip_json(stage="evaluate", repeat=10, inner=10000)
+
+solver = veqlib_ext.PfPsinUniformIpSolver()
+solver.warmup(5)
+solver.solve_json()
+```
+
+The free functions return the same JSON payloads as the corresponding
+`veqlib_main` modes. `PfPsinUniformIpSolver` keeps the C++ context alive across
+calls and is the interface used for Python-perceived latency comparisons.
 
 ## Default Topology
 
@@ -246,6 +268,25 @@ deterministic synthetic solver-state ring controlled by `--ring-size`; use it to
 compare warm repeated callbacks against state-varying callback traffic, not as a
 real nonlinear-solver trajectory.
 
+To compare VEQPy's Python solve latency against a direct VEQlib nanobind call,
+build the Release module and run the Python comparison script:
+
+```bash
+cmake --preset clang-release
+cmake --build --preset clang-release --target veqlib_ext
+../.venv/bin/python benchmark_pf_psin_uniform_compare.py \
+  --cxx-backend nanobind \
+  --module-dir build/release \
+  --repeat 30 \
+  --warmup 5 \
+  --no-write
+```
+
+This benchmark times `Solver.solve()` and
+`PfPsinUniformIpSolver.solve_json()` from Python with `time.perf_counter_ns()`.
+Use `--cxx-backend subprocess --cxx-exe build/release/veqlib_main` only when
+you want the older executable-internal timing path.
+
 For topology sweeps, use `stage_topology_matrix.py`. It creates isolated CMake
 build directories under `build/topology-matrix/`, configures `DefaultTopology`
 for each requested `Nr x Nt x Mmax`, runs `veqlib_main --mode stage`, and emits a
@@ -293,6 +334,7 @@ The versions below are the currently validated local toolchain versions.
 | SUNDIALS KINSOL    | Newton / Newton-Krylov experiments   | package `libsundials-dev 6.4.1+dfsg1-3build4`              |
 | LAPACKE / LAPACK   | Dense linear algebra interface       | package `liblapacke-dev 3.12.0-3build1.1`                  |
 | OpenBLAS           | BLAS backend                         | package `libopenblas-dev 0.3.26+ds-1ubuntu0.1`             |
+| nanobind           | Python extension bridge              | Python package `nanobind 2.13.0` in `.venv`                |
 | LLVM dev files     | Enzyme build dependency              | package `llvm-18-dev 1:18.1.3-1ubuntu1`                    |
 | libclang dev files | ClangEnzyme build dependency         | package `libclang-18-dev 1:18.1.3-1ubuntu1`                |
 | Enzyme             | clang plugin for autodiff            | source build `v0.0.268`, git commit `41b6c734`             |
@@ -488,6 +530,13 @@ sudo apt install -y \
   libsundials-dev \
   liblapacke-dev \
   libopenblas-dev
+```
+
+The Python extension target also needs nanobind in the Python environment used
+by CMake. In this checkout, CMake prefers `../.venv/bin/python` when it exists:
+
+```bash
+.venv/bin/python -m pip install nanobind
 ```
 
 The Enzyme plugin was built from source against LLVM/Clang 18. The critical

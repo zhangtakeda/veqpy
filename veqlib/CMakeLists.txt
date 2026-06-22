@@ -12,6 +12,7 @@ option(VEQLIB_ENABLE_NATIVE_OPTIMIZATIONS "Enable native CPU and loop optimizati
 option(VEQLIB_ENABLE_THIN_LTO "Enable clang ThinLTO and lld for optimized builds" ON)
 option(VEQLIB_ANALYSIS_BUILD "Build with source-correlated optimization diagnostics" OFF)
 option(VEQLIB_FORCE_OPENBLAS_SINGLE_THREAD "Force OpenBLAS to one runtime thread inside veqlib targets" ON)
+option(VEQLIB_ENABLE_PYTHON_BINDINGS "Build the nanobind Python extension for VEQlib" ON)
 set(VEQLIB_FP_MODE "RELAXED" CACHE STRING "Floating-point mode: STRICT, FMA, or RELAXED")
 set_property(CACHE VEQLIB_FP_MODE PROPERTY STRINGS STRICT FMA RELAXED)
 set(VEQLIB_ENZYME_PLUGIN "" CACHE FILEPATH "Path to ClangEnzyme shared library")
@@ -456,7 +457,7 @@ veqlib_require_clang()
 
 set(VEQLIB_COMMON_SOURCES linalg.cpp)
 
-function(veqlib_configure_executable target)
+function(veqlib_configure_target target)
     target_include_directories(
         "${target}"
         PRIVATE
@@ -476,11 +477,60 @@ function(veqlib_configure_executable target)
     veqlib_link_dependencies("${target}")
 endfunction()
 
+function(veqlib_configure_executable target)
+    veqlib_configure_target("${target}")
+endfunction()
+
 add_executable(veqlib_main main.cpp ${VEQLIB_COMMON_SOURCES})
 veqlib_configure_executable(veqlib_main)
 veqlib_enable_enzyme(veqlib_main)
+
+if(VEQLIB_ENABLE_PYTHON_BINDINGS)
+    if(NOT Python_EXECUTABLE AND EXISTS "${PROJECT_SOURCE_DIR}/../.venv/bin/python")
+        set(Python_EXECUTABLE "${PROJECT_SOURCE_DIR}/../.venv/bin/python" CACHE FILEPATH "Python interpreter")
+    endif()
+    find_package(Python 3.12 COMPONENTS Interpreter Development.Module REQUIRED)
+
+    if(NOT nanobind_DIR)
+        execute_process(
+            COMMAND "${Python_EXECUTABLE}" -m nanobind --cmake_dir
+            RESULT_VARIABLE VEQLIB_NANOBIND_CMAKE_RESULT
+            OUTPUT_VARIABLE VEQLIB_NANOBIND_CMAKE_DIR
+            ERROR_VARIABLE VEQLIB_NANOBIND_CMAKE_ERROR
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_STRIP_TRAILING_WHITESPACE
+        )
+        if(NOT VEQLIB_NANOBIND_CMAKE_RESULT EQUAL 0)
+            message(
+                FATAL_ERROR
+                "nanobind is required when VEQLIB_ENABLE_PYTHON_BINDINGS=ON. "
+                "Python '${Python_EXECUTABLE}' failed to report --cmake_dir: "
+                "${VEQLIB_NANOBIND_CMAKE_ERROR}"
+            )
+        endif()
+        set(nanobind_DIR "${VEQLIB_NANOBIND_CMAKE_DIR}" CACHE PATH "nanobind CMake package directory")
+    endif()
+    find_package(nanobind CONFIG REQUIRED)
+
+    nanobind_add_module(veqlib_ext NB_SUPPRESS_WARNINGS python_bindings.cpp ${VEQLIB_COMMON_SOURCES})
+    veqlib_configure_target(veqlib_ext)
+endif()
 
 enable_testing()
 add_test(NAME veqlib_probe COMMAND veqlib_main --mode probe)
 add_test(NAME veqlib_temp_validation COMMAND veqlib_main --mode temp-validation)
 add_test(NAME veqlib_pf_psin_uniform_validation COMMAND veqlib_main --mode pf-validation)
+if(VEQLIB_ENABLE_PYTHON_BINDINGS)
+    add_test(
+        NAME veqlib_python_binding
+        COMMAND
+            "${Python_EXECUTABLE}"
+            -c
+            "import json, veqlib_ext; report=json.loads(veqlib_ext.validate_pf_psin_uniform_ip_json()); raise SystemExit(0 if report['route'] == 'PF/psin/uniform/Ip' else 1)"
+    )
+    set_tests_properties(
+        veqlib_python_binding
+        PROPERTIES
+            ENVIRONMENT "PYTHONPATH=$<TARGET_FILE_DIR:veqlib_ext>"
+    )
+endif()

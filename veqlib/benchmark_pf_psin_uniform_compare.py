@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import importlib.util
 import json
 import subprocess
 import sys
+import time
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -15,6 +17,7 @@ import numpy as np
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BENCHMARK_PATH = REPO_ROOT / "tests" / "benchmark.py"
 DEFAULT_CXX_EXE = REPO_ROOT / "veqlib" / "build" / "debug" / "veqlib_main"
+DEFAULT_CXX_MODULE_DIR = REPO_ROOT / "veqlib" / "build" / "release"
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "tests" / "benchmark"
 FIXED_CONSTRAINT = "Ip"
 
@@ -35,6 +38,23 @@ def _load_benchmark_module() -> ModuleType:
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def _load_veqlib_module(module_dir: Path):
+    module_dir = module_dir.resolve()
+    if not module_dir.exists():
+        raise FileNotFoundError(
+            f"VEQlib nanobind module directory not found: {module_dir}. "
+            "Build it with `cmake --build --preset clang-release --target veqlib_ext`."
+        )
+    sys.path.insert(0, str(module_dir))
+    try:
+        return importlib.import_module("veqlib_ext")
+    except ImportError as exc:
+        raise ImportError(
+            f"Unable to import veqlib_ext from {module_dir}. "
+            "Build it with `cmake --build --preset clang-release --target veqlib_ext`."
+        ) from exc
 
 
 def _finite_or_none(value: float) -> float | None:
@@ -168,6 +188,7 @@ def _solve_python_timed(
 
     samples_ms: list[float] = []
     for _ in range(repeat):
+        start_ns = time.perf_counter_ns()
         solver.solve(
             x0=x0,
             method=benchmark.CONFIG.method,
@@ -176,9 +197,10 @@ def _solve_python_timed(
             enable_verbose=False,
             enable_history=False,
         )
+        stop_ns = time.perf_counter_ns()
         if solver.result is None:
             raise RuntimeError("Python solve produced no SolverResult")
-        samples_ms.append(float(solver.result.elapsed) / 1000.0)
+        samples_ms.append(float(stop_ns - start_ns) / 1.0e6)
 
     if solver.result is None:
         solver.solve(
@@ -203,6 +225,7 @@ def _solve_python_timed(
             "residual_normalization": benchmark.CONFIG.residual_normalization,
         },
         "timing": _stats(samples_ms),
+        "timing_scope": "Python perf_counter around Solver.solve()",
         "final": {
             "success": bool(result.success),
             "message": result.message,
@@ -237,11 +260,46 @@ def _run_cxx_case(executable: Path, *, repeat: int, warmup: int) -> dict[str, An
     return json.loads(completed.stdout)
 
 
+def _run_cxx_binding_case(module_dir: Path, *, repeat: int, warmup: int) -> dict[str, Any]:
+    module = _load_veqlib_module(module_dir)
+    solver = module.PfPsinUniformIpSolver()
+
+    for _ in range(warmup):
+        solver.solve_json()
+
+    report = json.loads(solver.initial_json())
+    samples_ms: list[float] = []
+    inner_samples_ms: list[float] = []
+    final_payload: dict[str, Any] | None = None
+    for _ in range(repeat):
+        start_ns = time.perf_counter_ns()
+        payload_json = solver.solve_json()
+        stop_ns = time.perf_counter_ns()
+        payload = json.loads(payload_json)
+        samples_ms.append(float(stop_ns - start_ns) / 1.0e6)
+        inner_samples_ms.append(float(payload["elapsed_ms"]))
+        final_payload = payload
+
+    if final_payload is None:
+        final_payload = json.loads(solver.solve_json())
+
+    report["timing"] = _stats(samples_ms)
+    report["binding_timing"] = {
+        "scope": "Python perf_counter around nanobind PfPsinUniformIpSolver.solve_json()",
+        "cxx_inner_timing": _stats(inner_samples_ms),
+    }
+    report["final"] = final_payload["final"]
+    report["success"] = bool(final_payload["success"])
+    return report
+
+
 def _run_case(
     benchmark: ModuleType,
     executable: Path,
+    module_dir: Path,
     reference,
     *,
+    cxx_backend: str,
     repeat: int,
     warmup: int,
 ) -> dict[str, Any]:
@@ -250,7 +308,12 @@ def _run_case(
     python_inputs = _python_case_inputs(benchmark, problem, spec)
     x0 = np.asarray(python_inputs["x0"], dtype=np.float64)
     python = _solve_python_timed(benchmark, problem, x0, repeat=repeat, warmup=warmup)
-    cxx = _run_cxx_case(executable, repeat=repeat, warmup=warmup)
+    if cxx_backend == "nanobind":
+        cxx = _run_cxx_binding_case(module_dir, repeat=repeat, warmup=warmup)
+    elif cxx_backend == "subprocess":
+        cxx = _run_cxx_case(executable, repeat=repeat, warmup=warmup)
+    else:
+        raise ValueError(f"unknown C++ backend: {cxx_backend}")
 
     x_diff = _max_abs(cxx["final"]["x"], python["final"]["x"])
     raw_diff = _max_abs(cxx["final"]["raw_residual"], python["final"]["raw_residual"])
@@ -266,10 +329,13 @@ def _run_case(
     )
     cxx_avg = float(cxx["timing"]["avg_ms"])
     python_avg = float(python["timing"]["avg_ms"])
+    cxx_median = float(cxx["timing"]["median_ms"])
+    python_median = float(python["timing"]["median_ms"])
 
     return {
         "case_name": spec.case_name,
         "constraint": FIXED_CONSTRAINT,
+        "cxx_backend": cxx_backend,
         "active_profiles": dict(problem.active_profiles),
         "x_size": int(x0.size),
         "initial_raw_norm": float(python_inputs["initial_raw_norm"]),
@@ -299,7 +365,7 @@ def _run_case(
             "nfev": int(cxx["final"]["nfev"]),
             "raw_norm": float(cxx["final"]["raw_norm"]),
             "avg_ms": cxx_avg,
-            "median_ms": float(cxx["timing"]["median_ms"]),
+            "median_ms": cxx_median,
             "p95_ms": float(cxx["timing"]["p95_ms"]),
             "std_ms": float(cxx["timing"]["std_ms"]),
         },
@@ -308,12 +374,15 @@ def _run_case(
             "nfev": int(python["final"]["nfev"]),
             "raw_norm": float(python["final"]["raw_norm"]),
             "avg_ms": python_avg,
-            "median_ms": float(python["timing"]["median_ms"]),
+            "median_ms": python_median,
             "p95_ms": float(python["timing"]["p95_ms"]),
             "std_ms": float(python["timing"]["std_ms"]),
             "message": python["final"]["message"],
         },
         "speedup_python_over_cxx": python_avg / cxx_avg if cxx_avg > 0.0 else float("inf"),
+        "speedup_python_over_cxx_median": (
+            python_median / cxx_median if cxx_median > 0.0 else float("inf")
+        ),
     }
 
 
@@ -337,6 +406,9 @@ def _summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "geomean_speedup_python_over_cxx": float(
             np.exp(np.mean(np.log([row["speedup_python_over_cxx"] for row in rows])))
         ),
+        "geomean_median_speedup_python_over_cxx": float(
+            np.exp(np.mean(np.log([row["speedup_python_over_cxx_median"] for row in rows])))
+        ),
     }
 
 
@@ -344,8 +416,9 @@ def _write_text_report(path: Path, payload: dict[str, Any]) -> None:
     rows = payload["rows"]
     summary = payload["summary"]
     lines = [
-        "PF/psin/uniform/Ip inline C++ cminpack vs VEQPy benchmark-style comparison",
+        "PF/psin/uniform/Ip VEQlib vs VEQPy Python-perceived benchmark-style comparison",
         "",
+        f"cxx_backend                   : {payload['cxx_backend']}",
         f"repeat_count                  : {payload['repeat']}",
         f"warmup_count                  : {payload['warmup']}",
         f"case_count                    : {summary['case_count']}",
@@ -363,6 +436,10 @@ def _write_text_report(path: Path, payload: dict[str, Any]) -> None:
             "geomean_speedup_py_over_cxx  : "
             f"{summary['geomean_speedup_python_over_cxx']:.3f}x"
         ),
+        (
+            "geomean_median_speedup       : "
+            f"{summary['geomean_median_speedup_python_over_cxx']:.3f}x"
+        ),
         "",
         "Case results",
         "",
@@ -378,6 +455,8 @@ def _write_text_report(path: Path, payload: dict[str, Any]) -> None:
             + "py_ms".rjust(9)
             + " | "
             + "py/cxx".rjust(8)
+            + " | "
+            + "med".rjust(8)
             + " | "
             + "nfev".rjust(9)
             + " | "
@@ -396,6 +475,7 @@ def _write_text_report(path: Path, payload: dict[str, Any]) -> None:
             f"{row['cxx']['avg_ms']:>9.3f} | "
             f"{row['python']['avg_ms']:>9.3f} | "
             f"{row['speedup_python_over_cxx']:>8.2f} | "
+            f"{row['speedup_python_over_cxx_median']:>8.2f} | "
             f"{row['cxx']['nfev']:>4d}/{row['python']['nfev']:<4d} | "
             f"{row['cxx']['raw_norm']:>10.3e}/{row['python']['raw_norm']:<10.3e} | "
             f"{ok:>7}"
@@ -407,7 +487,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Compare benchmark.py-style PF/psin/uniform cases in VEQlib and VEQPy."
     )
+    parser.add_argument("--cxx-backend", choices=("nanobind", "subprocess"), default="nanobind")
     parser.add_argument("--cxx-exe", type=Path, default=DEFAULT_CXX_EXE)
+    parser.add_argument("--module-dir", type=Path, default=DEFAULT_CXX_MODULE_DIR)
     parser.add_argument("--repeat", type=int, default=10)
     parser.add_argument("--warmup", type=int, default=1)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
@@ -423,7 +505,9 @@ def main(argv: list[str] | None = None) -> int:
         _run_case(
             benchmark,
             args.cxx_exe.resolve(),
+            args.module_dir.resolve(),
             reference,
+            cxx_backend=args.cxx_backend,
             repeat=args.repeat,
             warmup=args.warmup,
         )
@@ -431,6 +515,7 @@ def main(argv: list[str] | None = None) -> int:
     payload = {
         "schema_version": 1,
         "source": "tests/benchmark.py fixed PF/psin/uniform/Ip case",
+        "cxx_backend": args.cxx_backend,
         "repeat": int(args.repeat),
         "warmup": int(args.warmup),
         "rows": rows,
