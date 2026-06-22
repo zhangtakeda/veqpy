@@ -1,12 +1,11 @@
 #pragma once
 
 #include "linalg.h"
-#include "math.h"
 #include "tensor.h"
 #include <algorithm>
 #include <array>
-#include <cminpack.h>
 #include <cmath>
+#include <cminpack.h>
 #include <cstddef>
 
 namespace nonlinear::detail
@@ -47,14 +46,12 @@ namespace nonlinear::detail
     };
 
     template <typename Functor>
-    inline constexpr bool has_jacobian_v = requires(Functor& functor, const double* x, double* jacobian) {
-        functor.jacobian(x, jacobian);
-    };
+    inline constexpr bool has_jacobian_v =
+        requires(Functor& functor, const double* x, double* jacobian) { functor.jacobian(x, jacobian); };
 
     template <typename Functor>
-    inline constexpr bool has_jvp_v = requires(Functor& functor, const double* x, const double* v, double* jv) {
-        functor.jvp(x, v, jv);
-    };
+    inline constexpr bool has_jvp_v =
+        requires(Functor& functor, const double* x, const double* v, double* jv) { functor.jvp(x, v, jv); };
 
     template <size_t N>
     double norm2(const double* values) noexcept
@@ -132,9 +129,9 @@ namespace nonlinear::detail
     template <size_t N>
     struct DenseNewtonWork
     {
-        Matrix<double, N, N> jacobian{uninitialized};
-        Matrix<double, N, 1> rhs{uninitialized};
-        Matrix<double, N, 1> step{uninitialized};
+        Matrix<double, N, N>  jacobian{uninitialized};
+        Matrix<double, N, 1>  rhs{uninitialized};
+        Matrix<double, N, 1>  step{uninitialized};
         std::array<double, N> trial_x{};
         std::array<double, N> trial_f{};
     };
@@ -147,24 +144,24 @@ namespace nonlinear::detail
         static_assert(equations == variables, "Newton requires a square residual");
 
         Functor functor;
-        double  tolerance      = 1.0e-8;
-        int     max_iterations = 50;
-        int     evaluations    = 0;
+        double  tolerance            = 1.0e-8;
+        int     max_iterations       = 50;
+        int     evaluations          = 0;
         int     jacobian_evaluations = 0;
-        int     info          = 0;
+        int     info                 = 0;
 
         explicit Context(const Functor& value) : functor(value) {}
 
         void optimize_inplace(double* x)
         {
-            constexpr size_t n = variables;
-            Matrix<double, n, n> jacobian{uninitialized};
-            Matrix<double, n, 1> rhs{uninitialized};
-            Matrix<double, n, 1> step{uninitialized};
+            constexpr size_t      n = variables;
+            Matrix<double, n, n>  jacobian{uninitialized};
+            Matrix<double, n, 1>  rhs{uninitialized};
+            Matrix<double, n, 1>  step{uninitialized};
             std::array<double, n> f{};
-            evaluations = 0;
+            evaluations          = 0;
             jacobian_evaluations = 0;
-            info = 5;
+            info                 = 5;
 
             for (int iteration = 0; iteration < max_iterations; ++iteration)
             {
@@ -201,22 +198,22 @@ namespace nonlinear::detail
         static_assert(equations == variables, "NewtonRaphson requires a square residual");
 
         Functor functor;
-        double  tolerance      = 1.0e-8;
-        int     max_iterations = 50;
-        int     evaluations    = 0;
+        double  tolerance            = 1.0e-8;
+        int     max_iterations       = 50;
+        int     evaluations          = 0;
         int     jacobian_evaluations = 0;
-        int     info          = 0;
+        int     info                 = 0;
 
         explicit Context(const Functor& value) : functor(value) {}
 
         void optimize_inplace(double* x)
         {
-            constexpr size_t n = variables;
-            DenseNewtonWork<n> work{};
+            constexpr size_t      n = variables;
+            DenseNewtonWork<n>    work{};
             std::array<double, n> f{};
-            evaluations = 0;
+            evaluations          = 0;
             jacobian_evaluations = 0;
-            info = 5;
+            info                 = 5;
 
             functor(x, f.data());
             ++evaluations;
@@ -293,7 +290,7 @@ namespace nonlinear::detail
     }
 
     template <typename Functor, size_t N>
-    int gmres_solve(Functor& functor,
+    int gmres_solve(Functor&      functor,
                     const double* x,
                     const double* f_base,
                     const double* rhs,
@@ -332,7 +329,7 @@ namespace nonlinear::detail
                     work.arnoldi[i] -= dot * basis[i];
             }
 
-            const double next_norm = norm2<N>(work.arnoldi.data());
+            const double next_norm            = norm2<N>(work.arnoldi.data());
             hessenberg_at(work, col + 1, col) = next_norm;
             if (next_norm > 0.0 && col + 1 < N + 1)
             {
@@ -343,24 +340,21 @@ namespace nonlinear::detail
 
             for (size_t row = 0; row < col; ++row)
             {
-                const double h0 = hessenberg_at(work, row, col);
-                const double h1 = hessenberg_at(work, row + 1, col);
-                hessenberg_at(work, row, col) =
-                    work.givens_cos[row] * h0 + work.givens_sin[row] * h1;
-                hessenberg_at(work, row + 1, col) =
-                    -work.givens_sin[row] * h0 + work.givens_cos[row] * h1;
+                const double h0                   = hessenberg_at(work, row, col);
+                const double h1                   = hessenberg_at(work, row + 1, col);
+                hessenberg_at(work, row, col)     = work.givens_cos[row] * h0 + work.givens_sin[row] * h1;
+                hessenberg_at(work, row + 1, col) = -work.givens_sin[row] * h0 + work.givens_cos[row] * h1;
             }
 
-            const double h0    = hessenberg_at(work, col, col);
-            const double h1    = hessenberg_at(work, col + 1, col);
-            const double denom = std::hypot(h0, h1);
-            work.givens_cos[col] = denom == 0.0 ? 1.0 : h0 / denom;
-            work.givens_sin[col] = denom == 0.0 ? 0.0 : h1 / denom;
-            hessenberg_at(work, col, col) =
-                work.givens_cos[col] * h0 + work.givens_sin[col] * h1;
+            const double h0                   = hessenberg_at(work, col, col);
+            const double h1                   = hessenberg_at(work, col + 1, col);
+            const double denom                = std::hypot(h0, h1);
+            work.givens_cos[col]              = denom == 0.0 ? 1.0 : h0 / denom;
+            work.givens_sin[col]              = denom == 0.0 ? 0.0 : h1 / denom;
+            hessenberg_at(work, col, col)     = work.givens_cos[col] * h0 + work.givens_sin[col] * h1;
             hessenberg_at(work, col + 1, col) = 0.0;
 
-            const double axis0 = work.residual_axis[col];
+            const double axis0          = work.residual_axis[col];
             work.residual_axis[col]     = work.givens_cos[col] * axis0;
             work.residual_axis[col + 1] = -work.givens_sin[col] * axis0;
             used_dimension              = col + 1;
@@ -395,28 +389,28 @@ namespace nonlinear::detail
         static_assert(equations == variables, "NewtonKrylov requires a square residual");
 
         Functor functor;
-        double  tolerance      = 1.0e-8;
-        int     max_iterations = 50;
-        int     max_dimension  = static_cast<int>(variables);
-        int     evaluations    = 0;
-        int     jvp_evaluations = 0;
+        double  tolerance         = 1.0e-8;
+        int     max_iterations    = 50;
+        int     max_dimension     = static_cast<int>(variables);
+        int     evaluations       = 0;
+        int     jvp_evaluations   = 0;
         int     linear_iterations = 0;
-        int     info          = 0;
+        int     info              = 0;
 
         explicit Context(const Functor& value) : functor(value) {}
 
         void optimize_inplace(double* x)
         {
-            constexpr size_t n = variables;
+            constexpr size_t      n = variables;
             std::array<double, n> f{};
             std::array<double, n> rhs{};
             std::array<double, n> step{};
             std::array<double, n> trial_x{};
             std::array<double, n> trial_f{};
-            evaluations = 0;
-            jvp_evaluations = 0;
+            evaluations       = 0;
+            jvp_evaluations   = 0;
             linear_iterations = 0;
-            info = 5;
+            info              = 5;
 
             functor(x, f.data());
             ++evaluations;
@@ -432,15 +426,7 @@ namespace nonlinear::detail
                 for (size_t i = 0; i < n; ++i)
                     rhs[i] = -f[i];
                 linear_iterations += gmres_solve<Functor, n>(
-                    functor,
-                    x,
-                    f.data(),
-                    rhs.data(),
-                    step.data(),
-                    max_dimension,
-                    tolerance * 0.1,
-                    jvp_evaluations
-                );
+                    functor, x, f.data(), rhs.data(), step.data(), max_dimension, tolerance * 0.1, jvp_evaluations);
 
                 double step_scale = 1.0;
                 bool   accepted   = false;
@@ -483,48 +469,44 @@ namespace nonlinear::detail
         static_assert(equations == variables, "Powell hybrid requires a square residual");
         static constexpr size_t work_size = variables * (3 * variables + 13) / 2;
 
-        Functor functor;
-        Vector<double, equations> fvec{uninitialized};
-        Vector<double, work_size> work{uninitialized};
+        Functor                               functor;
+        Vector<double, equations>             fvec{uninitialized};
+        Vector<double, work_size>             work{uninitialized};
         Vector<double, equations * variables> fjac{uninitialized};
-        double tolerance = 1.0e-8;
-        int    evaluations = 0;
-        int    jacobian_evaluations = 0;
-        int    info = 0;
+        double                                tolerance            = 1.0e-8;
+        int                                   evaluations          = 0;
+        int                                   jacobian_evaluations = 0;
+        int                                   info                 = 0;
 
         explicit Context(const Functor& value) : functor(value) {}
 
         void optimize_inplace(double* x)
         {
-            evaluations = 0;
+            evaluations          = 0;
             jacobian_evaluations = 0;
             if constexpr (has_jacobian_v<Functor>)
             {
-                info = hybrj1(
-                    callback_with_jacobian,
-                    this,
-                    static_cast<int>(variables),
-                    x,
-                    fvec.data(),
-                    fjac.data(),
-                    static_cast<int>(equations),
-                    tolerance,
-                    work.data(),
-                    static_cast<int>(work_size)
-                );
+                info = hybrj1(callback_with_jacobian,
+                              this,
+                              static_cast<int>(variables),
+                              x,
+                              fvec.data(),
+                              fjac.data(),
+                              static_cast<int>(equations),
+                              tolerance,
+                              work.data(),
+                              static_cast<int>(work_size));
             }
             else
             {
-                info = hybrd1(
-                    callback,
-                    this,
-                    static_cast<int>(variables),
-                    x,
-                    fvec.data(),
-                    tolerance,
-                    work.data(),
-                    static_cast<int>(work_size)
-                );
+                info = hybrd1(callback,
+                              this,
+                              static_cast<int>(variables),
+                              x,
+                              fvec.data(),
+                              tolerance,
+                              work.data(),
+                              static_cast<int>(work_size));
             }
         }
 
@@ -539,8 +521,8 @@ namespace nonlinear::detail
             return 0;
         }
 
-        static int callback_with_jacobian(
-            void* data, int, const double* x, double* fvec, double* fjac, int ldfjac, int iflag)
+        static int
+        callback_with_jacobian(void* data, int, const double* x, double* fvec, double* fjac, int ldfjac, int iflag)
         {
             auto& self = *static_cast<Context*>(data);
             if (iflag == 1)
@@ -554,8 +536,7 @@ namespace nonlinear::detail
                 ++self.jacobian_evaluations;
                 for (size_t row = 0; row < equations; ++row)
                     for (size_t col = 0; col < variables; ++col)
-                        fjac[row + static_cast<size_t>(ldfjac) * col] =
-                            self.fjac[row * variables + col];
+                        fjac[row + static_cast<size_t>(ldfjac) * col] = self.fjac[row * variables + col];
             }
             return 0;
         }
@@ -568,53 +549,49 @@ namespace nonlinear::detail
         static constexpr size_t variables = Functor::variables;
         static constexpr size_t work_size = equations * variables + 5 * variables + equations;
 
-        Functor functor;
-        Vector<double, equations> fvec{uninitialized};
-        Vector<double, work_size> work{uninitialized};
+        Functor                               functor;
+        Vector<double, equations>             fvec{uninitialized};
+        Vector<double, work_size>             work{uninitialized};
         Vector<double, equations * variables> fjac{uninitialized};
-        Vector<int, variables> ipvt{uninitialized};
-        double tolerance = 1.0e-8;
-        int    evaluations = 0;
-        int    jacobian_evaluations = 0;
-        int    info = 0;
+        Vector<int, variables>                ipvt{uninitialized};
+        double                                tolerance            = 1.0e-8;
+        int                                   evaluations          = 0;
+        int                                   jacobian_evaluations = 0;
+        int                                   info                 = 0;
 
         explicit Context(const Functor& value) : functor(value) {}
 
         void optimize_inplace(double* x)
         {
-            evaluations = 0;
+            evaluations          = 0;
             jacobian_evaluations = 0;
             if constexpr (has_jacobian_v<Functor>)
             {
-                info = lmder1(
-                    callback_with_jacobian,
-                    this,
-                    static_cast<int>(equations),
-                    static_cast<int>(variables),
-                    x,
-                    fvec.data(),
-                    fjac.data(),
-                    static_cast<int>(equations),
-                    tolerance,
-                    ipvt.data(),
-                    work.data(),
-                    static_cast<int>(work_size)
-                );
+                info = lmder1(callback_with_jacobian,
+                              this,
+                              static_cast<int>(equations),
+                              static_cast<int>(variables),
+                              x,
+                              fvec.data(),
+                              fjac.data(),
+                              static_cast<int>(equations),
+                              tolerance,
+                              ipvt.data(),
+                              work.data(),
+                              static_cast<int>(work_size));
             }
             else
             {
-                info = lmdif1(
-                    callback,
-                    this,
-                    static_cast<int>(equations),
-                    static_cast<int>(variables),
-                    x,
-                    fvec.data(),
-                    tolerance,
-                    ipvt.data(),
-                    work.data(),
-                    static_cast<int>(work_size)
-                );
+                info = lmdif1(callback,
+                              this,
+                              static_cast<int>(equations),
+                              static_cast<int>(variables),
+                              x,
+                              fvec.data(),
+                              tolerance,
+                              ipvt.data(),
+                              work.data(),
+                              static_cast<int>(work_size));
             }
         }
 
@@ -629,8 +606,8 @@ namespace nonlinear::detail
             return 0;
         }
 
-        static int callback_with_jacobian(
-            void* data, int, int, const double* x, double* fvec, double* fjac, int ldfjac, int iflag)
+        static int
+        callback_with_jacobian(void* data, int, int, const double* x, double* fvec, double* fjac, int ldfjac, int iflag)
         {
             auto& self = *static_cast<Context*>(data);
             if (iflag == 1)
@@ -644,8 +621,7 @@ namespace nonlinear::detail
                 ++self.jacobian_evaluations;
                 for (size_t row = 0; row < equations; ++row)
                     for (size_t col = 0; col < variables; ++col)
-                        fjac[row + static_cast<size_t>(ldfjac) * col] =
-                            self.fjac[row * variables + col];
+                        fjac[row + static_cast<size_t>(ldfjac) * col] = self.fjac[row * variables + col];
             }
             return 0;
         }

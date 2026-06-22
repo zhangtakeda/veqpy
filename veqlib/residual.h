@@ -1,7 +1,6 @@
 #pragma once
 
 #include "geometry.h"
-#include "math.h"
 #include "profiles.h"
 #include "source.h"
 #include "tensor.h"
@@ -15,20 +14,20 @@ namespace residual::detail
     using tensor::Vector;
     using tensor::uninitialized;
 
-    inline constexpr size_t surface_G                 = 0;
-    inline constexpr size_t surface_Gpsin_R           = 1;
-    inline constexpr size_t surface_Gpsin_Z           = 2;
-    inline constexpr size_t surface_Gpsin_R_sin_tb    = 3;
-    inline constexpr size_t residual_surface_count    = 4;
+    inline constexpr size_t surface_G              = 0;
+    inline constexpr size_t surface_Gpsin_R        = 1;
+    inline constexpr size_t surface_Gpsin_Z        = 2;
+    inline constexpr size_t surface_Gpsin_R_sin_tb = 3;
+    inline constexpr size_t residual_surface_count = 4;
 
-    inline constexpr size_t block_h      = 0;
-    inline constexpr size_t block_v      = 1;
-    inline constexpr size_t block_kappa  = 2;
-    inline constexpr size_t block_c0     = 3;
-    inline constexpr size_t block_c      = 4;
-    inline constexpr size_t block_s      = 5;
-    inline constexpr size_t block_psin   = 6;
-    inline constexpr size_t block_F      = 7;
+    inline constexpr size_t block_h     = 0;
+    inline constexpr size_t block_v     = 1;
+    inline constexpr size_t block_kappa = 2;
+    inline constexpr size_t block_c0    = 3;
+    inline constexpr size_t block_c     = 4;
+    inline constexpr size_t block_s     = 5;
+    inline constexpr size_t block_psin  = 6;
+    inline constexpr size_t block_F     = 7;
 
     template <typename Shape, typename GridType>
     struct ResidualRuntime
@@ -49,7 +48,7 @@ namespace residual::detail
         using RadialVector = Vector<double, radial_nodes>;
         using PackedVector = Vector<double, Shape::x_size>;
 
-        SurfaceSlab surface_fields{};
+        SurfaceSlab  surface_fields{};
         RadialVector scratch{};
 
         constexpr void clear() noexcept
@@ -69,7 +68,7 @@ namespace residual::detail
         }
 
         template <typename SourceRuntime, typename GeometryRuntime>
-        constexpr void update_compact(const SourceRuntime& source_runtime,
+        constexpr void update_compact(const SourceRuntime&   source_runtime,
                                       const GeometryRuntime& geometry_runtime) noexcept
         {
             static_assert(SourceRuntime::radial_nodes == radial_nodes, "residual/source radial grids must match");
@@ -81,10 +80,10 @@ namespace residual::detail
 
             for (size_t i = 0; i < radial_nodes; ++i)
             {
-                const double psin_r_i    = source_runtime.profile_root_fields(source::root_psin_r, i);
-                const double psin_rr_i   = source_runtime.profile_root_fields(source::root_psin_rr, i);
-                const double FFn_psin_i  = source_runtime.FFn_psin[i];
-                const double Pn_psin_i   = source_runtime.Pn_psin[i];
+                const double psin_r_i   = source_runtime.profile_root_fields(source::root_psin_r, i);
+                const double psin_rr_i  = source_runtime.profile_root_fields(source::root_psin_rr, i);
+                const double FFn_psin_i = source_runtime.FFn_psin[i];
+                const double Pn_psin_i  = source_runtime.Pn_psin[i];
 
                 for (size_t j = 0; j < theta_rows; ++j)
                 {
@@ -94,25 +93,22 @@ namespace residual::detail
                     const double Z_t_ij        = geometry_runtime.surface_field(geometry::surface_Z_t, i, j);
                     const double J_ij          = geometry_runtime.surface_field(geometry::surface_J, i, j);
                     const double JdivR_ij      = geometry_runtime.surface_field(geometry::surface_JdivR, i, j);
-                    const double grtdivJR_t_ij =
-                        geometry_runtime.surface_field(geometry::surface_grtdivJR_t, i, j);
+                    const double grtdivJR_t_ij = geometry_runtime.surface_field(geometry::surface_grtdivJR_t, i, j);
                     const double gttdivJR_ij   = geometry_runtime.surface_field(geometry::surface_gttdivJR, i, j);
-                    const double gttdivJR_r_ij =
-                        geometry_runtime.surface_field(geometry::surface_gttdivJR_r, i, j);
+                    const double gttdivJR_r_ij = geometry_runtime.surface_field(geometry::surface_gttdivJR_r, i, j);
 
                     const double inv_J  = 1.0 / J_ij;
                     const double psin_R = -Z_t_ij * inv_J * psin_r_i;
                     const double psin_Z = R_t_ij * inv_J * psin_r_i;
 
-                    const double G1n = JdivR_ij * (FFn_psin_i + R_ij * R_ij * Pn_psin_i);
-                    const double G2n =
-                        gttdivJR_ij * psin_rr_i + (gttdivJR_r_ij - grtdivJR_t_ij) * psin_r_i;
+                    const double G1n  = JdivR_ij * (FFn_psin_i + R_ij * R_ij * Pn_psin_i);
+                    const double G2n  = gttdivJR_ij * psin_rr_i + (gttdivJR_r_ij - grtdivJR_t_ij) * psin_r_i;
                     const double G_ij = alpha1 * G1n + alpha2 * G2n;
                     surface_field(surface_G, i, j) = G_ij;
 
-                    const double Gpsin_R = G_ij * psin_R;
-                    surface_field(surface_Gpsin_R, i, j) = Gpsin_R;
-                    surface_field(surface_Gpsin_Z, i, j) = G_ij * psin_Z;
+                    const double Gpsin_R                        = G_ij * psin_R;
+                    surface_field(surface_Gpsin_R, i, j)        = Gpsin_R;
+                    surface_field(surface_Gpsin_Z, i, j)        = G_ij * psin_Z;
                     surface_field(surface_Gpsin_R_sin_tb, i, j) = Gpsin_R * sin_tb_ij;
                 }
             }
@@ -146,8 +142,8 @@ namespace residual::detail
         template <size_t ProfileId, size_t Count>
         constexpr void pack_one(PackedVector& out, double a, double R0, double B0) noexcept
         {
-            constexpr size_t code  = block_code<ProfileId>();
-            constexpr size_t order = block_order<ProfileId>();
+            constexpr size_t code         = block_code<ProfileId>();
+            constexpr size_t order        = block_order<ProfileId>();
             constexpr size_t radial_power = block_radial_power<ProfileId>();
 
             if constexpr (code == block_h)
@@ -174,23 +170,13 @@ namespace residual::detail
             {
                 rowwise_weighted_sum(surface_Gpsin_R_sin_tb, theta_cos<order>());
                 project_scaled<Count, ProfileId>(
-                    out,
-                    rho_power<radial_power + 1>(),
-                    GridType::y,
-                    unit_weights(),
-                    -a * base_scale()
-                );
+                    out, rho_power<radial_power + 1>(), GridType::y, unit_weights(), -a * base_scale());
             }
             else if constexpr (code == block_s)
             {
                 rowwise_weighted_sum(surface_Gpsin_R_sin_tb, theta_sin<order>());
                 project_scaled<Count, ProfileId>(
-                    out,
-                    rho_power<radial_power + 1>(),
-                    GridType::y,
-                    unit_weights(),
-                    -a * base_scale()
-                );
+                    out, rho_power<radial_power + 1>(), GridType::y, unit_weights(), -a * base_scale());
             }
             else if constexpr (code == block_psin)
             {
@@ -201,12 +187,7 @@ namespace residual::detail
             {
                 rowwise_sum(surface_G);
                 project_scaled<Count, ProfileId>(
-                    out,
-                    GridType::y,
-                    GridType::y,
-                    unit_weights(),
-                    base_scale() * (R0 * B0) * (R0 * B0)
-                );
+                    out, GridType::y, GridType::y, unit_weights(), base_scale() * (R0 * B0) * (R0 * B0));
             }
         }
 

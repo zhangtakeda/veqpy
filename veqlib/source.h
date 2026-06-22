@@ -2,10 +2,8 @@
 
 #include "geometry.h"
 #include "math.h"
-#include "profiles.h"
 #include "tensor.h"
 #include <cstddef>
-#include <limits>
 #include <span>
 
 namespace source::detail
@@ -17,9 +15,9 @@ namespace source::detail
 
     inline constexpr size_t default_barycentric_stencil = 8;
 
-    inline constexpr size_t root_psin       = 0;
-    inline constexpr size_t root_psin_r     = 1;
-    inline constexpr size_t root_psin_rr    = 2;
+    inline constexpr size_t root_psin        = 0;
+    inline constexpr size_t root_psin_r      = 1;
+    inline constexpr size_t root_psin_rr     = 2;
     inline constexpr size_t root_field_count = 3;
 
     inline constexpr size_t profile_value   = 0;
@@ -132,8 +130,8 @@ namespace source::detail
 
             for (size_t i = 0; i < radial_nodes; ++i)
             {
-                const double psin_value = source_target_root_fields(root_psin, i);
-                source_psin_query[i]    = psin_value;
+                const double psin_value   = source_target_root_fields(root_psin, i);
+                source_psin_query[i]      = psin_value;
                 source_parameter_query[i] = psin_value;
             }
 
@@ -141,9 +139,8 @@ namespace source::detail
         }
 
         template <typename GeometryRuntime>
-        constexpr void update_pf_ip_from_psin_uniform(const GeometryRuntime& geometry,
-                                                      double                 Ip,
-                                                      size_t                 n_axis_fix) noexcept
+        constexpr void
+        update_pf_ip_from_psin_uniform(const GeometryRuntime& geometry, double Ip, size_t n_axis_fix) noexcept
         {
             static_assert(GeometryRuntime::radial_nodes == radial_nodes, "source/geometry radial grids must match");
 
@@ -224,20 +221,20 @@ namespace source::detail
         {
             if (n_axis_fix > 0 && n_axis_fix + 1 < radial_nodes)
             {
-                const size_t anchor0 = n_axis_fix;
-                const size_t anchor1 = n_axis_fix + 1;
-                const double rho0    = GridType::nodes[anchor0];
-                const double rho1    = GridType::nodes[anchor1];
-                const double x0      = rho0 * rho0;
-                const double x1      = rho1 * rho1;
-                const double slope0  = source_target_root_fields(root_psin_r, anchor0) / rho0;
-                const double slope1  = source_target_root_fields(root_psin_r, anchor1) / rho1;
+                const size_t anchor0  = n_axis_fix;
+                const size_t anchor1  = n_axis_fix + 1;
+                const double rho0     = GridType::nodes[anchor0];
+                const double rho1     = GridType::nodes[anchor1];
+                const double x0       = rho0 * rho0;
+                const double x1       = rho1 * rho1;
+                const double slope0   = source_target_root_fields(root_psin_r, anchor0) / rho0;
+                const double slope1   = source_target_root_fields(root_psin_r, anchor1) / rho1;
                 const double gradient = (slope1 - slope0) / (x1 - x0);
 
                 for (size_t i = 0; i < n_axis_fix; ++i)
                 {
-                    const double rho_i = GridType::nodes[i];
-                    const double x_i   = rho_i * rho_i;
+                    const double rho_i                        = GridType::nodes[i];
+                    const double x_i                          = rho_i * rho_i;
                     source_target_root_fields(root_psin_r, i) = rho_i * (slope0 + gradient * (x_i - x0));
                 }
             }
@@ -249,7 +246,7 @@ namespace source::detail
 
         constexpr void update_psin_coordinate() noexcept
         {
-            const auto psin_r = const_root_row<root_psin_r>();
+            const auto   psin_r = const_root_row<root_psin_r>();
             RadialVector integrated{uninitialized};
             matvec_into(integrated, GridType::accumulator, psin_r);
 
@@ -262,7 +259,7 @@ namespace source::detail
         {
             for (size_t i = 0; i < radial_nodes; ++i)
                 source_target_root_fields(root_psin, i) = (integrated[i] - offset) / scale;
-            source_target_root_fields(root_psin, 0) = 0.0;
+            source_target_root_fields(root_psin, 0)                = 0.0;
             source_target_root_fields(root_psin, radial_nodes - 1) = 1.0;
         }
 
@@ -283,7 +280,7 @@ namespace source::detail
             }
             else
             {
-                const double pos = q * static_cast<double>(sample_count - 1);
+                const double pos    = q * static_cast<double>(sample_count - 1);
                 size_t       center = static_cast<size_t>(pos);
                 if (pos > static_cast<double>(center))
                     ++center;
@@ -292,7 +289,7 @@ namespace source::detail
                 if (center < half)
                     return 0;
 
-                const size_t start = center - half;
+                const size_t     start     = center - half;
                 constexpr size_t max_start = sample_count - stencil_size;
                 return start > max_start ? max_start : start;
             }
@@ -313,9 +310,9 @@ namespace source::detail
                 constexpr double denom_scale = static_cast<double>(sample_count - 1);
                 for (size_t i = 0; i < radial_nodes; ++i)
                 {
-                    const double q = clip_unit(source_parameter_query[i]);
-                    const size_t start = local_uniform_stencil_start(q);
-                    const size_t nearest = static_cast<size_t>(q * denom_scale + 0.5);
+                    const double q         = clip_unit(source_parameter_query[i]);
+                    const size_t start     = local_uniform_stencil_start(q);
+                    const size_t nearest   = static_cast<size_t>(q * denom_scale + 0.5);
                     const double x_nearest = static_cast<double>(nearest) / denom_scale;
                     if (math::abs(q - x_nearest) <= 1.0e-14)
                     {
@@ -324,8 +321,8 @@ namespace source::detail
                         continue;
                     }
 
-                    double denominator = 0.0;
-                    double numerator_heat = 0.0;
+                    double denominator       = 0.0;
+                    double numerator_heat    = 0.0;
                     double numerator_current = 0.0;
                     for (size_t local_j = 0; local_j < stencil_size; ++local_j)
                     {
@@ -356,8 +353,7 @@ namespace source::detail
             for (size_t i = 0; i < radial_nodes; ++i)
             {
                 out[i] = materialized_current_input[i] * geometry.radial_field(geometry::radial_Ln_r, i) +
-                         geometry.radial_field(geometry::radial_V_r, i) * materialized_heat_input[i] *
-                             pressure_factor;
+                         geometry.radial_field(geometry::radial_V_r, i) * materialized_heat_input[i] * pressure_factor;
             }
         }
 
@@ -373,14 +369,14 @@ namespace source::detail
         template <typename GeometryRuntime>
         constexpr double g1n_psin_integral_from_radial_moments(const GeometryRuntime& geometry) const noexcept
         {
-            constexpr double two_pi = 2.0 * geometry::detail::pi;
+            constexpr double two_pi     = 2.0 * geometry::detail::pi;
             constexpr double inv_two_pi = 1.0 / two_pi;
-            double total = 0.0;
+            double           total      = 0.0;
             for (size_t i = 0; i < radial_nodes; ++i)
             {
-                total += GridType::weights[i] *
-                         (two_pi * geometry.radial_field(geometry::radial_Ln_r, i) * FFn_psin[i] +
-                          inv_two_pi * geometry.radial_field(geometry::radial_V_r, i) * Pn_psin[i]);
+                total +=
+                    GridType::weights[i] * (two_pi * geometry.radial_field(geometry::radial_Ln_r, i) * FFn_psin[i] +
+                                            inv_two_pi * geometry.radial_field(geometry::radial_V_r, i) * Pn_psin[i]);
             }
             return total;
         }
@@ -390,18 +386,18 @@ namespace source::detail
             if (n_axis_fix == 0 || n_axis_fix + 1 >= radial_nodes)
                 return;
 
-            const size_t anchor0 = n_axis_fix;
-            const size_t anchor1 = n_axis_fix + 1;
-            const double x0      = GridType::nodes[anchor0] * GridType::nodes[anchor0];
-            const double x1      = GridType::nodes[anchor1] * GridType::nodes[anchor1];
-            const double value0  = FFn_psin[anchor0];
-            const double value1  = FFn_psin[anchor1];
+            const size_t anchor0  = n_axis_fix;
+            const size_t anchor1  = n_axis_fix + 1;
+            const double x0       = GridType::nodes[anchor0] * GridType::nodes[anchor0];
+            const double x1       = GridType::nodes[anchor1] * GridType::nodes[anchor1];
+            const double value0   = FFn_psin[anchor0];
+            const double value1   = FFn_psin[anchor1];
             const double gradient = (value1 - value0) / (x1 - x0);
 
             for (size_t i = 0; i < n_axis_fix; ++i)
             {
                 const double x = GridType::nodes[i] * GridType::nodes[i];
-                FFn_psin[i] = value0 + gradient * (x - x0);
+                FFn_psin[i]    = value0 + gradient * (x - x0);
             }
         }
     };

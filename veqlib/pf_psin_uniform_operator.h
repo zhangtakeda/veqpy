@@ -4,7 +4,6 @@
 #include "profiles.h"
 #include "residual.h"
 #include "source.h"
-#include "tensor.h"
 #include <span>
 
 namespace operator_pf::detail
@@ -13,12 +12,12 @@ namespace operator_pf::detail
     struct PfPsinUniformRuntimeParams
     {
         profiles::ProfileRuntimeParams<Shape> profile_params{};
-        double a       = 1.0;
-        double R0      = 1.0;
-        double Z0      = 0.0;
-        double B0      = 1.0;
-        double Ip      = 0.0;
-        double fix_rho = 0.0;
+        double                                a       = 1.0;
+        double                                R0      = 1.0;
+        double                                Z0      = 0.0;
+        double                                B0      = 1.0;
+        double                                Ip      = 0.0;
+        double                                fix_rho = 0.0;
     };
 
     template <typename Shape, typename GridType, typename SourceShape>
@@ -33,20 +32,20 @@ namespace operator_pf::detail
                       "PF/psin/uniform does not accept an active F profile");
         static_assert(SourceShape::sample_count >= 1, "PF/psin/uniform source needs at least one sample");
 
-        using shape          = Shape;
-        using grid           = GridType;
-        using source_shape   = SourceShape;
-        using RuntimeParams  = PfPsinUniformRuntimeParams<Shape>;
-        using Profiles       = profiles::RuntimeProfiles<Shape, GridType>;
-        using Geometry       = geometry::GeometryRuntime<GridType>;
-        using Source         = source::ProfileOwnedPsinSourceRuntime<GridType, SourceShape>;
-        using Residual       = residual::ResidualRuntime<Shape, GridType>;
-        using PackedVector   = typename Residual::PackedVector;
+        using shape         = Shape;
+        using grid          = GridType;
+        using source_shape  = SourceShape;
+        using RuntimeParams = PfPsinUniformRuntimeParams<Shape>;
+        using Profiles      = profiles::RuntimeProfiles<Shape, GridType>;
+        using Geometry      = geometry::GeometryRuntime<GridType>;
+        using Source        = source::ProfileOwnedPsinSourceRuntime<GridType, SourceShape>;
+        using Residual      = residual::ResidualRuntime<Shape, GridType>;
+        using PackedVector  = typename Residual::PackedVector;
 
-        Profiles profiles{};
-        Geometry geometry{};
-        Source   source_runtime{};
-        Residual residual{};
+        Profiles      profiles{};
+        Geometry      geometry{};
+        Source        source_runtime{};
+        Residual      residual{};
         RuntimeParams params{};
 
         constexpr void set_uniform_sources(std::span<const double, SourceShape::sample_count> heat,

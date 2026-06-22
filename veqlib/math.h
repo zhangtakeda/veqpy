@@ -5,7 +5,6 @@
 #include <cmath>
 #include <cstdint>
 #include <gcem.hpp>
-#include <limits>
 #include <type_traits>
 
 namespace math::detail

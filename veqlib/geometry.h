@@ -1,7 +1,5 @@
 #pragma once
 
-#include "math.h"
-#include "profiles.h"
 #include "tensor.h"
 #include <array>
 #include <cstddef>
@@ -14,34 +12,33 @@ namespace geometry::detail
     using tensor::Tensor;
     using tensor::uninitialized;
 
-    inline constexpr double pi = 3.141592653589793238462643383279502884;
+    inline constexpr double pi      = 3.141592653589793238462643383279502884;
     inline constexpr double half_pi = 0.5 * pi;
 
     // RELAXED hot-path backend for dynamic tb: reduce to |r|<=pi/4, then use
     // x^11/x^10 Taylor polynomials validated against the Python reference.
     inline void reduced_taylor_sincos(double value, double& sin_value, double& cos_value) noexcept
     {
-        constexpr double inv_half_pi = 2.0 / pi;
-        const double     scaled      = value * inv_half_pi;
-        const int        quadrant_index =
-            static_cast<int>(scaled + (scaled >= 0.0 ? 0.5 : -0.5));
+        constexpr double inv_half_pi    = 2.0 / pi;
+        const double     scaled         = value * inv_half_pi;
+        const int        quadrant_index = static_cast<int>(scaled + (scaled >= 0.0 ? 0.5 : -0.5));
         const double     q              = static_cast<double>(quadrant_index);
         const double     reduced        = value - q * half_pi;
         const double     r2             = reduced * reduced;
 
-        double sin_poly = -1.0 / 39916800.0;
-        sin_poly = sin_poly * r2 + 1.0 / 362880.0;
-        sin_poly = sin_poly * r2 - 1.0 / 5040.0;
-        sin_poly = sin_poly * r2 + 1.0 / 120.0;
-        sin_poly = sin_poly * r2 - 1.0 / 6.0;
-        sin_poly = sin_poly * r2 + 1.0;
+        double sin_poly          = -1.0 / 39916800.0;
+        sin_poly                 = sin_poly * r2 + 1.0 / 362880.0;
+        sin_poly                 = sin_poly * r2 - 1.0 / 5040.0;
+        sin_poly                 = sin_poly * r2 + 1.0 / 120.0;
+        sin_poly                 = sin_poly * r2 - 1.0 / 6.0;
+        sin_poly                 = sin_poly * r2 + 1.0;
         const double sin_reduced = reduced * sin_poly;
 
-        double cos_poly = -1.0 / 3628800.0;
-        cos_poly = cos_poly * r2 + 1.0 / 40320.0;
-        cos_poly = cos_poly * r2 - 1.0 / 720.0;
-        cos_poly = cos_poly * r2 + 1.0 / 24.0;
-        cos_poly = cos_poly * r2 - 1.0 / 2.0;
+        double cos_poly          = -1.0 / 3628800.0;
+        cos_poly                 = cos_poly * r2 + 1.0 / 40320.0;
+        cos_poly                 = cos_poly * r2 - 1.0 / 720.0;
+        cos_poly                 = cos_poly * r2 + 1.0 / 24.0;
+        cos_poly                 = cos_poly * r2 - 1.0 / 2.0;
         const double cos_reduced = cos_poly * r2 + 1.0;
 
         const unsigned quadrant = static_cast<unsigned>(quadrant_index) & 3U;
@@ -53,27 +50,27 @@ namespace geometry::detail
         cos_value = quadrant == 0U || quadrant == 3U ? cos_base : -cos_base;
     }
 
-    inline constexpr size_t surface_sin_tb       = 0;
-    inline constexpr size_t surface_R            = 1;
-    inline constexpr size_t surface_R_t          = 2;
-    inline constexpr size_t surface_Z_t          = 3;
-    inline constexpr size_t surface_J            = 4;
-    inline constexpr size_t surface_JdivR        = 5;
-    inline constexpr size_t surface_grtdivJR_t   = 6;
-    inline constexpr size_t surface_gttdivJR     = 7;
-    inline constexpr size_t surface_gttdivJR_r   = 8;
-    inline constexpr size_t surface_field_count  = 9;
+    inline constexpr size_t surface_sin_tb      = 0;
+    inline constexpr size_t surface_R           = 1;
+    inline constexpr size_t surface_R_t         = 2;
+    inline constexpr size_t surface_Z_t         = 3;
+    inline constexpr size_t surface_J           = 4;
+    inline constexpr size_t surface_JdivR       = 5;
+    inline constexpr size_t surface_grtdivJR_t  = 6;
+    inline constexpr size_t surface_gttdivJR    = 7;
+    inline constexpr size_t surface_gttdivJR_r  = 8;
+    inline constexpr size_t surface_field_count = 9;
 
-    inline constexpr size_t radial_S_r           = 0;
-    inline constexpr size_t radial_V_r           = 1;
-    inline constexpr size_t radial_Kn            = 2;
-    inline constexpr size_t radial_Kn_r          = 3;
-    inline constexpr size_t radial_Ln_r          = 4;
-    inline constexpr size_t radial_field_count   = 5;
+    inline constexpr size_t radial_S_r         = 0;
+    inline constexpr size_t radial_V_r         = 1;
+    inline constexpr size_t radial_Kn          = 2;
+    inline constexpr size_t radial_Kn_r        = 3;
+    inline constexpr size_t radial_Ln_r        = 4;
+    inline constexpr size_t radial_field_count = 5;
 
-    inline constexpr size_t profile_value        = 0;
-    inline constexpr size_t profile_radial       = 1;
-    inline constexpr size_t profile_radial2      = 2;
+    inline constexpr size_t profile_value   = 0;
+    inline constexpr size_t profile_radial  = 1;
+    inline constexpr size_t profile_radial2 = 2;
 
     template <typename GridType>
     struct GeometryRuntime
@@ -131,12 +128,8 @@ namespace geometry::detail
         }
 
         template <FourierFamily Family, typename ProfilesRuntime>
-        static constexpr double family_field(
-            const ProfilesRuntime& runtime_profiles,
-            size_t                 order,
-            size_t                 node,
-            size_t                 component
-        ) noexcept
+        static constexpr double
+        family_field(const ProfilesRuntime& runtime_profiles, size_t order, size_t node, size_t component) noexcept
         {
             if constexpr (Family == FourierFamily::Cosine)
                 return runtime_profiles.c_family_fields(order, node, component);
@@ -145,68 +138,53 @@ namespace geometry::detail
         }
 
         template <FourierFamily Family, typename Shape, typename ProfilesRuntime, size_t Limit, size_t Order>
-        static constexpr void load_family_field_order(
-            Matrix<double, Limit, 3>& fields,
-            const ProfilesRuntime&    runtime_profiles,
-            size_t                    node
-        ) noexcept
+        static constexpr void load_family_field_order(Matrix<double, Limit, 3>& fields,
+                                                      const ProfilesRuntime&    runtime_profiles,
+                                                      size_t                    node) noexcept
         {
             if constexpr (family_order_enabled<Family, Shape, Order>())
             {
-                fields(Order, profile_value) = family_field<Family>(runtime_profiles, Order, node, profile_value);
-                fields(Order, profile_radial) = family_field<Family>(runtime_profiles, Order, node, profile_radial);
+                fields(Order, profile_value)   = family_field<Family>(runtime_profiles, Order, node, profile_value);
+                fields(Order, profile_radial)  = family_field<Family>(runtime_profiles, Order, node, profile_radial);
                 fields(Order, profile_radial2) = family_field<Family>(runtime_profiles, Order, node, profile_radial2);
             }
         }
 
         template <FourierFamily Family, typename Shape, typename ProfilesRuntime, size_t Limit, size_t... Indices>
-        static constexpr void load_family_fields_impl(
-            Matrix<double, Limit, 3>& fields,
-            const ProfilesRuntime&    runtime_profiles,
-            size_t                    node,
-            std::index_sequence<Indices...>
-        ) noexcept
+        static constexpr void load_family_fields_impl(Matrix<double, Limit, 3>& fields,
+                                                      const ProfilesRuntime&    runtime_profiles,
+                                                      size_t                    node,
+                                                      std::index_sequence<Indices...>) noexcept
         {
             (load_family_field_order<Family, Shape, ProfilesRuntime, Limit, Indices + 1>(
-                 fields,
-                 runtime_profiles,
-                 node
-             ),
+                 fields, runtime_profiles, node),
              ...);
         }
 
         template <FourierFamily Family, typename Shape, typename ProfilesRuntime, size_t Limit>
-        static constexpr void load_family_fields(
-            Matrix<double, Limit, 3>& fields,
-            const ProfilesRuntime&    runtime_profiles,
-            size_t                    node
-        ) noexcept
+        static constexpr void load_family_fields(Matrix<double, Limit, 3>& fields,
+                                                 const ProfilesRuntime&    runtime_profiles,
+                                                 size_t                    node) noexcept
         {
             load_family_fields_impl<Family, Shape, ProfilesRuntime, Limit>(
-                fields,
-                runtime_profiles,
-                node,
-                std::make_index_sequence<Limit - 1>{}
-            );
+                fields, runtime_profiles, node, std::make_index_sequence<Limit - 1>{});
         }
 
         template <FourierFamily Family, typename Shape, size_t Limit, size_t Order>
-        static constexpr void accumulate_phase_order(
-            double&                         tb,
-            double&                         tb_r,
-            double&                         tb_t,
-            double&                         tb_rr,
-            double&                         tb_rt,
-            double&                         tb_tt,
-            const Matrix<double, Limit, 3>& fields,
-            size_t                          theta_node
-        ) noexcept
+        static constexpr void accumulate_phase_order(double&                         tb,
+                                                     double&                         tb_r,
+                                                     double&                         tb_t,
+                                                     double&                         tb_rr,
+                                                     double&                         tb_rt,
+                                                     double&                         tb_tt,
+                                                     const Matrix<double, Limit, 3>& fields,
+                                                     size_t                          theta_node) noexcept
         {
             if constexpr (family_order_enabled<Family, Shape, Order>())
             {
-                const double value    = fields(Order, profile_value);
-                const double radial   = fields(Order, profile_radial);
-                const double radial2  = fields(Order, profile_radial2);
+                const double value   = fields(Order, profile_value);
+                const double radial  = fields(Order, profile_radial);
+                const double radial2 = fields(Order, profile_radial2);
 
                 if constexpr (Family == FourierFamily::Cosine)
                 {
@@ -238,54 +216,33 @@ namespace geometry::detail
         }
 
         template <FourierFamily Family, typename Shape, size_t Limit, size_t... Indices>
-        static constexpr void accumulate_phase_impl(
-            double&                         tb,
-            double&                         tb_r,
-            double&                         tb_t,
-            double&                         tb_rr,
-            double&                         tb_rt,
-            double&                         tb_tt,
-            const Matrix<double, Limit, 3>& fields,
-            size_t                          theta_node,
-            std::index_sequence<Indices...>
-        ) noexcept
+        static constexpr void accumulate_phase_impl(double&                         tb,
+                                                    double&                         tb_r,
+                                                    double&                         tb_t,
+                                                    double&                         tb_rr,
+                                                    double&                         tb_rt,
+                                                    double&                         tb_tt,
+                                                    const Matrix<double, Limit, 3>& fields,
+                                                    size_t                          theta_node,
+                                                    std::index_sequence<Indices...>) noexcept
         {
             (accumulate_phase_order<Family, Shape, Limit, Indices + 1>(
-                 tb,
-                 tb_r,
-                 tb_t,
-                 tb_rr,
-                 tb_rt,
-                 tb_tt,
-                 fields,
-                 theta_node
-             ),
+                 tb, tb_r, tb_t, tb_rr, tb_rt, tb_tt, fields, theta_node),
              ...);
         }
 
         template <FourierFamily Family, typename Shape, size_t Limit>
-        static constexpr void accumulate_phase(
-            double&                         tb,
-            double&                         tb_r,
-            double&                         tb_t,
-            double&                         tb_rr,
-            double&                         tb_rt,
-            double&                         tb_tt,
-            const Matrix<double, Limit, 3>& fields,
-            size_t                          theta_node
-        ) noexcept
+        static constexpr void accumulate_phase(double&                         tb,
+                                               double&                         tb_r,
+                                               double&                         tb_t,
+                                               double&                         tb_rr,
+                                               double&                         tb_rt,
+                                               double&                         tb_tt,
+                                               const Matrix<double, Limit, 3>& fields,
+                                               size_t                          theta_node) noexcept
         {
             accumulate_phase_impl<Family, Shape, Limit>(
-                tb,
-                tb_r,
-                tb_t,
-                tb_rr,
-                tb_rt,
-                tb_tt,
-                fields,
-                theta_node,
-                std::make_index_sequence<Limit - 1>{}
-            );
+                tb, tb_r, tb_t, tb_rr, tb_rt, tb_tt, fields, theta_node, std::make_index_sequence<Limit - 1>{});
         }
 
         template <typename ProfilesRuntime>
@@ -296,7 +253,8 @@ namespace geometry::detail
 
             static_assert(ProfileGrid::radial_nodes == radial_nodes, "geometry/profile radial grids must match");
             static_assert(ProfileGrid::theta_rows == theta_rows, "geometry/profile theta grids must match");
-            static_assert(ProfileGrid::harmonic_rows == GridType::harmonic_rows, "geometry/profile harmonics must match");
+            static_assert(ProfileGrid::harmonic_rows == GridType::harmonic_rows,
+                          "geometry/profile harmonics must match");
 
             (void)Z0;
 
@@ -324,28 +282,30 @@ namespace geometry::detail
                 {
                     for (size_t order = 1; order < c_limit; ++order)
                     {
-                        c_fields(order, profile_value) = runtime_profiles.c_family_fields(order, i, profile_value);
-                        c_fields(order, profile_radial) = runtime_profiles.c_family_fields(order, i, profile_radial);
+                        c_fields(order, profile_value)   = runtime_profiles.c_family_fields(order, i, profile_value);
+                        c_fields(order, profile_radial)  = runtime_profiles.c_family_fields(order, i, profile_radial);
                         c_fields(order, profile_radial2) = runtime_profiles.c_family_fields(order, i, profile_radial2);
                     }
                     for (size_t order = 1; order < s_limit; ++order)
                     {
-                        s_fields(order, profile_value) = runtime_profiles.s_family_fields(order, i, profile_value);
-                        s_fields(order, profile_radial) = runtime_profiles.s_family_fields(order, i, profile_radial);
+                        s_fields(order, profile_value)   = runtime_profiles.s_family_fields(order, i, profile_value);
+                        s_fields(order, profile_radial)  = runtime_profiles.s_family_fields(order, i, profile_radial);
                         s_fields(order, profile_radial2) = runtime_profiles.s_family_fields(order, i, profile_radial2);
                     }
                 }
                 else
                 {
-                    load_family_fields<FourierFamily::Cosine, Shape, ProfilesRuntime, c_limit>(c_fields, runtime_profiles, i);
-                    load_family_fields<FourierFamily::Sine, Shape, ProfilesRuntime, s_limit>(s_fields, runtime_profiles, i);
+                    load_family_fields<FourierFamily::Cosine, Shape, ProfilesRuntime, c_limit>(
+                        c_fields, runtime_profiles, i);
+                    load_family_fields<FourierFamily::Sine, Shape, ProfilesRuntime, s_limit>(
+                        s_fields, runtime_profiles, i);
                 }
 
-                double sum_J           = 0.0;
-                double sum_JR          = 0.0;
-                double sum_gttdivJR    = 0.0;
-                double sum_gttdivJR_r  = 0.0;
-                double sum_JdivR       = 0.0;
+                double sum_J          = 0.0;
+                double sum_JR         = 0.0;
+                double sum_gttdivJR   = 0.0;
+                double sum_gttdivJR_r = 0.0;
+                double sum_JdivR      = 0.0;
 
                 alignas(tensor::detail::simd_alignment) std::array<double, theta_rows> tb_values;
                 alignas(tensor::detail::simd_alignment) std::array<double, theta_rows> tb_r_values;
@@ -404,25 +364,9 @@ namespace geometry::detail
                     else
                     {
                         accumulate_phase<FourierFamily::Cosine, Shape, c_limit>(
-                            tb_ij,
-                            tb_r_ij,
-                            tb_t_ij,
-                            tb_rr_ij,
-                            tb_rt_ij,
-                            tb_tt_ij,
-                            c_fields,
-                            j
-                        );
+                            tb_ij, tb_r_ij, tb_t_ij, tb_rr_ij, tb_rt_ij, tb_tt_ij, c_fields, j);
                         accumulate_phase<FourierFamily::Sine, Shape, s_limit>(
-                            tb_ij,
-                            tb_r_ij,
-                            tb_t_ij,
-                            tb_rr_ij,
-                            tb_rt_ij,
-                            tb_tt_ij,
-                            s_fields,
-                            j
-                        );
+                            tb_ij, tb_r_ij, tb_t_ij, tb_rr_ij, tb_rt_ij, tb_tt_ij, s_fields, j);
                     }
 
                     tb_values[j]    = tb_ij;
@@ -445,11 +389,11 @@ namespace geometry::detail
                     const double sin_t = GridType::sin_mtheta(1, j);
                     const double cos_t = GridType::cos_mtheta(1, j);
 
-                    const double tb_r_ij  = tb_r_values[j];
-                    const double tb_t_ij  = tb_t_values[j];
-                    const double tb_rr_ij = tb_rr_values[j];
-                    const double tb_rt_ij = tb_rt_values[j];
-                    const double tb_tt_ij = tb_tt_values[j];
+                    const double tb_r_ij   = tb_r_values[j];
+                    const double tb_t_ij   = tb_t_values[j];
+                    const double tb_rr_ij  = tb_rr_values[j];
+                    const double tb_rt_ij  = tb_rt_values[j];
+                    const double tb_tt_ij  = tb_tt_values[j];
                     const double cos_tb_ij = cos_tb_values[j];
                     const double sin_tb_ij = sin_tb_values[j];
 
@@ -457,16 +401,13 @@ namespace geometry::detail
                     if (R_ij < 1.0e-6)
                         R_ij = 1.0e-6;
 
-                    const double R_r_ij = a * (h_r_i + cos_tb_ij - rho_i * sin_tb_ij * tb_r_ij);
-                    const double R_t_ij = -a * rho_i * sin_tb_ij * tb_t_ij;
-                    const double R_rr_ij =
-                        a * (h_rr_i - 2.0 * sin_tb_ij * tb_r_ij -
-                             rho_i * (cos_tb_ij * tb_r_ij * tb_r_ij + sin_tb_ij * tb_rr_ij));
+                    const double R_r_ij  = a * (h_r_i + cos_tb_ij - rho_i * sin_tb_ij * tb_r_ij);
+                    const double R_t_ij  = -a * rho_i * sin_tb_ij * tb_t_ij;
+                    const double R_rr_ij = a * (h_rr_i - 2.0 * sin_tb_ij * tb_r_ij -
+                                                rho_i * (cos_tb_ij * tb_r_ij * tb_r_ij + sin_tb_ij * tb_rr_ij));
                     const double R_rt_ij =
-                        -a * (sin_tb_ij * tb_t_ij +
-                              rho_i * (cos_tb_ij * tb_r_ij * tb_t_ij + sin_tb_ij * tb_rt_ij));
-                    const double R_tt_ij =
-                        -a * rho_i * (cos_tb_ij * tb_t_ij * tb_t_ij + sin_tb_ij * tb_tt_ij);
+                        -a * (sin_tb_ij * tb_t_ij + rho_i * (cos_tb_ij * tb_r_ij * tb_t_ij + sin_tb_ij * tb_rt_ij));
+                    const double R_tt_ij = -a * rho_i * (cos_tb_ij * tb_t_ij * tb_t_ij + sin_tb_ij * tb_tt_ij);
 
                     const double Z_r_ij  = a * (v_r_i - (k_i + rho_i * k_r_i) * sin_t);
                     const double Z_t_ij  = -a * rho_i * k_i * cos_t;
@@ -478,19 +419,17 @@ namespace geometry::detail
                     if (J_ij < 1.0e-6)
                         J_ij = 1.0e-6;
 
-                    const double J_r_ij =
-                        -(R_rr_ij * Z_t_ij - R_rt_ij * Z_r_ij + R_r_ij * Z_rt_ij - R_t_ij * Z_rr_ij);
-                    const double J_t_ij =
-                        -(R_rt_ij * Z_t_ij - R_tt_ij * Z_r_ij + R_r_ij * Z_tt_ij - R_t_ij * Z_rt_ij);
-                    const double JR_ij       = J_ij * R_ij;
-                    const double JR_r_ij     = J_r_ij * R_ij + J_ij * R_r_ij;
-                    const double JR_t_ij     = J_t_ij * R_ij + J_ij * R_t_ij;
-                    const double JdivR_ij    = J_ij / R_ij;
-                    const double grt_ij      = R_r_ij * R_t_ij + Z_r_ij * Z_t_ij;
-                    const double grt_t_ij    = R_rt_ij * R_t_ij + R_r_ij * R_tt_ij + Z_rt_ij * Z_t_ij + Z_r_ij * Z_tt_ij;
-                    const double gtt_ij      = R_t_ij * R_t_ij + Z_t_ij * Z_t_ij;
-                    const double gtt_r_ij    = 2.0 * (R_t_ij * R_rt_ij + Z_t_ij * Z_rt_ij);
-                    const double inv_JR      = 1.0 / JR_ij;
+                    const double J_r_ij  = -(R_rr_ij * Z_t_ij - R_rt_ij * Z_r_ij + R_r_ij * Z_rt_ij - R_t_ij * Z_rr_ij);
+                    const double J_t_ij  = -(R_rt_ij * Z_t_ij - R_tt_ij * Z_r_ij + R_r_ij * Z_tt_ij - R_t_ij * Z_rt_ij);
+                    const double JR_ij   = J_ij * R_ij;
+                    const double JR_r_ij = J_r_ij * R_ij + J_ij * R_r_ij;
+                    const double JR_t_ij = J_t_ij * R_ij + J_ij * R_t_ij;
+                    const double JdivR_ij = J_ij / R_ij;
+                    const double grt_ij   = R_r_ij * R_t_ij + Z_r_ij * Z_t_ij;
+                    const double grt_t_ij = R_rt_ij * R_t_ij + R_r_ij * R_tt_ij + Z_rt_ij * Z_t_ij + Z_r_ij * Z_tt_ij;
+                    const double gtt_ij   = R_t_ij * R_t_ij + Z_t_ij * Z_t_ij;
+                    const double gtt_r_ij = 2.0 * (R_t_ij * R_rt_ij + Z_t_ij * Z_rt_ij);
+                    const double inv_JR   = 1.0 / JR_ij;
                     const double grtdivJR_t_ij = (grt_t_ij - grt_ij * JR_t_ij * inv_JR) * inv_JR;
                     const double gttdivJR_ij   = gtt_ij * inv_JR;
                     const double gttdivJR_r_ij = gtt_r_ij * inv_JR - gtt_ij * JR_r_ij * inv_JR * inv_JR;

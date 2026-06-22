@@ -316,13 +316,13 @@ namespace profiles
 
         template <size_t Nr>
             requires(kappa_slot.enabled() && kappa_count > 0 && basis_rows + 1 >= kappa_count)
-        static constexpr void update_kappa(Matrix<double, Nr, 3>&             profiles,
-                                           const Vector<double, kappa_count>& coeffs,
+        static constexpr void update_kappa(Matrix<double, Nr, 3>&                profiles,
+                                           const Vector<double, kappa_count>&    coeffs,
                                            const Matrix<double, basis_rows, Nr>& T,
                                            const Matrix<double, basis_rows, Nr>& T_r,
                                            const Matrix<double, basis_rows, Nr>& T_rr,
                                            const Matrix<double, rho_rows, Nr>&   rhos,
-                                           double                            ka) noexcept
+                                           double                                ka) noexcept
         {
             Matrix<double, Nr, 3> polys{uninitialized};
             detail::update_polys<basis_rows, kappa_count>(polys, coeffs, T, T_r, T_rr);
@@ -331,8 +331,8 @@ namespace profiles
 
         template <size_t Nr>
             requires(psin_slot.enabled() && psin_count > 0 && basis_rows + 1 >= psin_count)
-        static constexpr void update_psin(Matrix<double, Nr, 3>&              profiles,
-                                          const Vector<double, psin_count>&   coeffs,
+        static constexpr void update_psin(Matrix<double, Nr, 3>&                profiles,
+                                          const Vector<double, psin_count>&     coeffs,
                                           const Matrix<double, basis_rows, Nr>& T,
                                           const Matrix<double, basis_rows, Nr>& T_r,
                                           const Matrix<double, basis_rows, Nr>& T_rr,
@@ -351,7 +351,7 @@ namespace profiles
                                        const Matrix<double, basis_rows, Nr>& T_r,
                                        const Matrix<double, basis_rows, Nr>& T_rr,
                                        const Matrix<double, rho_rows, Nr>&   rhos,
-                                       double                          scale) noexcept
+                                       double                                scale) noexcept
         {
             Matrix<double, Nr, 3> polys{uninitialized};
             detail::update_polys<basis_rows, F_count>(polys, coeffs, T, T_r, T_rr);
@@ -359,8 +359,7 @@ namespace profiles
         }
 
         template <size_t Order, size_t Nr>
-            requires(c_count<Order>() > 0 && basis_rows + 1 >= c_count<Order>() &&
-                     rho_rows >= fourier_power<Order>())
+            requires(c_count<Order>() > 0 && basis_rows + 1 >= c_count<Order>() && rho_rows >= fourier_power<Order>())
         static constexpr void update_c(Matrix<double, Nr, 3>&                  profiles,
                                        const Vector<double, c_count<Order>()>& coeffs,
                                        const Matrix<double, basis_rows, Nr>&   T,
@@ -378,8 +377,7 @@ namespace profiles
         }
 
         template <size_t Order, size_t Nr>
-            requires(s_count<Order>() > 0 && basis_rows + 1 >= s_count<Order>() &&
-                     rho_rows >= fourier_power<Order>())
+            requires(s_count<Order>() > 0 && basis_rows + 1 >= s_count<Order>() && rho_rows >= fourier_power<Order>())
         static constexpr void update_s(Matrix<double, Nr, 3>&                  profiles,
                                        const Vector<double, s_count<Order>()>& coeffs,
                                        const Matrix<double, basis_rows, Nr>&   T,
@@ -415,18 +413,17 @@ namespace profiles
         static constexpr auto c_family_slots = tail_optimized_slots_from_counts<CFamilyCounts>();
         static constexpr auto s_family_slots = optimized_slots_from_counts<SFamilyCounts>();
 
-        using type = ProfileShape<
-            Lmax,
-            Kmax,
-            Mmax,
-            optimized_slot_from_count(HCount),
-            optimized_slot_from_count(VCount),
-            optimized_slot_from_count(KappaCount),
-            first_optimized_slot_from_counts<CFamilyCounts>(),
-            optimized_slot_from_count(PsinCount),
-            optimized_slot_from_count(FCount),
-            c_family_slots,
-            s_family_slots>;
+        using type = ProfileShape<Lmax,
+                                  Kmax,
+                                  Mmax,
+                                  optimized_slot_from_count(HCount),
+                                  optimized_slot_from_count(VCount),
+                                  optimized_slot_from_count(KappaCount),
+                                  first_optimized_slot_from_counts<CFamilyCounts>(),
+                                  optimized_slot_from_count(PsinCount),
+                                  optimized_slot_from_count(FCount),
+                                  c_family_slots,
+                                  s_family_slots>;
     };
 
     template <size_t Lmax,
@@ -438,16 +435,15 @@ namespace profiles
               size_t FCount,
               auto   CFamilyCounts,
               auto   SFamilyCounts>
-    using OptimizedProfileShapeFromCountsT = typename OptimizedProfileShapeFromCounts<
-        Lmax,
-        Kmax,
-        HCount,
-        VCount,
-        KappaCount,
-        PsinCount,
-        FCount,
-        CFamilyCounts,
-        SFamilyCounts>::type;
+    using OptimizedProfileShapeFromCountsT = typename OptimizedProfileShapeFromCounts<Lmax,
+                                                                                      Kmax,
+                                                                                      HCount,
+                                                                                      VCount,
+                                                                                      KappaCount,
+                                                                                      PsinCount,
+                                                                                      FCount,
+                                                                                      CFamilyCounts,
+                                                                                      SFamilyCounts>::type;
 
     template <size_t Lmax,
               size_t Kmax,
@@ -458,25 +454,23 @@ namespace profiles
               size_t FCount,
               auto   CFamilyCounts,
               auto   SFamilyCounts>
-    struct Profiles
-        : ProfileEvaluator<OptimizedProfileShapeFromCountsT<
-              Lmax,
-              Kmax,
-              HCount,
-              VCount,
-              KappaCount,
-              PsinCount,
-              FCount,
-              CFamilyCounts,
-              SFamilyCounts>>
-    {};
+    struct Profiles : ProfileEvaluator<OptimizedProfileShapeFromCountsT<Lmax,
+                                                                        Kmax,
+                                                                        HCount,
+                                                                        VCount,
+                                                                        KappaCount,
+                                                                        PsinCount,
+                                                                        FCount,
+                                                                        CFamilyCounts,
+                                                                        SFamilyCounts>>
+    {
+    };
 
     template <typename Shape>
     struct ProfileRuntimeParams
     {
         std::array<double, Shape::profile_count> offsets{};
-        std::array<double, Shape::profile_count> scales =
-            detail::filled_array<double, Shape::profile_count>(1.0);
+        std::array<double, Shape::profile_count> scales = detail::filled_array<double, Shape::profile_count>(1.0);
         std::array<size_t, Shape::profile_count> powers{};
         std::array<size_t, Shape::profile_count> envelope_powers{};
         std::array<double, Shape::profile_count> amplitude_powers =
@@ -695,15 +689,13 @@ namespace profiles
                 constexpr size_t count      = evaluator::kappa_count;
                 const auto       coeffs     = coefficients_from_x<profile_id, count>(x);
                 ProfileField     out{uninitialized};
-                evaluator::update_kappa(
-                    out,
-                    coeffs,
-                    GridType::T,
-                    GridType::T_r,
-                    GridType::T_rr,
-                    GridType::rhos,
-                    params.offsets[profile_id]
-                );
+                evaluator::update_kappa(out,
+                                        coeffs,
+                                        GridType::T,
+                                        GridType::T_r,
+                                        GridType::T_rr,
+                                        GridType::rhos,
+                                        params.offsets[profile_id]);
                 store_profile<profile_id>(out);
             }
         }
@@ -731,14 +723,7 @@ namespace profiles
                 const auto       coeffs     = coefficients_from_x<profile_id, count>(x);
                 ProfileField     out{uninitialized};
                 evaluator::update_F(
-                    out,
-                    coeffs,
-                    GridType::T,
-                    GridType::T_r,
-                    GridType::T_rr,
-                    GridType::rhos,
-                    params.scales[profile_id]
-                );
+                    out, coeffs, GridType::T, GridType::T_r, GridType::T_rr, GridType::rhos, params.scales[profile_id]);
                 store_profile<profile_id>(out);
             }
         }
@@ -755,15 +740,13 @@ namespace profiles
                     constexpr size_t count      = evaluator::template c_count<Order>();
                     const auto       coeffs     = coefficients_from_x<profile_id, count>(x);
                     ProfileField     out{uninitialized};
-                    evaluator::template update_c<Order>(
-                        out,
-                        coeffs,
-                        GridType::T,
-                        GridType::T_r,
-                        GridType::T_rr,
-                        GridType::rhos,
-                        params.offsets[profile_id]
-                    );
+                    evaluator::template update_c<Order>(out,
+                                                        coeffs,
+                                                        GridType::T,
+                                                        GridType::T_r,
+                                                        GridType::T_rr,
+                                                        GridType::rhos,
+                                                        params.offsets[profile_id]);
                     store_profile<profile_id>(out);
                 }
                 refresh_c_active<Order + 1>(x, params);
@@ -782,15 +765,13 @@ namespace profiles
                     constexpr size_t count      = evaluator::template s_count<Order>();
                     const auto       coeffs     = coefficients_from_x<profile_id, count>(x);
                     ProfileField     out{uninitialized};
-                    evaluator::template update_s<Order>(
-                        out,
-                        coeffs,
-                        GridType::T,
-                        GridType::T_r,
-                        GridType::T_rr,
-                        GridType::rhos,
-                        params.offsets[profile_id]
-                    );
+                    evaluator::template update_s<Order>(out,
+                                                        coeffs,
+                                                        GridType::T,
+                                                        GridType::T_r,
+                                                        GridType::T_rr,
+                                                        GridType::rhos,
+                                                        params.offsets[profile_id]);
                     store_profile<profile_id>(out);
                 }
                 refresh_s_active<Order + 1>(x, params);
@@ -804,8 +785,8 @@ namespace profiles
             {
                 for (size_t component = 0; component < 3; ++component)
                 {
-                    const double value              = profile_fields(ProfileId, node, component);
-                    family(Order, node, component)  = value;
+                    const double value                  = profile_fields(ProfileId, node, component);
+                    family(Order, node, component)      = value;
                     family_base(Order, node, component) = value;
                 }
             }
@@ -818,10 +799,8 @@ namespace profiles
             {
                 constexpr int profile_id = Shape::c_family_source_profile_ids[Order];
                 if constexpr (profile_id >= 0)
-                    copy_profile_to_family<static_cast<size_t>(profile_id), Order>(
-                        c_family_fields,
-                        c_family_base_fields
-                    );
+                    copy_profile_to_family<static_cast<size_t>(profile_id), Order>(c_family_fields,
+                                                                                   c_family_base_fields);
                 refresh_c_family_order<Order + 1>();
             }
         }
@@ -833,10 +812,8 @@ namespace profiles
             {
                 constexpr int profile_id = Shape::s_family_source_profile_ids[Order];
                 if constexpr (profile_id >= 0)
-                    copy_profile_to_family<static_cast<size_t>(profile_id), Order>(
-                        s_family_fields,
-                        s_family_base_fields
-                    );
+                    copy_profile_to_family<static_cast<size_t>(profile_id), Order>(s_family_fields,
+                                                                                   s_family_base_fields);
                 refresh_s_family_order<Order + 1>();
             }
         }
