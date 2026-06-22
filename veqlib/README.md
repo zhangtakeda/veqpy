@@ -60,6 +60,7 @@ import veqlib_ext
 
 veqlib_ext.validate_pf_psin_uniform_ip_json()
 veqlib_ext.solve_pf_psin_uniform_ip_json(repeat=10, warmup=1)
+veqlib_ext.scan_pf_psin_uniform_ip_json(points=11, policy="warm", relative_step=0.02)
 veqlib_ext.stage_pf_psin_uniform_ip_json(stage="evaluate", repeat=10, inner=10000)
 
 solver = veqlib_ext.PfPsinUniformIpSolver()
@@ -68,8 +69,10 @@ solver.solve_direct()  # scalars plus read-only NumPy views
 ```
 
 The free functions return the same JSON payloads as the corresponding
-`veqlib_main` modes. `PfPsinUniformIpSolver` keeps the C++ context alive across
-calls and is the interface used for Python-perceived latency comparisons.
+`veqlib_main` modes, including the `Ip` scan path that reuses one prepared
+operator while updating only solve parameters for each scan point.
+`PfPsinUniformIpSolver` keeps the C++ context alive across calls and is the
+interface used for Python-perceived latency comparisons.
 
 ## Default Topology
 

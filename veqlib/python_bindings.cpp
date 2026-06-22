@@ -29,6 +29,7 @@ namespace veqlib_python
     using veqlib_pf_psin_uniform_benchmark_cli::BenchSource;
     using veqlib_pf_psin_uniform_benchmark_cli::CaseInput;
     using veqlib_pf_psin_uniform_benchmark_cli::PackedVector;
+    using veqlib_pf_psin_uniform_benchmark_cli::ScanConfig;
     using veqlib_pf_psin_uniform_benchmark_cli::SolveContext;
     using veqlib_pf_psin_uniform_benchmark_cli::SolveResult;
     using veqlib_pf_psin_uniform_benchmark_cli::SolverKind;
@@ -36,7 +37,9 @@ namespace veqlib_python
     using veqlib_pf_psin_uniform_benchmark_cli::build_inline_case;
     using veqlib_pf_psin_uniform_benchmark_cli::json_array;
     using veqlib_pf_psin_uniform_benchmark_cli::norm2;
+    using veqlib_pf_psin_uniform_benchmark_cli::parse_scan_policy;
     using veqlib_pf_psin_uniform_benchmark_cli::parse_solver_kind;
+    using veqlib_pf_psin_uniform_benchmark_cli::run_parameter_scan_report;
     using veqlib_pf_psin_uniform_benchmark_cli::run_solver_once;
     using veqlib_pf_psin_uniform_benchmark_cli::solve_result_json;
     using veqlib_pf_psin_uniform_benchmark_cli::solver_entrypoint;
@@ -116,6 +119,31 @@ namespace veqlib_python
             std::to_string(enzyme_width),
         };
         return run_cli_json(veqlib_pf_psin_uniform_benchmark_cli::run, args);
+    }
+
+    std::string scan_pf_psin_uniform_ip_json(
+        int                points,
+        const std::string& policy,
+        double             relative_step,
+        const std::string& solver,
+        int                enzyme_width
+    )
+    {
+        if (points <= 0)
+            throw std::runtime_error("points must be positive for PF/psin/uniform/Ip scan");
+        if (!supported_enzyme_width(enzyme_width))
+            throw std::runtime_error("enzyme_width must be one of 1, 2, 3, 4, 5, 6, 8, 9, 10, 12, 18");
+        if (relative_step < -1.0 || relative_step > 1.0)
+            throw std::runtime_error("relative_step must be in [-1, 1]");
+
+        ScanConfig scan{};
+        scan.points        = points;
+        scan.policy        = parse_scan_policy(policy.c_str());
+        scan.relative_step = relative_step;
+
+        const SolverKind solver_kind = parse_solver_kind(solver.c_str());
+        CaseInput        input       = build_inline_case(0, 0, solver_kind, enzyme_width);
+        return run_parameter_scan_report(input, scan).dump(2);
     }
 
     std::string validate_pf_psin_uniform_ip_json()
@@ -350,6 +378,16 @@ NB_MODULE(veqlib_ext, module)
         "validate_pf_psin_uniform_ip_json",
         &veqlib_python::validate_pf_psin_uniform_ip_json,
         "Run the PF/psin/uniform/Ip validation payload and return JSON."
+    );
+    module.def(
+        "scan_pf_psin_uniform_ip_json",
+        &veqlib_python::scan_pf_psin_uniform_ip_json,
+        nb::arg("points"),
+        nb::arg("policy") = "warm",
+        nb::arg("relative_step") = 5.0e-3,
+        nb::arg("solver") = "residual",
+        nb::arg("enzyme_width") = 1,
+        "Run the PF/psin/uniform/Ip Ip-scan path and return JSON."
     );
     module.def(
         "stage_pf_psin_uniform_ip_json",
