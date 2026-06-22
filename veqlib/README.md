@@ -99,7 +99,7 @@ order, profile ids, active/fixed/absent ownership, packed coefficient ordering,
 and workspace extents are compile-time facts for each concrete instantiation.
 Runtime code should carry numerical values only.
 
-`profile_layout.h` starts this boundary with `profiles::ProfileShape`, which
+`profiles.h` starts this boundary with `profiles::ProfileShape`, which
 mirrors VEQPy's profile order `h, v, k, c0, c, s, psin, F` and degree-first
 packed coefficient layout. `profiles::ProfileSlot` distinguishes absent,
 fixed, and optimized profiles so a profile can have runtime fields without
