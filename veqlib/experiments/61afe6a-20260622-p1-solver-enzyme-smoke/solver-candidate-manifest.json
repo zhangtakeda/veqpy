@@ -1,0 +1,35 @@
+{
+  "artifacts": [
+    "enzyme-width1-jacobian-check.json",
+    "enzyme-width1.json",
+    "enzyme-width2.json",
+    "enzyme-width3.json",
+    "enzyme-width4.json",
+    "enzyme-width6.json",
+    "enzyme-width9.json",
+    "enzyme-width18.json",
+    "sundials-nk.json",
+    "sundials-nr.json",
+    "solver-candidate-summary.json"
+  ],
+  "commands": [
+    "cmake --preset clang-enzyme-release",
+    "cmake --build --preset clang-enzyme-release -j$(nproc)",
+    "ctest --test-dir build/enzyme-release --output-on-failure",
+    "taskset -c 2 build/enzyme-release/veqlib_main --mode pf-benchmark --solver enzyme --enzyme-width 1 --jacobian-check --repeat 5 --warmup 2",
+    "taskset -c 2 build/enzyme-release/veqlib_main --mode pf-benchmark --solver enzyme --enzyme-width W --repeat 10 --warmup 2 for W in 1 2 3 4 6 9 18",
+    "taskset -c 2 build/release/veqlib_main --mode pf-benchmark --solver sundials-nk --repeat 5 --warmup 2",
+    "taskset -c 2 build/release/veqlib_main --mode pf-benchmark --solver sundials-nr --repeat 5 --warmup 2"
+  ],
+  "current_head": "61afe6af4f4aaadfa4b9f6d474b3a358e206da74",
+  "dirty_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "git_status_short": "?? veqlib/experiments/61afe6a-20260622-p1-solver-enzyme-smoke/",
+  "notes": "Smoke/diagnostic only; no solver strategy change retained.",
+  "phase": "P1-C solver candidate smoke",
+  "schema_version": 1,
+  "system": {
+    "machine": "x86_64",
+    "platform": "Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "processor": "x86_64"
+  }
+}

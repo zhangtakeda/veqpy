@@ -242,6 +242,33 @@ from the requested end state. Residual work should resume only with a
 vector-friendly/blocked moment design that does not replace vectorized rowwise
 passes with scalar dependency chains.
 
+## 2026-06-22 P1-C Solver candidate smoke
+
+The Enzyme release preset builds in the current environment. Enzyme CTest passed
+4/4, and the width-1 Jacobian check passed with `max_abs_diff=1.93e-10`.
+Artifacts are saved under
+`veqlib/experiments/61afe6a-20260622-p1-solver-enzyme-smoke`.
+
+| solver path | median ms | counters | decision |
+| --- | ---: | --- | --- |
+| residual-only P1-A reference | 0.186 | `nfev=38` | keep baseline |
+| Enzyme width 1 | 0.360 | `nfev=20`, `njev=1` | too slow |
+| Enzyme width 2 | 0.296 | `nfev=20`, `njev=1` | too slow |
+| Enzyme width 3 | 0.287 | `nfev=20`, `njev=1` | too slow |
+| Enzyme width 4 | 0.446 | `nfev=20`, `njev=1` | too slow |
+| Enzyme width 6 | 0.406 | `nfev=20`, `njev=1` | too slow |
+| Enzyme width 9 | 0.451 | `nfev=20`, `njev=1` | too slow |
+| Enzyme width 18 | 0.556 | `nfev=20`, `njev=1` | too slow |
+| SUNDIALS Newton-Krylov | 1.050 | `nfev=8`, `jvp=98`, `lin=98` | too slow |
+| SUNDIALS Newton-Raphson | 0.310 | `nfev=23`, `njev=2` | too slow |
+
+Decision: do not switch solver baseline in this phase. Enzyme/SUNDIALS paths
+are useful diagnostics and now have callback timing, but all tested Jacobian or
+KINSOL variants are slower than residual-only CMINPACK for the current small
+topology. Future solver work should focus on making Jacobian construction much
+cheaper or reusing factorizations across a parameter scan before revisiting the
+strategy switch.
+
 ## Stable release stage timing
 
 | stage | median ns/call | avg ns/call | p95/median | CV |
