@@ -1009,3 +1009,28 @@ now records predictor fallback counts and per-point raw residual evidence. Do no
 return to Enzyme/KINSOL/Broyden work until a continuation scan still shows high
 post-warm-start callback counts.
 
+## 2026-06-22 Source accumulator-only block-4 SIMD
+
+The remaining production Source row-dot matvec in `update_pf_ip_from_psin_uniform()`
+was converted to the same plan-packed output-block-4 AVX2/FMA shape used by the
+paired D/A psin passes. This is the `A * integrand` accumulator pass that creates
+the unnormalized `psin_r`; the old row-dot path remains available as
+`source_A_integrand_rowdot`, while `source_A_integrand` now measures the
+production block-4 path.
+
+Pinned artifacts:
+`veqlib/experiments/ea25915-20260622-source-accumulator-block4`.
+Default topology timing (`taskset -c 2`, repeat 20, warmup 5, inner 10000)
+measured `source_A_integrand_rowdot` at 245.9 ns and block-4
+`source_A_integrand` at 67.9 ns, ratio≈0.276 (≈3.62x faster). The production
+smoke measured `source_update`≈244.8 ns, `evaluate`≈3682.7 ns,
+`evaluate_ring`≈3704.9 ns, and solve median≈0.1759 ms.
+
+Representative topology comparison against the previous retained Source block-4
+baseline showed `source_update` geomean ratio≈0.384 with 8/9 rows improved; the
+only source-stage regression was `64x16x1` at ratio≈1.115. The full
+`evaluate_ring` endpoint improved 9/9 rows with geomean ratio≈0.959 and worst
+row≈0.993. Keep the change: the SIMD accumulator path removes the last
+production Source row-dot matvec and the endpoint gate is positive across the
+representative matrix.
+

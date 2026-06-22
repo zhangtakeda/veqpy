@@ -1,0 +1,202 @@
+{
+  "source_update": {
+    "baseline_artifact": "experiments/d109fd3-20260622-p1-source-block4/current-source-update-topology.json",
+    "current_artifact": "experiments/ea25915-20260622-source-accumulator-block4/current-source-update-topology.json",
+    "geomean_ratio": 0.3837509702217397,
+    "improved_rows": 8,
+    "row_count": 9,
+    "worst_ratio": 1.1151571391442234,
+    "rows": [
+      {
+        "topology": {
+          "Nr": 16,
+          "Nt": 16,
+          "Mmax": 1
+        },
+        "baseline_median_ns": 196.453625,
+        "current_median_ns": 100.843625,
+        "ratio": 0.5133202556073985
+      },
+      {
+        "topology": {
+          "Nr": 32,
+          "Nt": 8,
+          "Mmax": 1
+        },
+        "baseline_median_ns": 918.073125,
+        "current_median_ns": 249.687,
+        "ratio": 0.27196853191841336
+      },
+      {
+        "topology": {
+          "Nr": 32,
+          "Nt": 16,
+          "Mmax": 1
+        },
+        "baseline_median_ns": 693.847875,
+        "current_median_ns": 245.06824999999998,
+        "ratio": 0.3532017014536507
+      },
+      {
+        "topology": {
+          "Nr": 32,
+          "Nt": 16,
+          "Mmax": 4
+        },
+        "baseline_median_ns": 645.233375,
+        "current_median_ns": 264.553125,
+        "ratio": 0.41001153264894274
+      },
+      {
+        "topology": {
+          "Nr": 32,
+          "Nt": 16,
+          "Mmax": 8
+        },
+        "baseline_median_ns": 1069.625375,
+        "current_median_ns": 244.40875,
+        "ratio": 0.2284993940051207
+      },
+      {
+        "topology": {
+          "Nr": 32,
+          "Nt": 24,
+          "Mmax": 1
+        },
+        "baseline_median_ns": 1036.044625,
+        "current_median_ns": 272.915875,
+        "ratio": 0.26342096509597746
+      },
+      {
+        "topology": {
+          "Nr": 32,
+          "Nt": 32,
+          "Mmax": 1
+        },
+        "baseline_median_ns": 670.694,
+        "current_median_ns": 246.93475,
+        "ratio": 0.368177961931969
+      },
+      {
+        "topology": {
+          "Nr": 32,
+          "Nt": 64,
+          "Mmax": 1
+        },
+        "baseline_median_ns": 676.563125,
+        "current_median_ns": 244.3985,
+        "ratio": 0.3612353244939266
+      },
+      {
+        "topology": {
+          "Nr": 64,
+          "Nt": 16,
+          "Mmax": 1
+        },
+        "baseline_median_ns": 922.45475,
+        "current_median_ns": 1028.6819999999998,
+        "ratio": 1.1151571391442234
+      }
+    ]
+  },
+  "evaluate_ring": {
+    "baseline_artifact": "experiments/d109fd3-20260622-p1-source-block4/current-evaluate-ring-topology.json",
+    "current_artifact": "experiments/ea25915-20260622-source-accumulator-block4/current-evaluate-ring-topology.json",
+    "geomean_ratio": 0.9591827240046557,
+    "improved_rows": 9,
+    "row_count": 9,
+    "worst_ratio": 0.9928505743602887,
+    "rows": [
+      {
+        "topology": {
+          "Nr": 16,
+          "Nt": 16,
+          "Mmax": 1
+        },
+        "baseline_median_ns": 1933.892375,
+        "current_median_ns": 1719.141,
+        "ratio": 0.8889538126443051
+      },
+      {
+        "topology": {
+          "Nr": 32,
+          "Nt": 8,
+          "Mmax": 1
+        },
+        "baseline_median_ns": 2733.5654999999997,
+        "current_median_ns": 2570.448125,
+        "ratio": 0.9403279800685223
+      },
+      {
+        "topology": {
+          "Nr": 32,
+          "Nt": 16,
+          "Mmax": 1
+        },
+        "baseline_median_ns": 3896.896375,
+        "current_median_ns": 3625.1735,
+        "ratio": 0.9302719782996539
+      },
+      {
+        "topology": {
+          "Nr": 32,
+          "Nt": 16,
+          "Mmax": 4
+        },
+        "baseline_median_ns": 4444.60425,
+        "current_median_ns": 4345.8817500000005,
+        "ratio": 0.9777882361517339
+      },
+      {
+        "topology": {
+          "Nr": 32,
+          "Nt": 16,
+          "Mmax": 8
+        },
+        "baseline_median_ns": 5149.348,
+        "current_median_ns": 4971.2515,
+        "ratio": 0.965413776656773
+      },
+      {
+        "topology": {
+          "Nr": 32,
+          "Nt": 24,
+          "Mmax": 1
+        },
+        "baseline_median_ns": 4747.25625,
+        "current_median_ns": 4618.977124999999,
+        "ratio": 0.9729782598106009
+      },
+      {
+        "topology": {
+          "Nr": 32,
+          "Nt": 32,
+          "Mmax": 1
+        },
+        "baseline_median_ns": 6581.332875,
+        "current_median_ns": 6534.280125,
+        "ratio": 0.9928505743602887
+      },
+      {
+        "topology": {
+          "Nr": 32,
+          "Nt": 64,
+          "Mmax": 1
+        },
+        "baseline_median_ns": 12276.465125,
+        "current_median_ns": 12019.7875,
+        "ratio": 0.9790918947444165
+      },
+      {
+        "topology": {
+          "Nr": 64,
+          "Nt": 16,
+          "Mmax": 1
+        },
+        "baseline_median_ns": 8403.886999999999,
+        "current_median_ns": 8318.69225,
+        "ratio": 0.9898624588836096
+      }
+    ]
+  }
+}

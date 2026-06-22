@@ -189,6 +189,67 @@ namespace source::detail
         }
     }
 
+    template <size_t BlockSize, typename PackedMatrix, typename InVector, typename OutVector>
+    constexpr void packed_block_matvec_into(OutVector& out, const PackedMatrix& packed, const InVector& values) noexcept
+    {
+        static_assert(PackedMatrix::rows == OutVector::shape[0], "packed matvec rows must match output");
+        static_assert(PackedMatrix::cols == InVector::shape[0], "packed matvec cols must match input");
+        static_assert(PackedMatrix::block_size == BlockSize, "packed matvec block size mismatch");
+
+        for (size_t block = 0; block < PackedMatrix::block_count; ++block)
+        {
+            double total[BlockSize]{};
+            for (size_t col = 0; col < PackedMatrix::cols; ++col)
+            {
+                const double value = values[col];
+                for (size_t lane = 0; lane < BlockSize; ++lane)
+                    total[lane] += packed.values(block, col, lane) * value;
+            }
+            for (size_t lane = 0; lane < BlockSize; ++lane)
+            {
+                const size_t row = block * BlockSize + lane;
+                if (row < OutVector::shape[0])
+                    out[row] = total[lane];
+            }
+        }
+    }
+
+    template <typename PackedMatrix, typename InVector, typename OutVector>
+    inline void packed_block4_matvec_into(OutVector& out, const PackedMatrix& packed, const InVector& values) noexcept
+    {
+        static_assert(PackedMatrix::block_size == 4, "block4 matvec requires block size 4");
+#if defined(__AVX2__)
+        static_assert(PackedMatrix::rows == OutVector::shape[0], "packed matvec rows must match output");
+        static_assert(PackedMatrix::cols == InVector::shape[0], "packed matvec cols must match input");
+
+        for (size_t block = 0; block < PackedMatrix::block_count; ++block)
+        {
+            __m256d total = _mm256_setzero_pd();
+            for (size_t col = 0; col < PackedMatrix::cols; ++col)
+            {
+                const __m256d value = _mm256_broadcast_sd(&values[col]);
+                const __m256d mat   = _mm256_load_pd(&packed.values(block, col, 0));
+#if defined(__FMA__)
+                total = _mm256_fmadd_pd(mat, value, total);
+#else
+                total = _mm256_add_pd(total, _mm256_mul_pd(mat, value));
+#endif
+            }
+
+            alignas(32) double lanes[4];
+            _mm256_store_pd(lanes, total);
+            for (size_t lane = 0; lane < 4; ++lane)
+            {
+                const size_t row = block * 4 + lane;
+                if (row < OutVector::shape[0])
+                    out[row] = lanes[lane];
+            }
+        }
+#else
+        packed_block_matvec_into<4>(out, packed, values);
+#endif
+    }
+
     template <typename PackedA, typename PackedB, typename InVector, typename OutA, typename OutB>
     inline void dual_packed_block4_matvec_into(OutA&          out_a,
                                                OutB&          out_b,
@@ -252,6 +313,16 @@ namespace source::detail
         else
             dual_packed_block4_matvec_into(
                 out_a, out_b, Plan::differentiator, Plan::accumulator, values);
+    }
+
+    template <typename GridType, typename InVector, typename OutVector>
+    constexpr void accumulator_grid_block4_matvec_into(OutVector& out, const InVector& values) noexcept
+    {
+        using Plan = SourceMatvecPlan<GridType, 4>;
+        if (std::is_constant_evaluated())
+            packed_block_matvec_into<4>(out, Plan::accumulator, values);
+        else
+            packed_block4_matvec_into(out, Plan::accumulator, values);
     }
 
     template <typename GridType, typename SourceShape>
@@ -334,7 +405,7 @@ namespace source::detail
             fill_pf_psin_integrand(integrand, geometry);
 
             RadialVector psin_r{uninitialized};
-            matvec_into(psin_r, GridType::accumulator, integrand);
+            accumulator_grid_block4_matvec_into<GridType>(psin_r, integrand);
             double psin_r_weighted_total = 0.0;
             for (size_t i = 0; i < radial_nodes; ++i)
             {
@@ -468,6 +539,12 @@ namespace source::detail
         }
 
         constexpr void benchmark_A_integrand_into(RadialVector& out, const RadialVector& integrand) const noexcept
+        {
+            accumulator_grid_block4_matvec_into<GridType>(out, integrand);
+        }
+
+        constexpr void benchmark_A_integrand_rowdot_into(RadialVector&       out,
+                                                         const RadialVector& integrand) const noexcept
         {
             matvec_into(out, GridType::accumulator, integrand);
         }

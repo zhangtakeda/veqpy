@@ -206,6 +206,7 @@ namespace
         SourceDApsinBlock4,
         SourceInterpolatePair,
         SourceIntegrand,
+        SourceAIntegrandRowdot,
         SourceAIntegrand,
         SourceNormalize,
         SourceDNormalized,
@@ -770,6 +771,10 @@ namespace
             op.workspace.source_runtime.benchmark_A_integrand_into(source_aux, source_scratch);
             compiler_barrier(source_aux.data());
             break;
+        case StageKind::SourceAIntegrandRowdot:
+            op.workspace.source_runtime.benchmark_A_integrand_rowdot_into(source_aux, source_scratch);
+            compiler_barrier(source_aux.data());
+            break;
         case StageKind::SourceNormalize:
             (void)op.workspace.source_runtime.benchmark_normalize_psin_r_into(
                 source_aux, source_scratch, op.workspace.geometry, op.plan.n_axis_fix);
@@ -854,6 +859,8 @@ namespace
             return "source_integrand";
         case StageKind::SourceAIntegrand:
             return "source_A_integrand";
+        case StageKind::SourceAIntegrandRowdot:
+            return "source_A_integrand_rowdot";
         case StageKind::SourceNormalize:
             return "source_normalize";
         case StageKind::SourceDNormalized:
@@ -914,6 +921,8 @@ namespace
             return StageKind::SourceIntegrand;
         if (value == "source_A_integrand")
             return StageKind::SourceAIntegrand;
+        if (value == "source_A_integrand_rowdot")
+            return StageKind::SourceAIntegrandRowdot;
         if (value == "source_normalize")
             return StageKind::SourceNormalize;
         if (value == "source_D_normalized")
@@ -958,6 +967,7 @@ namespace
             StageKind::SourceDApsinBlock4,
             StageKind::SourceInterpolatePair,
             StageKind::SourceIntegrand,
+            StageKind::SourceAIntegrandRowdot,
             StageKind::SourceAIntegrand,
             StageKind::SourceNormalize,
             StageKind::SourceDNormalized,
@@ -1001,7 +1011,7 @@ namespace
                              "geometry_metric_no_store|geometry|source_materialize|source_copy_regularize|"
                              "source_D_psin|source_A_psin|source_DA_psin|source_DA_psin_block4|"
                              "source_interpolate_pair|source_integrand|"
-                             "source_A_integrand|source_normalize|source_D_normalized|source_alpha|"
+                             "source_A_integrand|source_A_integrand_rowdot|source_normalize|source_D_normalized|source_alpha|"
                              "source_update|residual_update|residual_theta_reduce|residual_radial_project|residual_pack|"
                              "evaluate|evaluate_ring] [--repeat N] [--warmup N] "
                              "[--inner N] [--ring-size N]\n";
@@ -1103,6 +1113,7 @@ namespace
             op.workspace.geometry.update(params.a, params.R0, params.Z0, op.workspace.profiles);
             break;
         case StageKind::SourceAIntegrand:
+        case StageKind::SourceAIntegrandRowdot:
             prepare_source_integrand(op, x, source_scratch);
             break;
         case StageKind::SourceNormalize:
