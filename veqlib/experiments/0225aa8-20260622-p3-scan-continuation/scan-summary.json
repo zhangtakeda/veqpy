@@ -1,0 +1,352 @@
+{
+  "rows": [
+    {
+      "artifact": "scan-all-11-step0p005.json",
+      "relative_step": 0.005,
+      "policy": "cold",
+      "success": true,
+      "nfev_total": 418,
+      "callback_total": 418,
+      "median_ms": 0.186434,
+      "avg_ms": 0.1943602727272727,
+      "initial_policy_counts": {
+        "cold": 11,
+        "secant": 0,
+        "warm": 0
+      },
+      "predictor_fallback_count": 0,
+      "point_nfev": [
+        38,
+        38,
+        38,
+        38,
+        38,
+        38,
+        38,
+        38,
+        38,
+        38,
+        38
+      ]
+    },
+    {
+      "artifact": "scan-all-11-step0p005.json",
+      "relative_step": 0.005,
+      "policy": "warm",
+      "success": true,
+      "nfev_total": 238,
+      "callback_total": 238,
+      "median_ms": 0.08526,
+      "avg_ms": 0.10117963636363636,
+      "initial_policy_counts": {
+        "cold": 1,
+        "secant": 0,
+        "warm": 10
+      },
+      "predictor_fallback_count": 0,
+      "point_nfev": [
+        38,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20
+      ]
+    },
+    {
+      "artifact": "scan-all-11-step0p005.json",
+      "relative_step": 0.005,
+      "policy": "secant",
+      "success": true,
+      "nfev_total": 238,
+      "callback_total": 238,
+      "median_ms": 0.085784,
+      "avg_ms": 0.09575163636363636,
+      "initial_policy_counts": {
+        "cold": 1,
+        "secant": 9,
+        "warm": 1
+      },
+      "predictor_fallback_count": 2,
+      "point_nfev": [
+        38,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20
+      ]
+    },
+    {
+      "artifact": "scan-all-11-step0p01.json",
+      "relative_step": 0.01,
+      "policy": "cold",
+      "success": true,
+      "nfev_total": 418,
+      "callback_total": 418,
+      "median_ms": 0.185503,
+      "avg_ms": 0.2003822727272727,
+      "initial_policy_counts": {
+        "cold": 11,
+        "secant": 0,
+        "warm": 0
+      },
+      "predictor_fallback_count": 0,
+      "point_nfev": [
+        38,
+        38,
+        38,
+        38,
+        38,
+        38,
+        38,
+        38,
+        38,
+        38,
+        38
+      ]
+    },
+    {
+      "artifact": "scan-all-11-step0p01.json",
+      "relative_step": 0.01,
+      "policy": "warm",
+      "success": true,
+      "nfev_total": 238,
+      "callback_total": 238,
+      "median_ms": 0.087005,
+      "avg_ms": 0.09993863636363635,
+      "initial_policy_counts": {
+        "cold": 1,
+        "secant": 0,
+        "warm": 10
+      },
+      "predictor_fallback_count": 0,
+      "point_nfev": [
+        38,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20
+      ]
+    },
+    {
+      "artifact": "scan-all-11-step0p01.json",
+      "relative_step": 0.01,
+      "policy": "secant",
+      "success": true,
+      "nfev_total": 238,
+      "callback_total": 238,
+      "median_ms": 0.085495,
+      "avg_ms": 0.11261554545454544,
+      "initial_policy_counts": {
+        "cold": 1,
+        "secant": 9,
+        "warm": 1
+      },
+      "predictor_fallback_count": 2,
+      "point_nfev": [
+        38,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20
+      ]
+    },
+    {
+      "artifact": "scan-all-11-step0p02.json",
+      "relative_step": 0.02,
+      "policy": "cold",
+      "success": true,
+      "nfev_total": 428,
+      "callback_total": 428,
+      "median_ms": 0.21253799999999998,
+      "avg_ms": 0.2771655454545454,
+      "initial_policy_counts": {
+        "cold": 11,
+        "secant": 0,
+        "warm": 0
+      },
+      "predictor_fallback_count": 0,
+      "point_nfev": [
+        38,
+        38,
+        38,
+        38,
+        38,
+        38,
+        39,
+        40,
+        40,
+        41,
+        40
+      ]
+    },
+    {
+      "artifact": "scan-all-11-step0p02.json",
+      "relative_step": 0.02,
+      "policy": "warm",
+      "success": true,
+      "nfev_total": 238,
+      "callback_total": 238,
+      "median_ms": 0.087768,
+      "avg_ms": 0.09920736363636364,
+      "initial_policy_counts": {
+        "cold": 1,
+        "secant": 0,
+        "warm": 10
+      },
+      "predictor_fallback_count": 0,
+      "point_nfev": [
+        38,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20
+      ]
+    },
+    {
+      "artifact": "scan-all-11-step0p02.json",
+      "relative_step": 0.02,
+      "policy": "secant",
+      "success": true,
+      "nfev_total": 238,
+      "callback_total": 238,
+      "median_ms": 0.085745,
+      "avg_ms": 0.09572081818181816,
+      "initial_policy_counts": {
+        "cold": 1,
+        "secant": 9,
+        "warm": 1
+      },
+      "predictor_fallback_count": 2,
+      "point_nfev": [
+        38,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20
+      ]
+    },
+    {
+      "artifact": "scan-all-11-step0p05.json",
+      "relative_step": 0.05,
+      "policy": "cold",
+      "success": true,
+      "nfev_total": 423,
+      "callback_total": 423,
+      "median_ms": 0.197405,
+      "avg_ms": 0.2112492727272727,
+      "initial_policy_counts": {
+        "cold": 11,
+        "secant": 0,
+        "warm": 0
+      },
+      "predictor_fallback_count": 0,
+      "point_nfev": [
+        38,
+        38,
+        38,
+        40,
+        40,
+        38,
+        38,
+        38,
+        40,
+        38,
+        37
+      ]
+    },
+    {
+      "artifact": "scan-all-11-step0p05.json",
+      "relative_step": 0.05,
+      "policy": "warm",
+      "success": true,
+      "nfev_total": 238,
+      "callback_total": 238,
+      "median_ms": 0.08567999999999999,
+      "avg_ms": 0.09558463636363636,
+      "initial_policy_counts": {
+        "cold": 1,
+        "secant": 0,
+        "warm": 10
+      },
+      "predictor_fallback_count": 0,
+      "point_nfev": [
+        38,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20
+      ]
+    },
+    {
+      "artifact": "scan-all-11-step0p05.json",
+      "relative_step": 0.05,
+      "policy": "secant",
+      "success": true,
+      "nfev_total": 238,
+      "callback_total": 238,
+      "median_ms": 0.085371,
+      "avg_ms": 0.09525927272727273,
+      "initial_policy_counts": {
+        "cold": 1,
+        "secant": 9,
+        "warm": 1
+      },
+      "predictor_fallback_count": 2,
+      "point_nfev": [
+        38,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20
+      ]
+    }
+  ]
+}

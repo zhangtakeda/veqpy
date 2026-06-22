@@ -274,6 +274,7 @@ namespace
                "\n"
                "examples:\n"
                "  veqlib_main --mode solve --repeat 30 --warmup 5\n"
+               "  veqlib_main --mode solve --scan-points 9 --scan-policy all\n"
                "  veqlib_main --mode stage --stage evaluate --repeat 10 --inner 10000\n";
     }
 
@@ -309,7 +310,8 @@ namespace
     bool is_solve_option(const std::string& option)
     {
         return option == "--repeat" || option == "--warmup" || option == "--solver" || option == "--enzyme-width" ||
-               option == "--jacobian-check";
+               option == "--jacobian-check" || option == "--scan-points" || option == "--scan-policy" ||
+               option == "--scan-relative-step" || option == "--scan-step";
     }
 
     bool is_stage_option(const std::string& option)

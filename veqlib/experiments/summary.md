@@ -981,3 +981,31 @@ PF Python/C++ comparator passed with `max_abs≈7.66e-10`. Remaining larger work
 is outside this micro-candidate pass: native-PMU mechanism validation, a
 deliberate external/vector math backend evaluation, and any broader Python/Numba
 route-specialization work should be started as separate scoped phases.
+
+## 2026-06-22 P3 parameter-scan continuation benchmark
+
+A benchmark-only continuation scan was added to `veqlib_main --mode solve` via
+`--scan-points`, `--scan-policy cold|warm|secant|all`, and
+`--scan-relative-step`. The scan varies scaled `Ip`, rebuilds the per-point
+normalization from the selected initial guess, and records per point: initial
+policy, predictor fallback reason, solve wall time, `nfev`, callback count,
+success, raw residual, scaled residual, and final `x`.
+
+Representative artifact:
+`veqlib/experiments/0225aa8-20260622-p3-scan-continuation/scan-all-11-step0p02.json`.
+With 11 points and relative `Ip` step 0.02, cold starts required 428 total
+residual evaluations (`38,38,38,38,38,38,39,40,40,41,40`) with median solve time
+≈0.2125 ms. Warm-start required 238 total evaluations (`38` for the first point,
+then `20` for each continuation point) with median ≈0.0878 ms. Secant used the
+first two points to build history, then the predictor for the remaining points;
+it also required 238 evaluations with median ≈0.0857 ms. Sweeps at relative
+steps 0.005, 0.01, and 0.05 showed the same callback pattern.
+
+Decision: keep warm/secant scan support as a benchmark/application-level path.
+For this smooth `Ip` scan, warm-start already reaches the observed CMINPACK
+post-continuation floor of 20 callbacks, so secant does not beat warm-start in
+`nfev`; it is retained for future less-linear parameter families because the JSON
+now records predictor fallback counts and per-point raw residual evidence. Do not
+return to Enzyme/KINSOL/Broyden work until a continuation scan still shows high
+post-warm-start callback counts.
+

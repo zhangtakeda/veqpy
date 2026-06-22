@@ -520,6 +520,19 @@ enable_testing()
 add_test(NAME veqlib_probe COMMAND veqlib_main --mode probe)
 add_test(NAME veqlib_temp_validation COMMAND veqlib_main --mode temp-validation)
 add_test(NAME veqlib_pf_psin_uniform_validation COMMAND veqlib_main --mode pf-validation)
+add_test(
+    NAME veqlib_pf_psin_uniform_scan
+    COMMAND
+        veqlib_main
+        --mode
+        solve
+        --scan-points
+        3
+        --scan-policy
+        secant
+        --scan-relative-step
+        0.005
+)
 if(VEQLIB_ENABLE_PYTHON_BINDINGS)
     add_test(
         NAME veqlib_python_binding

@@ -11,6 +11,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <cminpack.h>
@@ -194,6 +195,14 @@ namespace
         SundialsNewtonRaphson,
     };
 
+    enum class ScanPolicy
+    {
+        Cold,
+        Warm,
+        Secant,
+        All,
+    };
+
     struct CaseInput
     {
         std::string case_name = "PF_psin_uniform_Ip";
@@ -215,6 +224,13 @@ namespace
         int    warmup    = 1;
         int    enzyme_width = 1;
         SolverKind solver = SolverKind::ResidualOnly;
+    };
+
+    struct ScanConfig
+    {
+        int        points        = 0;
+        double     relative_step = 5.0e-3;
+        ScanPolicy policy        = ScanPolicy::All;
     };
 
     struct SolveResult
@@ -240,6 +256,13 @@ namespace
         double                                jvp_callback_ms = 0.0;
         double                                linear_solve_ms = 0.0;
         bool                                  accepted    = false;
+    };
+
+    struct InitialResidual
+    {
+        PackedVector raw{uninitialized};
+        PackedVector scaled{uninitialized};
+        double       raw_norm = 0.0;
     };
 
     struct JacobianCheck
@@ -422,6 +445,22 @@ namespace
         return static_cast<int>(parsed);
     }
 
+    double parse_finite_double(const char* flag, const char* value)
+    {
+        char*        end    = nullptr;
+        const double parsed = std::strtod(value, &end);
+        std::string  text{value};
+        for (char& ch : text)
+        {
+            if (ch >= 'A' && ch <= 'Z')
+                ch = static_cast<char>(ch - 'A' + 'a');
+        }
+        if (end == value || *end != '\0' || text.find("inf") != std::string::npos ||
+            text.find("nan") != std::string::npos)
+            throw std::runtime_error(std::string{"invalid "} + flag + " value: " + value);
+        return parsed;
+    }
+
     SolverKind parse_solver_kind(const char* value)
     {
         const std::string solver{value};
@@ -450,6 +489,36 @@ namespace
         if (solver == "sundials-nr" || solver == "kinsol-nr")
             return SolverKind::SundialsNewtonRaphson;
         throw std::runtime_error("invalid --solver value: " + solver);
+    }
+
+    ScanPolicy parse_scan_policy(const char* value)
+    {
+        const std::string policy{value};
+        if (policy == "cold")
+            return ScanPolicy::Cold;
+        if (policy == "warm" || policy == "warm-start")
+            return ScanPolicy::Warm;
+        if (policy == "secant" || policy == "predictor")
+            return ScanPolicy::Secant;
+        if (policy == "all")
+            return ScanPolicy::All;
+        throw std::runtime_error("invalid --scan-policy value: " + policy);
+    }
+
+    constexpr const char* scan_policy_name(ScanPolicy policy) noexcept
+    {
+        switch (policy)
+        {
+        case ScanPolicy::Cold:
+            return "cold";
+        case ScanPolicy::Warm:
+            return "warm";
+        case ScanPolicy::Secant:
+            return "secant";
+        case ScanPolicy::All:
+            return "all";
+        }
+        return "unknown";
     }
 
     constexpr const char* solver_entrypoint(SolverKind solver) noexcept
@@ -706,6 +775,26 @@ namespace
                 residual[i] = raw[i];
         }
     };
+
+    InitialResidual prepare_initial_residual(SolveContext& context) noexcept
+    {
+        InitialResidual initial{};
+        context.raw_residual(
+            std::span<const double, BenchShape::x_size>{
+                context.input.x0.data(),
+                BenchShape::x_size,
+            },
+            std::span<double, BenchShape::x_size>{initial.raw.data(), BenchShape::x_size}
+        );
+        context.input.residual_scale = build_block_rms_residual_scale(initial.raw);
+        for (size_t i = 0; i < BenchShape::x_size; ++i)
+            initial.scaled[i] = initial.raw[i] / context.input.residual_scale[i];
+        initial.raw_norm = norm2(std::span<const double, BenchShape::x_size>{
+            initial.raw.data(),
+            BenchShape::x_size,
+        });
+        return initial;
+    }
 
     void scaled_residual_z_no_count(SolveContext& context, const double* z, double* fvec) noexcept;
 
@@ -1652,6 +1741,280 @@ namespace
             {"std_ms", stddev(samples, avg)},
         };
     }
+
+    nlohmann::json grid_json()
+    {
+        return {
+            {"Nr", BenchGrid::radial_nodes},
+            {"Nt", BenchGrid::theta_rows},
+            {"L_max", BenchShape::L_max},
+            {"M_max", BenchShape::M_max},
+            {"K_max", BenchShape::K_max},
+            {"quadrature_scheme", "legendre"},
+            {"calculus_scheme", "spectral"},
+        };
+    }
+
+    nlohmann::json source_topology_json()
+    {
+        return {
+            {"route", "PF"},
+            {"coordinate", "psin"},
+            {"nodes", "uniform"},
+            {"constraint", "Ip"},
+        };
+    }
+
+    nlohmann::json solver_config_json(const CaseInput& input)
+    {
+        return {
+            {"method", solver_method(input.solver)},
+            {"entrypoint", solver_entrypoint(input.solver)},
+            {"jacobian", solver_jacobian(input)},
+            {"enzyme_width",
+             input.solver == SolverKind::EnzymeJacobian
+                 ? nlohmann::json(input.enzyme_width)
+                 : nlohmann::json(nullptr)},
+            {"max_residual", veqpy_max_residual},
+            {"acceptance_threshold", veqpy_acceptance_threshold()},
+            {"requested_max_evaluations", veqpy_requested_max_evaluations},
+            {"maxfev", veqpy_maxfev},
+            {"eps", veqpy_hybr_eps},
+            {"factor", veqpy_hybr_factor},
+            {"diag_mode", veqpy_hybr_mode},
+        };
+    }
+
+    nlohmann::json normalization_json(const CaseInput& input)
+    {
+        return {
+            {"x_scale", json_array(input.x_scale)},
+            {"residual_scale", json_array(input.residual_scale)},
+            {"x_scale_builder", "VEQPy _build_x_block_scale_vector equivalent"},
+            {"residual_scale_builder", "fast/block_rms initial residual block RMS"},
+            {"unknown_space", "z = x / x_scale"},
+        };
+    }
+
+    nlohmann::json initial_residual_json(const CaseInput& input, const InitialResidual& initial)
+    {
+        return {
+            {"x", json_array(input.x0)},
+            {"policy", "benchmark.py robust zero profile coefficients or scan predictor"},
+            {"raw_residual", json_array(initial.raw)},
+            {"scaled_residual", json_array(initial.scaled)},
+            {"raw_norm", initial.raw_norm},
+        };
+    }
+
+    void rebuild_scanned_case_scales(CaseInput& input) noexcept
+    {
+        input.x_scale = build_x_block_scale_vector<BenchShape>(input.x0, profile_params_for_case(input));
+        input.residual_scale.fill(1.0);
+    }
+
+    nlohmann::json run_parameter_scan_policy(const CaseInput& base_input,
+                                             ScanPolicy       policy,
+                                             int              point_count,
+                                             double           relative_step)
+    {
+        if (point_count <= 0)
+            throw std::runtime_error("--scan-points must be positive when parameter scan is enabled");
+
+        nlohmann::json       points_json = nlohmann::json::array();
+        std::vector<double>  samples_ms;
+        samples_ms.reserve(static_cast<size_t>(point_count));
+
+        std::array<double, BenchShape::x_size> previous_x{};
+        std::array<double, BenchShape::x_size> previous_previous_x{};
+        double                                previous_ip          = 0.0;
+        double                                previous_previous_ip = 0.0;
+        bool                                  have_previous        = false;
+        bool                                  have_previous_previous = false;
+
+        int cold_count                = 0;
+        int warm_count                = 0;
+        int secant_count              = 0;
+        int predictor_fallback_count  = 0;
+        int success_count             = 0;
+        int nfev_total                = 0;
+        int callback_total            = 0;
+
+        for (int index = 0; index < point_count; ++index)
+        {
+            CaseInput point_input = base_input;
+            point_input.repeat    = 1;
+            point_input.warmup    = 0;
+            const double ip_scale = 1.0 + relative_step * static_cast<double>(index);
+            if (!(ip_scale > 0.0))
+                throw std::runtime_error("scan relative step produced a non-positive Ip scale");
+            point_input.Ip = base_input.Ip * ip_scale;
+
+            const char* initial_policy  = "cold";
+            const char* fallback_reason = nullptr;
+            if (policy == ScanPolicy::Warm)
+            {
+                if (have_previous)
+                {
+                    point_input.x0 = previous_x;
+                    initial_policy = "warm";
+                }
+            }
+            else if (policy == ScanPolicy::Secant)
+            {
+                if (have_previous && have_previous_previous)
+                {
+                    const double old_delta = previous_ip - previous_previous_ip;
+                    if (std::abs(old_delta) > 0.0)
+                    {
+                        const double ratio = (point_input.Ip - previous_ip) / old_delta;
+                        for (size_t i = 0; i < BenchShape::x_size; ++i)
+                        {
+                            point_input.x0[i] =
+                                previous_x[i] + ratio * (previous_x[i] - previous_previous_x[i]);
+                        }
+                        initial_policy = "secant";
+                    }
+                    else
+                    {
+                        point_input.x0 = previous_x;
+                        initial_policy = "warm";
+                        fallback_reason = "zero_previous_parameter_delta";
+                    }
+                }
+                else if (have_previous)
+                {
+                    point_input.x0  = previous_x;
+                    initial_policy  = "warm";
+                    fallback_reason = "insufficient_history";
+                }
+                else
+                {
+                    fallback_reason = "insufficient_history";
+                }
+            }
+
+            if (std::string_view{initial_policy} == "secant")
+                ++secant_count;
+            else if (std::string_view{initial_policy} == "warm")
+                ++warm_count;
+            else
+                ++cold_count;
+            if (policy == ScanPolicy::Secant && fallback_reason)
+                ++predictor_fallback_count;
+
+            rebuild_scanned_case_scales(point_input);
+            SolveContext    context{point_input};
+            InitialResidual initial = prepare_initial_residual(context);
+            point_input.residual_scale = context.input.residual_scale;
+
+            const auto started = std::chrono::steady_clock::now();
+            SolveResult final  = run_solver_once(context);
+            const double solve_ms = elapsed_ms_since(started);
+            samples_ms.push_back(solve_ms);
+
+            const bool point_success =
+                final.accepted && solver_info_succeeded(point_input.solver, final.info);
+            if (point_success)
+            {
+                ++success_count;
+                previous_previous_x  = previous_x;
+                previous_previous_ip = previous_ip;
+                have_previous_previous = have_previous;
+                previous_x           = final.x;
+                previous_ip          = point_input.Ip;
+                have_previous        = true;
+            }
+            nfev_total     += final.nfev;
+            callback_total += final.callbacks;
+
+            nlohmann::json point_json = {
+                {"index", index},
+                {"scaled_Ip", point_input.Ip},
+                {"initial_policy", initial_policy},
+                {"fallback_reason", fallback_reason ? nlohmann::json(fallback_reason) : nlohmann::json(nullptr)},
+                {"solve_ms", solve_ms},
+                {"initial", initial_residual_json(point_input, initial)},
+                {"normalization", normalization_json(point_input)},
+                {"final", solve_result_json(final)},
+                {"success", point_success},
+            };
+            points_json.push_back(std::move(point_json));
+        }
+
+        return {
+            {"policy", scan_policy_name(policy)},
+            {"parameter", "scaled_Ip"},
+            {"base_scaled_Ip", base_input.Ip},
+            {"relative_step", relative_step},
+            {"point_count", point_count},
+            {"initial_policy_counts",
+             {
+                 {"cold", cold_count},
+                 {"warm", warm_count},
+                 {"secant", secant_count},
+             }},
+            {"predictor_fallback_count", predictor_fallback_count},
+            {"success_count", success_count},
+            {"nfev_total", nfev_total},
+            {"callback_total", callback_total},
+            {"timing", timing_json(samples_ms)},
+            {"points", std::move(points_json)},
+            {"success", success_count == point_count},
+        };
+    }
+
+    nlohmann::json run_parameter_scan_report(const CaseInput& base_input, const ScanConfig& scan)
+    {
+        nlohmann::json scan_payload;
+        bool           success = true;
+        if (scan.policy == ScanPolicy::All)
+        {
+            nlohmann::json scans = nlohmann::json::object();
+            for (ScanPolicy policy : {ScanPolicy::Cold, ScanPolicy::Warm, ScanPolicy::Secant})
+            {
+                auto policy_report = run_parameter_scan_policy(
+                    base_input,
+                    policy,
+                    scan.points,
+                    scan.relative_step
+                );
+                success = success && policy_report["success"].get<bool>();
+                scans[scan_policy_name(policy)] = std::move(policy_report);
+            }
+            scan_payload = {
+                {"policy", "all"},
+                {"scans", std::move(scans)},
+            };
+        }
+        else
+        {
+            auto policy_report = run_parameter_scan_policy(
+                base_input,
+                scan.policy,
+                scan.points,
+                scan.relative_step
+            );
+            success = policy_report["success"].get<bool>();
+            scan_payload = std::move(policy_report);
+        }
+
+        return {
+            {"case_name", base_input.case_name},
+            {"route", "PF/psin/uniform/Ip"},
+            {"source_topology", source_topology_json()},
+            {"x_size", BenchShape::x_size},
+            {"grid", grid_json()},
+            {"solver", solver_config_json(base_input)},
+            {"source",
+             {
+                 {"scaled_heat", json_array(base_input.heat)},
+                 {"scaled_current", json_array(base_input.current)},
+             }},
+            {"scan", std::move(scan_payload)},
+            {"success", success},
+        };
+    }
 } // namespace
 
 int run(int argc, char** argv)
@@ -1663,6 +2026,7 @@ int run(int argc, char** argv)
         SolverKind solver = SolverKind::ResidualOnly;
         int enzyme_jacobian_width = 1;
         bool enable_jacobian_check = false;
+        ScanConfig scan{};
         for (int i = 1; i < argc; ++i)
         {
             const std::string arg = argv[i];
@@ -1694,6 +2058,26 @@ int run(int argc, char** argv)
                         "--enzyme-width must be one of 1, 2, 3, 4, 5, 6, 8, 9, 10, 12, 18"
                     );
             }
+            else if (arg == "--scan-points")
+            {
+                if (++i >= argc)
+                    throw std::runtime_error("--scan-points requires a value");
+                scan.points = parse_nonnegative_int("--scan-points", argv[i]);
+            }
+            else if (arg == "--scan-relative-step" || arg == "--scan-step")
+            {
+                if (++i >= argc)
+                    throw std::runtime_error(arg + " requires a value");
+                scan.relative_step = parse_finite_double(arg.c_str(), argv[i]);
+                if (scan.relative_step < -1.0 || scan.relative_step > 1.0)
+                    throw std::runtime_error(arg + " must be in [-1, 1]");
+            }
+            else if (arg == "--scan-policy")
+            {
+                if (++i >= argc)
+                    throw std::runtime_error("--scan-policy requires a value");
+                scan.policy = parse_scan_policy(argv[i]);
+            }
             else if (arg == "--jacobian-check")
             {
 #ifdef ENABLE_ENZYME
@@ -1708,6 +2092,8 @@ int run(int argc, char** argv)
                           << " [--repeat N] [--warmup N]"
                           << " [--solver residual|enzyme|lm|newton|nk|nr|powell|sundials-nk|sundials-nr]"
                           << " [--enzyme-width 1|2|3|4|5|6|8|9|10|12|18]"
+                          << " [--scan-points N] [--scan-policy cold|warm|secant|all]"
+                          << " [--scan-relative-step STEP]"
                           << " [--jacobian-check]\n";
                 return EXIT_SUCCESS;
             }
@@ -1721,18 +2107,17 @@ int run(int argc, char** argv)
             enzyme_jacobian_width = 1;
 
         CaseInput    input = build_inline_case(repeat, warmup, solver, enzyme_jacobian_width);
+        if (scan.points > 0)
+        {
+            const auto report = run_parameter_scan_report(input, scan);
+            std::cout << report.dump(2) << '\n';
+            return report["success"].get<bool>() ? EXIT_SUCCESS : EXIT_FAILURE;
+        }
+
         SolveContext context{input};
 
-        PackedVector initial_raw{uninitialized};
-        context.raw_residual(
-            std::span<const double, BenchShape::x_size>{input.x0.data(), BenchShape::x_size},
-            std::span<double, BenchShape::x_size>{initial_raw.data(), BenchShape::x_size}
-        );
-        context.input.residual_scale = build_block_rms_residual_scale(initial_raw);
-        input.residual_scale         = context.input.residual_scale;
-        PackedVector initial_scaled{uninitialized};
-        for (size_t i = 0; i < BenchShape::x_size; ++i)
-            initial_scaled[i] = initial_raw[i] / input.residual_scale[i];
+        InitialResidual initial = prepare_initial_residual(context);
+        input.residual_scale    = context.input.residual_scale;
 
         nlohmann::json jacobian_check_report = nullptr;
 #ifdef ENABLE_ENZYME
@@ -1764,71 +2149,23 @@ int run(int argc, char** argv)
             {"case_name", input.case_name},
             {"route", "PF/psin/uniform/Ip"},
             {"source_topology",
-             {
-                 {"route", "PF"},
-                 {"coordinate", "psin"},
-                 {"nodes", "uniform"},
-                 {"constraint", "Ip"},
-             }},
+             source_topology_json()},
             {"x_size", BenchShape::x_size},
-            {"grid",
-             {
-                 {"Nr", BenchGrid::radial_nodes},
-                 {"Nt", BenchGrid::theta_rows},
-                 {"L_max", BenchShape::L_max},
-                 {"M_max", BenchShape::M_max},
-                 {"K_max", BenchShape::K_max},
-                 {"quadrature_scheme", "legendre"},
-                 {"calculus_scheme", "spectral"},
-             }},
-            {"solver",
-             {
-                 {"method", solver_method(input.solver)},
-                 {"entrypoint", solver_entrypoint(input.solver)},
-                 {"jacobian", solver_jacobian(input)},
-                 {"enzyme_width",
-                  input.solver == SolverKind::EnzymeJacobian
-                      ? nlohmann::json(input.enzyme_width)
-                      : nlohmann::json(nullptr)},
-                 {"max_residual", veqpy_max_residual},
-                 {"acceptance_threshold", veqpy_acceptance_threshold()},
-                 {"requested_max_evaluations", veqpy_requested_max_evaluations},
-                 {"maxfev", veqpy_maxfev},
-                 {"eps", veqpy_hybr_eps},
-                 {"factor", veqpy_hybr_factor},
-                 {"diag_mode", veqpy_hybr_mode},
-             }},
+            {"grid", grid_json()},
+            {"solver", solver_config_json(input)},
             {"source",
              {
                  {"scaled_heat", json_array(input.heat)},
                  {"scaled_current", json_array(input.current)},
              }},
-            {"normalization",
-             {
-                 {"x_scale", json_array(input.x_scale)},
-                 {"residual_scale", json_array(input.residual_scale)},
-                 {"x_scale_builder", "VEQPy _build_x_block_scale_vector equivalent"},
-                 {"residual_scale_builder", "fast/block_rms initial residual block RMS"},
-                 {"unknown_space", "z = x / x_scale"},
-             }},
+            {"normalization", normalization_json(input)},
             {"constraints",
              {
                  {"scaled_Ip", input.Ip},
              }},
             {"jacobian_check", jacobian_check_report},
             {"timing", timing_json(samples_ms)},
-            {"initial",
-             {
-                 {"x", json_array(input.x0)},
-                 {"policy", "benchmark.py robust zero profile coefficients"},
-                 {"raw_residual", json_array(initial_raw)},
-                 {"scaled_residual", json_array(initial_scaled)},
-                 {"raw_norm",
-                  norm2(std::span<const double, BenchShape::x_size>{
-                      initial_raw.data(),
-                      BenchShape::x_size,
-                  })},
-             }},
+            {"initial", initial_residual_json(input, initial)},
             {"final", solve_result_json(final)},
             {"success", final.accepted && solver_info_succeeded(input.solver, final.info)},
         };

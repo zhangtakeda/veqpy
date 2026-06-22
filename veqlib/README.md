@@ -269,6 +269,26 @@ runtime unless the Jacobian is generated much more cheaply than a batch of
 residual evaluations. Powell/hybrd therefore remains the baseline until VEQlib
 has a route-specific analytic or template-generated Jacobian path.
 
+Parameter scans should first use continuation before revisiting Jacobian reuse.
+The solve benchmark has a scan mode that varies the scaled `Ip` constraint and
+compares cold starts, one-step warm starts, and a first-order secant predictor:
+
+```bash
+./build/release/veqlib_main --mode solve \
+  --scan-points 11 \
+  --scan-policy cold|warm|secant|all \
+  --scan-relative-step 0.02
+```
+
+The scan JSON records each point's initial-guess policy, predictor fallback
+reason, solve wall time, `nfev`, callback count, success flag, raw residual, and
+final state. Use this corpus to decide whether a parameter family still has high
+post-warm-start residual counts before investing in Broyden/Jacobian state
+reuse. On the current smooth `Ip` scan, warm-start already reduces the ten
+continuation points from 38--41 callbacks to 20 callbacks each; secant reaches
+the same count and is retained as an explicit policy for less-linear future
+scans.
+
 `veqlib_main --mode stage` is the lower-level timing path for the same inline
 PF-psin-uniform-Ip case. It measures repeated hot-path stages without the
 CMINPACK solve loop:
