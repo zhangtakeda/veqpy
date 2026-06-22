@@ -15,9 +15,7 @@
 #include <nanobind/stl/string.h>
 #include <nlohmann/json.hpp>
 
-#include "pf_psin_uniform_benchmark_cli.h"
-#include "pf_psin_uniform_validation_cli.h"
-#include "stage_benchmark_cli.h"
+#include "test_cli.h"
 #include "tensor.h"
 
 namespace nb = nanobind;

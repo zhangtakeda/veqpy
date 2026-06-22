@@ -12,11 +12,8 @@
 #include "grid.h"
 #include "linalg.h"
 #include "math.h"
-#include "pf_psin_uniform_benchmark_cli.h"
-#include "pf_psin_uniform_validation_cli.h"
-#include "stage_benchmark_cli.h"
+#include "test_cli.h"
 #include "tensor.h"
-#include "temp_validation_cli.h"
 
 namespace
 {
