@@ -202,6 +202,8 @@ namespace
         SourceCopyRegularize,
         SourceDpsin,
         SourceApsin,
+        SourceDApsin,
+        SourceDApsinBlock4,
         SourceInterpolatePair,
         SourceIntegrand,
         SourceAIntegrand,
@@ -747,6 +749,14 @@ namespace
             op.workspace.source_runtime.benchmark_A_psin_into(source_scratch);
             compiler_barrier(source_scratch.data());
             break;
+        case StageKind::SourceDApsin:
+            op.workspace.source_runtime.benchmark_DA_psin_into(source_scratch, source_aux);
+            compiler_barrier(source_scratch.data());
+            break;
+        case StageKind::SourceDApsinBlock4:
+            op.workspace.source_runtime.benchmark_DA_psin_block4_into(source_scratch, source_aux);
+            compiler_barrier(source_scratch.data());
+            break;
         case StageKind::SourceInterpolatePair:
             op.workspace.source_runtime.benchmark_prepare_psin_queries();
             op.workspace.source_runtime.benchmark_interpolate_pair();
@@ -834,6 +844,10 @@ namespace
             return "source_D_psin";
         case StageKind::SourceApsin:
             return "source_A_psin";
+        case StageKind::SourceDApsin:
+            return "source_DA_psin";
+        case StageKind::SourceDApsinBlock4:
+            return "source_DA_psin_block4";
         case StageKind::SourceInterpolatePair:
             return "source_interpolate_pair";
         case StageKind::SourceIntegrand:
@@ -890,6 +904,10 @@ namespace
             return StageKind::SourceDpsin;
         if (value == "source_A_psin")
             return StageKind::SourceApsin;
+        if (value == "source_DA_psin")
+            return StageKind::SourceDApsin;
+        if (value == "source_DA_psin_block4")
+            return StageKind::SourceDApsinBlock4;
         if (value == "source_interpolate_pair")
             return StageKind::SourceInterpolatePair;
         if (value == "source_integrand")
@@ -936,6 +954,8 @@ namespace
             StageKind::SourceCopyRegularize,
             StageKind::SourceDpsin,
             StageKind::SourceApsin,
+            StageKind::SourceDApsin,
+            StageKind::SourceDApsinBlock4,
             StageKind::SourceInterpolatePair,
             StageKind::SourceIntegrand,
             StageKind::SourceAIntegrand,
@@ -979,7 +999,8 @@ namespace
                 std::cout << "usage: veqlib_main --mode stage [--stage all|profiles_fixed|profiles_active|"
                              "profiles_all|geometry_phase|geometry_phase_sincos|geometry_phase_split_sincos|"
                              "geometry_metric_no_store|geometry|source_materialize|source_copy_regularize|"
-                             "source_D_psin|source_A_psin|source_interpolate_pair|source_integrand|"
+                             "source_D_psin|source_A_psin|source_DA_psin|source_DA_psin_block4|"
+                             "source_interpolate_pair|source_integrand|"
                              "source_A_integrand|source_normalize|source_D_normalized|source_alpha|"
                              "source_update|residual_update|residual_theta_reduce|residual_radial_project|residual_pack|"
                              "evaluate|evaluate_ring] [--repeat N] [--warmup N] "
@@ -1070,6 +1091,8 @@ namespace
             break;
         case StageKind::SourceDpsin:
         case StageKind::SourceApsin:
+        case StageKind::SourceDApsin:
+        case StageKind::SourceDApsinBlock4:
             prepare_source_profile_root(op, x);
             break;
         case StageKind::SourceInterpolatePair:

@@ -134,6 +134,18 @@ rebuilds fixed profile rows and the `fix_rho` axis-count. The method seeds only
 fixed profile rows into the workspace; active rows remain callback-owned and are
 overwritten by `refresh_active()`.
 
+## Source Matvec Shape
+
+The PF/psin/uniform/Ip Source path applies the grid differentiator and
+accumulator to the same `psin_r` vector in both materialization and normalized
+source update. Production code uses `SourceMatvecPlan<GridType, 4>` to pack those
+two matrices by output blocks of four rows, so a runtime AVX2/FMA kernel can
+broadcast each input value once and update four output rows for both matrices.
+The same helper has a generic packed fallback for non-AVX builds and constexpr
+validation. The row-dot dual matvec remains as a stage-benchmark probe
+(`source_DA_psin`) beside the production block-4 probe
+(`source_DA_psin_block4`).
+
 ## Hot-path Surface Layout
 
 Materialized geometry and residual surface slabs use physical

@@ -292,6 +292,52 @@ Decision: keep this as an architecture/correctness fix. It is not intended as a
 new performance candidate; it preserves the low-cost callback gate while making
 reused operators safe for future parameter-scan and per-thread workspace work.
 
+## 2026-06-22 P1-D Source packed block-4 matvec
+
+Source now has a plan-packed output-block matvec for the two production psin
+D/A passes. `SourceMatvecPlan<GridType, 4>` stores differentiator and accumulator
+rows as `[block][col][4 lanes]`; runtime builds with AVX2 use a four-output
+broadcast/FMA kernel, while constexpr evaluation and non-AVX builds keep the
+generic packed fallback. The earlier row-dot dual matvec remains available as a
+benchmark probe so future Source changes can still compare code shapes in the
+same binary.
+
+Validation after enabling the candidate:
+
+- Debug CTest: 4/4 passed.
+- Release CTest: 4/4 passed.
+- RELAXED Python/C++ comparator: passed with `max_abs=7.66e-10`.
+
+Pinned artifacts are saved under
+`veqlib/experiments/d109fd3-20260622-p1-source-block4`.
+
+| metric | baseline / row-dot | block-4 candidate | ratio |
+| --- | ---: | ---: | ---: |
+| focused `source_DA_psin` median | 420.0 ns | 102.9 ns | 0.245 |
+| `source_materialize` median | 650.9 ns | 367.0 ns | 0.564 |
+| `source_update` median | 652.0 ns | 437.4 ns | 0.671 |
+| `evaluate` median | 3969.0 ns | 3877.9 ns | 0.977 |
+| `evaluate_ring` median | 3988.0 ns | 3909.0 ns | 0.980 |
+| residual-only solve median | 0.186 ms | 0.183 ms | 0.985 |
+
+The residual-only solve rerun used `repeat=40`, `warmup=10`, and reported
+median `0.1832635 ms`, p95 `0.20402485 ms`, `nfev=38`, and residual-kernel
+callback total `0.14158 ms`. An earlier noisy solve sample was discarded rather
+than used as the candidate result.
+
+Representative topology A/B against `d109fd3` used `repeat=6`, `warmup=3`,
+`inner=4000`, and `ring-size=16`:
+
+| stage | geomean ratio | improved rows | worst row |
+| --- | ---: | ---: | --- |
+| `source_update` | 0.650 | 9 / 9 | `32x64x1` ratio 0.933 |
+| `evaluate_ring` | 0.929 | 7 / 9 | `64x16x1` ratio 1.082 |
+
+Decision: keep the block-4 Source path. It clears the focused Source gate and
+the representative full-evaluate geomean gate. The `64x16x1` full-evaluate row
+should be revisited only if that topology becomes a priority; it is not enough
+to reject the overall positive Source shape.
+
 ## Stable release stage timing
 
 | stage | median ns/call | avg ns/call | p95/median | CV |

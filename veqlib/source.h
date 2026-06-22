@@ -4,7 +4,11 @@
 #include "math.h"
 #include "tensor.h"
 #include <cstddef>
+#if defined(__AVX2__)
+#include <immintrin.h>
+#endif
 #include <span>
+#include <type_traits>
 
 namespace source::detail
 {
@@ -96,6 +100,160 @@ namespace source::detail
         }
     }
 
+    template <size_t Rows, size_t Cols, size_t BlockSize>
+    struct OutputBlockMatrix
+    {
+        static constexpr size_t rows        = Rows;
+        static constexpr size_t cols        = Cols;
+        static constexpr size_t block_size  = BlockSize;
+        static constexpr size_t block_count = (Rows + BlockSize - 1) / BlockSize;
+
+        tensor::Tensor<double, block_count, Cols, BlockSize> values{};
+
+        template <typename MatrixType>
+        constexpr void load_from(const MatrixType& matrix) noexcept
+        {
+            static_assert(MatrixType::shape[0] == Rows,
+                          "packed matvec rows must match source matrix");
+            static_assert(MatrixType::shape[1] == Cols,
+                          "packed matvec cols must match source matrix");
+
+            for (size_t block = 0; block < block_count; ++block)
+                for (size_t col = 0; col < Cols; ++col)
+                    for (size_t lane = 0; lane < BlockSize; ++lane)
+                    {
+                        const size_t row      = block * BlockSize + lane;
+                        values(block, col, lane) = row < Rows ? matrix(row, col) : 0.0;
+                    }
+        }
+    };
+
+    template <size_t BlockSize, typename MatrixType>
+    constexpr auto make_output_block_matrix(const MatrixType& matrix) noexcept
+    {
+        OutputBlockMatrix<MatrixType::shape[0], MatrixType::shape[1], BlockSize> out{};
+        out.load_from(matrix);
+        return out;
+    }
+
+    template <typename GridType, size_t BlockSize>
+    struct SourceMatvecPlan
+    {
+        static constexpr auto differentiator =
+            make_output_block_matrix<BlockSize>(GridType::differentiator);
+        static constexpr auto accumulator =
+            make_output_block_matrix<BlockSize>(GridType::accumulator);
+    };
+
+    template <size_t BlockSize,
+              typename PackedA,
+              typename PackedB,
+              typename InVector,
+              typename OutA,
+              typename OutB>
+    constexpr void dual_packed_block_matvec_into(OutA&          out_a,
+                                                 OutB&          out_b,
+                                                 const PackedA& packed_a,
+                                                 const PackedB& packed_b,
+                                                 const InVector& values) noexcept
+    {
+        static_assert(PackedA::rows == OutA::shape[0], "packed matvec A rows must match output");
+        static_assert(PackedB::rows == OutB::shape[0], "packed matvec B rows must match output");
+        static_assert(PackedA::cols == InVector::shape[0], "packed matvec A cols must match input");
+        static_assert(PackedB::cols == InVector::shape[0], "packed matvec B cols must match input");
+        static_assert(PackedA::block_size == BlockSize, "packed matvec A block size mismatch");
+        static_assert(PackedB::block_size == BlockSize, "packed matvec B block size mismatch");
+
+        for (size_t block = 0; block < PackedA::block_count; ++block)
+        {
+            double total_a[BlockSize]{};
+            double total_b[BlockSize]{};
+            for (size_t col = 0; col < PackedA::cols; ++col)
+            {
+                const double value = values[col];
+                for (size_t lane = 0; lane < BlockSize; ++lane)
+                {
+                    total_a[lane] += packed_a.values(block, col, lane) * value;
+                    total_b[lane] += packed_b.values(block, col, lane) * value;
+                }
+            }
+            for (size_t lane = 0; lane < BlockSize; ++lane)
+            {
+                const size_t row = block * BlockSize + lane;
+                if (row < OutA::shape[0])
+                {
+                    out_a[row] = total_a[lane];
+                    out_b[row] = total_b[lane];
+                }
+            }
+        }
+    }
+
+    template <typename PackedA, typename PackedB, typename InVector, typename OutA, typename OutB>
+    inline void dual_packed_block4_matvec_into(OutA&          out_a,
+                                               OutB&          out_b,
+                                               const PackedA& packed_a,
+                                               const PackedB& packed_b,
+                                               const InVector& values) noexcept
+    {
+        static_assert(PackedA::block_size == 4, "block4 matvec requires block size 4");
+        static_assert(PackedB::block_size == 4, "block4 matvec requires block size 4");
+#if defined(__AVX2__)
+        static_assert(PackedA::rows == OutA::shape[0], "packed matvec A rows must match output");
+        static_assert(PackedB::rows == OutB::shape[0], "packed matvec B rows must match output");
+        static_assert(PackedA::cols == InVector::shape[0], "packed matvec A cols must match input");
+        static_assert(PackedB::cols == InVector::shape[0], "packed matvec B cols must match input");
+
+        for (size_t block = 0; block < PackedA::block_count; ++block)
+        {
+            __m256d total_a = _mm256_setzero_pd();
+            __m256d total_b = _mm256_setzero_pd();
+            for (size_t col = 0; col < PackedA::cols; ++col)
+            {
+                const __m256d value = _mm256_broadcast_sd(&values[col]);
+                const __m256d mat_a = _mm256_load_pd(&packed_a.values(block, col, 0));
+                const __m256d mat_b = _mm256_load_pd(&packed_b.values(block, col, 0));
+#if defined(__FMA__)
+                total_a = _mm256_fmadd_pd(mat_a, value, total_a);
+                total_b = _mm256_fmadd_pd(mat_b, value, total_b);
+#else
+                total_a = _mm256_add_pd(total_a, _mm256_mul_pd(mat_a, value));
+                total_b = _mm256_add_pd(total_b, _mm256_mul_pd(mat_b, value));
+#endif
+            }
+
+            alignas(32) double lane_a[4];
+            alignas(32) double lane_b[4];
+            _mm256_store_pd(lane_a, total_a);
+            _mm256_store_pd(lane_b, total_b);
+            for (size_t lane = 0; lane < 4; ++lane)
+            {
+                const size_t row = block * 4 + lane;
+                if (row < OutA::shape[0])
+                {
+                    out_a[row] = lane_a[lane];
+                    out_b[row] = lane_b[lane];
+                }
+            }
+        }
+#else
+        dual_packed_block_matvec_into<4>(out_a, out_b, packed_a, packed_b, values);
+#endif
+    }
+
+    template <typename GridType, typename InVector, typename OutA, typename OutB>
+    constexpr void
+    dual_grid_block4_matvec_into(OutA& out_a, OutB& out_b, const InVector& values) noexcept
+    {
+        using Plan = SourceMatvecPlan<GridType, 4>;
+        if (std::is_constant_evaluated())
+            dual_packed_block_matvec_into<4>(
+                out_a, out_b, Plan::differentiator, Plan::accumulator, values);
+        else
+            dual_packed_block4_matvec_into(
+                out_a, out_b, Plan::differentiator, Plan::accumulator, values);
+    }
+
     template <typename GridType, typename SourceShape>
     struct ProfileOwnedPsinSourceRuntime
     {
@@ -149,7 +307,7 @@ namespace source::detail
             const RadialVector psin_r = const_root_row<root_psin_r>();
             RadialVector psin_rr{uninitialized};
             RadialVector integrated{uninitialized};
-            dual_matvec_into(psin_rr, integrated, GridType::differentiator, GridType::accumulator, psin_r);
+            dual_grid_block4_matvec_into<GridType>(psin_rr, integrated, psin_r);
             store_root_row<root_psin_rr>(psin_rr);
             const double offset = integrated[0];
             const double scale  = integrated[radial_nodes - 1] - offset;
@@ -200,7 +358,7 @@ namespace source::detail
 
             RadialVector psin_rr{uninitialized};
             RadialVector integrated{uninitialized};
-            dual_matvec_into(psin_rr, integrated, GridType::differentiator, GridType::accumulator, psin_r);
+            dual_grid_block4_matvec_into<GridType>(psin_rr, integrated, psin_r);
             store_root_row<root_psin_rr>(psin_rr);
             const double offset = integrated[0];
             const double scale  = integrated[radial_nodes - 1] - offset;
@@ -268,6 +426,23 @@ namespace source::detail
         constexpr void benchmark_A_psin_into(RadialVector& out) const noexcept
         {
             matvec_into(out, GridType::accumulator, const_root_row<root_psin_r>());
+        }
+
+        constexpr void
+        benchmark_DA_psin_into(RadialVector& psin_rr, RadialVector& integrated) const noexcept
+        {
+            dual_matvec_into(
+                psin_rr,
+                integrated,
+                GridType::differentiator,
+                GridType::accumulator,
+                const_root_row<root_psin_r>());
+        }
+
+        void benchmark_DA_psin_block4_into(RadialVector& psin_rr, RadialVector& integrated) const noexcept
+        {
+            dual_grid_block4_matvec_into<GridType>(
+                psin_rr, integrated, const_root_row<root_psin_r>());
         }
 
         constexpr void benchmark_prepare_psin_queries() noexcept
