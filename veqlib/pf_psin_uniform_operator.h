@@ -4,10 +4,13 @@
 #include "profiles.h"
 #include "residual.h"
 #include "source.h"
+#include <cstddef>
 #include <span>
 
 namespace operator_pf::detail
 {
+    using std::size_t;
+
     template <typename Shape>
     struct PfPsinUniformRuntimeParams
     {
@@ -42,30 +45,59 @@ namespace operator_pf::detail
         using Residual      = residual::ResidualRuntime<Shape, GridType>;
         using PackedVector  = typename Residual::PackedVector;
 
-        Profiles      profiles{};
-        Geometry      geometry{};
-        Source        source_runtime{};
-        Residual      residual{};
+        struct KernelPlan
+        {
+            Profiles      fixed_profiles{};
+            RuntimeParams static_params{};
+            size_t        n_axis_fix = 0;
+            bool          prepared   = false;
+
+            constexpr void refresh(const RuntimeParams& params) noexcept
+            {
+                static_params.profile_params = params.profile_params;
+                static_params.fix_rho        = params.fix_rho;
+                n_axis_fix                   = source::axis_fix_count<GridType>(params.fix_rho);
+                fixed_profiles.refresh_fixed(static_params.profile_params);
+                prepared = true;
+            }
+        };
+
+        struct KernelWorkspace
+        {
+            Profiles profiles{};
+            Geometry geometry{};
+            Source   source_runtime{};
+            Residual residual{};
+        };
+
+        KernelPlan      plan{};
+        KernelWorkspace workspace{};
         RuntimeParams params{};
 
         constexpr void set_uniform_sources(std::span<const double, SourceShape::sample_count> heat,
                                            std::span<const double, SourceShape::sample_count> current) noexcept
         {
-            source_runtime.set_uniform_sources(heat, current);
+            workspace.source_runtime.set_uniform_sources(heat, current);
+        }
+
+        constexpr void refresh_static_plan() noexcept
+        {
+            plan.refresh(params);
+            workspace.profiles.load_fixed_from(plan.fixed_profiles);
         }
 
         constexpr void evaluate(std::span<const double, Shape::x_size> x, PackedVector& out) noexcept
         {
-            profiles.refresh_fixed(params.profile_params);
-            profiles.refresh_active(x, params.profile_params);
-            geometry.update(params.a, params.R0, params.Z0, profiles);
+            if (!plan.prepared)
+                refresh_static_plan();
+            workspace.profiles.refresh_active(x, params.profile_params);
+            workspace.geometry.update(params.a, params.R0, params.Z0, workspace.profiles);
 
-            const auto n_axis_fix = source::axis_fix_count<GridType>(params.fix_rho);
-            source_runtime.materialize_profile_owned_psin(profiles, n_axis_fix);
-            source_runtime.update_pf_ip_from_psin_uniform(geometry, params.Ip, n_axis_fix);
+            workspace.source_runtime.materialize_profile_owned_psin(workspace.profiles, plan.n_axis_fix);
+            workspace.source_runtime.update_pf_ip_from_psin_uniform(workspace.geometry, params.Ip, plan.n_axis_fix);
 
-            residual.update_compact(source_runtime, geometry);
-            residual.pack_into(out, params.a, params.R0, params.B0);
+            workspace.residual.update_compact(workspace.source_runtime, workspace.geometry);
+            workspace.residual.pack_into(out, params.a, params.R0, params.B0);
         }
     };
 } // namespace operator_pf::detail

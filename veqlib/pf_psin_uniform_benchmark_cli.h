@@ -1189,7 +1189,7 @@ namespace
             result.scaled.data(),
             BenchShape::x_size,
         });
-        result.alpha    = {context.op.source_runtime.alpha1, context.op.source_runtime.alpha2};
+        result.alpha    = {context.op.workspace.source_runtime.alpha1, context.op.workspace.source_runtime.alpha2};
         result.accepted = result.raw_norm <= veqpy_acceptance_threshold();
     }
 

@@ -92,6 +92,44 @@ avoid merely adding a moment buffer around the current scalar reductions; the
 next viable residual candidate should batch/merge moments with a vector-friendly
 theta loop before claiming projection savings.
 
+## 2026-06-22 P0-C KernelPlan / KernelWorkspace split
+
+`PfPsinUniformOperator` now has an explicit read-mostly `KernelPlan` and mutable
+`KernelWorkspace`. The plan owns fixed profile rows and the `fix_rho` axis-count
+for the current runtime parameters; the workspace owns active/fixed profiles,
+geometry, source, and residual buffers. `evaluate()` lazily prepares the plan on
+first use and no longer rebuilds fixed profiles or recomputes the axis count on
+each callback. `refresh_static_plan()` is the explicit boundary to call after
+changing fixed runtime parameters on a reused operator.
+
+Validation after the split:
+
+- Release CTest: 4/4 passed.
+- Debug CTest: 4/4 passed.
+- RELAXED Python/C++ comparator: passed with `max_abs=7.66e-10`.
+
+Pinned P0-C timing used `taskset -c 2`, `repeat=30`, `warmup=5`; stage timing
+used `inner=1000` and was saved under
+`veqlib/experiments/0d68ce3-20260622-p0-kernelplan`.
+
+| stage / metric | P0-B median | P0-C median | ratio |
+| --- | ---: | ---: | ---: |
+| `profiles_all` | 124.0 ns | 130.6 ns | 1.053 |
+| `source_materialize` | 800.3 ns | 747.3 ns | 0.934 |
+| `source_update` | 831.6 ns | 798.0 ns | 0.960 |
+| `residual_update` | 794.6 ns | 790.5 ns | 0.995 |
+| `residual_pack` | 132.5 ns | 129.5 ns | 0.978 |
+| `evaluate` | 4578.5 ns | 4367.2 ns | 0.954 |
+| `evaluate_ring` | 4812.8 ns | 4199.9 ns | 0.873 |
+| solve median | 0.206 ms | 0.188 ms | 0.908 |
+
+Interpretation: the minimal plan/workspace split satisfies the P0-C retention
+gate in this WSL2 run: correctness is unchanged, callback-level `evaluate` and
+state-ring `evaluate_ring` do not regress, and the full residual-only solve
+median improved. `profiles_all` now includes explicit static-plan refresh plus
+fixed-row seeding and is not the callback gate; it remains close enough to keep
+the boundary because static refresh is outside repeated solver callbacks.
+
 ## Stable release stage timing
 
 | stage | median ns/call | avg ns/call | p95/median | CV |

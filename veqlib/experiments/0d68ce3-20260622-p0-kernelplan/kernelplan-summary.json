@@ -1,0 +1,404 @@
+{
+  "base_commit": "7e4229d",
+  "correctness": {
+    "case": "PF/psin/uniform/Ip active psin length=1, Grid(8,8,L=1,M=1,K=2)",
+    "comparisons": [
+      {
+        "cxx_shape": [
+          1
+        ],
+        "field": "initial.raw_residual",
+        "max_abs": 6.068479052601106e-13,
+        "python_shape": [
+          1
+        ]
+      },
+      {
+        "cxx_shape": [
+          2
+        ],
+        "field": "initial.alpha",
+        "max_abs": 2.954236855146064e-11,
+        "python_shape": [
+          2
+        ]
+      },
+      {
+        "cxx_shape": [
+          8
+        ],
+        "field": "initial.profile_psin",
+        "max_abs": 2.703948176474569e-13,
+        "python_shape": [
+          8
+        ]
+      },
+      {
+        "cxx_shape": [
+          8
+        ],
+        "field": "initial.profile_psin_r",
+        "max_abs": 4.569677969357144e-13,
+        "python_shape": [
+          8
+        ]
+      },
+      {
+        "cxx_shape": [
+          8
+        ],
+        "field": "initial.root_psin_r",
+        "max_abs": 4.569677969357144e-13,
+        "python_shape": [
+          8
+        ]
+      },
+      {
+        "cxx_shape": [
+          8
+        ],
+        "field": "initial.materialized_heat_input",
+        "max_abs": 4.662936703425657e-13,
+        "python_shape": [
+          8
+        ]
+      },
+      {
+        "cxx_shape": [
+          8
+        ],
+        "field": "initial.materialized_current_input",
+        "max_abs": 7.749356711883593e-14,
+        "python_shape": [
+          8
+        ]
+      },
+      {
+        "cxx_shape": [
+          8
+        ],
+        "field": "initial.source_target_psin_r",
+        "max_abs": 6.800150720298603e-12,
+        "python_shape": [
+          8
+        ]
+      },
+      {
+        "cxx_shape": [
+          8
+        ],
+        "field": "initial.FFn_psin",
+        "max_abs": 7.749356711883593e-14,
+        "python_shape": [
+          8
+        ]
+      },
+      {
+        "cxx_shape": [
+          8
+        ],
+        "field": "initial.Pn_psin",
+        "max_abs": 4.662936703425657e-13,
+        "python_shape": [
+          8
+        ]
+      },
+      {
+        "cxx_shape": [
+          8
+        ],
+        "field": "initial.geometry_V_r",
+        "max_abs": 7.655671652173623e-10,
+        "python_shape": [
+          8
+        ]
+      },
+      {
+        "cxx_shape": [
+          8
+        ],
+        "field": "initial.geometry_Kn",
+        "max_abs": 7.755796005426419e-12,
+        "python_shape": [
+          8
+        ]
+      },
+      {
+        "cxx_shape": [
+          8
+        ],
+        "field": "initial.geometry_Ln_r",
+        "max_abs": 6.476014169365385e-12,
+        "python_shape": [
+          8
+        ]
+      },
+      {
+        "cxx_shape": [
+          8,
+          8
+        ],
+        "field": "initial.residual_surface_G",
+        "max_abs": 9.124923039394162e-11,
+        "python_shape": [
+          8,
+          8
+        ]
+      },
+      {
+        "cxx_shape": [
+          1
+        ],
+        "field": "final.x",
+        "max_abs": 4.850342349982384e-11,
+        "python_shape": [
+          1
+        ]
+      },
+      {
+        "cxx_shape": [
+          1
+        ],
+        "field": "final.raw_residual",
+        "max_abs": 3.3306690738754696e-16,
+        "python_shape": [
+          1
+        ]
+      },
+      {
+        "cxx_shape": [
+          2
+        ],
+        "field": "final.alpha",
+        "max_abs": 2.3763990775194088e-11,
+        "python_shape": [
+          2
+        ]
+      }
+    ],
+    "final": {
+      "cxx_raw_residual": [
+        -2.7422508708241367e-14
+      ],
+      "cxx_x": [
+        8.018018359291945
+      ],
+      "python_raw_residual": [
+        -2.7755575615628914e-14
+      ],
+      "python_x": [
+        8.018018359243442
+      ]
+    },
+    "max_abs": 7.655671652173623e-10,
+    "passed": true,
+    "solver_interface": {
+      "cxx_entrypoint": "cminpack::hybrd",
+      "cxx_nfev": 8,
+      "eps": {
+        "cxx": 1e-06,
+        "python": 1e-06
+      },
+      "factor": {
+        "cxx": 1.0,
+        "python": 1.0
+      },
+      "maxfev": {
+        "cxx": 1000,
+        "python": 1000
+      },
+      "python_entrypoint": "scipy.optimize.root(method='hybr')",
+      "python_nfev": 10,
+      "residual_scale": {
+        "cxx": [
+          1.127890387700855
+        ],
+        "python": [
+          1.1278903877014619
+        ]
+      },
+      "tol": {
+        "cxx": 1e-06,
+        "python": 1e-06
+      },
+      "x_scale": {
+        "cxx": [
+          0.15
+        ],
+        "python": [
+          0.15
+        ]
+      }
+    },
+    "tolerance": 1e-09
+  },
+  "final_raw_norm": {
+    "baseline": 9.809034120518876e-09,
+    "kernelplan": 9.809034120518876e-09
+  },
+  "notes": [
+    "KernelPlan hoists fixed profile refresh and axis-fix count out of repeated evaluate callbacks after first preparation.",
+    "KernelWorkspace keeps mutable profiles/geometry/source/residual buffers; refresh_static_plan seeds only fixed profile rows.",
+    "WSL2 taskset wall-clock samples remain noisy; evaluate/evaluate_ring and correctness are the retention gates."
+  ],
+  "parent_commit": "0d68ce3",
+  "schema_version": 1,
+  "solve_baseline": "experiments/7e4229d-20260622-p0-baseline/solve-residual-relaxed-taskset-c2.json",
+  "solve_kernelplan": "experiments/0d68ce3-20260622-p0-kernelplan/solve-kernelplan-relaxed-taskset-c2.json",
+  "solve_timing": {
+    "baseline": {
+      "avg_ms": 0.21459050000000002,
+      "max_ms": 0.279076,
+      "median_ms": 0.206484,
+      "min_ms": 0.203615,
+      "p95_ms": 0.26359409999999994,
+      "repeat_count": 30,
+      "samples_ms": [
+        0.227074,
+        0.21464899999999998,
+        0.226702,
+        0.20540799999999998,
+        0.204922,
+        0.20648999999999998,
+        0.204349,
+        0.20857399999999998,
+        0.206478,
+        0.20599699999999999,
+        0.21892,
+        0.207283,
+        0.20622,
+        0.205729,
+        0.207399,
+        0.206121,
+        0.207209,
+        0.20382899999999998,
+        0.203615,
+        0.274017,
+        0.279076,
+        0.206444,
+        0.205121,
+        0.20443,
+        0.206499,
+        0.204677,
+        0.20574499999999998,
+        0.207063,
+        0.21681999999999998,
+        0.250855
+      ],
+      "std_ms": 0.01917423531852053
+    },
+    "kernelplan": {
+      "avg_ms": 0.20018609999999995,
+      "max_ms": 0.340721,
+      "median_ms": 0.187577,
+      "min_ms": 0.185445,
+      "p95_ms": 0.23751165,
+      "repeat_count": 30,
+      "samples_ms": [
+        0.19476,
+        0.2176,
+        0.238197,
+        0.18781899999999999,
+        0.186394,
+        0.18581799999999998,
+        0.22078899999999999,
+        0.186656,
+        0.186211,
+        0.186462,
+        0.20008099999999998,
+        0.18867699999999998,
+        0.18653899999999998,
+        0.340721,
+        0.195026,
+        0.189142,
+        0.187335,
+        0.18726099999999998,
+        0.222417,
+        0.236674,
+        0.194121,
+        0.18626099999999998,
+        0.18617599999999998,
+        0.185751,
+        0.185445,
+        0.185501,
+        0.18595399999999998,
+        0.18570699999999998,
+        0.195257,
+        0.190831
+      ],
+      "std_ms": 0.03015835611053759
+    },
+    "median_ratio": 0.9084335832316305
+  },
+  "stage_baseline": "experiments/7e4229d-20260622-p0-substages/stages-all-substages-relaxed-taskset-c2.json",
+  "stage_kernelplan": "experiments/0d68ce3-20260622-p0-kernelplan/stages-all-kernelplan-relaxed-taskset-c2.json",
+  "stage_ratios": {
+    "evaluate": {
+      "base_median_ns": 4578.532166666667,
+      "base_p95_ns": 4823.596,
+      "median_ratio": 0.953832984246443,
+      "new_median_ns": 4367.155,
+      "new_p95_ns": 5348.105
+    },
+    "evaluate_ring": {
+      "base_median_ns": 4812.792333333333,
+      "base_p95_ns": 5080.3786666666665,
+      "median_ratio": 0.872659406247669,
+      "new_median_ns": 4199.9285,
+      "new_p95_ns": 4578.147
+    },
+    "profiles_active": {
+      "base_median_ns": 115.801,
+      "base_p95_ns": 148.62966666666668,
+      "median_ratio": 0.981433666375938,
+      "new_median_ns": 113.651,
+      "new_p95_ns": 125.935
+    },
+    "profiles_all": {
+      "base_median_ns": 124.04116666666667,
+      "base_p95_ns": 172.99566666666666,
+      "median_ratio": 1.0530979634449316,
+      "new_median_ns": 130.6275,
+      "new_p95_ns": 138.367
+    },
+    "profiles_fixed": {
+      "base_median_ns": 8.009,
+      "base_p95_ns": 10.108666666666666,
+      "median_ratio": 0.9513047821201148,
+      "new_median_ns": 7.619,
+      "new_p95_ns": 9.726
+    },
+    "residual_pack": {
+      "base_median_ns": 132.46383333333335,
+      "base_p95_ns": 163.03766666666667,
+      "median_ratio": 0.977644212319589,
+      "new_median_ns": 129.5025,
+      "new_p95_ns": 160.009
+    },
+    "residual_update": {
+      "base_median_ns": 794.5991666666666,
+      "base_p95_ns": 884.7923333333333,
+      "median_ratio": 0.994900993058345,
+      "new_median_ns": 790.5475,
+      "new_p95_ns": 982.634
+    },
+    "source_materialize": {
+      "base_median_ns": 800.2513333333334,
+      "base_p95_ns": 968.469,
+      "median_ratio": 0.9338066290840293,
+      "new_median_ns": 747.28,
+      "new_p95_ns": 822.997
+    },
+    "source_update": {
+      "base_median_ns": 831.6406666666667,
+      "base_p95_ns": 1176.0753333333334,
+      "median_ratio": 0.9595520421079297,
+      "new_median_ns": 798.0025,
+      "new_p95_ns": 902.662
+    }
+  },
+  "success": {
+    "baseline": true,
+    "kernelplan": true
+  }
+}

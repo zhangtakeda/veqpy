@@ -269,43 +269,41 @@ namespace
 
     void refresh_profiles(BenchOperator& op, std::span<const double, BenchShape::x_size> x) noexcept
     {
-        op.profiles.refresh_fixed(op.params.profile_params);
-        op.profiles.refresh_active(x, op.params.profile_params);
+        op.refresh_static_plan();
+        op.workspace.profiles.refresh_active(x, op.params.profile_params);
     }
 
     void prepare_geometry(BenchOperator& op, std::span<const double, BenchShape::x_size> x) noexcept
     {
         refresh_profiles(op, x);
-        op.geometry.update(op.params.a, op.params.R0, op.params.Z0, op.profiles);
+        op.workspace.geometry.update(op.params.a, op.params.R0, op.params.Z0, op.workspace.profiles);
     }
 
     void prepare_source_materialized(BenchOperator& op, std::span<const double, BenchShape::x_size> x) noexcept
     {
         refresh_profiles(op, x);
-        const size_t n_axis_fix = axis_fix_count<BenchGrid>(op.params.fix_rho);
-        op.source_runtime.materialize_profile_owned_psin(op.profiles, n_axis_fix);
+        op.workspace.source_runtime.materialize_profile_owned_psin(op.workspace.profiles, op.plan.n_axis_fix);
     }
 
     void prepare_source_updated(BenchOperator& op, std::span<const double, BenchShape::x_size> x) noexcept
     {
         prepare_geometry(op, x);
-        const size_t n_axis_fix = axis_fix_count<BenchGrid>(op.params.fix_rho);
-        op.source_runtime.materialize_profile_owned_psin(op.profiles, n_axis_fix);
-        op.source_runtime.update_pf_ip_from_psin_uniform(op.geometry, op.params.Ip, n_axis_fix);
+        op.workspace.source_runtime.materialize_profile_owned_psin(op.workspace.profiles, op.plan.n_axis_fix);
+        op.workspace.source_runtime.update_pf_ip_from_psin_uniform(
+            op.workspace.geometry, op.params.Ip, op.plan.n_axis_fix);
     }
 
     void prepare_residual_updated(BenchOperator& op, std::span<const double, BenchShape::x_size> x) noexcept
     {
         prepare_source_updated(op, x);
-        op.residual.update_compact(op.source_runtime, op.geometry);
+        op.workspace.residual.update_compact(op.workspace.source_runtime, op.workspace.geometry);
     }
 
     void prepare_source_profile_root(BenchOperator& op, std::span<const double, BenchShape::x_size> x) noexcept
     {
         refresh_profiles(op, x);
-        const size_t n_axis_fix = axis_fix_count<BenchGrid>(op.params.fix_rho);
-        op.source_runtime.benchmark_copy_profile_psin_r(op.profiles);
-        op.source_runtime.benchmark_regularize_psin_r(n_axis_fix);
+        op.workspace.source_runtime.benchmark_copy_profile_psin_r(op.workspace.profiles);
+        op.workspace.source_runtime.benchmark_regularize_psin_r(op.plan.n_axis_fix);
     }
 
     void prepare_source_integrand(BenchOperator&                              op,
@@ -313,8 +311,8 @@ namespace
                                   SourceRadialVector&                         integrand) noexcept
     {
         prepare_source_materialized(op, x);
-        op.geometry.update(op.params.a, op.params.R0, op.params.Z0, op.profiles);
-        op.source_runtime.benchmark_fill_pf_psin_integrand(integrand, op.geometry);
+        op.workspace.geometry.update(op.params.a, op.params.R0, op.params.Z0, op.workspace.profiles);
+        op.workspace.source_runtime.benchmark_fill_pf_psin_integrand(integrand, op.workspace.geometry);
     }
 
     void prepare_source_accumulated_integrand(BenchOperator&                              op,
@@ -323,7 +321,7 @@ namespace
     {
         SourceRadialVector integrand{uninitialized};
         prepare_source_integrand(op, x, integrand);
-        op.source_runtime.benchmark_A_integrand_into(accumulated, integrand);
+        op.workspace.source_runtime.benchmark_A_integrand_into(accumulated, integrand);
     }
 
     void prepare_source_normalized_psin(BenchOperator&                              op,
@@ -332,9 +330,8 @@ namespace
     {
         SourceRadialVector accumulated{uninitialized};
         prepare_source_accumulated_integrand(op, x, accumulated);
-        const size_t n_axis_fix = axis_fix_count<BenchGrid>(op.params.fix_rho);
-        (void)op.source_runtime.benchmark_normalize_psin_r_into(
-            normalized, accumulated, op.geometry, n_axis_fix);
+        (void)op.workspace.source_runtime.benchmark_normalize_psin_r_into(
+            normalized, accumulated, op.workspace.geometry, op.plan.n_axis_fix);
     }
 
     enum class GeometryProbeMode
@@ -357,7 +354,7 @@ namespace
         constexpr size_t s_limit         = BenchGrid::harmonic_rows;
         constexpr double probe_pi        = 3.141592653589793238462643383279502884;
 
-        const auto& runtime_profiles = op.profiles;
+        const auto& runtime_profiles = op.workspace.profiles;
         double      sink             = 0.0;
 
         for (size_t i = 0; i < BenchGrid::radial_nodes; ++i)
@@ -532,11 +529,11 @@ namespace
 
                 constexpr double theta_scale = 2.0 * probe_pi / static_cast<double>(BenchGrid::theta_rows);
                 constexpr double mean_scale  = 1.0 / static_cast<double>(BenchGrid::theta_rows);
-                op.geometry.radial_fields(radial_S_r, i) = sum_J * theta_scale;
-                op.geometry.radial_fields(radial_V_r, i) = sum_JR * theta_scale * 2.0 * probe_pi;
-                op.geometry.radial_fields(radial_Kn, i) = sum_gttdivJR * mean_scale;
-                op.geometry.radial_fields(radial_Kn_r, i) = sum_gttdivJR_r * mean_scale;
-                op.geometry.radial_fields(radial_Ln_r, i) = (sum_JdivR + sum_grtdivJR_t) * mean_scale;
+                op.workspace.geometry.radial_fields(radial_S_r, i) = sum_J * theta_scale;
+                op.workspace.geometry.radial_fields(radial_V_r, i) = sum_JR * theta_scale * 2.0 * probe_pi;
+                op.workspace.geometry.radial_fields(radial_Kn, i) = sum_gttdivJR * mean_scale;
+                op.workspace.geometry.radial_fields(radial_Kn_r, i) = sum_gttdivJR_r * mean_scale;
+                op.workspace.geometry.radial_fields(radial_Ln_r, i) = (sum_JdivR + sum_grtdivJR_t) * mean_scale;
             }
             else
             {
@@ -669,7 +666,7 @@ namespace
         }
 
         if constexpr (Mode != GeometryProbeMode::MetricNoStore)
-            op.geometry.radial_fields(radial_S_r, 0) = sink;
+            op.workspace.geometry.radial_fields(radial_S_r, 0) = sink;
     }
 
     double consume_state(const BenchOperator&       op,
@@ -677,9 +674,10 @@ namespace
                          const SourceRadialVector&  source_scratch,
                          const ResidualMomentRows&  residual_moments) noexcept
     {
-        return op.profiles.profile_field(BenchShape::psin_profile_id, 0, 0) +
-               op.geometry.surface_field(surface_R, 0, 0) + op.source_runtime.alpha1 +
-               op.residual.surface_field(surface_G, 0, 0) + packed[0] + source_scratch[0] + residual_moments(0, 0);
+        return op.workspace.profiles.profile_field(BenchShape::psin_profile_id, 0, 0) +
+               op.workspace.geometry.surface_field(surface_R, 0, 0) + op.workspace.source_runtime.alpha1 +
+               op.workspace.residual.surface_field(surface_G, 0, 0) + packed[0] + source_scratch[0] +
+               residual_moments(0, 0);
     }
 
     void run_stage_once(StageKind                                   stage,
@@ -688,104 +686,105 @@ namespace
                         PackedVector&                               packed,
                         SourceRadialVector&                         source_scratch,
                         SourceRadialVector&                         source_aux,
-                        ResidualMomentRows&                         residual_moments)
+        ResidualMomentRows&                         residual_moments)
     {
-        const size_t n_axis_fix = axis_fix_count<BenchGrid>(op.params.fix_rho);
         switch (stage)
         {
         case StageKind::ProfilesFixed:
-            op.profiles.refresh_fixed(op.params.profile_params);
-            compiler_barrier(op.profiles.profile_fields.data());
+            op.workspace.profiles.refresh_fixed(op.params.profile_params);
+            compiler_barrier(op.workspace.profiles.profile_fields.data());
             break;
         case StageKind::ProfilesActive:
-            op.profiles.refresh_active(x, op.params.profile_params);
-            compiler_barrier(op.profiles.profile_fields.data());
+            op.workspace.profiles.refresh_active(x, op.params.profile_params);
+            compiler_barrier(op.workspace.profiles.profile_fields.data());
             break;
         case StageKind::ProfilesAll:
             refresh_profiles(op, x);
-            compiler_barrier(op.profiles.profile_fields.data());
+            compiler_barrier(op.workspace.profiles.profile_fields.data());
             break;
         case StageKind::GeometryPhase:
             run_geometry_probe<GeometryProbeMode::Phase>(op);
-            compiler_barrier(op.geometry.radial_fields.data());
+            compiler_barrier(op.workspace.geometry.radial_fields.data());
             break;
         case StageKind::GeometryPhaseSincos:
             run_geometry_probe<GeometryProbeMode::PhaseSincos>(op);
-            compiler_barrier(op.geometry.radial_fields.data());
+            compiler_barrier(op.workspace.geometry.radial_fields.data());
             break;
         case StageKind::GeometryPhaseSplitSincos:
             run_geometry_probe<GeometryProbeMode::PhaseSplitSincos>(op);
-            compiler_barrier(op.geometry.radial_fields.data());
+            compiler_barrier(op.workspace.geometry.radial_fields.data());
             break;
         case StageKind::GeometryMetricNoStore:
             run_geometry_probe<GeometryProbeMode::MetricNoStore>(op);
-            compiler_barrier(op.geometry.radial_fields.data());
+            compiler_barrier(op.workspace.geometry.radial_fields.data());
             break;
         case StageKind::Geometry:
-            op.geometry.update(op.params.a, op.params.R0, op.params.Z0, op.profiles);
-            compiler_barrier(op.geometry.surface_fields.data());
+            op.workspace.geometry.update(op.params.a, op.params.R0, op.params.Z0, op.workspace.profiles);
+            compiler_barrier(op.workspace.geometry.surface_fields.data());
             break;
         case StageKind::SourceMaterialize:
-            op.source_runtime.materialize_profile_owned_psin(op.profiles, n_axis_fix);
-            compiler_barrier(op.source_runtime.materialized_heat_input.data());
+            op.workspace.source_runtime.materialize_profile_owned_psin(op.workspace.profiles, op.plan.n_axis_fix);
+            compiler_barrier(op.workspace.source_runtime.materialized_heat_input.data());
             break;
         case StageKind::SourceCopyRegularize:
-            op.source_runtime.benchmark_copy_profile_psin_r(op.profiles);
-            op.source_runtime.benchmark_regularize_psin_r(n_axis_fix);
-            compiler_barrier(op.source_runtime.source_target_root_fields.data());
+            op.workspace.source_runtime.benchmark_copy_profile_psin_r(op.workspace.profiles);
+            op.workspace.source_runtime.benchmark_regularize_psin_r(op.plan.n_axis_fix);
+            compiler_barrier(op.workspace.source_runtime.source_target_root_fields.data());
             break;
         case StageKind::SourceDpsin:
-            op.source_runtime.benchmark_D_psin_into_rr();
-            compiler_barrier(op.source_runtime.source_target_root_fields.data());
+            op.workspace.source_runtime.benchmark_D_psin_into_rr();
+            compiler_barrier(op.workspace.source_runtime.source_target_root_fields.data());
             break;
         case StageKind::SourceApsin:
-            op.source_runtime.benchmark_A_psin_into(source_scratch);
+            op.workspace.source_runtime.benchmark_A_psin_into(source_scratch);
             compiler_barrier(source_scratch.data());
             break;
         case StageKind::SourceInterpolatePair:
-            op.source_runtime.benchmark_prepare_psin_queries();
-            op.source_runtime.benchmark_interpolate_pair();
-            compiler_barrier(op.source_runtime.materialized_heat_input.data());
+            op.workspace.source_runtime.benchmark_prepare_psin_queries();
+            op.workspace.source_runtime.benchmark_interpolate_pair();
+            compiler_barrier(op.workspace.source_runtime.materialized_heat_input.data());
             break;
         case StageKind::SourceIntegrand:
-            op.source_runtime.benchmark_fill_pf_psin_integrand(source_scratch, op.geometry);
+            op.workspace.source_runtime.benchmark_fill_pf_psin_integrand(source_scratch, op.workspace.geometry);
             compiler_barrier(source_scratch.data());
             break;
         case StageKind::SourceAIntegrand:
-            op.source_runtime.benchmark_A_integrand_into(source_aux, source_scratch);
+            op.workspace.source_runtime.benchmark_A_integrand_into(source_aux, source_scratch);
             compiler_barrier(source_aux.data());
             break;
         case StageKind::SourceNormalize:
-            (void)op.source_runtime.benchmark_normalize_psin_r_into(
-                source_aux, source_scratch, op.geometry, n_axis_fix);
+            (void)op.workspace.source_runtime.benchmark_normalize_psin_r_into(
+                source_aux, source_scratch, op.workspace.geometry, op.plan.n_axis_fix);
             compiler_barrier(source_aux.data());
             break;
         case StageKind::SourceDNormalized:
-            op.source_runtime.benchmark_D_normalized_psin_into_rr(source_scratch);
-            compiler_barrier(op.source_runtime.source_target_root_fields.data());
+            op.workspace.source_runtime.benchmark_D_normalized_psin_into_rr(source_scratch);
+            compiler_barrier(op.workspace.source_runtime.source_target_root_fields.data());
             break;
         case StageKind::SourceAlpha:
-            op.source_runtime.benchmark_update_alpha_from_integral(op.geometry, op.params.Ip, 1.0);
-            compiler_barrier(&op.source_runtime.alpha1);
+            op.workspace.source_runtime.benchmark_update_alpha_from_integral(op.workspace.geometry, op.params.Ip, 1.0);
+            compiler_barrier(&op.workspace.source_runtime.alpha1);
             break;
         case StageKind::SourceUpdate:
-            op.source_runtime.update_pf_ip_from_psin_uniform(op.geometry, op.params.Ip, n_axis_fix);
-            compiler_barrier(op.source_runtime.FFn_psin.data());
+            op.workspace.source_runtime.update_pf_ip_from_psin_uniform(
+                op.workspace.geometry, op.params.Ip, op.plan.n_axis_fix);
+            compiler_barrier(op.workspace.source_runtime.FFn_psin.data());
             break;
         case StageKind::ResidualUpdate:
-            op.residual.update_compact(op.source_runtime, op.geometry);
-            compiler_barrier(op.residual.surface_fields.data());
+            op.workspace.residual.update_compact(op.workspace.source_runtime, op.workspace.geometry);
+            compiler_barrier(op.workspace.residual.surface_fields.data());
             break;
         case StageKind::ResidualThetaReduce:
-            op.residual.benchmark_theta_reduce_into(residual_moments);
+            op.workspace.residual.benchmark_theta_reduce_into(residual_moments);
             compiler_barrier(residual_moments.data());
             break;
         case StageKind::ResidualRadialProject:
-            op.residual.benchmark_radial_project_from(packed, residual_moments, op.params.a, op.params.R0, op.params.B0);
+            op.workspace.residual.benchmark_radial_project_from(
+                packed, residual_moments, op.params.a, op.params.R0, op.params.B0);
             compiler_barrier(packed.data());
             break;
         case StageKind::ResidualPack:
-            op.residual.pack_into(packed, op.params.a, op.params.R0, op.params.B0);
+            op.workspace.residual.pack_into(packed, op.params.a, op.params.R0, op.params.B0);
             compiler_barrier(packed.data());
             break;
         case StageKind::Evaluate:
@@ -1043,7 +1042,7 @@ namespace
         case StageKind::ProfilesFixed:
             break;
         case StageKind::ProfilesActive:
-            op.profiles.refresh_fixed(op.params.profile_params);
+            op.refresh_static_plan();
             break;
         case StageKind::ProfilesAll:
             break;
@@ -1069,7 +1068,7 @@ namespace
             break;
         case StageKind::SourceIntegrand:
             prepare_source_materialized(op, x);
-            op.geometry.update(op.params.a, op.params.R0, op.params.Z0, op.profiles);
+            op.workspace.geometry.update(op.params.a, op.params.R0, op.params.Z0, op.workspace.profiles);
             break;
         case StageKind::SourceAIntegrand:
             prepare_source_integrand(op, x, source_scratch);
@@ -1085,7 +1084,7 @@ namespace
             break;
         case StageKind::SourceUpdate:
             prepare_source_materialized(op, x);
-            op.geometry.update(op.params.a, op.params.R0, op.params.Z0, op.profiles);
+            op.workspace.geometry.update(op.params.a, op.params.R0, op.params.Z0, op.workspace.profiles);
             break;
         case StageKind::ResidualUpdate:
             prepare_source_updated(op, x);
@@ -1095,7 +1094,7 @@ namespace
             break;
         case StageKind::ResidualRadialProject:
             prepare_residual_updated(op, x);
-            op.residual.benchmark_theta_reduce_into(residual_moments);
+            op.workspace.residual.benchmark_theta_reduce_into(residual_moments);
             break;
         case StageKind::ResidualPack:
             prepare_residual_updated(op, x);

@@ -605,6 +605,12 @@ namespace profiles
             refresh_s_family_order<1>();
         }
 
+        constexpr void load_fixed_from(const RuntimeProfiles& fixed_profiles) noexcept
+        {
+            load_fixed_profile<0>(fixed_profiles);
+            refresh_fourier_family_fields();
+        }
+
     private:
         template <size_t ProfileId, size_t Count>
         static constexpr Vector<double, Count> coefficients_from_x(std::span<const double, Shape::x_size> x) noexcept
@@ -639,6 +645,29 @@ namespace profiles
                 profile_fields(ProfileId, node, 0) = value;
                 profile_fields(ProfileId, node, 1) = radial;
                 profile_fields(ProfileId, node, 2) = radial2;
+            }
+        }
+
+        template <size_t ProfileId>
+        constexpr void copy_profile_from(const RuntimeProfiles& fixed_profiles) noexcept
+        {
+            static_assert(ProfileId < profile_field_count, "profile id exceeds runtime profile slab");
+
+            for (size_t node = 0; node < radial_nodes; ++node)
+                for (size_t component = 0; component < 3; ++component)
+                    profile_fields(ProfileId, node, component) =
+                        fixed_profiles.profile_fields(ProfileId, node, component);
+        }
+
+        template <size_t ProfileId>
+        constexpr void load_fixed_profile(const RuntimeProfiles& fixed_profiles) noexcept
+        {
+            if constexpr (ProfileId < profile_field_count)
+            {
+                constexpr ProfileSlot slot = Shape::slot_for_profile_id(ProfileId);
+                if constexpr (slot.fixed())
+                    copy_profile_from<ProfileId>(fixed_profiles);
+                load_fixed_profile<ProfileId + 1>(fixed_profiles);
             }
         }
 

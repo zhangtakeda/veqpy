@@ -1,0 +1,29 @@
+{
+  "artifacts": [
+    "comparator-kernelplan.json",
+    "stages-all-kernelplan-relaxed-taskset-c2.json",
+    "solve-kernelplan-relaxed-taskset-c2.json",
+    "kernelplan-summary.json"
+  ],
+  "base_commit": "0d68ce3",
+  "commands": [
+    "cmake --build --preset clang-debug -j$(nproc)",
+    "ctest --test-dir build/debug --output-on-failure",
+    "cmake --build --preset clang-release -j$(nproc)",
+    "ctest --test-dir build/release --output-on-failure",
+    "../.venv/bin/python compare_pf_psin_uniform_veqpy.py --cxx-exe build/release/veqlib_main --tolerance 1e-9",
+    "taskset -c 2 build/release/veqlib_main --mode stage --stage all --repeat 30 --warmup 5 --inner 1000 --ring-size 16",
+    "taskset -c 2 build/release/veqlib_main --mode pf-benchmark --repeat 30 --warmup 5"
+  ],
+  "current_head": "0d68ce3275fffdd012e4199b51cacf8ead2b4325",
+  "dirty_diff_sha256": "870728d003442c521ee3351ff3daf57e0f0bea1fcf1c2102b36823961c04925a",
+  "git_status_short": "M veqlib/pf_psin_uniform_benchmark_cli.h\n M veqlib/pf_psin_uniform_operator.h\n M veqlib/pf_psin_uniform_validation_cli.h\n M veqlib/profiles.h\n M veqlib/stage_benchmark_cli.h\n?? veqlib/experiments/0d68ce3-20260622-p0-kernelplan/",
+  "notes": "WSL2/taskset wall-clock evidence; hardware PMU remains unavailable in this environment.",
+  "phase": "P0-C KernelPlan/KernelWorkspace split",
+  "schema_version": 1,
+  "system": {
+    "machine": "x86_64",
+    "platform": "Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "processor": "x86_64"
+  }
+}
