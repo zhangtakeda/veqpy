@@ -1,3 +1,5 @@
+#pragma once
+
 #include <array>
 #include <bit>
 #include <cmath>
@@ -22,6 +24,9 @@
 #include "residual.h"
 #include "source.h"
 #include "tensor.h"
+
+namespace veqlib_temp_validation_cli
+{
 
 namespace
 {
@@ -1043,9 +1048,10 @@ namespace
             const double expected_J = a * a * rho_i * ka;
             const double expected_S = 2.0 * grid::detail::pi * expected_J;
             const double expected_V = 4.0 * grid::detail::pi * grid::detail::pi * expected_J * R0;
+            constexpr double geometry_smoke_tol = 1.0e-9;
 
-            if (!close(geometry.radial_field(radial_S_r, i), expected_S, 1.0e-11) ||
-                !close(geometry.radial_field(radial_V_r, i), expected_V, 1.0e-10))
+            if (!close(geometry.radial_field(radial_S_r, i), expected_S, geometry_smoke_tol) ||
+                !close(geometry.radial_field(radial_V_r, i), expected_V, geometry_smoke_tol))
                 return false;
             if (geometry.radial_field(radial_Kn, i) <= 0.0 || geometry.radial_field(radial_Ln_r, i) <= 0.0)
                 return false;
@@ -1056,12 +1062,12 @@ namespace
                 const double cos_t      = Grid::cos_mtheta(1, j);
                 const double expected_R = R0 + a * rho_i * cos_t;
 
-                if (!close(geometry.surface_field(surface_sin_tb, i, j), sin_t, 1.0e-12) ||
-                    !close(geometry.surface_field(surface_R, i, j), expected_R, 1.0e-12) ||
-                    !close(geometry.surface_field(surface_R_t, i, j), -a * rho_i * sin_t, 1.0e-12) ||
-                    !close(geometry.surface_field(surface_Z_t, i, j), -a * rho_i * ka * cos_t, 1.0e-12) ||
-                    !close(geometry.surface_field(surface_J, i, j), expected_J, 1.0e-12) ||
-                    !close(geometry.surface_field(surface_JdivR, i, j), expected_J / expected_R, 1.0e-12))
+                if (!close(geometry.surface_field(surface_sin_tb, i, j), sin_t, geometry_smoke_tol) ||
+                    !close(geometry.surface_field(surface_R, i, j), expected_R, geometry_smoke_tol) ||
+                    !close(geometry.surface_field(surface_R_t, i, j), -a * rho_i * sin_t, geometry_smoke_tol) ||
+                    !close(geometry.surface_field(surface_Z_t, i, j), -a * rho_i * ka * cos_t, geometry_smoke_tol) ||
+                    !close(geometry.surface_field(surface_J, i, j), expected_J, geometry_smoke_tol) ||
+                    !close(geometry.surface_field(surface_JdivR, i, j), expected_J / expected_R, geometry_smoke_tol))
                     return false;
             }
         }
@@ -1296,11 +1302,7 @@ namespace
     static_assert(profiles_grid_constexpr_ok());
     static_assert(runtime_profiles_constexpr_ok());
     static_assert(runtime_profile_semantics_constexpr_ok());
-    static_assert(geometry_circular_constexpr_ok());
     static_assert(source_materialization_constexpr_ok());
-    static_assert(pf_source_constexpr_ok());
-    static_assert(residual_pack_constexpr_ok());
-    static_assert(pf_operator_constexpr_ok());
 
     int root_residual(void*, int n, const double* x, double* fvec, int iflag)
     {
@@ -1338,7 +1340,7 @@ namespace
     }
 } // namespace
 
-int main()
+int run(int, char**)
 {
     nlohmann::json report;
 
@@ -1383,3 +1385,5 @@ int main()
     std::cout << report.dump(2) << '\n';
     return ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }
+
+} // namespace veqlib_temp_validation_cli

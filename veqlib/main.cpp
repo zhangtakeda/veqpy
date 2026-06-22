@@ -1,6 +1,8 @@
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
+#include <string>
+#include <vector>
 
 #include <cminpack.h>
 #include <gcem.hpp>
@@ -10,7 +12,11 @@
 #include "grid.h"
 #include "linalg.h"
 #include "math.h"
+#include "pf_psin_uniform_benchmark_cli.h"
+#include "pf_psin_uniform_validation_cli.h"
+#include "stage_benchmark_cli.h"
 #include "tensor.h"
+#include "temp_validation_cli.h"
 
 namespace
 {
@@ -141,7 +147,7 @@ namespace
 
 } // namespace
 
-int main()
+int run_probe(int, char**)
 {
     nlohmann::json report;
     report["cxx"]  = static_cast<long>(__cplusplus);
@@ -248,4 +254,96 @@ int main()
         ;
 
     return ok ? EXIT_SUCCESS : EXIT_FAILURE;
+}
+
+namespace
+{
+    using CliEntrypoint = int (*)(int, char**);
+
+    void print_usage()
+    {
+        std::cout
+            << "usage: veqlib_main [--mode MODE|MODE] [mode options]\n"
+               "\n"
+               "modes:\n"
+               "  probe              dependency and constexpr smoke test (default)\n"
+               "  temp-validation    generated-topology validation suite\n"
+               "  pf-validation      PF/psin/uniform/Ip C++ vs VEQPy validation payload\n"
+               "  solve              PF/psin/uniform/Ip solve benchmark\n"
+               "  stage              PF/psin/uniform/Ip stage benchmark\n"
+               "\n"
+               "examples:\n"
+               "  veqlib_main --mode solve --repeat 30 --warmup 5\n"
+               "  veqlib_main --mode stage --stage evaluate --repeat 10 --inner 10000\n";
+    }
+
+    int run_forwarded(CliEntrypoint entrypoint, int argc, char** argv, int first_arg)
+    {
+        std::vector<char*> forwarded;
+        forwarded.reserve(static_cast<std::size_t>(argc - first_arg + 2));
+        forwarded.push_back(argv[0]);
+        for (int i = first_arg; i < argc; ++i)
+            forwarded.push_back(argv[i]);
+        forwarded.push_back(nullptr);
+        return entrypoint(static_cast<int>(forwarded.size() - 1), forwarded.data());
+    }
+
+    int run_mode(const std::string& mode, int argc, char** argv, int first_arg)
+    {
+        if (mode == "probe")
+            return run_forwarded(run_probe, argc, argv, first_arg);
+        if (mode == "temp-validation" || mode == "temp" || mode == "topology-validation")
+            return run_forwarded(veqlib_temp_validation_cli::run, argc, argv, first_arg);
+        if (mode == "pf-validation" || mode == "validate" || mode == "validation")
+            return run_forwarded(veqlib_pf_psin_uniform_validation_cli::run, argc, argv, first_arg);
+        if (mode == "solve" || mode == "solve-benchmark" || mode == "pf-benchmark" || mode == "benchmark")
+            return run_forwarded(veqlib_pf_psin_uniform_benchmark_cli::run, argc, argv, first_arg);
+        if (mode == "stage" || mode == "stage-benchmark")
+            return run_forwarded(veqlib_stage_benchmark_cli::run, argc, argv, first_arg);
+
+        std::cerr << "veqlib_main: unknown mode: " << mode << '\n';
+        print_usage();
+        return 2;
+    }
+
+    bool is_solve_option(const std::string& option)
+    {
+        return option == "--repeat" || option == "--warmup" || option == "--solver" || option == "--enzyme-width" ||
+               option == "--jacobian-check";
+    }
+
+    bool is_stage_option(const std::string& option)
+    {
+        return option == "--stage" || option == "--inner" || option == "--ring-size";
+    }
+} // namespace
+
+int main(int argc, char** argv)
+{
+    if (argc <= 1)
+        return run_mode("probe", argc, argv, 1);
+
+    const std::string first = argv[1];
+    if (first == "--help" || first == "-h")
+    {
+        print_usage();
+        return 0;
+    }
+    if (first == "--mode")
+    {
+        if (argc <= 2)
+        {
+            std::cerr << "veqlib_main: --mode requires a value\n";
+            return 2;
+        }
+        return run_mode(argv[2], argc, argv, 3);
+    }
+    if (first.rfind("--mode=", 0) == 0)
+        return run_mode(first.substr(7), argc, argv, 2);
+    if (is_stage_option(first))
+        return run_mode("stage", argc, argv, 1);
+    if (is_solve_option(first))
+        return run_mode("solve", argc, argv, 1);
+
+    return run_mode(first, argc, argv, 2);
 }

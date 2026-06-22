@@ -14,7 +14,7 @@ import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BENCHMARK_PATH = REPO_ROOT / "tests" / "benchmark.py"
-DEFAULT_CXX_EXE = REPO_ROOT / "veqlib" / "build" / "debug" / "veqlib_pf_psin_uniform_benchmark"
+DEFAULT_CXX_EXE = REPO_ROOT / "veqlib" / "build" / "debug" / "veqlib_main"
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "tests" / "benchmark"
 FIXED_CONSTRAINT = "Ip"
 
@@ -221,12 +221,11 @@ def _run_cxx_case(executable: Path, *, repeat: int, warmup: int) -> dict[str, An
     if not executable.exists():
         raise FileNotFoundError(
             f"C++ benchmark executable not found: {executable}. "
-            "Build it with `cmake --build --preset clang-debug --target "
-            "veqlib_pf_psin_uniform_benchmark`."
+            "Build it with `cmake --build --preset clang-debug --target veqlib_main`."
         )
     try:
         completed = subprocess.run(
-            [str(executable), "--repeat", str(repeat), "--warmup", str(warmup)],
+            [str(executable), "--mode", "solve", "--repeat", str(repeat), "--warmup", str(warmup)],
             check=True,
             cwd=executable.parent,
             text=True,

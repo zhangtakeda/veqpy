@@ -1,3 +1,5 @@
+#pragma once
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -14,6 +16,9 @@
 #include "profiles.h"
 #include "source.h"
 #include "tensor.h"
+
+namespace veqlib_pf_psin_uniform_validation_cli
+{
 
 namespace
 {
@@ -292,7 +297,7 @@ namespace
     }
 } // namespace
 
-int main()
+int run(int, char**)
 {
     SolveContext context;
 
@@ -439,3 +444,5 @@ int main()
     std::cout << report.dump(2) << '\n';
     return (accepted_by_veqpy && info > 0) ? EXIT_SUCCESS : EXIT_FAILURE;
 }
+
+} // namespace veqlib_pf_psin_uniform_validation_cli

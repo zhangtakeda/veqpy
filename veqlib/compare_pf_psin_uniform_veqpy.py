@@ -26,7 +26,7 @@ CPP_CURRENT = np.array([0.5, 0.625, 0.75, 0.875, 1.0], dtype=np.float64)
 
 
 def _repo_relative_default_exe() -> Path:
-    return REPO_ROOT / "veqlib" / "build" / "debug" / "veqlib_pf_psin_uniform_validation"
+    return REPO_ROOT / "veqlib" / "build" / "debug" / "veqlib_main"
 
 
 def _run_cxx_report(executable: Path) -> dict[str, Any]:
@@ -34,10 +34,10 @@ def _run_cxx_report(executable: Path) -> dict[str, Any]:
         raise FileNotFoundError(
             f"C++ validation executable not found: {executable}. "
             "Build it with `cmake --build --preset clang-debug --target "
-            "veqlib_pf_psin_uniform_validation`."
+            "veqlib_main`."
         )
     completed = subprocess.run(
-        [str(executable)],
+        [str(executable), "--mode", "pf-validation"],
         check=True,
         cwd=executable.parent,
         text=True,

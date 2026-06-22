@@ -1,3 +1,5 @@
+#pragma once
+
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -32,6 +34,9 @@ extern int enzyme_width;
 #include "profiles.h"
 #include "source.h"
 #include "tensor.h"
+
+namespace veqlib_pf_psin_uniform_benchmark_cli
+{
 
 namespace
 {
@@ -1600,7 +1605,7 @@ namespace
     }
 } // namespace
 
-int main(int argc, char** argv)
+int run(int argc, char** argv)
 {
     try
     {
@@ -1784,7 +1789,9 @@ int main(int argc, char** argv)
     }
     catch (const std::exception& exc)
     {
-        std::cerr << "veqlib_pf_psin_uniform_benchmark: " << exc.what() << '\n';
+        std::cerr << "veqlib_main --mode solve: " << exc.what() << '\n';
         return EXIT_FAILURE;
     }
 }
+
+} // namespace veqlib_pf_psin_uniform_benchmark_cli

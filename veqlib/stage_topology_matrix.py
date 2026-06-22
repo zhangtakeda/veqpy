@@ -122,14 +122,16 @@ def main() -> int:
             stdout=sys.stderr,
         )
         subprocess.run(
-            ["cmake", "--build", str(build_dir), "--target", "veqlib_stage_benchmark"],
+            ["cmake", "--build", str(build_dir), "--target", "veqlib_main"],
             check=True,
             stdout=sys.stderr,
         )
-        exe = build_dir / "veqlib_stage_benchmark"
+        exe = build_dir / "veqlib_main"
         report = run_json(
             [
                 str(exe),
+                "--mode",
+                "stage",
                 "--stage",
                 args.stage,
                 "--repeat",

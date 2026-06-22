@@ -476,24 +476,11 @@ function(veqlib_configure_executable target)
     veqlib_link_dependencies("${target}")
 endfunction()
 
-add_executable(veqlib_probe main.cpp ${VEQLIB_COMMON_SOURCES})
-veqlib_configure_executable(veqlib_probe)
-veqlib_enable_enzyme(veqlib_probe)
-
-add_executable(veqlib_temp_validation temp_validation.cpp ${VEQLIB_COMMON_SOURCES})
-veqlib_configure_executable(veqlib_temp_validation)
-
-add_executable(veqlib_pf_psin_uniform_validation pf_psin_uniform_validation.cpp ${VEQLIB_COMMON_SOURCES})
-veqlib_configure_executable(veqlib_pf_psin_uniform_validation)
-
-add_executable(veqlib_pf_psin_uniform_benchmark pf_psin_uniform_benchmark.cpp ${VEQLIB_COMMON_SOURCES})
-veqlib_configure_executable(veqlib_pf_psin_uniform_benchmark)
-veqlib_enable_enzyme(veqlib_pf_psin_uniform_benchmark)
-
-add_executable(veqlib_stage_benchmark stage_benchmark.cpp ${VEQLIB_COMMON_SOURCES})
-veqlib_configure_executable(veqlib_stage_benchmark)
+add_executable(veqlib_main main.cpp ${VEQLIB_COMMON_SOURCES})
+veqlib_configure_executable(veqlib_main)
+veqlib_enable_enzyme(veqlib_main)
 
 enable_testing()
-add_test(NAME veqlib_probe COMMAND veqlib_probe)
-add_test(NAME veqlib_temp_validation COMMAND veqlib_temp_validation)
-add_test(NAME veqlib_pf_psin_uniform_validation COMMAND veqlib_pf_psin_uniform_validation)
+add_test(NAME veqlib_probe COMMAND veqlib_main --mode probe)
+add_test(NAME veqlib_temp_validation COMMAND veqlib_main --mode temp-validation)
+add_test(NAME veqlib_pf_psin_uniform_validation COMMAND veqlib_main --mode pf-validation)

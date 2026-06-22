@@ -26,8 +26,10 @@ setup data should be `constexpr` wherever the compile-time cost is acceptable.
 
 ## Current Target
 
-The current CMake target is `veqlib_probe`. It is a dependency smoke test, not
-the final VEQ kernel:
+The current CMake target is `veqlib_main`. It is the canonical C++ validation
+and benchmark executable; all optimization comparisons should run through
+`main.cpp` subcommands instead of separate test binaries. Its default `probe`
+mode is a dependency smoke test, not the final VEQ kernel:
 
 - instantiates compile-time quadrature nodes/weights for Chebyshev, Legendre,
   Lobatto, and Radau rules on the unit interval;
@@ -42,10 +44,10 @@ the final VEQ kernel:
 - writes a nlohmann/json report;
 - when Enzyme is enabled, differentiates `x * x` at `x = 3` and expects `6`.
 
-The generated-topology validation target is `veqlib_temp_validation`. It checks
-that generated `config::DefaultTopology` values can instantiate one concrete
-`grid::Grid` and `profiles::Profiles` pair without making those generic types
-depend on `config.h`.
+The generated-topology validation suite is now `veqlib_main --mode
+temp-validation`. It checks that generated `config::DefaultTopology` values can
+instantiate one concrete `grid::Grid` and `profiles::Profiles` pair without
+making those generic types depend on `config.h`.
 
 ## Default Topology
 
@@ -181,12 +183,12 @@ free `linalg` functions.
 ## Nonlinear Solver Notes
 
 VEQPy's production solve path is currently modeled by the CMINPACK `hybrd`
-configuration used in `veqlib_pf_psin_uniform_validation`. The
-`veqlib_pf_psin_uniform_benchmark` target keeps the same PF-psin-uniform-Ip
-case inline and can compare several candidate solve paths:
+configuration used in `veqlib_main --mode pf-validation`. The `veqlib_main
+--mode solve` benchmark keeps the same PF-psin-uniform-Ip case inline and can
+compare several candidate solve paths:
 
 ```bash
-./build/enzyme-release/veqlib_pf_psin_uniform_benchmark \
+./build/enzyme-release/veqlib_main --mode solve \
   --solver residual|enzyme|lm|newton|nk|nr|powell|sundials-nk|sundials-nr
 ```
 
@@ -217,12 +219,12 @@ runtime unless the Jacobian is generated much more cheaply than a batch of
 residual evaluations. Powell/hybrd therefore remains the baseline until VEQlib
 has a route-specific analytic or template-generated Jacobian path.
 
-`veqlib_stage_benchmark` is the lower-level timing target for the same inline
+`veqlib_main --mode stage` is the lower-level timing path for the same inline
 PF-psin-uniform-Ip case. It measures repeated hot-path stages without the
 CMINPACK solve loop:
 
 ```bash
-./build/release/veqlib_stage_benchmark \
+./build/release/veqlib_main --mode stage \
   --stage all \
   --repeat 30 \
   --warmup 5 \
@@ -246,7 +248,7 @@ real nonlinear-solver trajectory.
 
 For topology sweeps, use `stage_topology_matrix.py`. It creates isolated CMake
 build directories under `build/topology-matrix/`, configures `DefaultTopology`
-for each requested `Nr x Nt x Mmax`, runs `veqlib_stage_benchmark`, and emits a
+for each requested `Nr x Nt x Mmax`, runs `veqlib_main --mode stage`, and emits a
 single JSON matrix report:
 
 ```bash
@@ -366,7 +368,7 @@ cmake -S . -B build/analysis \
   -DENABLE_ENZYME=OFF \
   -DVEQLIB_ENABLE_THIN_LTO=OFF \
   -DVEQLIB_ANALYSIS_BUILD=ON
-cmake --build build/analysis --target veqlib_stage_benchmark
+cmake --build build/analysis --target veqlib_main
 ```
 
 ## Build Presets
@@ -377,7 +379,7 @@ Use CMake presets from this directory:
 cd ~/veqpy/veqlib
 cmake --preset clang-enzyme-release
 cmake --build --preset clang-enzyme-release
-./build/enzyme-release/veqlib_probe
+./build/enzyme-release/veqlib_main --mode probe
 ```
 
 Expected output includes:

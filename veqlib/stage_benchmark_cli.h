@@ -1,3 +1,5 @@
+#pragma once
+
 #include <algorithm>
 #include <array>
 #include <charconv>
@@ -24,6 +26,9 @@
 #include "residual.h"
 #include "source.h"
 #include "tensor.h"
+
+namespace veqlib_stage_benchmark_cli
+{
 
 namespace
 {
@@ -805,7 +810,7 @@ namespace
             const std::string arg = argv[i];
             if (arg == "--help")
             {
-                std::cout << "usage: veqlib_stage_benchmark [--stage all|profiles_fixed|profiles_active|"
+                std::cout << "usage: veqlib_main --mode stage [--stage all|profiles_fixed|profiles_active|"
                              "profiles_all|geometry_phase|geometry_phase_sincos|geometry_phase_split_sincos|"
                              "geometry_metric_no_store|geometry|source_materialize|source_update|residual_update|residual_pack|"
                              "evaluate|evaluate_ring] [--repeat N] [--warmup N] "
@@ -976,7 +981,7 @@ namespace
     }
 } // namespace
 
-int main(int argc, char** argv)
+int run(int argc, char** argv)
 {
     try
     {
@@ -1006,7 +1011,9 @@ int main(int argc, char** argv)
     }
     catch (const std::exception& error)
     {
-        std::cerr << "veqlib_stage_benchmark: " << error.what() << '\n';
+        std::cerr << "veqlib_main --mode stage: " << error.what() << '\n';
         return 2;
     }
 }
+
+} // namespace veqlib_stage_benchmark_cli
