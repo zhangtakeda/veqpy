@@ -64,7 +64,7 @@ veqlib_ext.stage_pf_psin_uniform_ip_json(stage="evaluate", repeat=10, inner=1000
 
 solver = veqlib_ext.PfPsinUniformIpSolver()
 solver.warmup(5)
-solver.solve_json()
+solver.solve_direct()  # scalars plus read-only NumPy views
 ```
 
 The free functions return the same JSON payloads as the corresponding
@@ -283,7 +283,7 @@ cmake --build --preset clang-release --target veqlib_ext
 ```
 
 This benchmark times `Solver.solve()` and
-`PfPsinUniformIpSolver.solve_json()` from Python with `time.perf_counter_ns()`.
+`PfPsinUniformIpSolver.solve_direct()` from Python with `time.perf_counter_ns()`. The direct method returns scalar solver metadata plus read-only NumPy views for `x`, raw residual, scaled residual, and `alpha`; the report also records the C++ internal solve time so the interface overhead can be estimated as Python outer time minus C++ inner time.
 Use `--cxx-backend subprocess --cxx-exe build/release/veqlib_main` only when
 you want the older executable-internal timing path.
 

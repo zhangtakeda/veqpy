@@ -526,7 +526,7 @@ if(VEQLIB_ENABLE_PYTHON_BINDINGS)
         COMMAND
             "${Python_EXECUTABLE}"
             -c
-            "import json, veqlib_ext; report=json.loads(veqlib_ext.validate_pf_psin_uniform_ip_json()); raise SystemExit(0 if report['route'] == 'PF/psin/uniform/Ip' else 1)"
+            "import json, veqlib_ext; report=json.loads(veqlib_ext.validate_pf_psin_uniform_ip_json()); solver=veqlib_ext.PfPsinUniformIpSolver(); direct=solver.solve_direct(); ok=report['route'] == 'PF/psin/uniform/Ip' and len(direct) == 15 and direct[1] and direct[11].shape == (18,) and direct[14].shape == (2,) and not direct[11].flags.writeable; raise SystemExit(0 if ok else 1)"
     )
     set_tests_properties(
         veqlib_python_binding

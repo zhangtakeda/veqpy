@@ -11,6 +11,7 @@
 #include <vector>
 
 #include <nanobind/nanobind.h>
+#include <nanobind/ndarray.h>
 #include <nanobind/stl/string.h>
 #include <nlohmann/json.hpp>
 
@@ -56,6 +57,9 @@ namespace veqlib_python
     using tensor::uninitialized;
 
     using CliEntrypoint = int (*)(int, char**);
+    using PackedArrayView =
+        nb::ndarray<nb::numpy, const double, nb::shape<BenchShape::x_size>, nb::c_contig>;
+    using AlphaArrayView = nb::ndarray<nb::numpy, const double, nb::shape<2>, nb::c_contig>;
 
     struct StreamRedirect
     {
@@ -245,6 +249,16 @@ namespace veqlib_python
         };
     }
 
+    PackedArrayView packed_view(const double* data, nb::handle owner)
+    {
+        return PackedArrayView(data, {BenchShape::x_size}, owner);
+    }
+
+    AlphaArrayView alpha_view(const double* data, nb::handle owner)
+    {
+        return AlphaArrayView(data, {2}, owner);
+    }
+
     class PfPsinUniformIpSolver
     {
     public:
@@ -266,25 +280,57 @@ namespace veqlib_python
         std::string solve_json()
         {
             const auto started = std::chrono::steady_clock::now();
-            const SolveResult result = run_solver_once(*context_);
+            last_result_ = run_solver_once(*context_);
             const auto elapsed = std::chrono::steady_clock::now() - started;
-            const double elapsed_ms = std::chrono::duration<double, std::milli>(elapsed).count();
+            last_elapsed_ms_ = std::chrono::duration<double, std::milli>(elapsed).count();
 
             const nlohmann::json report = {
                 {"route", "PF/psin/uniform/Ip"},
                 {"x_size", BenchShape::x_size},
                 {"solver", solver_json(context_->input)},
-                {"elapsed_ms", elapsed_ms},
-                {"final", solve_result_json(result)},
-                {"success", result.accepted && solver_info_succeeded(context_->input.solver, result.info)},
+                {"elapsed_ms", last_elapsed_ms_},
+                {"final", solve_result_json(last_result_)},
+                {"success",
+                 last_result_.accepted && solver_info_succeeded(context_->input.solver, last_result_.info)},
             };
             return report.dump(2);
         }
+
+        nb::tuple solve_direct()
+        {
+            const auto started = std::chrono::steady_clock::now();
+            last_result_ = run_solver_once(*context_);
+            const auto elapsed = std::chrono::steady_clock::now() - started;
+            last_elapsed_ms_ = std::chrono::duration<double, std::milli>(elapsed).count();
+
+            nb::object owner = nb::cast(this, nb::rv_policy::reference);
+            return nb::make_tuple(
+                last_elapsed_ms_,
+                last_result_.accepted && solver_info_succeeded(context_->input.solver, last_result_.info),
+                last_result_.info,
+                last_result_.nfev,
+                last_result_.njev,
+                last_result_.callbacks,
+                last_result_.jacobian_component_evaluations,
+                last_result_.jvp_evaluations,
+                last_result_.linear_iterations,
+                last_result_.raw_norm,
+                last_result_.scaled_norm,
+                packed_view(last_result_.x.data(), owner),
+                packed_view(last_result_.raw.data(), owner),
+                packed_view(last_result_.scaled.data(), owner),
+                alpha_view(last_result_.alpha.data(), owner)
+            );
+        }
+
+        double last_elapsed_ms() const noexcept { return last_elapsed_ms_; }
 
     private:
         SolverKind                    solver_;
         int                           enzyme_width_;
         std::unique_ptr<SolveContext> context_;
+        SolveResult                   last_result_{};
+        double                        last_elapsed_ms_ = 0.0;
     };
 } // namespace veqlib_python
 
@@ -326,5 +372,11 @@ NB_MODULE(veqlib_ext, module)
         )
         .def("warmup", &veqlib_python::PfPsinUniformIpSolver::warmup, nb::arg("count"))
         .def("initial_json", &veqlib_python::PfPsinUniformIpSolver::initial_json)
-        .def("solve_json", &veqlib_python::PfPsinUniformIpSolver::solve_json);
+        .def("solve_json", &veqlib_python::PfPsinUniformIpSolver::solve_json)
+        .def(
+            "solve_direct",
+            &veqlib_python::PfPsinUniformIpSolver::solve_direct,
+            "Run one solve and return scalars plus read-only NumPy views without JSON serialization."
+        )
+        .def_prop_ro("last_elapsed_ms", &veqlib_python::PfPsinUniformIpSolver::last_elapsed_ms);
 }

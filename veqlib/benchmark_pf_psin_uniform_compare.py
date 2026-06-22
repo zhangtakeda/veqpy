@@ -265,31 +265,57 @@ def _run_cxx_binding_case(module_dir: Path, *, repeat: int, warmup: int) -> dict
     solver = module.PfPsinUniformIpSolver()
 
     for _ in range(warmup):
-        solver.solve_json()
+        solver.solve_direct()
 
     report = json.loads(solver.initial_json())
     samples_ms: list[float] = []
     inner_samples_ms: list[float] = []
-    final_payload: dict[str, Any] | None = None
+    interface_samples_ms: list[float] = []
+    final_result: tuple[Any, ...] | None = None
     for _ in range(repeat):
         start_ns = time.perf_counter_ns()
-        payload_json = solver.solve_json()
+        result = solver.solve_direct()
         stop_ns = time.perf_counter_ns()
-        payload = json.loads(payload_json)
-        samples_ms.append(float(stop_ns - start_ns) / 1.0e6)
-        inner_samples_ms.append(float(payload["elapsed_ms"]))
-        final_payload = payload
+        outer_ms = float(stop_ns - start_ns) / 1.0e6
+        inner_ms = float(result[0])
+        samples_ms.append(outer_ms)
+        inner_samples_ms.append(inner_ms)
+        interface_samples_ms.append(outer_ms - inner_ms)
+        final_result = result
 
-    if final_payload is None:
-        final_payload = json.loads(solver.solve_json())
+    if final_result is None:
+        final_result = solver.solve_direct()
+
+    final_success = bool(final_result[1])
 
     report["timing"] = _stats(samples_ms)
     report["binding_timing"] = {
-        "scope": "Python perf_counter around nanobind PfPsinUniformIpSolver.solve_json()",
+        "scope": "Python perf_counter around nanobind PfPsinUniformIpSolver.solve_direct()",
+        "return_schema": (
+            "elapsed_ms, success, info, nfev, njev, callbacks, jacobian_component_evaluations, "
+            "jvp_evaluations, linear_iterations, raw_norm, scaled_norm, x_view, raw_view, "
+            "scaled_view, alpha_view"
+        ),
         "cxx_inner_timing": _stats(inner_samples_ms),
+        "interface_overhead_timing": _stats(interface_samples_ms),
     }
-    report["final"] = final_payload["final"]
-    report["success"] = bool(final_payload["success"])
+    report["final"] = {
+        "accepted_by_veqpy": final_success,
+        "x": np.asarray(final_result[11], dtype=np.float64).tolist(),
+        "raw_residual": np.asarray(final_result[12], dtype=np.float64).tolist(),
+        "scaled_residual": np.asarray(final_result[13], dtype=np.float64).tolist(),
+        "alpha": np.asarray(final_result[14], dtype=np.float64).tolist(),
+        "raw_norm": float(final_result[9]),
+        "scaled_norm": float(final_result[10]),
+        "info": int(final_result[2]),
+        "nfev": int(final_result[3]),
+        "njev": int(final_result[4]),
+        "callback_evaluations": int(final_result[5]),
+        "jacobian_component_evaluations": int(final_result[6]),
+        "jvp_evaluations": int(final_result[7]),
+        "linear_iterations": int(final_result[8]),
+    }
+    report["success"] = final_success
     return report
 
 
@@ -307,13 +333,13 @@ def _run_case(
     problem = benchmark._make_benchmark_case(spec, reference)
     python_inputs = _python_case_inputs(benchmark, problem, spec)
     x0 = np.asarray(python_inputs["x0"], dtype=np.float64)
-    python = _solve_python_timed(benchmark, problem, x0, repeat=repeat, warmup=warmup)
     if cxx_backend == "nanobind":
         cxx = _run_cxx_binding_case(module_dir, repeat=repeat, warmup=warmup)
     elif cxx_backend == "subprocess":
         cxx = _run_cxx_case(executable, repeat=repeat, warmup=warmup)
     else:
         raise ValueError(f"unknown C++ backend: {cxx_backend}")
+    python = _solve_python_timed(benchmark, problem, x0, repeat=repeat, warmup=warmup)
 
     x_diff = _max_abs(cxx["final"]["x"], python["final"]["x"])
     raw_diff = _max_abs(cxx["final"]["raw_residual"], python["final"]["raw_residual"])
@@ -331,6 +357,9 @@ def _run_case(
     python_avg = float(python["timing"]["avg_ms"])
     cxx_median = float(cxx["timing"]["median_ms"])
     python_median = float(python["timing"]["median_ms"])
+    binding_timing = cxx.get("binding_timing", {})
+    cxx_inner_timing = binding_timing.get("cxx_inner_timing", {})
+    interface_timing = binding_timing.get("interface_overhead_timing", {})
 
     return {
         "case_name": spec.case_name,
@@ -368,6 +397,10 @@ def _run_case(
             "median_ms": cxx_median,
             "p95_ms": float(cxx["timing"]["p95_ms"]),
             "std_ms": float(cxx["timing"]["std_ms"]),
+            "inner_avg_ms": float(cxx_inner_timing.get("avg_ms", 0.0)),
+            "inner_median_ms": float(cxx_inner_timing.get("median_ms", 0.0)),
+            "interface_avg_ms": float(interface_timing.get("avg_ms", 0.0)),
+            "interface_median_ms": float(interface_timing.get("median_ms", 0.0)),
         },
         "python": {
             "success": bool(python["final"]["success"]),
@@ -452,6 +485,10 @@ def _write_text_report(path: Path, payload: dict[str, Any]) -> None:
             + " | "
             + "cxx_ms".rjust(9)
             + " | "
+            + "cpp_ms".rjust(9)
+            + " | "
+            + "if_ms".rjust(8)
+            + " | "
             + "py_ms".rjust(9)
             + " | "
             + "py/cxx".rjust(8)
@@ -473,6 +510,8 @@ def _write_text_report(path: Path, payload: dict[str, Any]) -> None:
             f"{row['final_x_max_abs_diff']:>10.3e} | "
             f"{row['final_raw_max_abs_diff']:>10.3e} | "
             f"{row['cxx']['avg_ms']:>9.3f} | "
+            f"{row['cxx']['inner_avg_ms']:>9.3f} | "
+            f"{row['cxx']['interface_avg_ms']:>8.3f} | "
             f"{row['python']['avg_ms']:>9.3f} | "
             f"{row['speedup_python_over_cxx']:>8.2f} | "
             f"{row['speedup_python_over_cxx_median']:>8.2f} | "
