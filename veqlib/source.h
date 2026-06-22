@@ -72,6 +72,30 @@ namespace source::detail
         }
     }
 
+    template <typename MatrixA, typename MatrixB, typename InVector, typename OutA, typename OutB>
+    constexpr void dual_matvec_into(OutA&            out_a,
+                                    OutB&            out_b,
+                                    const MatrixA&   matrix_a,
+                                    const MatrixB&   matrix_b,
+                                    const InVector& values) noexcept
+    {
+        static_assert(OutA::shape[0] == OutB::shape[0], "dual matvec outputs must have matching rows");
+
+        for (size_t row = 0; row < OutA::shape[0]; ++row)
+        {
+            double total_a = 0.0;
+            double total_b = 0.0;
+            for (size_t col = 0; col < InVector::shape[0]; ++col)
+            {
+                const double value = values[col];
+                total_a += matrix_a(row, col) * value;
+                total_b += matrix_b(row, col) * value;
+            }
+            out_a[row] = total_a;
+            out_b[row] = total_b;
+        }
+    }
+
     template <typename GridType, typename SourceShape>
     struct ProfileOwnedPsinSourceRuntime
     {
@@ -122,10 +146,14 @@ namespace source::detail
                     runtime_profiles.profile_field(Shape::psin_profile_id, i, profile_radial);
 
             regularize_psin_r(n_axis_fix);
+            const RadialVector psin_r = const_root_row<root_psin_r>();
             RadialVector psin_rr{uninitialized};
-            matvec_into(psin_rr, GridType::differentiator, const_root_row<root_psin_r>());
+            RadialVector integrated{uninitialized};
+            dual_matvec_into(psin_rr, integrated, GridType::differentiator, GridType::accumulator, psin_r);
             store_root_row<root_psin_rr>(psin_rr);
-            update_psin_coordinate();
+            const double offset = integrated[0];
+            const double scale  = integrated[radial_nodes - 1] - offset;
+            store_psin_coordinate(integrated, offset, scale);
             copy_source_target_to_profile_root();
 
             for (size_t i = 0; i < radial_nodes; ++i)
@@ -171,9 +199,12 @@ namespace source::detail
             store_root_row<root_psin_r>(psin_r);
 
             RadialVector psin_rr{uninitialized};
-            matvec_into(psin_rr, GridType::differentiator, psin_r);
+            RadialVector integrated{uninitialized};
+            dual_matvec_into(psin_rr, integrated, GridType::differentiator, GridType::accumulator, psin_r);
             store_root_row<root_psin_rr>(psin_rr);
-            update_psin_coordinate();
+            const double offset = integrated[0];
+            const double scale  = integrated[radial_nodes - 1] - offset;
+            store_psin_coordinate(integrated, offset, scale);
 
             for (size_t i = 0; i < radial_nodes; ++i)
             {

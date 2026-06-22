@@ -164,6 +164,43 @@ Because the timing probes use `std::chrono` inside callbacks, these artifacts
 are diagnostic attribution evidence; use the P0-C uninstrumented solve/stage
 samples for cleaner absolute performance comparisons.
 
+## 2026-06-22 P1-A Source dual matvec candidate
+
+Source now has a `dual_matvec_into()` helper for the two places where the same
+`psin_r` vector was immediately multiplied by both the differentiator and
+accumulator. The production Source path uses it in profile-owned psin
+materialization and in normalized PF/IP source update. Existing single-output
+`matvec_into()` and benchmark probes remain available; interpolation and
+residual formulas are unchanged.
+
+Validation after the candidate:
+
+- Release CTest: 4/4 passed.
+- Debug CTest: 4/4 passed.
+- RELAXED Python/C++ comparator: passed with `max_abs=7.66e-10`.
+
+Pinned candidate artifacts:
+`veqlib/experiments/0601ecf-20260622-p1-source-dual-matvec`.
+
+| stage / metric | P0-C median | P1-A median | ratio |
+| --- | ---: | ---: | ---: |
+| `source_materialize` | 747.3 ns | 650.9 ns | 0.871 |
+| `source_D_psin` | 240.5 ns | 239.5 ns | 0.996 |
+| `source_A_psin` | 238.3 ns | 238.4 ns | 1.001 |
+| `source_interpolate_pair` | 210.2 ns | 194.1 ns | 0.923 |
+| `source_update` | 798.0 ns | 652.0 ns | 0.817 |
+| `source_D_normalized` | 242.1 ns | 234.4 ns | 0.968 |
+| `residual_update` | 790.5 ns | 710.4 ns | 0.899 |
+| `evaluate` | 4367.2 ns | 3969.0 ns | 0.909 |
+| `evaluate_ring` | 4199.9 ns | 3988.0 ns | 0.950 |
+| solve median | instrumented | 0.186 ms | success |
+
+Decision: keep the dual D/A row-dot shape. It clears the source and end-to-end
+retention gate without changing route semantics. The individual single-output
+`source_D_*`/`source_A_*` probes remain near neutral because they still time the
+old single-output helpers; the retained benefit is from avoiding two consecutive
+passes over the same `psin_r` vector in the production Source sequence.
+
 ## Stable release stage timing
 
 | stage | median ns/call | avg ns/call | p95/median | CV |

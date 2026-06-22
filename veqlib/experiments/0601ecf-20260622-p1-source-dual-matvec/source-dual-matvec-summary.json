@@ -1,0 +1,134 @@
+{
+  "base_stage": "experiments/0d68ce3-20260622-p0-kernelplan/stages-all-kernelplan-relaxed-taskset-c2.json",
+  "candidate_stage": "experiments/0601ecf-20260622-p1-source-dual-matvec/stages-all-source-dual-matvec-relaxed-taskset-c2.json",
+  "correctness": {
+    "max_abs": 7.655671652173623e-10,
+    "passed": true
+  },
+  "notes": [
+    "Candidate fuses consecutive D/A matvecs over psin_r in Source materialize and normalized update paths.",
+    "P0-D solver timing instrumentation is present in solve artifact; stage timing is the retention gate."
+  ],
+  "phase": "P1-A Source dual matvec candidate",
+  "schema_version": 1,
+  "solve": {
+    "artifact": "experiments/0601ecf-20260622-p1-source-dual-matvec/solve-source-dual-matvec-relaxed-taskset-c2.json",
+    "callback_timing_ms": {
+      "final_residual": 0.003916,
+      "jacobian_total": 0.0,
+      "jvp_total": 0.0,
+      "linear_solve": 0.0,
+      "residual_kernel": 0.14768499999999996,
+      "residual_scale": 0.0010999999999999994,
+      "residual_total": 0.15066699999999997
+    },
+    "raw_norm": 9.809034120518876e-09,
+    "success": true,
+    "timing": {
+      "avg_ms": 0.18763689999999997,
+      "max_ms": 0.203873,
+      "median_ms": 0.18562,
+      "min_ms": 0.184659,
+      "p95_ms": 0.19428869999999998,
+      "repeat_count": 30,
+      "samples_ms": [
+        0.19089699999999998,
+        0.18711699999999998,
+        0.19458299999999998,
+        0.18704099999999999,
+        0.18598099999999998,
+        0.185971,
+        0.203873,
+        0.187772,
+        0.18695799999999999,
+        0.185886,
+        0.185322,
+        0.185354,
+        0.18503599999999998,
+        0.191735,
+        0.18514,
+        0.18531599999999998,
+        0.184659,
+        0.18617,
+        0.18523199999999998,
+        0.18528899999999998,
+        0.184884,
+        0.184824,
+        0.184891,
+        0.192291,
+        0.185256,
+        0.18481,
+        0.185061,
+        0.193929,
+        0.192712,
+        0.185117
+      ],
+      "std_ms": 0.004230544577632214
+    }
+  },
+  "stage_ratios": {
+    "evaluate": {
+      "base_median_ns": 4367.155,
+      "base_p95_ns": 5348.105,
+      "median_ratio": 0.9088213035717762,
+      "new_median_ns": 3968.9635,
+      "new_p95_ns": 4350.321
+    },
+    "evaluate_ring": {
+      "base_median_ns": 4199.9285,
+      "base_p95_ns": 4578.147,
+      "median_ratio": 0.9495429505526105,
+      "new_median_ns": 3988.0125,
+      "new_p95_ns": 4286.21
+    },
+    "residual_update": {
+      "base_median_ns": 790.5475,
+      "base_p95_ns": 982.634,
+      "median_ratio": 0.8986594733396791,
+      "new_median_ns": 710.433,
+      "new_p95_ns": 776.386
+    },
+    "source_A_psin": {
+      "base_median_ns": 238.268,
+      "base_p95_ns": 357.008,
+      "median_ratio": 1.00052042238152,
+      "new_median_ns": 238.392,
+      "new_p95_ns": 432.029
+    },
+    "source_D_normalized": {
+      "base_median_ns": 242.14249999999998,
+      "base_p95_ns": 350.736,
+      "median_ratio": 0.9680043775875775,
+      "new_median_ns": 234.39499999999998,
+      "new_p95_ns": 364.956
+    },
+    "source_D_psin": {
+      "base_median_ns": 240.515,
+      "base_p95_ns": 253.646,
+      "median_ratio": 0.995919173440326,
+      "new_median_ns": 239.5335,
+      "new_p95_ns": 252.884
+    },
+    "source_interpolate_pair": {
+      "base_median_ns": 210.21949999999998,
+      "base_p95_ns": 248.579,
+      "median_ratio": 0.9234395477108451,
+      "new_median_ns": 194.125,
+      "new_p95_ns": 209.5
+    },
+    "source_materialize": {
+      "base_median_ns": 747.28,
+      "base_p95_ns": 822.997,
+      "median_ratio": 0.8709620222674231,
+      "new_median_ns": 650.8525,
+      "new_p95_ns": 1123.507
+    },
+    "source_update": {
+      "base_median_ns": 798.0025,
+      "base_p95_ns": 902.662,
+      "median_ratio": 0.8170225030623337,
+      "new_median_ns": 651.986,
+      "new_p95_ns": 845.627
+    }
+  }
+}

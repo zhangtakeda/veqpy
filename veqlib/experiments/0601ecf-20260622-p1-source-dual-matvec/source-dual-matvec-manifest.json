@@ -1,0 +1,29 @@
+{
+  "artifacts": [
+    "comparator-source-dual-matvec.json",
+    "stages-all-source-dual-matvec-relaxed-taskset-c2.json",
+    "solve-source-dual-matvec-relaxed-taskset-c2.json",
+    "source-dual-matvec-summary.json"
+  ],
+  "base_commit": "0601ecf",
+  "commands": [
+    "cmake --build --preset clang-debug -j$(nproc)",
+    "ctest --test-dir build/debug --output-on-failure",
+    "cmake --build --preset clang-release -j$(nproc)",
+    "ctest --test-dir build/release --output-on-failure",
+    "../.venv/bin/python compare_pf_psin_uniform_veqpy.py --cxx-exe build/release/veqlib_main --tolerance 1e-9",
+    "taskset -c 2 build/release/veqlib_main --mode stage --stage all --repeat 30 --warmup 5 --inner 1000 --ring-size 16",
+    "taskset -c 2 build/release/veqlib_main --mode pf-benchmark --repeat 30 --warmup 5"
+  ],
+  "current_head": "0601ecff4fa082c69df7522c653928092857bf69",
+  "dirty_diff_sha256": "385df4b472b2154fe9f452b3c92b5dfaf919bb45bb021fea202910b97a5acdfb",
+  "git_status_short": "M veqlib/source.h\n?? veqlib/experiments/0601ecf-20260622-p1-source-dual-matvec/",
+  "notes": "Candidate fuses two consecutive Source D/A row-dot passes over psin_r; interpolation and residual formulas are unchanged.",
+  "phase": "P1-A Source dual matvec candidate",
+  "schema_version": 1,
+  "system": {
+    "machine": "x86_64",
+    "platform": "Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "processor": "x86_64"
+  }
+}
