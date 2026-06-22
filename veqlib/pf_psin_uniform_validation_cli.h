@@ -205,14 +205,16 @@ namespace
 
         SolveContext()
         {
-            op.params.a = 0.42;
-            op.params.R0 = 1.8;
-            op.params.Z0 = -0.25;
-            op.params.B0 = 2.1;
-            op.params.Ip = 3.7699111843077517;
-            op.params.fix_rho = 0.0;
-            op.params.profile_params.offsets[SmokeShape::kappa_profile_id] = 1.45;
-            op.params.profile_params.offsets[SmokeShape::c_profile_id<0>()] = 0.0;
+            SmokeOperator::RuntimeParams params{};
+            params.a = 0.42;
+            params.R0 = 1.8;
+            params.Z0 = -0.25;
+            params.B0 = 2.1;
+            params.Ip = 3.7699111843077517;
+            params.fix_rho = 0.0;
+            params.profile_params.offsets[SmokeShape::kappa_profile_id] = 1.45;
+            params.profile_params.offsets[SmokeShape::c_profile_id<0>()] = 0.0;
+            op.set_runtime_params(params);
 
             constexpr std::array<double, SmokeSource::sample_count> heat{
                 2.0,

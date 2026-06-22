@@ -99,8 +99,8 @@ theta loop before claiming projection savings.
 for the current runtime parameters; the workspace owns active/fixed profiles,
 geometry, source, and residual buffers. `evaluate()` lazily prepares the plan on
 first use and no longer rebuilds fixed profiles or recomputes the axis count on
-each callback. `refresh_static_plan()` is the explicit boundary to call after
-changing fixed runtime parameters on a reused operator.
+each callback. Runtime parameters now flow through `set_runtime_params()`, which
+invalidates the plan when a reused operator receives new fixed parameters.
 
 Validation after the split:
 
@@ -268,6 +268,29 @@ KINSOL variants are slower than residual-only CMINPACK for the current small
 topology. Future solver work should focus on making Jacobian construction much
 cheaper or reusing factorizations across a parameter scan before revisiting the
 strategy switch.
+
+## 2026-06-22 P0-E KernelPlan invalidation boundary
+
+The operator parameter boundary was tightened after reviewing the retained
+`KernelPlan / KernelWorkspace` split. `PfPsinUniformOperator::params` is no
+longer a public mutable member; callers build a `RuntimeParams` value and pass it
+through `set_runtime_params()`. The setter invalidates `KernelPlan::prepared`, so
+changes to fixed profile offsets/scales or `fix_rho` cannot silently reuse stale
+fixed rows or a stale `n_axis_fix` in the next `evaluate()`.
+
+Validation after the boundary change:
+
+- Debug CTest: 4/4 passed.
+- Release CTest: 4/4 passed.
+- RELAXED Python/C++ comparator: passed with `max_abs=7.66e-10`.
+- `veqlib_temp_validation` now includes a runtime check that changes both
+  `fix_rho` and a fixed kappa offset after the first evaluation, verifies that
+  the plan is marked unprepared, and confirms the next evaluation refreshes the
+  plan with the new axis count and fixed row.
+
+Decision: keep this as an architecture/correctness fix. It is not intended as a
+new performance candidate; it preserves the low-cost callback gate while making
+reused operators safe for future parameter-scan and per-thread workspace work.
 
 ## Stable release stage timing
 

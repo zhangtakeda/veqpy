@@ -128,10 +128,11 @@ geometry, source, and residual buffers used by each residual callback.
 
 `evaluate()` lazily prepares the static plan on the first call and then refreshes
 only active profiles from packed `x` before geometry/source/residual execution.
-When runtime parameters that affect fixed rows or `fix_rho` are changed on an
-existing operator, call `refresh_static_plan()` before the next benchmark/solve
-sequence. The method seeds only fixed profile rows into the workspace; active
-rows remain callback-owned and are overwritten by `refresh_active()`.
+Runtime parameters are updated through `set_runtime_params()`, which invalidates
+the static plan so the next `evaluate()` or explicit `refresh_static_plan()`
+rebuilds fixed profile rows and the `fix_rho` axis-count. The method seeds only
+fixed profile rows into the workspace; active rows remain callback-owned and are
+overwritten by `refresh_active()`.
 
 ## Hot-path Surface Layout
 

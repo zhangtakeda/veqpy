@@ -648,13 +648,15 @@ namespace
 
     void configure_operator_for_case(BenchOperator& op, const CaseInput& input) noexcept
     {
-        op.params.a              = input.a;
-        op.params.R0             = input.R0;
-        op.params.Z0             = input.Z0;
-        op.params.B0             = input.B0;
-        op.params.Ip             = input.Ip;
-        op.params.fix_rho        = input.fix_rho;
-        op.params.profile_params = profile_params_for_case(input);
+        BenchOperator::RuntimeParams params{};
+        params.a              = input.a;
+        params.R0             = input.R0;
+        params.Z0             = input.Z0;
+        params.B0             = input.B0;
+        params.Ip             = input.Ip;
+        params.fix_rho        = input.fix_rho;
+        params.profile_params = profile_params_for_case(input);
+        op.set_runtime_params(params);
         op.set_uniform_sources(
             std::span<const double, BenchSource::sample_count>{input.heat.data(), input.heat.size()},
             std::span<const double, BenchSource::sample_count>{input.current.data(), input.current.size()}

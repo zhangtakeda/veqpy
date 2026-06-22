@@ -72,7 +72,14 @@ namespace operator_pf::detail
 
         KernelPlan      plan{};
         KernelWorkspace workspace{};
-        RuntimeParams params{};
+
+        constexpr const RuntimeParams& runtime_params() const noexcept { return params_; }
+
+        constexpr void set_runtime_params(const RuntimeParams& params) noexcept
+        {
+            params_       = params;
+            plan.prepared = false;
+        }
 
         constexpr void set_uniform_sources(std::span<const double, SourceShape::sample_count> heat,
                                            std::span<const double, SourceShape::sample_count> current) noexcept
@@ -82,7 +89,7 @@ namespace operator_pf::detail
 
         constexpr void refresh_static_plan() noexcept
         {
-            plan.refresh(params);
+            plan.refresh(params_);
             workspace.profiles.load_fixed_from(plan.fixed_profiles);
         }
 
@@ -90,15 +97,18 @@ namespace operator_pf::detail
         {
             if (!plan.prepared)
                 refresh_static_plan();
-            workspace.profiles.refresh_active(x, params.profile_params);
-            workspace.geometry.update(params.a, params.R0, params.Z0, workspace.profiles);
+            workspace.profiles.refresh_active(x, params_.profile_params);
+            workspace.geometry.update(params_.a, params_.R0, params_.Z0, workspace.profiles);
 
             workspace.source_runtime.materialize_profile_owned_psin(workspace.profiles, plan.n_axis_fix);
-            workspace.source_runtime.update_pf_ip_from_psin_uniform(workspace.geometry, params.Ip, plan.n_axis_fix);
+            workspace.source_runtime.update_pf_ip_from_psin_uniform(workspace.geometry, params_.Ip, plan.n_axis_fix);
 
             workspace.residual.update_compact(workspace.source_runtime, workspace.geometry);
-            workspace.residual.pack_into(out, params.a, params.R0, params.B0);
+            workspace.residual.pack_into(out, params_.a, params_.R0, params_.B0);
         }
+
+    private:
+        RuntimeParams params_{};
     };
 } // namespace operator_pf::detail
 

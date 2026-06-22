@@ -1268,16 +1268,18 @@ namespace
         write_profile_coefficients<Shape, psin_id>(x, make_profile_coefficients<2>(0.010, -0.0002));
 
         Operator op{};
-        op.params.a = 0.42;
-        op.params.R0 = 1.8;
-        op.params.Z0 = -0.25;
-        op.params.B0 = 2.1;
-        op.params.Ip = 0.75;
-        op.params.fix_rho = 0.0;
-        op.params.profile_params.offsets[k_id] = 1.45;
-        op.params.profile_params.offsets[c0_id] = 0.0;
-        op.params.profile_params.offsets[c1_id] = 0.0;
-        op.params.profile_params.offsets[s1_id] = 0.0;
+        Operator::RuntimeParams params{};
+        params.a = 0.42;
+        params.R0 = 1.8;
+        params.Z0 = -0.25;
+        params.B0 = 2.1;
+        params.Ip = 0.75;
+        params.fix_rho = 0.0;
+        params.profile_params.offsets[k_id] = 1.45;
+        params.profile_params.offsets[c0_id] = 0.0;
+        params.profile_params.offsets[c1_id] = 0.0;
+        params.profile_params.offsets[s1_id] = 0.0;
+        op.set_runtime_params(params);
 
         constexpr std::array<double, 5> heat{2.0, 2.75, 3.5, 4.25, 5.0};
         constexpr std::array<double, 5> current{0.5, 0.625, 0.75, 0.875, 1.0};
@@ -1293,6 +1295,59 @@ namespace
         for (size_t i = 0; i < Shape::x_size; ++i)
             norm1 += math::abs(packed[i]);
         return math::is_finite(packed) && norm1 > 1.0e-12;
+    }
+
+    constexpr bool pf_operator_plan_invalidation_ok()
+    {
+        using Shape    = SourceMaterializationShape;
+        using Grid     = SourceMaterializationGrid;
+        using Operator = PfPsinUniformOperator<Shape, Grid, UniformSourceShape<5>>;
+
+        constexpr size_t h_id    = Shape::h_profile_id;
+        constexpr size_t v_id    = Shape::v_profile_id;
+        constexpr size_t k_id    = Shape::kappa_profile_id;
+        constexpr size_t c0_id   = Shape::c_profile_id<0>();
+        constexpr size_t psin_id = Shape::psin_profile_id;
+
+        Vector<double, Shape::x_size> x{};
+        write_profile_coefficients<Shape, psin_id>(x, make_profile_coefficients<3>(0.010, -0.0002));
+
+        Operator op{};
+        Operator::RuntimeParams params{};
+        params.a = 0.42;
+        params.R0 = 1.8;
+        params.Z0 = -0.25;
+        params.B0 = 2.1;
+        params.Ip = 0.75;
+        params.fix_rho = 0.0;
+        params.profile_params.offsets[h_id] = 0.02;
+        params.profile_params.offsets[v_id] = -0.01;
+        params.profile_params.offsets[k_id] = 1.45;
+        params.profile_params.offsets[c0_id] = 0.0;
+        op.set_runtime_params(params);
+
+        constexpr std::array<double, 5> heat{2.0, 2.75, 3.5, 4.25, 5.0};
+        constexpr std::array<double, 5> current{0.5, 0.625, 0.75, 0.875, 1.0};
+        op.set_uniform_sources(
+            std::span<const double, heat.size()>{heat.data(), heat.size()},
+            std::span<const double, current.size()>{current.data(), current.size()}
+        );
+
+        typename Operator::PackedVector packed{};
+        op.evaluate(std::span<const double, Shape::x_size>{x.data(), Shape::x_size}, packed);
+        if (!op.plan.prepared || op.plan.n_axis_fix != source::axis_fix_count<Grid>(0.0))
+            return false;
+
+        auto next = op.runtime_params();
+        next.fix_rho = 0.5;
+        next.profile_params.offsets[k_id] = 1.80;
+        op.set_runtime_params(next);
+        if (op.plan.prepared)
+            return false;
+
+        op.evaluate(std::span<const double, Shape::x_size>{x.data(), Shape::x_size}, packed);
+        return op.plan.prepared && op.plan.n_axis_fix == source::axis_fix_count<Grid>(0.5) &&
+               close(op.plan.fixed_profiles.profile_field<k_id>(0, 0), 1.80);
     }
 
     static_assert(linalg_constexpr_ok());
@@ -1357,6 +1412,7 @@ int run(int, char**)
         {"pf_source", pf_source_constexpr_ok()},
         {"residual_pack", residual_pack_constexpr_ok()},
         {"pf_operator", pf_operator_constexpr_ok()},
+        {"pf_operator_plan_invalidation", pf_operator_plan_invalidation_ok()},
     };
     report["quadrature"] = {
         {"chebyshev_moment_error_n16_degree7", max_moment_error<Chebyshev, 16>(7)},
@@ -1380,6 +1436,7 @@ int run(int, char**)
                     runtime_profile_semantics_constexpr_ok() && geometry_circular_constexpr_ok() &&
                     source_materialization_constexpr_ok() && pf_source_constexpr_ok() &&
                     residual_pack_constexpr_ok() && pf_operator_constexpr_ok() &&
+                    pf_operator_plan_invalidation_ok() &&
                     runtime_library_ok(report);
 
     std::cout << report.dump(2) << '\n';

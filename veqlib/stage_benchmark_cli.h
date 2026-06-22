@@ -247,15 +247,17 @@ namespace
 
     void configure_operator(BenchOperator& op) noexcept
     {
-        op.params.a                                                     = 1.05 / 1.85;
-        op.params.R0                                                    = 1.05;
-        op.params.Z0                                                    = 0.0;
-        op.params.B0                                                    = 3.0;
-        op.params.Ip                                                    = 3.7699111867885415;
-        op.params.fix_rho                                               = 0.05;
-        op.params.profile_params.offsets[BenchShape::kappa_profile_id]  = 2.2;
-        op.params.profile_params.offsets[BenchShape::c_profile_id<0>()] = 0.0;
-        op.params.profile_params.offsets[BenchShape::s_profile_id<1>()] = 0.52359877559829887308;
+        BenchOperator::RuntimeParams params{};
+        params.a                                                     = 1.05 / 1.85;
+        params.R0                                                    = 1.05;
+        params.Z0                                                    = 0.0;
+        params.B0                                                    = 3.0;
+        params.Ip                                                    = 3.7699111867885415;
+        params.fix_rho                                               = 0.05;
+        params.profile_params.offsets[BenchShape::kappa_profile_id]  = 2.2;
+        params.profile_params.offsets[BenchShape::c_profile_id<0>()] = 0.0;
+        params.profile_params.offsets[BenchShape::s_profile_id<1>()] = 0.52359877559829887308;
+        op.set_runtime_params(params);
         op.set_uniform_sources(
             std::span<const double, BenchSource::sample_count>{
                 benchmark_scaled_heat.data(),
@@ -269,14 +271,16 @@ namespace
 
     void refresh_profiles(BenchOperator& op, std::span<const double, BenchShape::x_size> x) noexcept
     {
+        const auto& params = op.runtime_params();
         op.refresh_static_plan();
-        op.workspace.profiles.refresh_active(x, op.params.profile_params);
+        op.workspace.profiles.refresh_active(x, params.profile_params);
     }
 
     void prepare_geometry(BenchOperator& op, std::span<const double, BenchShape::x_size> x) noexcept
     {
+        const auto& params = op.runtime_params();
         refresh_profiles(op, x);
-        op.workspace.geometry.update(op.params.a, op.params.R0, op.params.Z0, op.workspace.profiles);
+        op.workspace.geometry.update(params.a, params.R0, params.Z0, op.workspace.profiles);
     }
 
     void prepare_source_materialized(BenchOperator& op, std::span<const double, BenchShape::x_size> x) noexcept
@@ -287,10 +291,11 @@ namespace
 
     void prepare_source_updated(BenchOperator& op, std::span<const double, BenchShape::x_size> x) noexcept
     {
+        const auto& params = op.runtime_params();
         prepare_geometry(op, x);
         op.workspace.source_runtime.materialize_profile_owned_psin(op.workspace.profiles, op.plan.n_axis_fix);
         op.workspace.source_runtime.update_pf_ip_from_psin_uniform(
-            op.workspace.geometry, op.params.Ip, op.plan.n_axis_fix);
+            op.workspace.geometry, params.Ip, op.plan.n_axis_fix);
     }
 
     void prepare_residual_updated(BenchOperator& op, std::span<const double, BenchShape::x_size> x) noexcept
@@ -310,8 +315,9 @@ namespace
                                   std::span<const double, BenchShape::x_size> x,
                                   SourceRadialVector&                         integrand) noexcept
     {
+        const auto& params = op.runtime_params();
         prepare_source_materialized(op, x);
-        op.workspace.geometry.update(op.params.a, op.params.R0, op.params.Z0, op.workspace.profiles);
+        op.workspace.geometry.update(params.a, params.R0, params.Z0, op.workspace.profiles);
         op.workspace.source_runtime.benchmark_fill_pf_psin_integrand(integrand, op.workspace.geometry);
     }
 
@@ -345,6 +351,7 @@ namespace
     template <GeometryProbeMode Mode>
     void run_geometry_probe(BenchOperator& op) noexcept
     {
+        const auto& params = op.runtime_params();
         using Shape = BenchShape;
 
         constexpr size_t profile_value   = 0;
@@ -477,26 +484,26 @@ namespace
                     const double cos_tb_ij = cos_tb_values[j];
                     const double sin_tb_ij = sin_tb_values[j];
 
-                    double R_ij = op.params.R0 + op.params.a * (h_i + rho_i * cos_tb_ij);
+                    double R_ij = params.R0 + params.a * (h_i + rho_i * cos_tb_ij);
                     if (R_ij < 1.0e-6)
                         R_ij = 1.0e-6;
 
-                    const double R_r_ij = op.params.a * (h_r_i + cos_tb_ij - rho_i * sin_tb_ij * tb_r_ij);
-                    const double R_t_ij = -op.params.a * rho_i * sin_tb_ij * tb_t_ij;
-                    const double R_rr_ij = op.params.a *
+                    const double R_r_ij = params.a * (h_r_i + cos_tb_ij - rho_i * sin_tb_ij * tb_r_ij);
+                    const double R_t_ij = -params.a * rho_i * sin_tb_ij * tb_t_ij;
+                    const double R_rr_ij = params.a *
                         (h_rr_i - 2.0 * sin_tb_ij * tb_r_ij -
                          rho_i * (cos_tb_ij * tb_r_ij * tb_r_ij + sin_tb_ij * tb_rr_ij));
-                    const double R_rt_ij = -op.params.a *
+                    const double R_rt_ij = -params.a *
                         (sin_tb_ij * tb_t_ij +
                          rho_i * (cos_tb_ij * tb_r_ij * tb_t_ij + sin_tb_ij * tb_rt_ij));
                     const double R_tt_ij =
-                        -op.params.a * rho_i * (cos_tb_ij * tb_t_ij * tb_t_ij + sin_tb_ij * tb_tt_ij);
+                        -params.a * rho_i * (cos_tb_ij * tb_t_ij * tb_t_ij + sin_tb_ij * tb_tt_ij);
 
-                    const double Z_r_ij  = op.params.a * (v_r_i - (k_i + rho_i * k_r_i) * sin_t);
-                    const double Z_t_ij  = -op.params.a * rho_i * k_i * cos_t;
-                    const double Z_rr_ij = op.params.a * (v_rr_i - (2.0 * k_r_i + rho_i * k_rr_i) * sin_t);
-                    const double Z_rt_ij = -op.params.a * (k_i + rho_i * k_r_i) * cos_t;
-                    const double Z_tt_ij = op.params.a * rho_i * k_i * sin_t;
+                    const double Z_r_ij  = params.a * (v_r_i - (k_i + rho_i * k_r_i) * sin_t);
+                    const double Z_t_ij  = -params.a * rho_i * k_i * cos_t;
+                    const double Z_rr_ij = params.a * (v_rr_i - (2.0 * k_r_i + rho_i * k_rr_i) * sin_t);
+                    const double Z_rt_ij = -params.a * (k_i + rho_i * k_r_i) * cos_t;
+                    const double Z_tt_ij = params.a * rho_i * k_i * sin_t;
 
                     double J_ij = R_t_ij * Z_r_ij - R_r_ij * Z_t_ij;
                     if (J_ij < 1.0e-6)
@@ -688,14 +695,15 @@ namespace
                         SourceRadialVector&                         source_aux,
         ResidualMomentRows&                         residual_moments)
     {
+        const auto& params = op.runtime_params();
         switch (stage)
         {
         case StageKind::ProfilesFixed:
-            op.workspace.profiles.refresh_fixed(op.params.profile_params);
+            op.workspace.profiles.refresh_fixed(params.profile_params);
             compiler_barrier(op.workspace.profiles.profile_fields.data());
             break;
         case StageKind::ProfilesActive:
-            op.workspace.profiles.refresh_active(x, op.params.profile_params);
+            op.workspace.profiles.refresh_active(x, params.profile_params);
             compiler_barrier(op.workspace.profiles.profile_fields.data());
             break;
         case StageKind::ProfilesAll:
@@ -719,7 +727,7 @@ namespace
             compiler_barrier(op.workspace.geometry.radial_fields.data());
             break;
         case StageKind::Geometry:
-            op.workspace.geometry.update(op.params.a, op.params.R0, op.params.Z0, op.workspace.profiles);
+            op.workspace.geometry.update(params.a, params.R0, params.Z0, op.workspace.profiles);
             compiler_barrier(op.workspace.geometry.surface_fields.data());
             break;
         case StageKind::SourceMaterialize:
@@ -762,12 +770,12 @@ namespace
             compiler_barrier(op.workspace.source_runtime.source_target_root_fields.data());
             break;
         case StageKind::SourceAlpha:
-            op.workspace.source_runtime.benchmark_update_alpha_from_integral(op.workspace.geometry, op.params.Ip, 1.0);
+            op.workspace.source_runtime.benchmark_update_alpha_from_integral(op.workspace.geometry, params.Ip, 1.0);
             compiler_barrier(&op.workspace.source_runtime.alpha1);
             break;
         case StageKind::SourceUpdate:
             op.workspace.source_runtime.update_pf_ip_from_psin_uniform(
-                op.workspace.geometry, op.params.Ip, op.plan.n_axis_fix);
+                op.workspace.geometry, params.Ip, op.plan.n_axis_fix);
             compiler_barrier(op.workspace.source_runtime.FFn_psin.data());
             break;
         case StageKind::ResidualUpdate:
@@ -780,11 +788,11 @@ namespace
             break;
         case StageKind::ResidualRadialProject:
             op.workspace.residual.benchmark_radial_project_from(
-                packed, residual_moments, op.params.a, op.params.R0, op.params.B0);
+                packed, residual_moments, params.a, params.R0, params.B0);
             compiler_barrier(packed.data());
             break;
         case StageKind::ResidualPack:
-            op.workspace.residual.pack_into(packed, op.params.a, op.params.R0, op.params.B0);
+            op.workspace.residual.pack_into(packed, params.a, params.R0, params.B0);
             compiler_barrier(packed.data());
             break;
         case StageKind::Evaluate:
@@ -1037,6 +1045,7 @@ namespace
                            SourceRadialVector&                         source_aux,
                            ResidualMomentRows&                         residual_moments)
     {
+        const auto& params = op.runtime_params();
         switch (stage)
         {
         case StageKind::ProfilesFixed:
@@ -1068,7 +1077,7 @@ namespace
             break;
         case StageKind::SourceIntegrand:
             prepare_source_materialized(op, x);
-            op.workspace.geometry.update(op.params.a, op.params.R0, op.params.Z0, op.workspace.profiles);
+            op.workspace.geometry.update(params.a, params.R0, params.Z0, op.workspace.profiles);
             break;
         case StageKind::SourceAIntegrand:
             prepare_source_integrand(op, x, source_scratch);
@@ -1084,7 +1093,7 @@ namespace
             break;
         case StageKind::SourceUpdate:
             prepare_source_materialized(op, x);
-            op.workspace.geometry.update(op.params.a, op.params.R0, op.params.Z0, op.workspace.profiles);
+            op.workspace.geometry.update(params.a, params.R0, params.Z0, op.workspace.profiles);
             break;
         case StageKind::ResidualUpdate:
             prepare_source_updated(op, x);
