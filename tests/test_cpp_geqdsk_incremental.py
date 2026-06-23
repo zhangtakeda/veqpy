@@ -13,7 +13,7 @@ import pytest
 
 from veqpy.cpp import (
     INITIAL_POLICY_COLD,
-    RESIDUAL_NORMALIZATION_BLOCK_RMS,
+    RESIDUAL_NORMALIZATION_FAST,
     SOLVER_METHOD_POWELL,
     KernelRegistry,
     VEQlibSolver,
@@ -184,7 +184,7 @@ def _kernel_payload(
             "accepted_residual_factor": 10.0,
             "accepted_residual_floor": 1.0e-5,
             "initial_policy_code": INITIAL_POLICY_COLD,
-            "residual_normalization_code": RESIDUAL_NORMALIZATION_BLOCK_RMS,
+            "residual_normalization_code": RESIDUAL_NORMALIZATION_FAST,
             "residual_normalization_floor": 1.0,
             "residual_normalization_max_ratio": 1.0e6,
             "residual_normalization_huber_tau": 3.0,

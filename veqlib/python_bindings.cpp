@@ -35,7 +35,7 @@ namespace veqlib_python
     using veqlib_kernel_api::SolveContext;
     using veqlib_kernel_api::SolveResult;
     using veqlib_kernel_api::SolverKind;
-    using veqlib_kernel_api::build_block_rms_residual_scale;
+    using veqlib_kernel_api::build_residual_scale_for_context;
     using veqlib_kernel_api::build_x_block_scale_vector;
     using veqlib_kernel_api::build_inline_case;
     using veqlib_kernel_api::apply_initial_policy;
@@ -77,7 +77,7 @@ namespace veqlib_python
         PackedVector initial_raw{uninitialized};
         context->raw_residual(std::span<const double, BenchShape::x_size>{input.x0.data(), BenchShape::x_size},
                               std::span<double, BenchShape::x_size>{initial_raw.data(), BenchShape::x_size});
-        context->input.residual_scale = build_block_rms_residual_scale(initial_raw);
+        context->input.residual_scale = build_residual_scale_for_context(*context, initial_raw);
         return context;
     }
 
@@ -433,8 +433,7 @@ namespace veqlib_python
                 BenchShape::x_size,
             },
             std::span<double, BenchShape::x_size>{initial_raw.data(), BenchShape::x_size});
-        context.input.residual_scale = build_block_rms_residual_scale(
-            initial_raw, context.input.residual_normalization_floor, context.input.residual_normalization_max_ratio);
+        context.input.residual_scale = build_residual_scale_for_context(context, initial_raw);
     }
 
     nlohmann::json solver_json(const CaseInput& input)

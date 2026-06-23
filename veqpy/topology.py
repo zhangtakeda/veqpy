@@ -45,7 +45,7 @@ class Topology:
     K_max: int | None = None  # 默认 max(2, M_max)；允许显式更高
 
     # artifact/cache metadata
-    build: str = "fastmath"
+    build: str = "fastmath"  # fastmath, fastmath-enzyme, release, release-enzyme, debug
     key: str | None = None
 
     def __post_init__(self) -> None:
@@ -85,9 +85,11 @@ class Topology:
         calculus = _normalize_token(self.calculus, "calculus").lower()
         if calculus != "spectral":
             raise TopologyError("only spectral calculus is supported by the topology schema v1")
-        build = _normalize_token(self.build, "build").lower()
-        if build not in {"fastmath", "release", "debug"}:
-            raise TopologyError("build must be one of fastmath, release, or debug")
+        build = _normalize_token(self.build, "build")
+        if build not in {"fastmath", "fastmath-enzyme", "release", "release-enzyme", "debug"}:
+            raise TopologyError(
+                "build must be one of fastmath, fastmath-enzyme, release, release-enzyme, or debug"
+            )
         sample_count = self._canonical_sample_count(nodes, nr)
         inferred_l = _infer_l_max((*profile_counts.values(), *c_counts, *s_counts))
         l_max = _canonical_exact_or_inferred(self.L_max, inferred_l, "L_max")
@@ -183,7 +185,7 @@ class Topology:
 
         digest = hashlib.sha256(self.to_json_bytes()).digest()
         encoded = base64.b32encode(digest).decode("ascii").lower().rstrip("=")
-        return encoded[: _TOPOLOGY_KEY_LENGTH]
+        return encoded[:_TOPOLOGY_KEY_LENGTH]
 
     def validate_supported_for_veqlib_mvp(self) -> None:
         """Reject topology combinations not yet implemented by the VEQlib MVP backend."""

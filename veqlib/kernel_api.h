@@ -8,6 +8,8 @@
 #include <chrono>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
+#include <limits>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -167,8 +169,6 @@ namespace veqlib_kernel_api
 
         enum class SolverKind
         {
-            ResidualOnly,
-            EnzymeJacobian,
             LevenbergMarquardt,
             Newton,
             NewtonKrylov,
@@ -180,6 +180,9 @@ namespace veqlib_kernel_api
         {
             SolverMethodPowell             = 1,
             SolverMethodLevenbergMarquardt = 2,
+            SolverMethodNewton             = 3,
+            SolverMethodNewtonKrylov       = 4,
+            SolverMethodNewtonRaphson      = 5,
         };
 
         enum InitialPolicyCode : int
@@ -192,7 +195,10 @@ namespace veqlib_kernel_api
 
         enum ResidualNormalizationCode : int
         {
-            ResidualNormalizationBlockRms = 1,
+            ResidualNormalizationNone     = 0,
+            ResidualNormalizationFast     = 1,
+            ResidualNormalizationBalanced = 2,
+            ResidualNormalizationSafe     = 3,
         };
 
         struct CaseInput
@@ -227,9 +233,9 @@ namespace veqlib_kernel_api
             int                                           repeat                             = 10;
             int                                           warmup                             = 1;
             int                                           enzyme_width                       = 1;
-            SolverKind                                    solver                             = SolverKind::ResidualOnly;
+            SolverKind                                    solver                             = SolverKind::Powell;
             int                                           initial_policy_code                = InitialPolicyCold;
-            int                                           residual_normalization_code = ResidualNormalizationBlockRms;
+            int                                           residual_normalization_code         = ResidualNormalizationFast;
         };
 
         struct SolveResult
@@ -403,29 +409,207 @@ namespace veqlib_kernel_api
             return scale;
         }
 
-        std::array<double, BenchShape::x_size> build_block_rms_residual_scale(const PackedVector& residual,
-                                                                              double              floor = 1.0,
-                                                                              double max_ratio = 1.0e6) noexcept
+        constexpr double residual_scale_tiny() noexcept { return std::numeric_limits<double>::min(); }
+
+        double finite_positive_or(double value, double fallback) noexcept
         {
-            std::array<double, BenchShape::x_size> scale;
-            size_t                                 offset         = 0;
-            const double                           safe_floor     = floor > 0.0 ? floor : 1.0;
-            const double                           safe_max_ratio = max_ratio > 1.0 ? max_ratio : 1.0;
-            const double                           ceiling        = safe_floor * safe_max_ratio;
+            return std::isfinite(value) && value > 0.0 ? value : fallback;
+        }
+
+        double residual_scale_floor(double floor) noexcept
+        {
+            return finite_positive_or(floor, 1.0);
+        }
+
+        double residual_scale_max_ratio(double max_ratio) noexcept
+        {
+            return std::isfinite(max_ratio) && max_ratio >= 1.0 ? max_ratio : 1.0;
+        }
+
+        double median_sorted_prefix(std::array<double, BenchShape::x_size>& values, size_t count) noexcept
+        {
+            if (count == 0)
+                return 0.0;
+            std::sort(values.begin(), values.begin() + static_cast<std::ptrdiff_t>(count));
+            const size_t mid = count / 2;
+            if ((count % 2) == 1)
+                return values[mid];
+            return 0.5 * (values[mid - 1] + values[mid]);
+        }
+
+        double stable_rms_clipped(std::array<double, BenchShape::x_size>& values,
+                                  size_t                                 count,
+                                  double                                 cutoff) noexcept
+        {
+            if (count == 0)
+                return 0.0;
+            double max_abs = 0.0;
+            for (size_t i = 0; i < count; ++i)
+            {
+                const double clipped = std::min(values[i], cutoff);
+                if (clipped > max_abs)
+                    max_abs = clipped;
+                values[i] = clipped;
+            }
+            if (max_abs == 0.0)
+                return 0.0;
+            double total = 0.0;
+            for (size_t i = 0; i < count; ++i)
+            {
+                const double scaled = values[i] / max_abs;
+                total += scaled * scaled;
+            }
+            return max_abs * std::sqrt(total / static_cast<double>(count));
+        }
+
+        double stable_rms_block(const PackedVector& residual, size_t offset, size_t length) noexcept
+        {
+            if (length == 0)
+                return 0.0;
+            double max_abs = 0.0;
+            for (size_t i = 0; i < length; ++i)
+            {
+                const double value = std::abs(residual[offset + i]);
+                if (std::isfinite(value) && value > max_abs)
+                    max_abs = value;
+            }
+            if (max_abs == 0.0)
+                return 0.0;
+            double total = 0.0;
+            for (size_t i = 0; i < length; ++i)
+            {
+                const double value = std::abs(residual[offset + i]);
+                if (!std::isfinite(value))
+                    continue;
+                const double scaled = value / max_abs;
+                total += scaled * scaled;
+            }
+            return max_abs * std::sqrt(total / static_cast<double>(length));
+        }
+
+        double robust_rms_block(const PackedVector& residual, size_t offset, size_t length, double huber_tau) noexcept
+        {
+            std::array<double, BenchShape::x_size> finite{};
+            size_t                                 count = 0;
+            for (size_t i = 0; i < length; ++i)
+            {
+                const double value = std::abs(residual[offset + i]);
+                if (std::isfinite(value))
+                    finite[count++] = value;
+            }
+            if (count == 0)
+                return 0.0;
+
+            std::array<double, BenchShape::x_size> sorted = finite;
+            const double                           center = median_sorted_prefix(sorted, count);
+            std::array<double, BenchShape::x_size> deviations{};
+            for (size_t i = 0; i < count; ++i)
+                deviations[i] = std::abs(finite[i] - center);
+            const double mad = median_sorted_prefix(deviations, count);
+            double       cutoff =
+                center + std::max(huber_tau, 0.0) * 1.4826 * mad;
+            if (!std::isfinite(cutoff) || cutoff <= 0.0)
+                cutoff = center;
+            return stable_rms_clipped(finite, count, cutoff);
+        }
+
+        double balanced_residual_anchor(std::array<double, BenchShape::active_count>& values) noexcept
+        {
+            std::array<double, BenchShape::active_count> finite_positive{};
+            size_t                                       count = 0;
+            for (double value : values)
+                if (std::isfinite(value) && value > 0.0)
+                    finite_positive[count++] = value;
+            if (count == 0)
+                return 1.0;
+            std::sort(finite_positive.begin(), finite_positive.begin() + static_cast<std::ptrdiff_t>(count));
+            const size_t mid = count / 2;
+            if ((count % 2) == 1)
+                return finite_positive[mid];
+            return 0.5 * (finite_positive[mid - 1] + finite_positive[mid]);
+        }
+
+        void clip_scale_by_anchor(std::array<double, BenchShape::active_count>& values,
+                                  double                                        floor,
+                                  double                                        max_ratio) noexcept
+        {
+            const double floor_eval = std::max(residual_scale_floor(floor), residual_scale_tiny());
+            const double ratio_eval = residual_scale_max_ratio(max_ratio);
+            for (double& value : values)
+            {
+                if (!std::isfinite(value) || value < floor_eval)
+                    value = floor_eval;
+            }
+            double anchor = balanced_residual_anchor(values);
+            if (!std::isfinite(anchor) || anchor < floor_eval)
+                anchor = floor_eval;
+            const double lower = std::max(floor_eval, anchor / ratio_eval);
+            double       upper = anchor * ratio_eval;
+            if (!std::isfinite(upper) || upper < floor_eval)
+                upper = std::numeric_limits<double>::max();
+            upper = std::max(floor_eval, upper);
+            for (double& value : values)
+                value = std::clamp(value, lower, upper);
+        }
+
+        std::array<double, BenchShape::x_size>
+        expand_block_scale_values(const std::array<double, BenchShape::active_count>& block_values) noexcept
+        {
+            std::array<double, BenchShape::x_size> scale{};
+            size_t                                 offset = 0;
             for (size_t block = 0; block < BenchShape::active_count; ++block)
             {
                 const size_t length = BenchShape::active_lengths[block];
-                double       total  = 0.0;
                 for (size_t i = 0; i < length; ++i)
-                    total += residual[offset + i] * residual[offset + i];
-                const double rms         = std::sqrt(total / static_cast<double>(length));
-                const double floored     = rms > safe_floor ? rms : safe_floor;
-                const double block_scale = floored < ceiling ? floored : ceiling;
-                for (size_t i = 0; i < length; ++i)
-                    scale[offset + i] = block_scale;
+                    scale[offset + i] = block_values[block];
                 offset += length;
             }
             return scale;
+        }
+
+        std::array<double, BenchShape::x_size> build_none_residual_scale() noexcept
+        {
+            std::array<double, BenchShape::x_size> scale{};
+            scale.fill(1.0);
+            return scale;
+        }
+
+        std::array<double, BenchShape::x_size> build_fast_residual_scale(const PackedVector& residual,
+                                                                         double              floor = 1.0,
+                                                                         double max_ratio = 1.0e6) noexcept
+        {
+            std::array<double, BenchShape::active_count> block_values{};
+            size_t                                       offset         = 0;
+            const double                                 safe_floor     = residual_scale_floor(floor);
+            const double                                 safe_max_ratio = residual_scale_max_ratio(max_ratio);
+            const double ceiling = std::isfinite(safe_floor * safe_max_ratio) ? safe_floor * safe_max_ratio
+                                                                              : std::numeric_limits<double>::max();
+            for (size_t block = 0; block < BenchShape::active_count; ++block)
+            {
+                const size_t length = BenchShape::active_lengths[block];
+                const double rms         = stable_rms_block(residual, offset, length);
+                const double floored     = rms > safe_floor ? rms : safe_floor;
+                block_values[block]      = floored < ceiling ? floored : ceiling;
+                offset += length;
+            }
+            return expand_block_scale_values(block_values);
+        }
+
+        std::array<double, BenchShape::x_size> build_balanced_residual_scale(const PackedVector& residual,
+                                                                             double              floor,
+                                                                             double              max_ratio,
+                                                                             double huber_tau) noexcept
+        {
+            std::array<double, BenchShape::active_count> block_values{};
+            size_t                                       offset = 0;
+            for (size_t block = 0; block < BenchShape::active_count; ++block)
+            {
+                const size_t length = BenchShape::active_lengths[block];
+                block_values[block] = robust_rms_block(residual, offset, length, huber_tau);
+                offset += length;
+            }
+            clip_scale_by_anchor(block_values, floor, max_ratio);
+            return expand_block_scale_values(block_values);
         }
 
         template <size_t N>
@@ -585,10 +769,6 @@ namespace veqlib_kernel_api
         {
             switch (solver)
             {
-            case SolverKind::ResidualOnly:
-                return "cminpack::hybrd";
-            case SolverKind::EnzymeJacobian:
-                return "cminpack::hybrj";
             case SolverKind::LevenbergMarquardt:
                 return "cminpack::lmdif";
             case SolverKind::Newton:
@@ -607,14 +787,10 @@ namespace veqlib_kernel_api
         {
             switch (solver)
             {
-            case SolverKind::ResidualOnly:
-                return "hybrd";
-            case SolverKind::EnzymeJacobian:
-                return "hybrj";
             case SolverKind::LevenbergMarquardt:
                 return "levenberg-marquardt";
             case SolverKind::Newton:
-                return "pure_newton";
+                return "newton";
             case SolverKind::NewtonKrylov:
                 return "newton-krylov";
             case SolverKind::NewtonRaphson:
@@ -633,6 +809,12 @@ namespace veqlib_kernel_api
                 return SolverMethodPowell;
             case SolverKind::LevenbergMarquardt:
                 return SolverMethodLevenbergMarquardt;
+            case SolverKind::Newton:
+                return SolverMethodNewton;
+            case SolverKind::NewtonKrylov:
+                return SolverMethodNewtonKrylov;
+            case SolverKind::NewtonRaphson:
+                return SolverMethodNewtonRaphson;
             default:
                 return 0;
             }
@@ -646,8 +828,15 @@ namespace veqlib_kernel_api
                 return SolverKind::Powell;
             case SolverMethodLevenbergMarquardt:
                 return SolverKind::LevenbergMarquardt;
+            case SolverMethodNewton:
+                return SolverKind::Newton;
+            case SolverMethodNewtonKrylov:
+                return SolverKind::NewtonKrylov;
+            case SolverMethodNewtonRaphson:
+                return SolverKind::NewtonRaphson;
             default:
-                throw std::runtime_error("solver.method_code must be 1 (powell) or 2 (levenberg-marquardt)");
+                throw std::runtime_error("solver.method_code must be 1 (powell), 2 (levenberg-marquardt), "
+                                         "3 (newton), 4 (newton-krylov), or 5 (newton-raphson)");
             }
         }
 
@@ -689,8 +878,14 @@ namespace veqlib_kernel_api
         {
             switch (code)
             {
-            case ResidualNormalizationBlockRms:
-                return "block-rms";
+            case ResidualNormalizationNone:
+                return "none";
+            case ResidualNormalizationFast:
+                return "fast";
+            case ResidualNormalizationBalanced:
+                return "balanced";
+            case ResidualNormalizationSafe:
+                return "safe";
             default:
                 return "unknown";
             }
@@ -698,16 +893,23 @@ namespace veqlib_kernel_api
 
         inline void validate_residual_normalization_code(int code)
         {
-            if (code != ResidualNormalizationBlockRms)
-                throw std::runtime_error("solver.residual_normalization_code currently only supports 1 (block-rms)");
+            switch (code)
+            {
+            case ResidualNormalizationNone:
+            case ResidualNormalizationFast:
+            case ResidualNormalizationBalanced:
+            case ResidualNormalizationSafe:
+                return;
+            default:
+                throw std::runtime_error(
+                    "solver.residual_normalization_code must be 0 (none), 1 (fast), 2 (balanced), or 3 (safe)");
+            }
         }
 
         constexpr bool solver_info_succeeded(SolverKind solver, int info) noexcept
         {
             switch (solver)
             {
-            case SolverKind::ResidualOnly:
-            case SolverKind::EnzymeJacobian:
             case SolverKind::LevenbergMarquardt:
             case SolverKind::Newton:
             case SolverKind::NewtonKrylov:
@@ -728,36 +930,6 @@ namespace veqlib_kernel_api
         {
             switch (input.solver)
             {
-            case SolverKind::ResidualOnly:
-                return "cminpack forward difference";
-            case SolverKind::EnzymeJacobian:
-                switch (input.enzyme_width)
-                {
-                case 1:
-                    return "Enzyme scalar forward-mode dense Jacobian";
-                case 2:
-                    return "Enzyme vector forward-mode dense Jacobian (width=2)";
-                case 3:
-                    return "Enzyme vector forward-mode dense Jacobian (width=3)";
-                case 4:
-                    return "Enzyme vector forward-mode dense Jacobian (width=4)";
-                case 5:
-                    return "Enzyme vector forward-mode dense Jacobian (width=5)";
-                case 6:
-                    return "Enzyme vector forward-mode dense Jacobian (width=6)";
-                case 8:
-                    return "Enzyme vector forward-mode dense Jacobian (width=8)";
-                case 9:
-                    return "Enzyme vector forward-mode dense Jacobian (width=9)";
-                case 10:
-                    return "Enzyme vector forward-mode dense Jacobian (width=10)";
-                case 12:
-                    return "Enzyme vector forward-mode dense Jacobian (width=12)";
-                case 18:
-                    return "Enzyme vector forward-mode dense Jacobian (width=18)";
-                default:
-                    return "Enzyme vector forward-mode dense Jacobian";
-                }
             case SolverKind::LevenbergMarquardt:
                 return "cminpack forward difference";
             case SolverKind::Newton:
@@ -904,6 +1076,110 @@ namespace veqlib_kernel_api
             }
         };
 
+        double deterministic_probe_sign(size_t probe, size_t index) noexcept
+        {
+            uint64_t value = (static_cast<uint64_t>(probe) + 1ULL) * 0x9e3779b97f4a7c15ULL;
+            value ^= (static_cast<uint64_t>(index) + 1ULL) * 0xbf58476d1ce4e5b9ULL;
+            value ^= value >> 30U;
+            value *= 0xbf58476d1ce4e5b9ULL;
+            value ^= value >> 27U;
+            value *= 0x94d049bb133111ebULL;
+            value ^= value >> 31U;
+            return (value & 1ULL) == 0ULL ? -1.0 : 1.0;
+        }
+
+        std::array<double, BenchShape::x_size>
+        build_safe_residual_scale(SolveContext&       context,
+                                  const PackedVector& initial_raw,
+                                  double              floor,
+                                  double              max_ratio,
+                                  double              huber_tau,
+                                  int                 probe_count,
+                                  double              probe_step,
+                                  double              sensitivity_lambda) noexcept
+        {
+            if (probe_count <= 0 || !std::isfinite(probe_step) || probe_step <= 0.0)
+                return build_balanced_residual_scale(initial_raw, floor, max_ratio, huber_tau);
+
+            std::array<double, BenchShape::active_count> amplitude_values{};
+            size_t                                       offset = 0;
+            for (size_t block = 0; block < BenchShape::active_count; ++block)
+            {
+                const size_t length  = BenchShape::active_lengths[block];
+                amplitude_values[block] = robust_rms_block(initial_raw, offset, length, huber_tau);
+                offset += length;
+            }
+
+            std::array<double, BenchShape::active_count> sensitivity_sq{};
+            for (int probe = 0; probe < probe_count; ++probe)
+            {
+                std::array<double, BenchShape::x_size> probe_x{};
+                for (size_t i = 0; i < BenchShape::x_size; ++i)
+                    probe_x[i] = context.input.x0[i] +
+                                 probe_step * context.input.x_scale[i] *
+                                     deterministic_probe_sign(static_cast<size_t>(probe), i);
+
+                PackedVector probe_raw{uninitialized};
+                context.raw_residual(std::span<const double, BenchShape::x_size>{probe_x.data(), BenchShape::x_size},
+                                     std::span<double, BenchShape::x_size>{probe_raw.data(), BenchShape::x_size});
+
+                PackedVector diff{uninitialized};
+                for (size_t i = 0; i < BenchShape::x_size; ++i)
+                    diff[i] = (probe_raw[i] - initial_raw[i]) / probe_step;
+
+                offset = 0;
+                for (size_t block = 0; block < BenchShape::active_count; ++block)
+                {
+                    const size_t length = BenchShape::active_lengths[block];
+                    const double value  = robust_rms_block(diff, offset, length, huber_tau);
+                    sensitivity_sq[block] += value * value;
+                    offset += length;
+                }
+            }
+
+            const double lambda = std::isfinite(sensitivity_lambda) && sensitivity_lambda > 0.0
+                                      ? sensitivity_lambda
+                                      : 0.0;
+            std::array<double, BenchShape::active_count> combined{};
+            for (size_t block = 0; block < BenchShape::active_count; ++block)
+            {
+                const double sensitivity = std::sqrt(sensitivity_sq[block] / static_cast<double>(probe_count));
+                combined[block]          = std::hypot(amplitude_values[block], lambda * sensitivity);
+            }
+            clip_scale_by_anchor(combined, floor, max_ratio);
+            return expand_block_scale_values(combined);
+        }
+
+        std::array<double, BenchShape::x_size>
+        build_residual_scale_for_context(SolveContext& context, const PackedVector& initial_raw) noexcept
+        {
+            switch (context.input.residual_normalization_code)
+            {
+            case ResidualNormalizationNone:
+                return build_none_residual_scale();
+            case ResidualNormalizationFast:
+                return build_fast_residual_scale(initial_raw,
+                                                 context.input.residual_normalization_floor,
+                                                 context.input.residual_normalization_max_ratio);
+            case ResidualNormalizationBalanced:
+                return build_balanced_residual_scale(initial_raw,
+                                                     context.input.residual_normalization_floor,
+                                                     context.input.residual_normalization_max_ratio,
+                                                     context.input.residual_normalization_huber_tau);
+            case ResidualNormalizationSafe:
+                return build_safe_residual_scale(context,
+                                                 initial_raw,
+                                                 context.input.residual_normalization_floor,
+                                                 context.input.residual_normalization_max_ratio,
+                                                 context.input.residual_normalization_huber_tau,
+                                                 context.input.residual_normalization_probe_count,
+                                                 context.input.residual_normalization_probe_step,
+                                                 context.input.residual_normalization_sensitivity_lambda);
+            default:
+                return build_none_residual_scale();
+            }
+        }
+
         void scaled_residual_z_no_count(SolveContext& context, const double* z, double* fvec) noexcept;
 
 #ifdef ENABLE_ENZYME
@@ -965,7 +1241,12 @@ namespace veqlib_kernel_api
 
             const auto scale_started = std::chrono::steady_clock::now();
             for (size_t i = 0; i < BenchShape::x_size; ++i)
-                fvec[i] = std::asinh(raw[i] / context.input.residual_scale[i]);
+            {
+                const double scaled = raw[i] / context.input.residual_scale[i];
+                fvec[i] = context.input.residual_normalization_code == ResidualNormalizationFast
+                              ? std::asinh(scaled)
+                              : scaled;
+            }
             context.residual_scale_ms += elapsed_ms_since(scale_started);
             context.residual_callback_ms += elapsed_ms_since(callback_started);
             return 0;
@@ -1500,8 +1781,6 @@ namespace veqlib_kernel_api
 
         SolveResult run_solver_once(SolveContext& context)
         {
-            if (context.input.solver == SolverKind::ResidualOnly)
-                return run_hybrd_once(context);
             if (context.input.solver == SolverKind::LevenbergMarquardt)
                 return run_lmdif_once(context);
             if (context.input.solver == SolverKind::Newton)
@@ -1512,11 +1791,7 @@ namespace veqlib_kernel_api
                 return run_nonlinear_policy_once<nonlinear::NewtonRaphson>(context);
             if (context.input.solver == SolverKind::Powell)
                 return run_hybrd_once(context);
-#ifdef ENABLE_ENZYME
-            return run_hybrj_once(context);
-#else
-            throw std::runtime_error("Enzyme Jacobian solver requested without ENABLE_ENZYME");
-#endif
+            throw std::runtime_error("unsupported solver kind");
         }
 
         nlohmann::json solve_result_json(const SolveResult& result)

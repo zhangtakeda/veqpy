@@ -261,6 +261,19 @@ def load():
     path.write_text(text)
 
 
+
+def _cmake_build_type(build: str) -> str:
+    return "Debug" if build == "debug" else "Release"
+
+
+def _fp_mode(build: str) -> str:
+    return "RELAXED" if build.startswith("fastmath") else "STRICT"
+
+
+def _enable_enzyme(build: str) -> str:
+    return "ON" if build.endswith("-enzyme") else "OFF"
+
+
 def _cmake_configure_args(
     topology: Topology,
     source_dir: Path,
@@ -270,8 +283,9 @@ def _cmake_configure_args(
     artifact_id: str,
     prebuilt_nanobind_static: str | None,
 ) -> list[str]:
-    build_type = "Debug" if topology.build == "debug" else "Release"
-    fp_mode = "RELAXED" if topology.build == "fastmath" else "STRICT"
+    build_type = _cmake_build_type(topology.build)
+    fp_mode = _fp_mode(topology.build)
+    enable_enzyme = _enable_enzyme(topology.build)
     kmax_limit = max(2, topology.K_max or 2)
     return [
         "cmake",
@@ -283,7 +297,7 @@ def _cmake_configure_args(
         f"-DCMAKE_CXX_COMPILER={cxx}",
         f"-DPython_EXECUTABLE={sys.executable}",
         "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
-        "-DENABLE_ENZYME=OFF",
+        f"-DENABLE_ENZYME={enable_enzyme}",
         "-DVEQLIB_ENABLE_PYTHON_BINDINGS=ON",
         "-DVEQLIB_ENABLE_NATIVE_OPTIMIZATIONS=ON",
         f"-DVEQLIB_FP_MODE={fp_mode}",
@@ -347,7 +361,7 @@ def _get_or_build_nanobind_static(
             str(root_dir),
             "-B",
             str(build_dir),
-            f"-DCMAKE_BUILD_TYPE={'Debug' if build == 'debug' else 'Release'}",
+            f"-DCMAKE_BUILD_TYPE={_cmake_build_type(build)}",
             f"-DCMAKE_CXX_COMPILER={cxx}",
             f"-DPython_EXECUTABLE={sys.executable}",
         ]
@@ -450,15 +464,16 @@ def _native_build_contract(topology: Topology, *, cxx: str) -> dict[str, Any]:
     concrete CMake definitions that select generated native code.
     """
 
-    build_type = "Debug" if topology.build == "debug" else "Release"
-    fp_mode = "RELAXED" if topology.build == "fastmath" else "STRICT"
+    build_type = _cmake_build_type(topology.build)
+    fp_mode = _fp_mode(topology.build)
+    enable_enzyme = _enable_enzyme(topology.build)
     kmax_limit = max(2, topology.K_max or 2)
     return {
         "schema": "veqpy.native_build_contract.v1",
         "cmake_build_type": build_type,
         "cxx": cxx,
         "defines": {
-            "ENABLE_ENZYME": "OFF",
+            "ENABLE_ENZYME": enable_enzyme,
             "VEQLIB_ENABLE_PYTHON_BINDINGS": "ON",
             "VEQLIB_ENABLE_NATIVE_OPTIMIZATIONS": "ON",
             "VEQLIB_FP_MODE": fp_mode,

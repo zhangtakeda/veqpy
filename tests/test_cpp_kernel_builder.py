@@ -66,7 +66,12 @@ def test_build_kernel_dry_run_writes_artifact_plan(tmp_path: Path) -> None:
     assert "-DVEQ_SIN_PROFILE_COUNTS=3" in configure
     assert "-DVEQ_BOUNDARY_M_MAX=10" in configure
     assert "-DVEQ_PROFILE_KMAX_LIMIT=10" in configure
+    assert "-DENABLE_ENZYME=OFF" in configure
+    assert "-DVEQLIB_FP_MODE=RELAXED" in configure
     assert f"-DVEQLIB_NB_DOMAIN=veqpy_kernel_{artifact.artifact_id}" in configure
+    native_defines = native_contract["defines"]
+    assert native_defines["ENABLE_ENZYME"] == "OFF"
+    assert native_defines["VEQLIB_FP_MODE"] == "RELAXED"
     nanobind_static = artifact.metadata["common_artifacts"]["nanobind_static"]
     assert nanobind_static["schema"] == "veqpy.nanobind_static_artifact.v1"
     assert nanobind_static["status"] == "planned"
@@ -92,11 +97,40 @@ def test_source_digest_ignores_repo_local_kernel_artifacts(tmp_path: Path) -> No
 
 def test_build_kernel_artifact_id_distinguishes_build_mode(tmp_path: Path) -> None:
     fastmath = build_kernel(make_topology(build="fastmath"), cache_root=tmp_path, dry_run=True)
+    fastmath_enzyme = build_kernel(
+        make_topology(build="fastmath-enzyme"), cache_root=tmp_path, dry_run=True
+    )
+    release = build_kernel(make_topology(build="release"), cache_root=tmp_path, dry_run=True)
+    release_enzyme = build_kernel(
+        make_topology(build="release-enzyme"), cache_root=tmp_path, dry_run=True
+    )
     debug = build_kernel(make_topology(build="debug"), cache_root=tmp_path, dry_run=True)
 
-    assert fastmath.artifact_id != debug.artifact_id
+    assert len({
+        fastmath.artifact_id,
+        fastmath_enzyme.artifact_id,
+        release.artifact_id,
+        release_enzyme.artifact_id,
+        debug.artifact_id,
+    }) == 5
     assert fastmath.root_dir.parts[-2] == "fastmath"
+    assert fastmath_enzyme.root_dir.parts[-2] == "fastmath-enzyme"
+    assert release.root_dir.parts[-2] == "release"
+    assert release_enzyme.root_dir.parts[-2] == "release-enzyme"
     assert debug.root_dir.parts[-2] == "debug"
+
+    fastmath_configure = fastmath.metadata["build"]["cmake_configure"]
+    assert "-DENABLE_ENZYME=OFF" in fastmath_configure
+    assert "-DVEQLIB_FP_MODE=RELAXED" in fastmath_configure
+    fastmath_enzyme_configure = fastmath_enzyme.metadata["build"]["cmake_configure"]
+    assert "-DENABLE_ENZYME=ON" in fastmath_enzyme_configure
+    assert "-DVEQLIB_FP_MODE=RELAXED" in fastmath_enzyme_configure
+    release_configure = release.metadata["build"]["cmake_configure"]
+    assert "-DENABLE_ENZYME=OFF" in release_configure
+    assert "-DVEQLIB_FP_MODE=STRICT" in release_configure
+    release_enzyme_configure = release_enzyme.metadata["build"]["cmake_configure"]
+    assert "-DENABLE_ENZYME=ON" in release_enzyme_configure
+    assert "-DVEQLIB_FP_MODE=STRICT" in release_enzyme_configure
 
 
 def test_build_kernel_artifact_id_ignores_python_client_digest(
