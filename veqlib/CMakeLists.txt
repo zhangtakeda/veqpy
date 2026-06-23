@@ -13,6 +13,7 @@ option(VEQLIB_ENABLE_THIN_LTO "Enable clang ThinLTO and lld for optimized builds
 option(VEQLIB_ANALYSIS_BUILD "Build with source-correlated optimization diagnostics" OFF)
 option(VEQLIB_FORCE_OPENBLAS_SINGLE_THREAD "Force OpenBLAS to one runtime thread inside veqlib targets" ON)
 option(VEQLIB_ENABLE_PYTHON_BINDINGS "Build the nanobind Python extension for VEQlib" ON)
+option(VEQLIB_ENABLE_SUNDIALS "Build optional KINSOL comparison solver paths" ON)
 set(VEQLIB_FP_MODE "RELAXED" CACHE STRING "Floating-point mode: STRICT, FMA, or RELAXED")
 set_property(CACHE VEQLIB_FP_MODE PROPERTY STRINGS STRICT FMA RELAXED)
 set(VEQLIB_ENZYME_PLUGIN "" CACHE FILEPATH "Path to ClangEnzyme shared library")
@@ -340,6 +341,44 @@ function(veqlib_enable_enzyme target)
     endif()
 endfunction()
 
+function(veqlib_enable_sundials target)
+    if(NOT VEQLIB_ENABLE_SUNDIALS)
+        return()
+    endif()
+
+    find_path(VEQLIB_SUNDIALS_INCLUDE_DIR kinsol/kinsol.h)
+    find_library(VEQLIB_SUNDIALS_KINSOL_LIBRARY NAMES sundials_kinsol)
+    find_library(VEQLIB_SUNDIALS_NVEC_SERIAL_LIBRARY NAMES sundials_nvecserial)
+    find_library(VEQLIB_SUNDIALS_SUNMATRIX_DENSE_LIBRARY NAMES sundials_sunmatrixdense)
+    find_library(VEQLIB_SUNDIALS_SUNLINSOL_DENSE_LIBRARY NAMES sundials_sunlinsoldense)
+    find_library(VEQLIB_SUNDIALS_SUNLINSOL_SPGMR_LIBRARY NAMES sundials_sunlinsolspgmr)
+
+    foreach(required_var IN ITEMS
+        VEQLIB_SUNDIALS_INCLUDE_DIR
+        VEQLIB_SUNDIALS_KINSOL_LIBRARY
+        VEQLIB_SUNDIALS_NVEC_SERIAL_LIBRARY
+        VEQLIB_SUNDIALS_SUNMATRIX_DENSE_LIBRARY
+        VEQLIB_SUNDIALS_SUNLINSOL_DENSE_LIBRARY
+        VEQLIB_SUNDIALS_SUNLINSOL_SPGMR_LIBRARY
+    )
+        if(NOT ${required_var})
+            message(FATAL_ERROR "VEQLIB_ENABLE_SUNDIALS=ON but ${required_var} was not found")
+        endif()
+    endforeach()
+
+    target_compile_definitions("${target}" PRIVATE VEQLIB_ENABLE_SUNDIALS=1)
+    target_include_directories("${target}" PRIVATE "${VEQLIB_SUNDIALS_INCLUDE_DIR}")
+    target_link_libraries(
+        "${target}"
+        PRIVATE
+            "${VEQLIB_SUNDIALS_KINSOL_LIBRARY}"
+            "${VEQLIB_SUNDIALS_NVEC_SERIAL_LIBRARY}"
+            "${VEQLIB_SUNDIALS_SUNMATRIX_DENSE_LIBRARY}"
+            "${VEQLIB_SUNDIALS_SUNLINSOL_DENSE_LIBRARY}"
+            "${VEQLIB_SUNDIALS_SUNLINSOL_SPGMR_LIBRARY}"
+    )
+endfunction()
+
 function(veqlib_enable_strict_conversions target)
     if(NOT VEQLIB_ENABLE_STRICT_CONVERSIONS)
         return()
@@ -492,6 +531,7 @@ function(veqlib_configure_target target)
     veqlib_enable_constexpr_budget("${target}")
     veqlib_enable_kernel_optimizations("${target}")
     veqlib_link_dependencies("${target}")
+    veqlib_enable_sundials("${target}")
 endfunction()
 
 if(VEQLIB_ENABLE_PYTHON_BINDINGS)

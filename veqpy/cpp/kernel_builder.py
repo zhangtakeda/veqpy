@@ -299,6 +299,7 @@ def _cmake_configure_args(
         "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
         f"-DENABLE_ENZYME={enable_enzyme}",
         "-DVEQLIB_ENABLE_PYTHON_BINDINGS=ON",
+        "-DVEQLIB_ENABLE_SUNDIALS=ON",
         "-DVEQLIB_ENABLE_NATIVE_OPTIMIZATIONS=ON",
         f"-DVEQLIB_FP_MODE={fp_mode}",
         f"-DVEQLIB_NB_DOMAIN=veqpy_kernel_{artifact_id}",
@@ -475,6 +476,7 @@ def _native_build_contract(topology: Topology, *, cxx: str) -> dict[str, Any]:
         "defines": {
             "ENABLE_ENZYME": enable_enzyme,
             "VEQLIB_ENABLE_PYTHON_BINDINGS": "ON",
+            "VEQLIB_ENABLE_SUNDIALS": "ON",
             "VEQLIB_ENABLE_NATIVE_OPTIMIZATIONS": "ON",
             "VEQLIB_FP_MODE": fp_mode,
             "VEQLIB_ENABLE_THIN_LTO": "ON",

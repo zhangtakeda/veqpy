@@ -6,6 +6,8 @@ SOLVER_METHOD_POWELL: Final[int] = 1
 SOLVER_METHOD_LEVENBERG_MARQUARDT: Final[int] = 2
 SOLVER_METHOD_NEWTON_KRYLOV: Final[int] = 4
 SOLVER_METHOD_NEWTON_RAPHSON: Final[int] = 5
+SOLVER_METHOD_SUNDIALS_NEWTON_KRYLOV: Final[int] = 6
+SOLVER_METHOD_SUNDIALS_NEWTON_RAPHSON: Final[int] = 7
 
 INITIAL_POLICY_COLD_ZEROS: Final[int] = 1
 INITIAL_POLICY_COLD_GEOMETRIC: Final[int] = 2
@@ -22,6 +24,8 @@ SOLVER_METHOD_CODES: Final[dict[str, int]] = {
     "levenberg-marquardt": SOLVER_METHOD_LEVENBERG_MARQUARDT,
     "newton-krylov": SOLVER_METHOD_NEWTON_KRYLOV,
     "newton-raphson": SOLVER_METHOD_NEWTON_RAPHSON,
+    "sundials-newton-krylov": SOLVER_METHOD_SUNDIALS_NEWTON_KRYLOV,
+    "sundials-newton-raphson": SOLVER_METHOD_SUNDIALS_NEWTON_RAPHSON,
 }
 
 INITIAL_POLICY_CODES: Final[dict[str, int]] = {
@@ -46,6 +50,8 @@ def solver_method_code(value: str | int) -> int:
         SOLVER_METHOD_LEVENBERG_MARQUARDT,
         SOLVER_METHOD_NEWTON_KRYLOV,
         SOLVER_METHOD_NEWTON_RAPHSON,
+        SOLVER_METHOD_SUNDIALS_NEWTON_KRYLOV,
+        SOLVER_METHOD_SUNDIALS_NEWTON_RAPHSON,
     ):
         raise ValueError(f"Unsupported solver method code {code!r}")
     return code
