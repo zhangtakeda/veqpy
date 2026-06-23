@@ -37,6 +37,7 @@ from .options import (
     residual_normalization_code,
     solver_method_code,
 )
+from .scan import PayloadSequenceStep, payload_json_with_initial_policy, solve_payload_sequence
 from .solver import VEQlibSolver
 
 __all__ = [
@@ -51,6 +52,7 @@ __all__ = [
     "KernelLoadError",
     "KernelRegistry",
     "LoadedKernel",
+    "PayloadSequenceStep",
     "RESIDUAL_NORMALIZATION_BALANCED",
     "RESIDUAL_NORMALIZATION_FAST",
     "RESIDUAL_NORMALIZATION_NONE",
@@ -69,6 +71,8 @@ __all__ = [
     "default_kernel_cache_root",
     "initial_policy_code",
     "load_kernel",
+    "payload_json_with_initial_policy",
     "residual_normalization_code",
+    "solve_payload_sequence",
     "solver_method_code",
 ]
