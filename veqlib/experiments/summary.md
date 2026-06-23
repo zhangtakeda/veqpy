@@ -259,15 +259,12 @@ Artifacts are saved under
 | Enzyme width 6 | 0.406 | `nfev=20`, `njev=1` | too slow |
 | Enzyme width 9 | 0.451 | `nfev=20`, `njev=1` | too slow |
 | Enzyme width 18 | 0.556 | `nfev=20`, `njev=1` | too slow |
-| SUNDIALS Newton-Krylov | 1.050 | `nfev=8`, `jvp=98`, `lin=98` | too slow |
-| SUNDIALS Newton-Raphson | 0.310 | `nfev=23`, `njev=2` | too slow |
 
-Decision: do not switch solver baseline in this phase. Enzyme/SUNDIALS paths
-are useful diagnostics and now have callback timing, but all tested Jacobian or
-KINSOL variants are slower than residual-only CMINPACK for the current small
-topology. Future solver work should focus on making Jacobian construction much
-cheaper or reusing factorizations across a parameter scan before revisiting the
-strategy switch.
+Decision: do not switch solver baseline in this phase. The tested Enzyme Jacobian
+paths remain diagnostic and slower than residual-only CMINPACK for the current
+small topology. Future solver work should focus on making Jacobian construction
+much cheaper or reusing factorizations across a parameter scan before revisiting
+the strategy switch.
 
 ## 2026-06-22 P0-E KernelPlan invalidation boundary
 
@@ -1006,7 +1003,7 @@ For this smooth `Ip` scan, warm-start already reaches the observed CMINPACK
 post-continuation floor of 20 callbacks, so secant does not beat warm-start in
 `nfev`; it is retained for future less-linear parameter families because the JSON
 now records predictor fallback counts and per-point raw residual evidence. Do not
-return to Enzyme/KINSOL/Broyden work until a continuation scan still shows high
+return to Enzyme/Broyden work until a continuation scan still shows high
 post-warm-start callback counts.
 
 ## 2026-06-22 Source accumulator-only block-4 SIMD

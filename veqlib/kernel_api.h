@@ -15,15 +15,6 @@
 #include <string>
 
 #include <cminpack.h>
-#ifdef VEQLIB_ENABLE_SUNDIALS
-    #include <kinsol/kinsol.h>
-    #include <kinsol/kinsol_ls.h>
-    #include <nvector/nvector_serial.h>
-    #include <sundials/sundials_context.h>
-    #include <sunlinsol/sunlinsol_dense.h>
-    #include <sunlinsol/sunlinsol_spgmr.h>
-    #include <sunmatrix/sunmatrix_dense.h>
-#endif
 #ifdef ENABLE_ENZYME
     #include <enzyme/enzyme>
 extern int enzyme_dupv;
@@ -182,8 +173,6 @@ namespace veqlib_kernel_api
             NewtonKrylov,
             NewtonRaphson,
             Powell,
-            SundialsNewtonKrylov,
-            SundialsNewtonRaphson,
         };
 
         enum RuntimeSolverMethodCode : int
@@ -192,8 +181,6 @@ namespace veqlib_kernel_api
             SolverMethodLevenbergMarquardt = 2,
             SolverMethodNewtonKrylov       = 4,
             SolverMethodNewtonRaphson      = 5,
-            SolverMethodSundialsNewtonKrylov  = 6,
-            SolverMethodSundialsNewtonRaphson = 7,
         };
 
         enum InitialPolicyCode : int
@@ -788,10 +775,6 @@ namespace veqlib_kernel_api
                 return "nonlinear::NewtonRaphson";
             case SolverKind::Powell:
                 return "cminpack::hybrd";
-            case SolverKind::SundialsNewtonKrylov:
-                return "SUNDIALS::KINSOL+SPGMR";
-            case SolverKind::SundialsNewtonRaphson:
-                return "SUNDIALS::KINSOL+Dense";
             }
             return "unknown";
         }
@@ -808,10 +791,6 @@ namespace veqlib_kernel_api
                 return "newton-raphson";
             case SolverKind::Powell:
                 return "powell";
-            case SolverKind::SundialsNewtonKrylov:
-                return "sundials-newton-krylov";
-            case SolverKind::SundialsNewtonRaphson:
-                return "sundials-newton-raphson";
             }
             return "unknown";
         }
@@ -828,10 +807,6 @@ namespace veqlib_kernel_api
                 return SolverMethodNewtonKrylov;
             case SolverKind::NewtonRaphson:
                 return SolverMethodNewtonRaphson;
-            case SolverKind::SundialsNewtonKrylov:
-                return SolverMethodSundialsNewtonKrylov;
-            case SolverKind::SundialsNewtonRaphson:
-                return SolverMethodSundialsNewtonRaphson;
             default:
                 return 0;
             }
@@ -849,14 +824,9 @@ namespace veqlib_kernel_api
                 return SolverKind::NewtonKrylov;
             case SolverMethodNewtonRaphson:
                 return SolverKind::NewtonRaphson;
-            case SolverMethodSundialsNewtonKrylov:
-                return SolverKind::SundialsNewtonKrylov;
-            case SolverMethodSundialsNewtonRaphson:
-                return SolverKind::SundialsNewtonRaphson;
             default:
                 throw std::runtime_error("solver.method_code must be 1 (powell), 2 (levenberg-marquardt), "
-                                         "4 (newton-krylov), 5 (newton-raphson), "
-                                         "6 (sundials-newton-krylov), or 7 (sundials-newton-raphson)");
+                                         "4 (newton-krylov), or 5 (newton-raphson)");
             }
         }
 
@@ -934,8 +904,6 @@ namespace veqlib_kernel_api
             case SolverKind::NewtonKrylov:
             case SolverKind::NewtonRaphson:
             case SolverKind::Powell:
-            case SolverKind::SundialsNewtonKrylov:
-            case SolverKind::SundialsNewtonRaphson:
                 return info > 0;
             }
             return false;
@@ -967,18 +935,6 @@ namespace veqlib_kernel_api
 #endif
             case SolverKind::Powell:
                 return "cminpack forward difference";
-            case SolverKind::SundialsNewtonKrylov:
-#ifdef ENABLE_ENZYME
-                return "SUNDIALS KINSOL SPGMR with Enzyme Jacobian-vector product";
-#else
-                return "SUNDIALS KINSOL SPGMR internal finite-difference JVP";
-#endif
-            case SolverKind::SundialsNewtonRaphson:
-#ifdef ENABLE_ENZYME
-                return "SUNDIALS KINSOL dense solver with Enzyme Jacobian";
-#else
-                return "SUNDIALS KINSOL dense solver internal finite-difference Jacobian";
-#endif
             }
             return "unknown";
         }
@@ -1298,35 +1254,6 @@ namespace veqlib_kernel_api
                 fvec[i] = raw[i] / context.input.residual_scale[i];
             context.residual_scale_ms += elapsed_ms_since(scale_started);
             context.residual_callback_ms += elapsed_ms_since(callback_started);
-        }
-
-        void fill_finite_difference_jvp_z(
-            SolveContext& context, const double* z, const double* v, const double* f_base, double* jv) noexcept
-        {
-            std::array<double, BenchShape::x_size> z_plus;
-            std::array<double, BenchShape::x_size> f_base_local;
-            std::array<double, BenchShape::x_size> f_plus;
-            std::copy(z, z + BenchShape::x_size, z_plus.begin());
-
-            const double v_norm = norm2(std::span<const double, BenchShape::x_size>{v, BenchShape::x_size});
-            if (v_norm <= 0.0)
-            {
-                std::fill(jv, jv + BenchShape::x_size, 0.0);
-                return;
-            }
-            const double z_norm = norm2(std::span<const double, BenchShape::x_size>{z, BenchShape::x_size});
-            const double eps    = std::sqrt(1.0e-12) * (1.0 + z_norm) / v_norm;
-            for (size_t i = 0; i < BenchShape::x_size; ++i)
-                z_plus[i] += eps * v[i];
-
-            if (f_base == nullptr)
-            {
-                scaled_residual_z_no_count(context, z, f_base_local.data());
-                f_base = f_base_local.data();
-            }
-            scaled_residual_z_no_count(context, z_plus.data(), f_plus.data());
-            for (size_t i = 0; i < BenchShape::x_size; ++i)
-                jv[i] = (f_plus[i] - f_base[i]) / eps;
         }
 
 #ifdef ENABLE_ENZYME
@@ -1818,242 +1745,6 @@ namespace veqlib_kernel_api
             return result;
         }
 
-#ifdef VEQLIB_ENABLE_SUNDIALS
-        int sundials_residual_callback(N_Vector uu, N_Vector fval, void* user_data)
-        {
-            auto&      context = *static_cast<SolveContext*>(user_data);
-            double*    z       = N_VGetArrayPointer_Serial(uu);
-            double*    f       = N_VGetArrayPointer_Serial(fval);
-            ++context.evaluations;
-            scaled_residual_z_no_count(context, z, f);
-            return 0;
-        }
-
-        int sundials_jtv_callback(N_Vector v, N_Vector jv, N_Vector uu, booleantype* new_uu, void* user_data)
-        {
-            auto&      context = *static_cast<SolveContext*>(user_data);
-            const auto started = std::chrono::steady_clock::now();
-            double*    z       = N_VGetArrayPointer_Serial(uu);
-            double*    v_data  = N_VGetArrayPointer_Serial(v);
-            double*    jv_data = N_VGetArrayPointer_Serial(jv);
-#ifdef ENABLE_ENZYME
-            fill_enzyme_jvp_z(context, z, v_data, jv_data);
-#else
-            fill_finite_difference_jvp_z(context, z, v_data, nullptr, jv_data);
-            ++context.jacobian_component_evaluations;
-#endif
-            context.jvp_callback_ms += elapsed_ms_since(started);
-            if (new_uu != nullptr)
-                *new_uu = SUNFALSE;
-            return 0;
-        }
-
-        int sundials_dense_jacobian_callback(
-            N_Vector uu, N_Vector fu, SUNMatrix jacobian, void* user_data, N_Vector, N_Vector)
-        {
-            auto&      context = *static_cast<SolveContext*>(user_data);
-            const auto started = std::chrono::steady_clock::now();
-            double*    z       = N_VGetArrayPointer_Serial(uu);
-            double*    jac     = SUNDenseMatrix_Data(jacobian);
-#ifdef ENABLE_ENZYME
-            fill_enzyme_jacobian_z(context, z, jac, static_cast<int>(BenchShape::x_size));
-#else
-            constexpr size_t n = BenchShape::x_size;
-            const double*    f_base = N_VGetArrayPointer_Serial(fu);
-            std::array<double, n> z_plus;
-            std::array<double, n> f_plus;
-            std::copy(z, z + n, z_plus.begin());
-            for (size_t col = 0; col < n; ++col)
-            {
-                const double saved = z_plus[col];
-                const double step  = 1.0e-7 * std::max(1.0, std::abs(saved));
-                z_plus[col]        = saved + step;
-                scaled_residual_z_no_count(context, z_plus.data(), f_plus.data());
-                z_plus[col] = saved;
-                for (size_t row = 0; row < n; ++row)
-                    jac[row + n * col] = (f_plus[row] - f_base[row]) / step;
-            }
-            context.jacobian_component_evaluations += static_cast<int>(n);
-#endif
-            context.jacobian_callback_ms += elapsed_ms_since(started);
-            return 0;
-        }
-
-
-        void check(int flag, const char* operation)
-        {
-            if (flag != 0)
-                throw std::runtime_error(std::string(operation) + " failed with flag " + std::to_string(flag));
-        }
-
-        struct SundialsContextHandle
-        {
-            SUNContext value = nullptr;
-            SundialsContextHandle() { check(SUNContext_Create(nullptr, &value), "SUNContext_Create"); }
-            SundialsContextHandle(const SundialsContextHandle&)            = delete;
-            SundialsContextHandle& operator=(const SundialsContextHandle&) = delete;
-            ~SundialsContextHandle()
-            {
-                if (value != nullptr)
-                    (void)SUNContext_Free(&value);
-            }
-        };
-
-        struct SundialsVectorHandle
-        {
-            N_Vector value = nullptr;
-            SundialsVectorHandle(sunindextype length, double* data, SUNContext sunctx)
-                : value(N_VMake_Serial(length, data, sunctx))
-            {
-                if (value == nullptr)
-                    throw std::runtime_error("N_VMake_Serial failed");
-            }
-            SundialsVectorHandle(const SundialsVectorHandle&)            = delete;
-            SundialsVectorHandle& operator=(const SundialsVectorHandle&) = delete;
-            ~SundialsVectorHandle()
-            {
-                if (value != nullptr)
-                    N_VDestroy_Serial(value);
-            }
-        };
-
-        struct SundialsMatrixHandle
-        {
-            SUNMatrix value = nullptr;
-            SundialsMatrixHandle(sunindextype rows, sunindextype cols, SUNContext sunctx)
-                : value(SUNDenseMatrix(rows, cols, sunctx))
-            {
-                if (value == nullptr)
-                    throw std::runtime_error("SUNDenseMatrix failed");
-            }
-            SundialsMatrixHandle(const SundialsMatrixHandle&)            = delete;
-            SundialsMatrixHandle& operator=(const SundialsMatrixHandle&) = delete;
-            ~SundialsMatrixHandle()
-            {
-                if (value != nullptr)
-                    SUNMatDestroy_Dense(value);
-            }
-        };
-
-        struct SundialsLinearSolverHandle
-        {
-            SUNLinearSolver value = nullptr;
-            explicit SundialsLinearSolverHandle(SUNLinearSolver solver) : value(solver)
-            {
-                if (value == nullptr)
-                    throw std::runtime_error("SUNLinearSolver creation failed");
-            }
-            SundialsLinearSolverHandle(const SundialsLinearSolverHandle&)            = delete;
-            SundialsLinearSolverHandle& operator=(const SundialsLinearSolverHandle&) = delete;
-            ~SundialsLinearSolverHandle()
-            {
-                if (value != nullptr)
-                    (void)SUNLinSolFree(value);
-            }
-        };
-
-        struct KinsolHandle
-        {
-            void* value = nullptr;
-            explicit KinsolHandle(SUNContext sunctx) : value(KINCreate(sunctx))
-            {
-                if (value == nullptr)
-                    throw std::runtime_error("KINCreate failed");
-            }
-            KinsolHandle(const KinsolHandle&)            = delete;
-            KinsolHandle& operator=(const KinsolHandle&) = delete;
-            ~KinsolHandle()
-            {
-                if (value != nullptr)
-                    KINFree(&value);
-            }
-        };
-
-        void configure_kinsol_common(KinsolHandle& kin, SolveContext& context, N_Vector template_vector)
-        {
-            check(KINInit(kin.value, sundials_residual_callback, template_vector), "KINInit");
-            check(KINSetUserData(kin.value, &context), "KINSetUserData");
-            check(KINSetFuncNormTol(kin.value, context.input.max_residual), "KINSetFuncNormTol");
-            check(KINSetScaledStepTol(kin.value, context.input.max_residual * 1.0e-2), "KINSetScaledStepTol");
-            const long int max_nonlinear_iterations =
-                std::min<long int>(static_cast<long int>(max_solver_evaluations(context.input)), 200L);
-            check(KINSetNumMaxIters(kin.value, max_nonlinear_iterations), "KINSetNumMaxIters");
-            check(KINSetMaxNewtonStep(kin.value, 1.0e12), "KINSetMaxNewtonStep");
-            check(KINSetMaxBetaFails(kin.value, 50), "KINSetMaxBetaFails");
-            check(KINSetNoResMon(kin.value, SUNTRUE), "KINSetNoResMon");
-            check(KINSetPrintLevel(kin.value, 0), "KINSetPrintLevel");
-        }
-
-        void fill_sundials_stats(SolveContext& context, SolveResult& result, KinsolHandle& kin, int flag)
-        {
-            long int nfev      = 0;
-            long int njev      = 0;
-            long int njvp      = 0;
-            long int nlin_iter = 0;
-            long int lin_fev   = 0;
-            (void)KINGetNumFuncEvals(kin.value, &nfev);
-            (void)KINGetNumJacEvals(kin.value, &njev);
-            (void)KINGetNumJtimesEvals(kin.value, &njvp);
-            (void)KINGetNumLinIters(kin.value, &nlin_iter);
-            (void)KINGetNumLinFuncEvals(kin.value, &lin_fev);
-            result.info                           = flag >= 0 ? 1 : flag;
-            result.nfev                           = static_cast<int>(nfev);
-            result.njev                           = static_cast<int>(njev);
-            result.callbacks                      = context.evaluations;
-            result.jvp_evaluations                = static_cast<int>(njvp);
-            result.linear_iterations              = static_cast<int>(nlin_iter);
-            result.jacobian_component_evaluations = context.jacobian_component_evaluations + static_cast<int>(lin_fev);
-        }
-
-        template <bool Dense>
-        SolveResult run_sundials_kinsol_once(SolveContext& context)
-        {
-            context.reset_solve_counters();
-            auto z = encode_x_to_z(context.input.x0, context.input.x_scale);
-
-            std::array<double, BenchShape::x_size> scale_data;
-            scale_data.fill(1.0);
-
-            SundialsContextHandle sunctx;
-            SundialsVectorHandle  uvec(static_cast<sunindextype>(BenchShape::x_size), z.data(), sunctx.value);
-            SundialsVectorHandle  uscale(static_cast<sunindextype>(BenchShape::x_size), scale_data.data(), sunctx.value);
-            SundialsVectorHandle  fscale(static_cast<sunindextype>(BenchShape::x_size), scale_data.data(), sunctx.value);
-            KinsolHandle          kin(sunctx.value);
-            configure_kinsol_common(kin, context, uvec.value);
-
-            if constexpr (Dense)
-            {
-                SundialsMatrixHandle       matrix(static_cast<sunindextype>(BenchShape::x_size),
-                                            static_cast<sunindextype>(BenchShape::x_size),
-                                            sunctx.value);
-                SundialsLinearSolverHandle linear_solver(SUNLinSol_Dense(uvec.value, matrix.value, sunctx.value));
-                check(KINSetLinearSolver(kin.value, linear_solver.value, matrix.value), "KINSetLinearSolver(Dense)");
-                check(KINSetJacFn(kin.value, sundials_dense_jacobian_callback), "KINSetJacFn");
-                const auto solve_started = std::chrono::steady_clock::now();
-                const int  flag          = KINSol(kin.value, uvec.value, KIN_LINESEARCH, uscale.value, fscale.value);
-                context.linear_solve_ms += elapsed_ms_since(solve_started);
-                SolveResult result{};
-                fill_solve_result_from_z(context, result, z.data(), flag >= 0 ? 1 : flag, 0, 0, context.evaluations);
-                fill_sundials_stats(context, result, kin, flag);
-                return result;
-            }
-            else
-            {
-                SundialsLinearSolverHandle linear_solver(
-                    SUNLinSol_SPGMR(uvec.value, SUN_PREC_NONE, static_cast<int>(BenchShape::x_size), sunctx.value));
-                check(KINSetLinearSolver(kin.value, linear_solver.value, nullptr), "KINSetLinearSolver(SPGMR)");
-                check(KINSetJacTimesVecFn(kin.value, sundials_jtv_callback), "KINSetJacTimesVecFn");
-                const auto solve_started = std::chrono::steady_clock::now();
-                const int  flag          = KINSol(kin.value, uvec.value, KIN_LINESEARCH, uscale.value, fscale.value);
-                context.linear_solve_ms += elapsed_ms_since(solve_started);
-                SolveResult result{};
-                fill_solve_result_from_z(context, result, z.data(), flag >= 0 ? 1 : flag, 0, 0, context.evaluations);
-                fill_sundials_stats(context, result, kin, flag);
-                return result;
-            }
-        }
-#endif
-
         SolveResult run_solver_once(SolveContext& context)
         {
             if (context.input.solver == SolverKind::LevenbergMarquardt)
@@ -2064,22 +1755,6 @@ namespace veqlib_kernel_api
                 return run_nonlinear_policy_once<nonlinear::NewtonRaphson>(context);
             if (context.input.solver == SolverKind::Powell)
                 return run_hybrd_once(context);
-            if (context.input.solver == SolverKind::SundialsNewtonKrylov)
-            {
-#ifdef VEQLIB_ENABLE_SUNDIALS
-                return run_sundials_kinsol_once<false>(context);
-#else
-                throw std::runtime_error("SUNDIALS support is not enabled in this VEQlib build");
-#endif
-            }
-            if (context.input.solver == SolverKind::SundialsNewtonRaphson)
-            {
-#ifdef VEQLIB_ENABLE_SUNDIALS
-                return run_sundials_kinsol_once<true>(context);
-#else
-                throw std::runtime_error("SUNDIALS support is not enabled in this VEQlib build");
-#endif
-            }
             throw std::runtime_error("unsupported solver kind");
         }
 

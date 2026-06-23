@@ -15,8 +15,6 @@ from veqpy.cpp import (
     SOLVER_METHOD_NEWTON_KRYLOV,
     SOLVER_METHOD_NEWTON_RAPHSON,
     SOLVER_METHOD_POWELL,
-    SOLVER_METHOD_SUNDIALS_NEWTON_KRYLOV,
-    SOLVER_METHOD_SUNDIALS_NEWTON_RAPHSON,
     initial_policy_code,
     residual_normalization_code,
     solver_method_code,
@@ -28,12 +26,14 @@ def test_cpp_solver_method_strings_are_exact_canonical_tokens() -> None:
     assert solver_method_code("levenberg-marquardt") == SOLVER_METHOD_LEVENBERG_MARQUARDT
     assert solver_method_code("newton-krylov") == SOLVER_METHOD_NEWTON_KRYLOV
     assert solver_method_code("newton-raphson") == SOLVER_METHOD_NEWTON_RAPHSON
-    assert solver_method_code("sundials-newton-krylov") == SOLVER_METHOD_SUNDIALS_NEWTON_KRYLOV
-    assert solver_method_code("sundials-newton-raphson") == SOLVER_METHOD_SUNDIALS_NEWTON_RAPHSON
 
-    for alias in ("lm", "Powell", "newton", "newton_krylov", "sundials_newton_krylov", "hybrd"):
+    for alias in ("lm", "Powell", "newton", "newton_krylov", "hybrd"):
         with pytest.raises(ValueError):
             solver_method_code(alias)
+
+    for removed_code in (6, 7):
+        with pytest.raises(ValueError):
+            solver_method_code(removed_code)
 
 
 def test_cpp_initial_policy_strings_have_no_transitional_aliases() -> None:

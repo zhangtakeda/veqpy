@@ -1,5 +1,0 @@
-Clang loop-vectorize remarks for geometry.h from build/analysis veqlib_main
-geometry.h:319:17 Analysis/InterleavingNotBeneficialAndDisabled vf=- interleave=-
-geometry.h:319:17 Passed/Vectorized vf=4 interleave=1
-geometry.h:381:17 Analysis/InterleavingNotBeneficialAndDisabled vf=- interleave=-
-geometry.h:381:17 Passed/Vectorized vf=4 interleave=1
