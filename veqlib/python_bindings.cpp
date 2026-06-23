@@ -60,6 +60,8 @@ namespace veqlib_python
     using CliEntrypoint = int (*)(int, char**);
     using PackedArrayView =
         nb::ndarray<nb::numpy, const double, nb::shape<BenchShape::x_size>, nb::c_contig>;
+    using MutablePackedArrayView =
+        nb::ndarray<nb::numpy, double, nb::shape<BenchShape::x_size>, nb::c_contig>;
     using AlphaArrayView = nb::ndarray<nb::numpy, const double, nb::shape<2>, nb::c_contig>;
 
     struct StreamRedirect
@@ -285,6 +287,161 @@ namespace veqlib_python
         return AlphaArrayView(data, {2}, owner);
     }
 
+
+    nb::dict topology_metadata_dict(const CaseInput& input)
+    {
+        nb::dict source;
+        source["route"]       = "PF";
+        source["coordinate"]  = "psin";
+        source["constraint"]  = "Ip";
+        source["nodes"]       = "uniform";
+        source["sample_count"] = BenchSource::sample_count;
+
+        nb::dict grid;
+        grid["Nr"]         = BenchGrid::radial_nodes;
+        grid["Nt"]         = BenchGrid::theta_rows;
+        grid["L_max"]      = BenchShape::L_max;
+        grid["M_max"]      = BenchShape::M_max;
+        grid["K_max"]      = BenchShape::K_max;
+        grid["quadrature"] = "legendre";
+        grid["calculus"]   = "spectral";
+
+        nb::dict solver;
+        solver["method"]       = solver_method(input.solver);
+        solver["entrypoint"]   = solver_entrypoint(input.solver);
+        solver["jacobian"]     = solver_jacobian(input);
+        solver["enzyme_width"] = input.enzyme_width;
+
+        nb::dict out;
+        out["schema"]         = "veqlib.kernel.metadata.v1";
+        out["backend"]        = "veqlib.nanobind";
+        out["route"]          = "PF/psin/uniform/Ip";
+        out["x_size"]         = BenchShape::x_size;
+        out["active_count"]   = BenchShape::active_count;
+        out["source"]         = source;
+        out["grid"]           = grid;
+        out["solver"]         = solver;
+        out["case_mutation"]  = "not_implemented_mvp";
+        return out;
+    }
+
+    class KernelSolver
+    {
+    public:
+        explicit KernelSolver(const std::string& solver = "residual", int enzyme_width = 1)
+            : solver_(parse_solver_kind(solver.c_str())),
+              enzyme_width_(enzyme_width),
+              context_(make_context(solver_, enzyme_width_))
+        {
+        }
+
+        nb::dict metadata() const { return topology_metadata_dict(context_->input); }
+
+        std::string metadata_json() const { return case_prefix_json(*context_).dump(2); }
+
+        void set_case_json(const std::string& payload)
+        {
+            if (payload.empty())
+            {
+                last_case_json_ = "{}";
+                return;
+            }
+            const nlohmann::json data = nlohmann::json::parse(payload);
+            if (!data.is_object())
+                throw std::runtime_error("KernelSolver.set_case_json expects a JSON object");
+            if (!data.empty())
+            {
+                throw std::runtime_error(
+                    "KernelSolver MVP does not yet support runtime case mutation; "
+                    "construct a new benchmark case through the legacy PF facade"
+                );
+            }
+            last_case_json_ = data.dump();
+        }
+
+        void warmup(size_t count)
+        {
+            for (size_t i = 0; i < count; ++i)
+                (void)run_solver_once(*context_);
+        }
+
+        std::string solve_json()
+        {
+            const auto started = std::chrono::steady_clock::now();
+            last_result_ = run_solver_once(*context_);
+            const auto elapsed = std::chrono::steady_clock::now() - started;
+            last_elapsed_ms_ = std::chrono::duration<double, std::milli>(elapsed).count();
+
+            const nlohmann::json report = {
+                {"schema", "veqlib.kernel.solve_result.v1"},
+                {"route", "PF/psin/uniform/Ip"},
+                {"x_size", BenchShape::x_size},
+                {"solver", solver_json(context_->input)},
+                {"elapsed_ms", last_elapsed_ms_},
+                {"final", solve_result_json(last_result_)},
+                {"success",
+                 last_result_.accepted && solver_info_succeeded(context_->input.solver, last_result_.info)},
+            };
+            return report.dump(2);
+        }
+
+        nb::tuple solve_direct()
+        {
+            const auto started = std::chrono::steady_clock::now();
+            last_result_ = run_solver_once(*context_);
+            const auto elapsed = std::chrono::steady_clock::now() - started;
+            last_elapsed_ms_ = std::chrono::duration<double, std::milli>(elapsed).count();
+
+            nb::object owner = nb::cast(this, nb::rv_policy::reference);
+            return nb::make_tuple(
+                last_elapsed_ms_,
+                last_result_.accepted && solver_info_succeeded(context_->input.solver, last_result_.info),
+                last_result_.info,
+                last_result_.nfev,
+                last_result_.njev,
+                last_result_.callbacks,
+                last_result_.jacobian_component_evaluations,
+                last_result_.jvp_evaluations,
+                last_result_.linear_iterations,
+                last_result_.raw_norm,
+                last_result_.scaled_norm,
+                packed_view(last_result_.x.data(), owner),
+                packed_view(last_result_.raw.data(), owner),
+                packed_view(last_result_.scaled.data(), owner),
+                alpha_view(last_result_.alpha.data(), owner)
+            );
+        }
+
+        void residual_var_into(PackedArrayView x, MutablePackedArrayView out)
+        {
+            context_->raw_residual(
+                std::span<const double, BenchShape::x_size>{x.data(), BenchShape::x_size},
+                std::span<double, BenchShape::x_size>{out.data(), BenchShape::x_size}
+            );
+        }
+
+        std::string stage_benchmark_json(
+            const std::string& stage,
+            size_t             repeat,
+            size_t             warmup,
+            size_t             inner,
+            size_t             ring_size
+        ) const
+        {
+            return stage_pf_psin_uniform_ip_json(stage, repeat, warmup, inner, ring_size);
+        }
+
+        double last_elapsed_ms() const noexcept { return last_elapsed_ms_; }
+
+    private:
+        SolverKind                    solver_;
+        int                           enzyme_width_;
+        std::unique_ptr<SolveContext> context_;
+        SolveResult                   last_result_{};
+        std::string                   last_case_json_ = "{}";
+        double                        last_elapsed_ms_ = 0.0;
+    };
+
     class PfPsinUniformIpSolver
     {
     public:
@@ -363,7 +520,7 @@ namespace veqlib_python
 NB_MODULE(veqlib_ext, module)
 {
     module.doc() =
-        "Single-thread nanobind bridge for VEQlib PF/psin/uniform/Ip validation and timing.";
+        "Single-thread nanobind bridge for VEQlib kernel validation and timing.";
 
     module.def(
         "solve_pf_psin_uniform_ip_json",
@@ -399,6 +556,41 @@ NB_MODULE(veqlib_ext, module)
         nb::arg("ring_size") = 16,
         "Run the PF/psin/uniform/Ip stage benchmark and return JSON."
     );
+
+
+    nb::class_<veqlib_python::KernelSolver>(module, "KernelSolver")
+        .def(
+            nb::init<const std::string&, int>(),
+            nb::arg("solver") = "residual",
+            nb::arg("enzyme_width") = 1
+        )
+        .def("metadata", &veqlib_python::KernelSolver::metadata)
+        .def("metadata_json", &veqlib_python::KernelSolver::metadata_json)
+        .def("set_case_json", &veqlib_python::KernelSolver::set_case_json, nb::arg("payload"))
+        .def("warmup", &veqlib_python::KernelSolver::warmup, nb::arg("count"))
+        .def("solve_json", &veqlib_python::KernelSolver::solve_json)
+        .def(
+            "solve_direct",
+            &veqlib_python::KernelSolver::solve_direct,
+            "Run one solve and return scalars plus read-only NumPy views without JSON serialization."
+        )
+        .def(
+            "residual_var_into",
+            &veqlib_python::KernelSolver::residual_var_into,
+            nb::arg("x"),
+            nb::arg("out"),
+            "Evaluate the raw variational residual into a caller-owned packed output array."
+        )
+        .def(
+            "stage_benchmark_json",
+            &veqlib_python::KernelSolver::stage_benchmark_json,
+            nb::arg("stage") = "all",
+            nb::arg("repeat") = 30,
+            nb::arg("warmup") = 5,
+            nb::arg("inner") = 1000,
+            nb::arg("ring_size") = 16
+        )
+        .def_prop_ro("last_elapsed_ms", &veqlib_python::KernelSolver::last_elapsed_ms);
 
     nb::class_<veqlib_python::PfPsinUniformIpSolver>(module, "PfPsinUniformIpSolver")
         .def(
