@@ -43,7 +43,7 @@ namespace tensor_layout
                 for (size_t col = 0; col < Cols; ++col)
                     for (size_t lane = 0; lane < Lanes; ++lane)
                     {
-                        const size_t row = block * Lanes + lane;
+                        const size_t row                     = block * Lanes + lane;
                         coefficients(Slot, block, col, lane) = row < Rows ? matrix(row, col) : 0.0;
                     }
         }

@@ -774,8 +774,8 @@ namespace profiles
               auto   SFamilyCounts>
     struct OptimizedProfileShapeFromCountsWithMmax
     {
-        static constexpr size_t Cmax = CFamilyCounts.size() == 0 ? 0 : CFamilyCounts.size() - 1;
-        static constexpr size_t Smax = SFamilyCounts.size();
+        static constexpr size_t Cmax        = CFamilyCounts.size() == 0 ? 0 : CFamilyCounts.size() - 1;
+        static constexpr size_t Smax        = SFamilyCounts.size();
         static constexpr size_t active_Mmax = Cmax > Smax ? Cmax : Smax;
         static_assert(Mmax >= active_Mmax, "boundary Mmax must cover configured c/s profile orders");
 
@@ -811,15 +811,15 @@ namespace profiles
         static constexpr size_t Mmax = Cmax > Smax ? Cmax : Smax;
 
         using type = typename OptimizedProfileShapeFromCountsWithMmax<Lmax,
-                                                                       Kmax,
-                                                                       Mmax,
-                                                                       HCount,
-                                                                       VCount,
-                                                                       KappaCount,
-                                                                       PsinCount,
-                                                                       FCount,
-                                                                       CFamilyCounts,
-                                                                       SFamilyCounts>::type;
+                                                                      Kmax,
+                                                                      Mmax,
+                                                                      HCount,
+                                                                      VCount,
+                                                                      KappaCount,
+                                                                      PsinCount,
+                                                                      FCount,
+                                                                      CFamilyCounts,
+                                                                      SFamilyCounts>::type;
     };
 
     template <size_t Lmax,
@@ -906,9 +906,9 @@ namespace profiles
         using grid      = GridType;
         using evaluator = ProfileEvaluator<Shape>;
 
-        static constexpr size_t radial_nodes        = GridType::radial_nodes;
-        static constexpr size_t profile_field_count = Shape::profile_count;
-        static constexpr size_t family_field_count  = Shape::M_max + 1;
+        static constexpr size_t radial_nodes          = GridType::radial_nodes;
+        static constexpr size_t profile_field_count   = Shape::profile_count;
+        static constexpr size_t family_field_count    = Shape::M_max + 1;
         static constexpr size_t phase_component_count = 6;
         static constexpr size_t phase_tb              = 0;
         static constexpr size_t phase_tb_r            = 1;
@@ -917,23 +917,23 @@ namespace profiles
         static constexpr size_t phase_tb_rt           = 4;
         static constexpr size_t phase_tb_tt           = 5;
 
-        using ProfileField = Matrix<double, radial_nodes, 3>;
-        using ProfileSlab  = Tensor<double, profile_field_count, radial_nodes, 3>;
-        using FamilySlab   = Tensor<double, family_field_count, radial_nodes, 3>;
+        using ProfileField  = Matrix<double, radial_nodes, 3>;
+        using ProfileSlab   = Tensor<double, profile_field_count, radial_nodes, 3>;
+        using FamilySlab    = Tensor<double, family_field_count, radial_nodes, 3>;
         using PhaseBaseSlab = Tensor<double, radial_nodes, GridType::theta_rows, phase_component_count>;
 
-        ProfileSlab profile_fields{};
-        ProfileSlab profile_rp_fields{};
-        ProfileSlab profile_env_fields{};
-        FamilySlab  c_family_fields{};
-        FamilySlab  s_family_fields{};
-        FamilySlab  c_family_base_fields{};
-        FamilySlab  s_family_base_fields{};
-        PhaseBaseSlab boundary_phase_base{};
+        ProfileSlab                            profile_fields{};
+        ProfileSlab                            profile_rp_fields{};
+        ProfileSlab                            profile_env_fields{};
+        FamilySlab                             c_family_fields{};
+        FamilySlab                             s_family_fields{};
+        FamilySlab                             c_family_base_fields{};
+        FamilySlab                             s_family_base_fields{};
+        PhaseBaseSlab                          boundary_phase_base{};
         std::array<size_t, family_field_count> boundary_c_orders{};
         std::array<size_t, family_field_count> boundary_s_orders{};
-        size_t boundary_c_order_count = 0;
-        size_t boundary_s_order_count = 0;
+        size_t                                 boundary_c_order_count = 0;
+        size_t                                 boundary_s_order_count = 0;
 
         constexpr void clear() noexcept
         {
@@ -1162,7 +1162,8 @@ namespace profiles
             };
         }
 
-        static constexpr void store_boundary_order(FamilySlab& family, size_t order, size_t node, double offset) noexcept
+        static constexpr void
+        store_boundary_order(FamilySlab& family, size_t order, size_t node, double offset) noexcept
         {
             const detail::ProfileValues rp = rho_power_rows_runtime(fourier_power_runtime(order), node);
             family(order, node, 0)         = offset * rp.value;
@@ -1255,7 +1256,7 @@ namespace profiles
 
                     for (size_t active = 0; active < boundary_s_order_count; ++active)
                     {
-                        const size_t order = boundary_s_orders[active];
+                        const size_t order     = boundary_s_orders[active];
                         const double s_i       = s_family_base_fields(order, node, 0);
                         const double s_r_i     = s_family_base_fields(order, node, 1);
                         const double s_rr_i    = s_family_base_fields(order, node, 2);
@@ -1378,13 +1379,8 @@ namespace profiles
                     constexpr size_t count      = evaluator::template c_count<Order>();
                     const auto       coeffs     = coefficients_from_x<profile_id, count>(x);
                     ProfileField     out{uninitialized};
-                    evaluator::template update_c<Order>(out,
-                                                        coeffs,
-                                                        GridType::T,
-                                                        GridType::T_r,
-                                                        GridType::T_rr,
-                                                        GridType::rhos,
-                                                        0.0);
+                    evaluator::template update_c<Order>(
+                        out, coeffs, GridType::T, GridType::T_r, GridType::T_rr, GridType::rhos, 0.0);
                     store_profile<profile_id>(out);
                 }
                 refresh_c_active<Order + 1>(x, params);
@@ -1403,13 +1399,8 @@ namespace profiles
                     constexpr size_t count      = evaluator::template s_count<Order>();
                     const auto       coeffs     = coefficients_from_x<profile_id, count>(x);
                     ProfileField     out{uninitialized};
-                    evaluator::template update_s<Order>(out,
-                                                        coeffs,
-                                                        GridType::T,
-                                                        GridType::T_r,
-                                                        GridType::T_rr,
-                                                        GridType::rhos,
-                                                        0.0);
+                    evaluator::template update_s<Order>(
+                        out, coeffs, GridType::T, GridType::T_r, GridType::T_rr, GridType::rhos, 0.0);
                     store_profile<profile_id>(out);
                 }
                 refresh_s_active<Order + 1>(x, params);

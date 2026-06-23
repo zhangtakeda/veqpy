@@ -26,59 +26,34 @@ setup data should be `constexpr` wherever the compile-time cost is acceptable.
 
 ## Current Target
 
-The current CMake targets are `veqlib_main` and the optional nanobind module
-`veqlib_ext`. `veqlib_main` is the canonical C++ validation and benchmark
-executable; all executable-side optimization comparisons should run through
-`main.cpp` subcommands instead of separate test binaries. `veqlib_ext` exposes
-the same PF-psin-uniform-Ip benchmark path to Python so Python can measure the
-latency of a direct VEQlib call without launching a subprocess. The default
-`veqlib_main probe` mode is a dependency smoke test, not the final VEQ kernel:
+The current production CMake target is the optional nanobind module
+`veqlib_ext`. The previous executable-side validation, stage benchmark, and
+parameter-scan CLI were removed after the PF-psin-uniform-Ip kernel was matched
+against the VEQPy/Numba backend. Production comparisons now go through the
+Python-facing `KernelSolver`, which exercises the same shared-library loading
+path used by VEQPy.
 
-- instantiates compile-time quadrature nodes/weights for Chebyshev, Legendre,
-  Lobatto, and Radau rules on the unit interval;
-- instantiates spectral and compact CFD33/CFD35/CFD55 radial calculus matrices;
-- checks compact calculus against constant integration and linear
-  differentiation identities;
-- solves dense systems with Doolittle, Cholesky, Bunch-Kaufman, Householder, and
-  Golub-Reinsch policies;
-- solves a tridiagonal band system through the Thomas policy;
-- solves `x^2 - 4 = 0` with CMINPACK `hybrd1`;
-- solves a 2x2 dense linear system with LAPACKE `dgesv`;
-- writes a nlohmann/json report;
-- when Enzyme is enabled, differentiates `x * x` at `x = 3` and expects `6`.
-
-The generated-topology validation suite is now `veqlib_main --mode
-temp-validation`. It checks that generated `config::DefaultTopology` values can
-instantiate one concrete `grid::Grid` and `profiles::Profiles` pair without
-making those generic types depend on `config.h`.
-
-The Python extension currently exposes a deliberately narrow, single-thread
-surface:
+The Python extension exposes a deliberately narrow, single-thread production
+kernel surface:
 
 ```python
 import veqlib_ext
 
-veqlib_ext.validate_pf_psin_uniform_ip_json()
-veqlib_ext.solve_pf_psin_uniform_ip_json(repeat=10, warmup=1)
-veqlib_ext.scan_pf_psin_uniform_ip_json(points=11, policy="warm", relative_step=0.02)
-veqlib_ext.stage_pf_psin_uniform_ip_json(stage="evaluate", repeat=10, inner=10000)
-
-solver = veqlib_ext.PfPsinUniformIpSolver()
-solver.warmup(5)
+solver = veqlib_ext.KernelSolver()
+solver.metadata()
+solver.set_case_json(payload_json)
 solver.solve_direct()  # scalars plus read-only NumPy views
 ```
 
-The free functions return the same JSON payloads as the corresponding
-`veqlib_main` modes, including the `Ip` scan path that reuses one prepared
-operator while updating only solve parameters for each scan point.
-`PfPsinUniformIpSolver` keeps the C++ context alive across calls and is the
-interface used for Python-perceived latency comparisons.
+`KernelSolver` keeps the C++ context and workspace alive across calls. Solver
+objects are mutable workspace owners and should not be shared across Python
+threads; use one solver instance per thread.
 
 ## Default Topology
 
 CMake generates `config.h` from cache variables and exposes them through
-`config::DefaultTopology`. The generated topology is a composition boundary:
-entry points may read `DefaultTopology::Nr`, `DefaultTopology::L_max`, and the
+`config::Topology`. The generated topology is a composition boundary:
+entry points may read `Topology::Nr`, `Topology::L_max`, and the
 profile counts, then pass those values into ordinary templates. Generic headers
 such as `grid.h` and `profiles.h` do not include the generated config.
 
@@ -252,104 +227,11 @@ free `linalg` functions.
 
 ## Nonlinear Solver Notes
 
-VEQPy's production solve path is currently modeled by the CMINPACK `hybrd`
-configuration used in `veqlib_main --mode pf-validation`. The `veqlib_main
---mode solve` benchmark keeps the same PF-psin-uniform-Ip case inline and can
-compare several candidate solve paths:
-
-```bash
-./build/enzyme-release/veqlib_main --mode solve \
-  --solver residual|enzyme|lm|newton|nk|nr|powell|sundials-nk|sundials-nr
-```
-
-Solver meanings are intentionally explicit:
-
-- `residual` is CMINPACK `hybrd`, matching the VEQPy-style residual-only path.
-- `enzyme` is CMINPACK `hybrj` with an Enzyme dense Jacobian.
-- `lm` is CMINPACK Levenberg-Marquardt.
-- `newton` is a hand-written full-step dense Newton method.
-- `nr` is a hand-written dense Newton-Raphson method with backtracking.
-- `nk` is a hand-written Newton-Krylov method using Enzyme JVPs and local GMRES.
-- `powell` is the CMINPACK Powell hybrid path.
-- `sundials-nr` and `sundials-nk` use SUNDIALS KINSOL with dense and SPGMR
-  linear solvers respectively.
-
-SciPy's `root(method="krylov")` should not be treated as a thin wrapper around
-KINSOL or CMINPACK. It is SciPy's own Newton-Krylov facade built around
-`KrylovJacobian`: by default the inner linear solve uses
-`scipy.sparse.linalg.lgmres`, Jacobian-vector products are finite-difference
-approximations of the residual, and the nonlinear step uses Armijo line search.
-That makes it a useful behavioral reference, but not a library implementation
-that VEQlib can call directly from C++.
-
-The current PF-psin-uniform-Ip benchmark shows that dense Newton variants are
-not automatically faster for the small fixed topology. Even when they converge
-in fewer nonlinear iterations, repeated dense Jacobian construction dominates
-runtime unless the Jacobian is generated much more cheaply than a batch of
-residual evaluations. Powell/hybrd therefore remains the baseline until VEQlib
-has a route-specific analytic or template-generated Jacobian path.
-
-Parameter scans should first use continuation before revisiting Jacobian reuse.
-The solve benchmark has a scan mode that varies the scaled `Ip` constraint and
-compares cold starts, one-step warm starts, and a first-order secant predictor:
-
-```bash
-./build/release/veqlib_main --mode solve \
-  --scan-points 11 \
-  --scan-policy cold|warm|secant|all \
-  --scan-relative-step 0.02
-```
-
-The scan JSON records each point's initial-guess policy, predictor fallback
-reason, solve wall time, `nfev`, callback count, success flag, raw residual, and
-final state. Use this corpus to decide whether a parameter family still has high
-post-warm-start residual counts before investing in Broyden/Jacobian state
-reuse. On the current smooth `Ip` scan, warm-start already reduces the ten
-continuation points from 38--41 callbacks to 20 callbacks each; secant reaches
-the same count and is retained as an explicit policy for less-linear future
-scans.
-
-`veqlib_main --mode stage` is the lower-level timing path for the same inline
-PF-psin-uniform-Ip case. It measures repeated hot-path stages without the
-CMINPACK solve loop:
-
-```bash
-./build/release/veqlib_main --mode stage \
-  --stage all \
-  --repeat 30 \
-  --warmup 5 \
-  --inner 10000
-```
-
-Available stages are `profiles_fixed`, `profiles_active`, `profiles_all`,
-`geometry_phase`, `geometry_phase_sincos`, `geometry_phase_split_sincos`,
-`geometry_metric_no_store`, `geometry`, `source_materialize`,
-`source_copy_regularize`, `source_D_psin`, `source_A_psin`,
-`source_interpolate_pair`, `source_integrand`, `source_A_integrand`,
-`source_normalize`, `source_D_normalized`, `source_alpha`, `source_update`,
-`residual_update`, `residual_theta_reduce`, `residual_radial_project`,
-`residual_pack`, `evaluate`, and `evaluate_ring`. Each reported sample is
-nanoseconds per stage call after dividing by `--inner`. The `geometry_*`,
-`source_*`, and `residual_*` fine-grained probe stages are benchmark-only
-decompositions of the current route-specific hot path; they are meant to locate
-the next hotspot bucket and should not be treated as separate production kernels
-or as exact hardware-event attribution. `geometry - geometry_metric_no_store` is
-only a surface-output proxy, not a hardware store counter. The residual
-theta/radial split materializes moment rows so projection can be timed
-separately; use it to compare candidate code shapes, not as a claim that the
-current `residual_pack` has identical memory traffic. `evaluate_ring` cycles
-through a deterministic synthetic solver-state ring controlled by `--ring-size`;
-use it to compare warm repeated callbacks against state-varying callback
-traffic, not as a real nonlinear-solver trajectory.
-
-`veqlib_main --mode pf-benchmark` keeps the solver-level JSON compatible while
-adding diagnostic callback timing under `final.callback_timing_ms`. The current
-fields split scaled residual callbacks into `residual_total`,
-`residual_kernel`, and `residual_scale`, keep post-solve diagnostic residual
-time as `final_residual`, and reserve `jacobian_total`, `jvp_total`, and
-`linear_solve` for Jacobian/JVP/linear-solver paths. These timings use
-`std::chrono` instrumentation inside callbacks, so use them for attribution and
-counter alignment rather than as the cleanest absolute solve-time baseline.
+VEQPy's production-facing VEQlib path is the nanobind `KernelSolver`. Runtime
+case setup is supplied by JSON payloads from Python; topology, layout, and route
+kernel structure remain compile-time C++ metadata. Solver choices exposed to
+Python are intentionally limited to the production-supported runtime method
+codes, currently Powell hybrid and Levenberg-Marquardt.
 
 To compare VEQPy's Python solve latency against a direct VEQlib nanobind call,
 build the Release module and run the Python comparison script:
@@ -358,143 +240,21 @@ build the Release module and run the Python comparison script:
 cmake --preset clang-release
 cmake --build --preset clang-release --target veqlib_ext
 ../.venv/bin/python benchmark_pf_psin_uniform_compare.py \
-  --cxx-backend nanobind \
   --module-dir build/release \
   --repeat 30 \
   --warmup 5 \
   --no-write
 ```
 
-This benchmark times `Solver.solve()` and
-`PfPsinUniformIpSolver.solve_direct()` from Python with `time.perf_counter_ns()`. The direct method returns scalar solver metadata plus read-only NumPy views for `x`, raw residual, scaled residual, and `alpha`; the report also records the C++ internal solve time so the interface overhead can be estimated as Python outer time minus C++ inner time.
-Use `--cxx-backend subprocess --cxx-exe build/release/veqlib_main` only when
-you want the older executable-internal timing path.
+This benchmark times `Solver.solve()` and `KernelSolver.solve_direct()` from
+Python with `time.perf_counter_ns()`. The direct method returns scalar solver
+metadata plus read-only NumPy views for `x`, raw residual, scaled residual, and
+`alpha`; the report also records the C++ internal solve time so the interface
+overhead can be estimated as Python outer time minus C++ inner time.
 
-For topology sweeps, use `stage_topology_matrix.py`. It creates isolated CMake
-build directories under `build/topology-matrix/`, configures `DefaultTopology`
-for each requested `Nr x Nt x Mmax`, runs `veqlib_main --mode stage`, and emits a
-single JSON matrix report:
-
-```bash
-./stage_topology_matrix.py \
-  --topology 32x16x1 \
-  --topology 32x32x1 \
-  --stage evaluate \
-  --repeat 10 \
-  --warmup 4 \
-  --inner 5000
-```
-
-When no explicit `--topology` is supplied, `--matrix-preset` selects a built-in
-set: `default`, `representative`, or `full`. The full preset is the current
-`Nr in {16,32,64}` x `Nt in {8,16,24,32,64}` x `Mmax in {1,4,8}` sweep. Pin the
-whole script when comparing timing across rows so the benchmark child processes
-inherit the same CPU affinity:
-
-```bash
-taskset -c 2 ./stage_topology_matrix.py \
-  --matrix-preset full \
-  --stage geometry \
-  --repeat 6 \
-  --warmup 3 \
-  --inner 4000 \
-  --output /tmp/veqlib_full_matrix_geometry_pinned.json
-```
-
-## Dependency Versions
-
-The versions below are the currently validated local toolchain versions.
-
-| Component          | Role                                 | Version                                                    |
-| ------------------ | ------------------------------------ | ---------------------------------------------------------- |
-| C++ standard       | Source language                      | C++20                                                      |
-| clang / clang++    | Required C++ compiler                | 18.1.3, Ubuntu package `clang-18 1:18.1.3-1ubuntu1`        |
-| CMake              | Build system                         | 3.28.3, package `cmake 3.28.3-1build7`                     |
-| lld                | Release linker for ThinLTO           | 18.1.3, package `lld-18 1:18.1.3-1ubuntu1`                 |
-| nlohmann/json      | JSON I/O                             | 3.11.3, package `nlohmann-json3-dev 3.11.3-1`              |
-| GCEM               | Compile-time math                    | source install `v1.18.0` at `/home/rhzhang/opt/gcem-install` |
-| CMINPACK           | MINPACK-style nonlinear solvers      | package `libcminpack-dev 1.3.6-5build1`                    |
-| SUNDIALS KINSOL    | Newton / Newton-Krylov experiments   | package `libsundials-dev 6.4.1+dfsg1-3build4`              |
-| LAPACKE / LAPACK   | Dense linear algebra interface       | package `liblapacke-dev 3.12.0-3build1.1`                  |
-| OpenBLAS           | BLAS backend                         | package `libopenblas-dev 0.3.26+ds-1ubuntu0.1`             |
-| nanobind           | Python extension bridge              | Python package `nanobind 2.13.0` in `.venv`                |
-| LLVM dev files     | Enzyme build dependency              | package `llvm-18-dev 1:18.1.3-1ubuntu1`                    |
-| libclang dev files | ClangEnzyme build dependency         | package `libclang-18-dev 1:18.1.3-1ubuntu1`                |
-| Enzyme             | clang plugin for autodiff            | source build `v0.0.268`, git commit `41b6c734`             |
-| ClangEnzyme plugin | Direct clang++ plugin used by VEQlib | `/home/rhzhang/opt/Enzyme/enzyme/build-llvm18/Enzyme/ClangEnzyme-18.so` |
-| clangd             | Optional editor language server      | 18.1.3, package `clangd-18 1:18.1.3-1ubuntu1`              |
-| clang-format       | Optional formatter                   | 18.1.3, package `clang-format-18 1:18.1.3-1ubuntu1`        |
-
-`LLVMEnzyme-18.so` is also built locally, but VEQlib's direct `clang++` workflow
-uses `ClangEnzyme-18.so`. `LLVMEnzyme` is for lower-level LLVM IR / `opt`
-pipelines and is not the default integration path here.
-
-## Optimization Profile
-
-Release presets enable VEQlib's aggressive kernel profile by default:
-
-- `VEQLIB_ENABLE_NATIVE_OPTIMIZATIONS=ON`
-- `VEQLIB_FP_MODE=RELAXED`
-- `VEQLIB_ENABLE_THIN_LTO=ON`
-
-`VEQLIB_FP_MODE` separates the numerical-contract baseline from the remaining
-native CPU and loop optimizations:
-
-- `STRICT`: `-fno-fast-math -ffp-contract=off`;
-- `FMA`: `-fno-fast-math -ffp-contract=fast`;
-- `RELAXED`: the historical benchmark profile with fast-math, reciprocal, and
-  approximate-function flags.
-
-The common Release target flags are:
-
-```text
--O3
--march=native -mtune=native
--fstrict-aliasing -fomit-frame-pointer
--funroll-loops -fvectorize -fslp-vectorize
--ffunction-sections -fdata-sections
--flto=thin
-link: -fuse-ld=lld -Wl,-O3 -Wl,--gc-sections
-```
-
-The default `RELAXED` FP mode adds:
-
-```text
--ffast-math -ffp-contract=fast -funsafe-math-optimizations
--fno-math-errno -fno-trapping-math -fno-signed-zeros
--freciprocal-math -ffinite-math-only -fapprox-func
-```
-
-`RELAXED` is intended for generated/fixed-size numerical kernels after route
-correctness is locked. It relaxes IEEE floating-point edge-case behavior,
-including NaN/inf propagation, trapping, signed zero, errno, and operation
-reassociation. Use `STRICT` and `FMA` builds to define correctness and error
-budgets before comparing approximate or vector math kernels. The current
-Geometry RELAXED backend already uses a validated reduced-Taylor approximation
-for dynamic `sincos(tb)`; do not silently replace it with scalar libm or a
-different vector backend without paired timing and Python/C++ error evidence.
-
-VEQlib route kernels deliberately do not make solve-success decisions.
-`math::is_finite()` is a bit-level NaN/inf helper for diagnostics and tests,
-but timed/source/residual kernels should not branch on finiteness, magnitude,
-or fallback sentinel values. Solver acceptance belongs in the outer solver or
-validation layer that interprets the residual norm.
-
-For source-correlated performance diagnostics, configure a separate analysis
-build with `VEQLIB_ANALYSIS_BUILD=ON`. This keeps `-O3` but disables ThinLTO for
-that build and emits Clang vectorization optimization remarks, stack-usage
-files, frame-size warnings, and large-by-value-copy warnings:
-
-```bash
-cmake -S . -B build/analysis \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_CXX_COMPILER=clang++ \
-  -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-  -DENABLE_ENZYME=OFF \
-  -DVEQLIB_ENABLE_THIN_LTO=OFF \
-  -DVEQLIB_ANALYSIS_BUILD=ON
-cmake --build build/analysis --target veqlib_main
-```
+Executable-side C++ validation/stage diagnostics are intentionally retired. New
+performance evidence should use the production nanobind/shared-library path or a
+Python-level lifecycle benchmark.
 
 ## Build Presets
 
@@ -502,44 +262,12 @@ Use CMake presets from this directory:
 
 ```bash
 cd ~/veqpy/veqlib
-cmake --preset clang-enzyme-release
-cmake --build --preset clang-enzyme-release
-./build/enzyme-release/veqlib_main --mode probe
+cmake --preset clang-release
+cmake --build --preset clang-release --target veqlib_ext
+ctest --test-dir build/release -R veqlib_python_binding --output-on-failure
 ```
 
-Expected output includes:
-
-```json
-{
-  "cfd": {
-    "cfd33_identity_derivative": 0.9999999999999998,
-    "cfd35_identity_derivative": 1.0000000000000004,
-    "cfd55_identity_derivative": 1.0000000000000004
-  },
-  "cminpack": {
-    "info": 1,
-    "x": 2.0,
-    "f": 0.0
-  },
-  "enzyme": {
-    "square_derivative_at_3": 6.0
-  },
-  "gcem": {
-    "sqrt_9": 3.0
-  },
-  "grid": {
-    "Nr": 32,
-    "weight_sum": 1.0000000000000002
-  },
-  "lapacke": {
-    "info": 0,
-    "solution": [2.0, 3.0]
-  },
-  "linalg": {
-    "thomas": [1.0, 1.0, 0.9999999999999999]
-  }
-}
-```
+The Python binding smoke test imports `veqlib_ext`, constructs `KernelSolver`, and checks the read-only NumPy result views.
 
 Available presets:
 
@@ -610,7 +338,6 @@ sudo apt install -y \
   llvm-18-dev \
   nlohmann-json3-dev \
   libcminpack-dev \
-  libsundials-dev \
   liblapacke-dev \
   libopenblas-dev
 ```

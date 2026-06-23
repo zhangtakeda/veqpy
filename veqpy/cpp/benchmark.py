@@ -60,8 +60,15 @@ def benchmark_kernel_lifecycle(
     first_result = solver.solve_direct()
     first_solve_ms = _elapsed_ms(first_started)
 
+    same_case_payload = solver.metadata_json()
+    set_case_samples = []
     solve_samples = []
+    result = first_result
     for _ in range(config.repeat):
+        started = time.perf_counter_ns()
+        solver.set_case_json(same_case_payload)
+        set_case_samples.append(_elapsed_us(started))
+
         started = time.perf_counter_ns()
         result = solver.solve_direct()
         solve_samples.append(_elapsed_ms(started))
@@ -84,6 +91,7 @@ def benchmark_kernel_lifecycle(
             "warm_registry_hit_us": _stats(registry_hit_samples),
             "solver_ctor_us": _stats(ctor_samples),
             "first_solve_ms": first_solve_ms,
+            "same_case_set_case_us": _stats(set_case_samples),
             "repeated_solve_ms": _stats(solve_samples),
         },
         "result": {
@@ -100,6 +108,12 @@ def benchmark_kernel_lifecycle(
             "script": str(Path("veqlib") / "benchmark_pf_psin_uniform_compare.py"),
             "note": "Use this existing script for full VEQPy Operator/Solver comparison while "
             "the MVP KernelSolver still wraps the benchmark PF backend.",
+        },
+        "case_refresh": {
+            "payload_schema": "KernelSolver.metadata_json() round-trip payload",
+            "scope": "same-case set_case_json() cost immediately before solve_direct()",
+            "note": "Measures real same-topology runtime case refresh through nanobind without "
+            "changing the numeric case values.",
         },
     }
 

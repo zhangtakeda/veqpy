@@ -11,6 +11,7 @@ from typing import Any
 from veqpy.topology import Topology
 
 from .kernel_builder import KernelArtifact, build_kernel
+from .options import solver_method_code
 
 
 class KernelLoadError(ImportError):
@@ -117,7 +118,7 @@ class KernelRegistry:
         )
 
     def load_kernel(self, topology: Topology, *, force: bool = False) -> LoadedKernel:
-        topology_key = topology.artifact_id or topology.compute_artifact_id()
+        topology_key = topology.key or topology.compute_key()
         with self._lock:
             cached_by_topology = self._topology_modules.get(topology_key)
             if cached_by_topology is not None and not force:
@@ -139,22 +140,26 @@ class KernelRegistry:
         self,
         topology: Topology,
         *,
-        solver: str = "residual",
+        solver: str | int = "powell",
         enzyme_width: int = 1,
         force: bool = False,
     ) -> ThreadOwnedKernelSolver:
         loaded = self.load_kernel(topology, force=force)
         solvers = self._thread_solver_cache()
-        key = (loaded.artifact.artifact_id, solver, enzyme_width)
+        solver_code = solver_method_code(solver)
+        key = (loaded.artifact.artifact_id, solver_code, enzyme_width)
         cached = solvers.get(key)
         if cached is not None:
             return cached
-        cpp_solver = loaded.module.KernelSolver(solver=solver, enzyme_width=enzyme_width)
+        cpp_solver = loaded.module.KernelSolver(
+            solver_code=solver_code,
+            enzyme_width=enzyme_width,
+        )
         wrapped = ThreadOwnedKernelSolver(cpp_solver)
         solvers[key] = wrapped
         return wrapped
 
-    def _thread_solver_cache(self) -> dict[tuple[str, str, int], ThreadOwnedKernelSolver]:
+    def _thread_solver_cache(self) -> dict[tuple[str, int, int], ThreadOwnedKernelSolver]:
         solvers = getattr(self._thread_local, "solvers", None)
         if solvers is None:
             solvers = {}

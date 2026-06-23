@@ -8,6 +8,7 @@ from veqpy.topology import Topology
 
 from .kernel_builder import KernelArtifact
 from .kernel_registry import KernelRegistry, SolverThreadError, ThreadOwnedKernelSolver
+from .options import solver_method_code
 
 
 class VEQlibSolver:
@@ -21,7 +22,7 @@ class VEQlibSolver:
         cache_root: Path | None = None,
         source_dir: Path | None = None,
         cxx: str = "clang++",
-        solver: str = "residual",
+        solver: str | int = "powell",
         enzyme_width: int = 1,
     ) -> None:
         topology.validate_supported_for_veqlib_mvp()
@@ -31,7 +32,7 @@ class VEQlibSolver:
             source_dir=source_dir,
             cxx=cxx,
         )
-        self.solver = solver
+        self.solver_code = solver_method_code(solver)
         self.enzyme_width = enzyme_width
         self._owner_thread_id = threading.get_ident()
         self._cpp_solver: ThreadOwnedKernelSolver | None = None
@@ -58,7 +59,7 @@ class VEQlibSolver:
         if self._cpp_solver is None:
             self._cpp_solver = self.registry.get_thread_solver(
                 self.topology,
-                solver=self.solver,
+                solver=self.solver_code,
                 enzyme_width=self.enzyme_width,
             )
         return self._cpp_solver

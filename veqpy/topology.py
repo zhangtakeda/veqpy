@@ -4,7 +4,9 @@ import base64
 import hashlib
 import json
 from dataclasses import dataclass
-from typing import Any, ClassVar
+from typing import Any
+
+_TOPOLOGY_KEY_LENGTH = 32
 
 
 class TopologyError(ValueError):
@@ -14,9 +16,6 @@ class TopologyError(ValueError):
 @dataclass(frozen=True, slots=True)
 class Topology:
     """Canonical kernel topology for the experimental VEQlib Solver path."""
-
-    artifact_schema: ClassVar[str] = "veqpy.topology.artifact.v1"
-    artifact_id_length: ClassVar[int] = 32
 
     # profiles: ProfileTopology
     h_count: int
@@ -47,8 +46,7 @@ class Topology:
 
     # artifact/cache metadata
     build: str = "fastmath"
-    version: str = "v1.0.0"
-    artifact_id: str | None = None
+    key: str | None = None
 
     def __post_init__(self) -> None:
         profile_counts = {
@@ -90,9 +88,6 @@ class Topology:
         build = _normalize_token(self.build, "build").lower()
         if build not in {"fastmath", "release", "debug"}:
             raise TopologyError("build must be one of fastmath, release, or debug")
-        if self.version != "v1.0.0":
-            raise TopologyError("Topology version must be v1.0.0")
-
         sample_count = self._canonical_sample_count(nodes, nr)
         inferred_l = _infer_l_max((*profile_counts.values(), *c_counts, *s_counts))
         l_max = _canonical_exact_or_inferred(self.L_max, inferred_l, "L_max")
@@ -117,18 +112,17 @@ class Topology:
             "M_max": m_max,
             "K_max": k_max,
             "build": build,
-            "version": self.version,
         }
         for key, value in normalized_values.items():
             object.__setattr__(self, key, value)
 
-        expected_artifact_id = self.compute_artifact_id()
-        if self.artifact_id is not None and self.artifact_id != expected_artifact_id:
+        expected_key = self.compute_key()
+        if self.key is not None and self.key != expected_key:
             raise TopologyError(
-                "artifact_id does not match canonical topology: "
-                f"got {self.artifact_id!r}, expected {expected_artifact_id!r}"
+                "key does not match canonical topology: "
+                f"got {self.key!r}, expected {expected_key!r}"
             )
-        object.__setattr__(self, "artifact_id", expected_artifact_id)
+        object.__setattr__(self, "key", expected_key)
 
     def _canonical_sample_count(self, nodes: str, nr: int) -> int:
         if nodes == "grid":
@@ -146,8 +140,6 @@ class Topology:
         """Return the deterministic payload used for artifact indexing."""
 
         return {
-            "schema": self.artifact_schema,
-            "version": self.version,
             "build": self.build,
             "profiles": {
                 "h_count": self.h_count,
@@ -186,12 +178,12 @@ class Topology:
             sort_keys=True,
         ).encode("utf-8")
 
-    def compute_artifact_id(self) -> str:
-        """Return the deterministic artifact id for the canonical topology payload."""
+    def compute_key(self) -> str:
+        """Return the deterministic key for the canonical topology payload."""
 
         digest = hashlib.sha256(self.to_json_bytes()).digest()
         encoded = base64.b32encode(digest).decode("ascii").lower().rstrip("=")
-        return encoded[: self.artifact_id_length]
+        return encoded[: _TOPOLOGY_KEY_LENGTH]
 
     def validate_supported_for_veqlib_mvp(self) -> None:
         """Reject topology combinations not yet implemented by the VEQlib MVP backend."""

@@ -20,9 +20,25 @@ from .kernel_registry import (
     load_kernel,
 )
 from .legacy_compare import LegacyCompareConfig, benchmark_legacy_veqpy_comparison
+from .options import (
+    INITIAL_POLICY_COLD,
+    INITIAL_POLICY_COLD_GEOMETRIC,
+    INITIAL_POLICY_COLD_ZEROS,
+    INITIAL_POLICY_WARM_CLONE,
+    RESIDUAL_NORMALIZATION_BLOCK_RMS,
+    SOLVER_METHOD_LEVENBERG_MARQUARDT,
+    SOLVER_METHOD_POWELL,
+    initial_policy_code,
+    residual_normalization_code,
+    solver_method_code,
+)
 from .solver import VEQlibSolver
 
 __all__ = [
+    "INITIAL_POLICY_COLD",
+    "INITIAL_POLICY_COLD_GEOMETRIC",
+    "INITIAL_POLICY_COLD_ZEROS",
+    "INITIAL_POLICY_WARM_CLONE",
     "KernelArtifact",
     "LegacyCompareConfig",
     "LifecycleBenchmarkConfig",
@@ -30,6 +46,9 @@ __all__ = [
     "KernelLoadError",
     "KernelRegistry",
     "LoadedKernel",
+    "RESIDUAL_NORMALIZATION_BLOCK_RMS",
+    "SOLVER_METHOD_LEVENBERG_MARQUARDT",
+    "SOLVER_METHOD_POWELL",
     "SolverThreadError",
     "ThreadOwnedKernelSolver",
     "VEQlibSolver",
@@ -38,5 +57,8 @@ __all__ = [
     "benchmark_kernel_lifecycle_json",
     "build_kernel",
     "default_kernel_cache_root",
+    "initial_policy_code",
     "load_kernel",
+    "residual_normalization_code",
+    "solver_method_code",
 ]

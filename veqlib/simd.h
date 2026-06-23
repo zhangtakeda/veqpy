@@ -2,7 +2,7 @@
 
 #include <cstddef>
 #if defined(__AVX2__)
-#include <immintrin.h>
+    #include <immintrin.h>
 #endif
 
 namespace simd
@@ -18,21 +18,19 @@ namespace simd
     inline constexpr size_t native_lanes_v<double> = f64x4_lanes;
 
 #if defined(__AVX2__)
-    inline void matvec_f64x4_lanes_into(double* lanes,
-                                        const double* coefficients,
-                                        const double* input,
-                                        size_t        cols) noexcept
+    inline void
+    matvec_f64x4_lanes_into(double* lanes, const double* coefficients, const double* input, size_t cols) noexcept
     {
         __m256d total = _mm256_setzero_pd();
         for (size_t col = 0; col < cols; ++col)
         {
             const __m256d value  = _mm256_broadcast_sd(input + col);
             const __m256d matrix = _mm256_load_pd(coefficients + col * f64x4_lanes);
-#if defined(__FMA__)
+    #if defined(__FMA__)
             total = _mm256_fmadd_pd(matrix, value, total);
-#else
+    #else
             total = _mm256_add_pd(total, _mm256_mul_pd(matrix, value));
-#endif
+    #endif
         }
         _mm256_store_pd(lanes, total);
     }
@@ -51,13 +49,13 @@ namespace simd
             const __m256d value   = _mm256_broadcast_sd(input + col);
             const __m256d matrix0 = _mm256_load_pd(coefficients0 + col * f64x4_lanes);
             const __m256d matrix1 = _mm256_load_pd(coefficients1 + col * f64x4_lanes);
-#if defined(__FMA__)
+    #if defined(__FMA__)
             total0 = _mm256_fmadd_pd(matrix0, value, total0);
             total1 = _mm256_fmadd_pd(matrix1, value, total1);
-#else
+    #else
             total0 = _mm256_add_pd(total0, _mm256_mul_pd(matrix0, value));
             total1 = _mm256_add_pd(total1, _mm256_mul_pd(matrix1, value));
-#endif
+    #endif
         }
         _mm256_store_pd(lanes0, total0);
         _mm256_store_pd(lanes1, total1);

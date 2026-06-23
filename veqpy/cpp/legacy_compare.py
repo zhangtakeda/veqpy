@@ -14,7 +14,6 @@ class LegacyCompareConfig:
     warmup: int = 0
     cxx_backend: str = "nanobind"
     module_dir: Path | None = None
-    cxx_exe: Path | None = None
 
 
 def benchmark_legacy_veqpy_comparison(
@@ -49,9 +48,6 @@ def benchmark_legacy_veqpy_comparison(
     ]
     if config.module_dir is not None:
         command.extend(["--module-dir", str(config.module_dir)])
-    if config.cxx_exe is not None:
-        command.extend(["--cxx-exe", str(config.cxx_exe)])
-
     completed = subprocess.run(
         command,
         cwd=repo_root,

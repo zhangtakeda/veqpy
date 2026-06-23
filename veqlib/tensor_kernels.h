@@ -21,9 +21,9 @@ namespace tensor_kernels
     using tensor_layout::MultiMatvecPlan;
 
     template <size_t Rows, size_t Cols>
-    constexpr void matvec_into(Vector<double, Rows>&       out,
+    constexpr void matvec_into(Vector<double, Rows>&             out,
                                const Matrix<double, Rows, Cols>& matrix,
-                               const Vector<double, Cols>& values) noexcept
+                               const Vector<double, Cols>&       values) noexcept
     {
         for (size_t row = 0; row < Rows; ++row)
         {
@@ -35,11 +35,11 @@ namespace tensor_kernels
     }
 
     template <size_t Rows, size_t Cols>
-    constexpr void multi_matvec_into(Vector<double, Rows>&       out0,
-                                     Vector<double, Rows>&       out1,
+    constexpr void multi_matvec_into(Vector<double, Rows>&             out0,
+                                     Vector<double, Rows>&             out1,
                                      const Matrix<double, Rows, Cols>& matrix0,
                                      const Matrix<double, Rows, Cols>& matrix1,
-                                     const Vector<double, Cols>& values) noexcept
+                                     const Vector<double, Cols>&       values) noexcept
     {
         for (size_t row = 0; row < Rows; ++row)
         {
@@ -59,10 +59,9 @@ namespace tensor_kernels
     namespace detail
     {
         template <size_t Slot, size_t K, size_t Rows, size_t Cols, size_t Lanes>
-        constexpr void plan_slot_matvec_scalar_into(
-            Vector<double, Rows>&                              out,
-            const MultiMatvecPlan<K, Rows, Cols, Lanes>& plan,
-            const Vector<double, Cols>&                  values) noexcept
+        constexpr void plan_slot_matvec_scalar_into(Vector<double, Rows>&                        out,
+                                                    const MultiMatvecPlan<K, Rows, Cols, Lanes>& plan,
+                                                    const Vector<double, Cols>&                  values) noexcept
         {
             static_assert(Slot < K, "multi-matvec matrix slot exceeds output count");
 
@@ -86,16 +85,14 @@ namespace tensor_kernels
 
 #if defined(__AVX2__)
         template <size_t Rows, size_t Cols>
-        inline void plan_matvec_f64x4_into(
-            Vector<double, Rows>&                                        out,
-            const MultiMatvecPlan<1, Rows, Cols, f64x4_lanes>& plan,
-            const Vector<double, Cols>&                            values) noexcept
+        inline void plan_matvec_f64x4_into(Vector<double, Rows>&                              out,
+                                           const MultiMatvecPlan<1, Rows, Cols, f64x4_lanes>& plan,
+                                           const Vector<double, Cols>&                        values) noexcept
         {
             for (size_t block = 0; block < plan.row_blocks; ++block)
             {
                 alignas(32) double lanes[f64x4_lanes];
-                matvec_f64x4_lanes_into(
-                    lanes, &plan.coefficients(0, block, 0, 0), values.data(), Cols);
+                matvec_f64x4_lanes_into(lanes, &plan.coefficients(0, block, 0, 0), values.data(), Cols);
                 for (size_t lane = 0; lane < f64x4_lanes; ++lane)
                 {
                     const size_t row = block * f64x4_lanes + lane;
@@ -106,23 +103,21 @@ namespace tensor_kernels
         }
 
         template <size_t Rows, size_t Cols>
-        inline void plan_multi_matvec2_f64x4_into(
-            Vector<double, Rows>&                                        out0,
-            Vector<double, Rows>&                                        out1,
-            const MultiMatvecPlan<2, Rows, Cols, f64x4_lanes>& plan,
-            const Vector<double, Cols>&                            values) noexcept
+        inline void plan_multi_matvec2_f64x4_into(Vector<double, Rows>&                              out0,
+                                                  Vector<double, Rows>&                              out1,
+                                                  const MultiMatvecPlan<2, Rows, Cols, f64x4_lanes>& plan,
+                                                  const Vector<double, Cols>&                        values) noexcept
         {
             for (size_t block = 0; block < plan.row_blocks; ++block)
             {
                 alignas(32) double lanes0[f64x4_lanes];
                 alignas(32) double lanes1[f64x4_lanes];
-                multi_matvec2_f64x4_lanes_into(
-                    lanes0,
-                    lanes1,
-                    &plan.coefficients(0, block, 0, 0),
-                    &plan.coefficients(1, block, 0, 0),
-                    values.data(),
-                    Cols);
+                multi_matvec2_f64x4_lanes_into(lanes0,
+                                               lanes1,
+                                               &plan.coefficients(0, block, 0, 0),
+                                               &plan.coefficients(1, block, 0, 0),
+                                               values.data(),
+                                               Cols);
                 for (size_t lane = 0; lane < f64x4_lanes; ++lane)
                 {
                     const size_t row = block * f64x4_lanes + lane;
@@ -138,7 +133,7 @@ namespace tensor_kernels
     } // namespace detail
 
     template <size_t Rows, size_t Cols, size_t Lanes>
-    constexpr void multi_matvec_into(Vector<double, Rows>&                         out,
+    constexpr void multi_matvec_into(Vector<double, Rows>&                        out,
                                      const MultiMatvecPlan<1, Rows, Cols, Lanes>& plan,
                                      const Vector<double, Cols>&                  values) noexcept
     {
@@ -156,7 +151,7 @@ namespace tensor_kernels
     }
 
     template <size_t Rows, size_t Cols, size_t Lanes>
-    constexpr void matvec_into(Vector<double, Rows>&                         out,
+    constexpr void matvec_into(Vector<double, Rows>&                        out,
                                const MultiMatvecPlan<1, Rows, Cols, Lanes>& plan,
                                const Vector<double, Cols>&                  values) noexcept
     {
@@ -164,8 +159,8 @@ namespace tensor_kernels
     }
 
     template <size_t Rows, size_t Cols, size_t Lanes>
-    constexpr void multi_matvec_into(Vector<double, Rows>&                         out0,
-                                     Vector<double, Rows>&                         out1,
+    constexpr void multi_matvec_into(Vector<double, Rows>&                        out0,
+                                     Vector<double, Rows>&                        out1,
                                      const MultiMatvecPlan<2, Rows, Cols, Lanes>& plan,
                                      const Vector<double, Cols>&                  values) noexcept
     {

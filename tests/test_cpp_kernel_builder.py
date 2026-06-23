@@ -6,7 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from veqpy.cpp import build_kernel
+import veqpy.cpp.kernel_builder as kernel_builder
+from veqpy.cpp import build_kernel, default_kernel_cache_root
 from veqpy.topology import Topology, TopologyError
 
 
@@ -31,12 +32,17 @@ def make_topology(**overrides: object) -> Topology:
     return Topology(**params)  # type: ignore[arg-type]
 
 
+def test_default_kernel_cache_root_is_repo_local_artifact_dir() -> None:
+    expected = Path(__file__).resolve().parents[1] / "veqlib" / "artifact"
+    assert default_kernel_cache_root() == expected
+
+
 def test_build_kernel_dry_run_writes_artifact_plan(tmp_path: Path) -> None:
     topology = make_topology(M_max=10, K_max=10)
 
     artifact = build_kernel(topology, cache_root=tmp_path, dry_run=True, cxx="clang++")
 
-    assert artifact.root_dir == tmp_path / "v1.0.0" / "fastmath" / artifact.artifact_id
+    assert artifact.root_dir == tmp_path / "fastmath" / artifact.artifact_id
     assert artifact.metadata_path.exists()
     assert artifact.topology_path.exists()
     assert artifact.build_path.exists()
@@ -48,13 +54,40 @@ def test_build_kernel_dry_run_writes_artifact_plan(tmp_path: Path) -> None:
     assert artifact.metadata["artifact"]["status"] == "planned"
     assert artifact.metadata["artifact"]["artifact_id"] == artifact.artifact_id
     assert artifact.metadata["topology"] == topology.to_canonical_dict()
+    assert "veqpy_cpp_source_digest" not in artifact.metadata["build_identity"]
+    assert artifact.metadata["python_client_source_digest"]["file_count"] > 0
+    native_contract = artifact.metadata["build_identity"]["native_build_contract"]
+    assert native_contract["defines"]["VEQ_NR"] == topology.Nr
     assert artifact.metadata["build_identity"]["veqlib_source_digest"]["file_count"] > 0
 
     configure = artifact.metadata["build"]["cmake_configure"]
     assert f"-DVEQ_NR={topology.Nr}" in configure
+    assert f"-DVEQ_SOURCE_SAMPLE_COUNT={topology.sample_count}" in configure
     assert "-DVEQ_SIN_PROFILE_COUNTS=3" in configure
     assert "-DVEQ_BOUNDARY_M_MAX=10" in configure
     assert "-DVEQ_PROFILE_KMAX_LIMIT=10" in configure
+    assert f"-DVEQLIB_NB_DOMAIN=veqpy_kernel_{artifact.artifact_id}" in configure
+    nanobind_static = artifact.metadata["common_artifacts"]["nanobind_static"]
+    assert nanobind_static["schema"] == "veqpy.nanobind_static_artifact.v1"
+    assert nanobind_static["status"] == "planned"
+    assert "/_common/nanobind-static/fastmath/" in nanobind_static["archive_path"]
+    assert f"-DVEQLIB_PREBUILT_NANOBIND_STATIC={nanobind_static['archive_path']}" in configure
+    build = artifact.metadata["build"]["cmake_build"]
+    assert "--parallel" in build
+    assert int(build[build.index("--parallel") + 1]) >= 1
+
+
+def test_source_digest_ignores_repo_local_kernel_artifacts(tmp_path: Path) -> None:
+    source_dir = tmp_path / "veqlib"
+    source_dir.mkdir()
+    (source_dir / "kernel_api.h").write_text("stable source\n")
+    artifact_generated = source_dir / "artifact" / "fastmath" / "abc" / "cmake-build" / "generated"
+    artifact_generated.mkdir(parents=True)
+    (artifact_generated / "config.h").write_text("generated artifact header\n")
+
+    digest = kernel_builder._source_digest(source_dir)
+
+    assert digest["file_count"] == 1
 
 
 def test_build_kernel_artifact_id_distinguishes_build_mode(tmp_path: Path) -> None:
@@ -62,8 +95,32 @@ def test_build_kernel_artifact_id_distinguishes_build_mode(tmp_path: Path) -> No
     debug = build_kernel(make_topology(build="debug"), cache_root=tmp_path, dry_run=True)
 
     assert fastmath.artifact_id != debug.artifact_id
-    assert fastmath.root_dir.parts[-3:-1] == ("v1.0.0", "fastmath")
-    assert debug.root_dir.parts[-3:-1] == ("v1.0.0", "debug")
+    assert fastmath.root_dir.parts[-2] == "fastmath"
+    assert debug.root_dir.parts[-2] == "debug"
+
+
+def test_build_kernel_artifact_id_ignores_python_client_digest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    topology = make_topology()
+    first = build_kernel(topology, cache_root=tmp_path, dry_run=True)
+
+    monkeypatch.setattr(
+        kernel_builder,
+        "_python_source_digest",
+        lambda: {
+            "schema": "veqpy.cpp_python_source_digest.v1",
+            "algorithm": "sha256",
+            "file_count": 1,
+            "files": ["veqpy/cpp/solver.py"],
+            "sha256": "changed-python-client",
+        },
+    )
+    second = build_kernel(topology, cache_root=tmp_path, dry_run=True)
+
+    assert second.artifact_id == first.artifact_id
+    assert second.root_dir == first.root_dir
+    assert second.metadata["python_client_source_digest"]["sha256"] == "changed-python-client"
 
 
 def test_build_kernel_reuses_verified_existing_artifact(tmp_path: Path) -> None:

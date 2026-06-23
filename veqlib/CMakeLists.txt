@@ -18,10 +18,18 @@ set_property(CACHE VEQLIB_FP_MODE PROPERTY STRINGS STRICT FMA RELAXED)
 set(VEQLIB_ENZYME_PLUGIN "" CACHE FILEPATH "Path to ClangEnzyme shared library")
 set(VEQLIB_ENZYME_INCLUDE_DIR "$ENV{HOME}/opt/Enzyme/enzyme/include" CACHE PATH "Path to Enzyme C++ headers")
 set(VEQLIB_GCEM_ROOT "$ENV{HOME}/opt/gcem-install" CACHE PATH "GCEM install prefix")
+set(VEQLIB_NB_DOMAIN "veqlib_default" CACHE STRING "nanobind type registry domain for this extension")
+set(
+    VEQLIB_PREBUILT_NANOBIND_STATIC
+    ""
+    CACHE FILEPATH
+    "Optional prebuilt libnanobind-static.a reused across topology-specific kernel builds"
+)
 set(VEQLIB_CONSTEXPR_STEP_LIMIT "67108864")
 set(VEQLIB_CONSTEXPR_STEPS "${VEQLIB_CONSTEXPR_STEP_LIMIT}" CACHE STRING "Clang constexpr evaluation step budget")
 set(VEQ_NR "8" CACHE STRING "Default topology radial grid node count")
 set(VEQ_NT "16" CACHE STRING "Default topology poloidal grid node count")
+set(VEQ_SOURCE_SAMPLE_COUNT "51" CACHE STRING "Default topology source sample count")
 set(VEQ_H_PROFILE_COUNT "10" CACHE STRING "h profile coefficient count; 0 disables the profile")
 set(VEQ_V_PROFILE_COUNT "10" CACHE STRING "v profile coefficient count; 0 disables the profile")
 set(VEQ_KAPPA_PROFILE_COUNT "10" CACHE STRING "kappa profile coefficient count; 0 disables the profile")
@@ -60,6 +68,9 @@ set(VEQLIB_FP_MODE "${VEQLIB_FP_MODE_NORMALIZED}" CACHE STRING "Floating-point m
 
 if(VEQLIB_CONSTEXPR_STEPS GREATER VEQLIB_CONSTEXPR_STEP_LIMIT)
     message(FATAL_ERROR "VEQLIB_CONSTEXPR_STEPS must not exceed ${VEQLIB_CONSTEXPR_STEP_LIMIT}")
+endif()
+if(NOT VEQLIB_NB_DOMAIN MATCHES "^[A-Za-z_][A-Za-z0-9_]*$")
+    message(FATAL_ERROR "VEQLIB_NB_DOMAIN must be a valid C/C++ identifier, got '${VEQLIB_NB_DOMAIN}'")
 endif()
 
 function(veqlib_require_nonnegative_int_var source_var)
@@ -127,6 +138,7 @@ endfunction()
 
 veqlib_require_int_at_least(VEQ_NR 4)
 veqlib_require_int_at_least(VEQ_NT 4)
+veqlib_require_int_at_least(VEQ_SOURCE_SAMPLE_COUNT 1)
 veqlib_require_nonnegative_int_var(VEQ_H_PROFILE_COUNT)
 veqlib_require_nonnegative_int_var(VEQ_V_PROFILE_COUNT)
 veqlib_require_nonnegative_int_var(VEQ_KAPPA_PROFILE_COUNT)
@@ -251,23 +263,6 @@ function(veqlib_link_dependencies target)
     find_library(CMINPACK_LIBRARY NAMES cminpack REQUIRED)
     target_include_directories("${target}" PRIVATE "${CMINPACK_INCLUDE_DIR}")
     target_link_libraries("${target}" PRIVATE "${CMINPACK_LIBRARY}")
-
-    find_path(SUNDIALS_INCLUDE_DIR NAMES kinsol/kinsol.h REQUIRED)
-    find_library(SUNDIALS_KINSOL_LIBRARY NAMES sundials_kinsol REQUIRED)
-    find_library(SUNDIALS_NVEC_SERIAL_LIBRARY NAMES sundials_nvecserial REQUIRED)
-    find_library(SUNDIALS_SUNLINSOL_DENSE_LIBRARY NAMES sundials_sunlinsoldense REQUIRED)
-    find_library(SUNDIALS_SUNLINSOL_SPGMR_LIBRARY NAMES sundials_sunlinsolspgmr REQUIRED)
-    find_library(SUNDIALS_SUNMATRIX_DENSE_LIBRARY NAMES sundials_sunmatrixdense REQUIRED)
-    target_include_directories("${target}" PRIVATE "${SUNDIALS_INCLUDE_DIR}")
-    target_link_libraries(
-        "${target}"
-        PRIVATE
-            "${SUNDIALS_KINSOL_LIBRARY}"
-            "${SUNDIALS_NVEC_SERIAL_LIBRARY}"
-            "${SUNDIALS_SUNLINSOL_DENSE_LIBRARY}"
-            "${SUNDIALS_SUNLINSOL_SPGMR_LIBRARY}"
-            "${SUNDIALS_SUNMATRIX_DENSE_LIBRARY}"
-    )
 
     find_path(LAPACKE_INCLUDE_DIR NAMES lapacke.h REQUIRED)
     find_library(LAPACKE_LIBRARY NAMES lapacke REQUIRED)
@@ -498,14 +493,6 @@ function(veqlib_configure_target target)
     veqlib_link_dependencies("${target}")
 endfunction()
 
-function(veqlib_configure_executable target)
-    veqlib_configure_target("${target}")
-endfunction()
-
-add_executable(veqlib_main main.cpp ${VEQLIB_COMMON_SOURCES})
-veqlib_configure_executable(veqlib_main)
-veqlib_enable_enzyme(veqlib_main)
-
 if(VEQLIB_ENABLE_PYTHON_BINDINGS)
     if(NOT Python_EXECUTABLE AND EXISTS "${PROJECT_SOURCE_DIR}/../.venv/bin/python")
         set(Python_EXECUTABLE "${PROJECT_SOURCE_DIR}/../.venv/bin/python" CACHE FILEPATH "Python interpreter")
@@ -533,34 +520,63 @@ if(VEQLIB_ENABLE_PYTHON_BINDINGS)
     endif()
     find_package(nanobind CONFIG REQUIRED)
 
-    nanobind_add_module(veqlib_ext NB_SUPPRESS_WARNINGS python_bindings.cpp ${VEQLIB_COMMON_SOURCES})
+    if(VEQLIB_PREBUILT_NANOBIND_STATIC)
+        if(NOT EXISTS "${VEQLIB_PREBUILT_NANOBIND_STATIC}")
+            message(
+                FATAL_ERROR
+                "VEQLIB_PREBUILT_NANOBIND_STATIC does not exist: ${VEQLIB_PREBUILT_NANOBIND_STATIC}"
+            )
+        endif()
+        execute_process(
+            COMMAND "${Python_EXECUTABLE}" -m nanobind --include_dir
+            RESULT_VARIABLE VEQLIB_NANOBIND_INCLUDE_RESULT
+            OUTPUT_VARIABLE VEQLIB_NANOBIND_INCLUDE_DIR
+            ERROR_VARIABLE VEQLIB_NANOBIND_INCLUDE_ERROR
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_STRIP_TRAILING_WHITESPACE
+        )
+        if(NOT VEQLIB_NANOBIND_INCLUDE_RESULT EQUAL 0)
+            message(
+                FATAL_ERROR
+                "Python '${Python_EXECUTABLE}' failed to report nanobind --include_dir: "
+                "${VEQLIB_NANOBIND_INCLUDE_ERROR}"
+            )
+        endif()
+        get_filename_component(VEQLIB_NANOBIND_ROOT "${VEQLIB_NANOBIND_INCLUDE_DIR}" DIRECTORY)
+
+        add_library(veqlib_ext MODULE python_bindings.cpp ${VEQLIB_COMMON_SOURCES})
+        nanobind_compile_options(veqlib_ext)
+        nanobind_link_options(veqlib_ext)
+        set_target_properties(veqlib_ext PROPERTIES LINKER_LANGUAGE CXX)
+        nanobind_extension(veqlib_ext)
+        nanobind_disable_stack_protector(veqlib_ext)
+        nanobind_opt_size(veqlib_ext)
+        nanobind_strip(veqlib_ext)
+        nanobind_set_visibility(veqlib_ext)
+        target_include_directories(
+            veqlib_ext
+            SYSTEM
+            PRIVATE
+                "${Python_INCLUDE_DIRS}"
+                "${VEQLIB_NANOBIND_INCLUDE_DIR}"
+                "${VEQLIB_NANOBIND_ROOT}/ext/robin_map/include"
+        )
+        target_link_libraries(veqlib_ext PRIVATE "${VEQLIB_PREBUILT_NANOBIND_STATIC}" Python::Module)
+    else()
+        nanobind_add_module(veqlib_ext NB_SUPPRESS_WARNINGS python_bindings.cpp ${VEQLIB_COMMON_SOURCES})
+    endif()
     veqlib_configure_target(veqlib_ext)
+    target_compile_definitions(veqlib_ext PRIVATE "NB_DOMAIN=${VEQLIB_NB_DOMAIN}")
 endif()
 
 enable_testing()
-add_test(NAME veqlib_probe COMMAND veqlib_main --mode probe)
-add_test(NAME veqlib_temp_validation COMMAND veqlib_main --mode temp-validation)
-add_test(NAME veqlib_pf_psin_uniform_validation COMMAND veqlib_main --mode pf-validation)
-add_test(
-    NAME veqlib_pf_psin_uniform_scan
-    COMMAND
-        veqlib_main
-        --mode
-        solve
-        --scan-points
-        3
-        --scan-policy
-        secant
-        --scan-relative-step
-        0.005
-)
 if(VEQLIB_ENABLE_PYTHON_BINDINGS)
     add_test(
         NAME veqlib_python_binding
         COMMAND
             "${Python_EXECUTABLE}"
             -c
-            "import json, veqlib_ext; report=json.loads(veqlib_ext.validate_pf_psin_uniform_ip_json()); scan=json.loads(veqlib_ext.scan_pf_psin_uniform_ip_json(points=3, policy='warm', relative_step=0.005)); solver=veqlib_ext.PfPsinUniformIpSolver(); direct=solver.solve_direct(); kernel=veqlib_ext.KernelSolver(); meta=kernel.metadata(); kres=kernel.solve_direct(); ok=report['route'] == 'PF/psin/uniform/Ip' and scan['success'] and scan['scan']['success'] and len(direct) == 15 and direct[1] and direct[11].shape == (18,) and direct[14].shape == (2,) and not direct[11].flags.writeable and meta['route'] == 'PF/psin/uniform/Ip' and len(kres) == 15 and kres[1]; raise SystemExit(0 if ok else 1)"
+            "import veqlib_ext; kernel=veqlib_ext.KernelSolver(); meta=kernel.metadata(); kres=kernel.solve_direct(); ok=meta['route'] == 'PF/psin/uniform/Ip' and len(kres) == 15 and kres[1] and kres[11].shape == (18,) and kres[14].shape == (2,) and not kres[11].flags.writeable; raise SystemExit(0 if ok else 1)"
     )
     set_tests_properties(
         veqlib_python_binding

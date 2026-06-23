@@ -21,6 +21,8 @@ from veqpy.topology import Topology
 GENERATOR_VERSION = "veqpy.cpp.kernel_builder.v1"
 ARTIFACT_SCHEMA = "veqpy.kernel_artifact.v1"
 SOURCE_DIGEST_SCHEMA = "veqlib.source_digest.v1"
+PYTHON_SOURCE_DIGEST_SCHEMA = "veqpy.cpp_python_source_digest.v1"
+NANOBIND_STATIC_SCHEMA = "veqpy.nanobind_static_artifact.v1"
 
 
 class KernelBuildError(RuntimeError):
@@ -46,12 +48,12 @@ class KernelArtifact:
 
 
 def default_kernel_cache_root() -> Path:
-    """Return the VEQPy kernel cache root without creating it."""
+    """Return the repository-local VEQPy kernel cache root without creating it."""
 
     override = os.environ.get("VEQPY_KERNEL_CACHE")
     if override:
         return Path(override).expanduser()
-    return Path.home() / ".cache" / "veqpy" / "kernels"
+    return _default_source_dir() / "artifact"
 
 
 def build_kernel(
@@ -77,8 +79,14 @@ def build_kernel(
     build_identity = _build_identity(topology, source_dir=source_dir, cxx=cxx)
     artifact_id = _compute_artifact_id(topology, build_identity)
     root = (cache_root or default_kernel_cache_root()).expanduser()
-    root_dir = root / topology.version / topology.build / artifact_id
-    lock_path = root / topology.version / topology.build / f"{artifact_id}.lock"
+    nanobind_static = _get_or_build_nanobind_static(
+        root,
+        cxx=cxx,
+        build=topology.build,
+        dry_run=dry_run,
+    )
+    root_dir = root / topology.build / artifact_id
+    lock_path = root / topology.build / f"{artifact_id}.lock"
     root_dir.parent.mkdir(parents=True, exist_ok=True)
 
     with _exclusive_lock(lock_path):
@@ -103,13 +111,22 @@ def build_kernel(
             )
 
         started = time.perf_counter()
-        cmake_args = _cmake_configure_args(topology, source_dir, paths["cmake_build_dir"], cxx)
+        cmake_args = _cmake_configure_args(
+            topology,
+            source_dir,
+            paths["cmake_build_dir"],
+            cxx,
+            artifact_id=artifact_id,
+            prebuilt_nanobind_static=nanobind_static["archive_path"],
+        )
         build_command = [
             "cmake",
             "--build",
             str(paths["cmake_build_dir"]),
             "--target",
             "veqlib_ext",
+            "--parallel",
+            str(_default_build_parallel_jobs()),
         ]
         metadata = _metadata_payload(
             topology=topology,
@@ -118,6 +135,7 @@ def build_kernel(
             build_identity=build_identity,
             cmake_args=cmake_args,
             build_command=build_command,
+            nanobind_static=nanobind_static,
             dry_run=dry_run,
         )
         _write_json(paths["topology_path"], topology.to_canonical_dict())
@@ -189,6 +207,7 @@ def _metadata_payload(
     build_identity: dict[str, Any],
     cmake_args: list[str],
     build_command: list[str],
+    nanobind_static: dict[str, Any],
     dry_run: bool,
 ) -> dict[str, Any]:
     module_name = f"veqpy._kernel_cache.k_{artifact_id}.veqlib_ext"
@@ -204,6 +223,10 @@ def _metadata_payload(
         },
         "topology": topology.to_canonical_dict(),
         "build_identity": build_identity,
+        "python_client_source_digest": _python_source_digest(),
+        "common_artifacts": {
+            "nanobind_static": nanobind_static,
+        },
         "build": {
             "build": topology.build,
             "dry_run": dry_run,
@@ -239,7 +262,13 @@ def load():
 
 
 def _cmake_configure_args(
-    topology: Topology, source_dir: Path, build_dir: Path, cxx: str
+    topology: Topology,
+    source_dir: Path,
+    build_dir: Path,
+    cxx: str,
+    *,
+    artifact_id: str,
+    prebuilt_nanobind_static: str | None,
 ) -> list[str]:
     build_type = "Debug" if topology.build == "debug" else "Release"
     fp_mode = "RELAXED" if topology.build == "fastmath" else "STRICT"
@@ -252,14 +281,18 @@ def _cmake_configure_args(
         str(build_dir),
         f"-DCMAKE_BUILD_TYPE={build_type}",
         f"-DCMAKE_CXX_COMPILER={cxx}",
+        f"-DPython_EXECUTABLE={sys.executable}",
         "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
         "-DENABLE_ENZYME=OFF",
         "-DVEQLIB_ENABLE_PYTHON_BINDINGS=ON",
         "-DVEQLIB_ENABLE_NATIVE_OPTIMIZATIONS=ON",
         f"-DVEQLIB_FP_MODE={fp_mode}",
+        f"-DVEQLIB_NB_DOMAIN=veqpy_kernel_{artifact_id}",
+        f"-DVEQLIB_PREBUILT_NANOBIND_STATIC={prebuilt_nanobind_static or ''}",
         "-DVEQLIB_ENABLE_THIN_LTO=ON",
         f"-DVEQ_NR={topology.Nr}",
         f"-DVEQ_NT={topology.Nt}",
+        f"-DVEQ_SOURCE_SAMPLE_COUNT={topology.sample_count}",
         f"-DVEQ_H_PROFILE_COUNT={topology.h_count}",
         f"-DVEQ_V_PROFILE_COUNT={topology.v_count}",
         f"-DVEQ_KAPPA_PROFILE_COUNT={topology.kappa_count}",
@@ -272,10 +305,82 @@ def _cmake_configure_args(
     ]
 
 
-def _build_identity(topology: Topology, *, source_dir: Path, cxx: str) -> dict[str, Any]:
+def _get_or_build_nanobind_static(
+    cache_root: Path,
+    *,
+    cxx: str,
+    build: str,
+    dry_run: bool,
+) -> dict[str, Any]:
+    identity = _nanobind_static_identity(cxx=cxx, build=build)
+    artifact_id = _compute_nanobind_static_id(identity)
+    root_dir = cache_root / "_common" / "nanobind-static" / build / artifact_id
+    archive_path = root_dir / "cmake-build" / "libnanobind-static.a"
+    metadata_path = root_dir / "metadata.json"
+    lock_path = root_dir.with_suffix(".lock")
+    payload: dict[str, Any] = {
+        "schema": NANOBIND_STATIC_SCHEMA,
+        "artifact_id": artifact_id,
+        "status": "planned" if dry_run else "building",
+        "archive_path": str(archive_path),
+        "identity": identity,
+        "elapsed_ms": None,
+    }
+    if dry_run:
+        return {**payload, "status": "planned"}
+
+    root_dir.mkdir(parents=True, exist_ok=True)
+    with _exclusive_lock(lock_path):
+        if _nanobind_static_is_reusable(metadata_path, archive_path, identity):
+            metadata = _read_json(metadata_path)
+            return {**metadata, "reused": True}
+
+        started = time.perf_counter()
+        source_path = root_dir / "CMakeLists.txt"
+        build_dir = root_dir / "cmake-build"
+        configure_log_path = root_dir / "configure.log"
+        build_log_path = root_dir / "build.log"
+        source_path.write_text(_nanobind_static_cmake_project())
+        configure = [
+            "cmake",
+            "-S",
+            str(root_dir),
+            "-B",
+            str(build_dir),
+            f"-DCMAKE_BUILD_TYPE={'Debug' if build == 'debug' else 'Release'}",
+            f"-DCMAKE_CXX_COMPILER={cxx}",
+            f"-DPython_EXECUTABLE={sys.executable}",
+        ]
+        build_command = [
+            "cmake",
+            "--build",
+            str(build_dir),
+            "--target",
+            "nanobind-static",
+            "--parallel",
+            str(_default_build_parallel_jobs()),
+        ]
+        _run_logged(configure, configure_log_path, cwd=root_dir)
+        _run_logged(build_command, build_log_path, cwd=root_dir)
+        if not archive_path.exists():
+            raise KernelBuildError(f"nanobind static build did not produce {archive_path}")
+        metadata = {
+            **payload,
+            "status": "built",
+            "archive_sha256": _file_sha256(archive_path),
+            "configure": configure,
+            "build_command": build_command,
+            "elapsed_ms": _elapsed_ms(started),
+            "reused": False,
+        }
+        _write_json(metadata_path, metadata)
+        return metadata
+
+
+def _nanobind_static_identity(*, cxx: str, build: str) -> dict[str, Any]:
     return {
-        "schema": "veqpy.kernel_build_identity.v1",
-        "generator": GENERATOR_VERSION,
+        "schema": "veqpy.nanobind_static_identity.v1",
+        "build_type": "Debug" if build == "debug" else "Release",
         "python": {
             "version": platform.python_version(),
             "implementation": platform.python_implementation(),
@@ -288,7 +393,108 @@ def _build_identity(topology: Topology, *, source_dir: Path, cxx: str) -> dict[s
             "cxx_version": _command_version([cxx, "--version"]),
             "nanobind": _package_version("nanobind"),
         },
-        "topology_build": topology.build,
+    }
+
+
+def _compute_nanobind_static_id(identity: dict[str, Any]) -> str:
+    data = json.dumps(identity, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode(
+        "utf-8"
+    )
+    digest = hashlib.sha256(data).digest()
+    return base64.b32encode(digest).decode("ascii").lower().rstrip("=")[:32]
+
+
+def _nanobind_static_is_reusable(
+    metadata_path: Path, archive_path: Path, identity: dict[str, Any]
+) -> bool:
+    if not metadata_path.exists() or not archive_path.exists():
+        return False
+    metadata = _read_json(metadata_path)
+    if metadata.get("schema") != NANOBIND_STATIC_SCHEMA:
+        return False
+    if metadata.get("status") != "built":
+        return False
+    if metadata.get("identity") != identity:
+        return False
+    expected = metadata.get("archive_sha256")
+    return isinstance(expected, str) and _file_sha256(archive_path) == expected
+
+
+def _nanobind_static_cmake_project() -> str:
+    return """cmake_minimum_required(VERSION 3.24)
+project(veqpy_nanobind_static LANGUAGES CXX)
+
+find_package(Python 3.12 COMPONENTS Interpreter Development.Module REQUIRED)
+execute_process(
+    COMMAND "${Python_EXECUTABLE}" -m nanobind --cmake_dir
+    RESULT_VARIABLE VEQPY_NANOBIND_CMAKE_RESULT
+    OUTPUT_VARIABLE VEQPY_NANOBIND_CMAKE_DIR
+    ERROR_VARIABLE VEQPY_NANOBIND_CMAKE_ERROR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_STRIP_TRAILING_WHITESPACE
+)
+if(NOT VEQPY_NANOBIND_CMAKE_RESULT EQUAL 0)
+    message(FATAL_ERROR "nanobind --cmake_dir failed: ${VEQPY_NANOBIND_CMAKE_ERROR}")
+endif()
+set(nanobind_DIR "${VEQPY_NANOBIND_CMAKE_DIR}" CACHE PATH "nanobind CMake package directory")
+find_package(nanobind CONFIG REQUIRED)
+nanobind_build_library(nanobind-static AS_SYSINCLUDE)
+"""
+
+
+def _native_build_contract(topology: Topology, *, cxx: str) -> dict[str, Any]:
+    """Return the Python-emitted native contract that participates in artifact identity.
+
+    Python facade/helper source changes should not force a native rebuild by themselves.
+    The artifact key is tied to the topology, toolchain ABI, VEQlib sources, and the
+    concrete CMake definitions that select generated native code.
+    """
+
+    build_type = "Debug" if topology.build == "debug" else "Release"
+    fp_mode = "RELAXED" if topology.build == "fastmath" else "STRICT"
+    kmax_limit = max(2, topology.K_max or 2)
+    return {
+        "schema": "veqpy.native_build_contract.v1",
+        "cmake_build_type": build_type,
+        "cxx": cxx,
+        "defines": {
+            "ENABLE_ENZYME": "OFF",
+            "VEQLIB_ENABLE_PYTHON_BINDINGS": "ON",
+            "VEQLIB_ENABLE_NATIVE_OPTIMIZATIONS": "ON",
+            "VEQLIB_FP_MODE": fp_mode,
+            "VEQLIB_ENABLE_THIN_LTO": "ON",
+            "VEQ_NR": topology.Nr,
+            "VEQ_NT": topology.Nt,
+            "VEQ_SOURCE_SAMPLE_COUNT": topology.sample_count,
+            "VEQ_H_PROFILE_COUNT": topology.h_count,
+            "VEQ_V_PROFILE_COUNT": topology.v_count,
+            "VEQ_KAPPA_PROFILE_COUNT": topology.kappa_count,
+            "VEQ_PSIN_PROFILE_COUNT": topology.psin_count,
+            "VEQ_F_PROFILE_COUNT": topology.F_count,
+            "VEQ_COS_PROFILE_COUNTS": topology.c_counts,
+            "VEQ_SIN_PROFILE_COUNTS": topology.s_counts,
+            "VEQ_BOUNDARY_M_MAX": topology.M_max,
+            "VEQ_PROFILE_KMAX_LIMIT": kmax_limit,
+        },
+    }
+
+
+def _build_identity(topology: Topology, *, source_dir: Path, cxx: str) -> dict[str, Any]:
+    return {
+        "schema": "veqpy.kernel_build_identity.v1",
+        "python": {
+            "version": platform.python_version(),
+            "implementation": platform.python_implementation(),
+            "cache_tag": sys.implementation.cache_tag,
+            "abi_flags": getattr(sys, "abiflags", ""),
+        },
+        "tools": {
+            "cmake": _command_version(["cmake", "--version"]),
+            "cxx": cxx,
+            "cxx_version": _command_version([cxx, "--version"]),
+            "nanobind": _package_version("nanobind"),
+        },
+        "native_build_contract": _native_build_contract(topology, cxx=cxx),
         "veqlib_source_digest": _source_digest(source_dir),
     }
 
@@ -323,10 +529,33 @@ def _source_digest(source_dir: Path) -> dict[str, Any]:
     }
 
 
+def _python_source_digest() -> dict[str, Any]:
+    root = Path(__file__).resolve().parents[1]
+    files = [root / "topology.py", *sorted((root / "cpp").glob("*.py"))]
+    digest = hashlib.sha256()
+    retained = []
+    for path in files:
+        if not path.is_file():
+            continue
+        relative = path.relative_to(root).as_posix()
+        retained.append(relative)
+        digest.update(relative.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return {
+        "schema": PYTHON_SOURCE_DIGEST_SCHEMA,
+        "algorithm": "sha256",
+        "file_count": len(retained),
+        "files": retained,
+        "sha256": digest.hexdigest(),
+    }
+
+
 def _is_source_digest_file(path: Path) -> bool:
     if not path.is_file():
         return False
-    ignored = {"build", "__pycache__", "experiments"}
+    ignored = {"artifact", "build", "__pycache__", "experiments"}
     if any(part in ignored for part in path.parts):
         return False
     return path.suffix in {".h", ".cpp", ".in", ".txt"} or path.name in {
@@ -334,6 +563,10 @@ def _is_source_digest_file(path: Path) -> bool:
         "CMakePresets.json",
         "README.md",
     }
+
+
+def _default_build_parallel_jobs() -> int:
+    return max(1, min(os.cpu_count() or 1, 8))
 
 
 def _copy_extension(build_dir: Path, destination: Path) -> None:

@@ -474,6 +474,7 @@ namespace nonlinear::detail
         Vector<double, work_size>             work{uninitialized};
         Vector<double, equations * variables> fjac{uninitialized};
         double                                tolerance            = 1.0e-8;
+        int                                   max_evaluations      = 1000;
         int                                   evaluations          = 0;
         int                                   jacobian_evaluations = 0;
         int                                   info                 = 0;
@@ -515,6 +516,8 @@ namespace nonlinear::detail
             auto& self = *static_cast<Context*>(data);
             if (iflag > 0)
             {
+                if (self.max_evaluations > 0 && self.evaluations >= self.max_evaluations)
+                    return -1;
                 self.functor(x, fvec);
                 ++self.evaluations;
             }
@@ -527,6 +530,8 @@ namespace nonlinear::detail
             auto& self = *static_cast<Context*>(data);
             if (iflag == 1)
             {
+                if (self.max_evaluations > 0 && self.evaluations >= self.max_evaluations)
+                    return -1;
                 self.functor(x, fvec);
                 ++self.evaluations;
             }
@@ -555,6 +560,7 @@ namespace nonlinear::detail
         Vector<double, equations * variables> fjac{uninitialized};
         Vector<int, variables>                ipvt{uninitialized};
         double                                tolerance            = 1.0e-8;
+        int                                   max_evaluations      = 1000;
         int                                   evaluations          = 0;
         int                                   jacobian_evaluations = 0;
         int                                   info                 = 0;
@@ -600,6 +606,8 @@ namespace nonlinear::detail
             auto& self = *static_cast<Context*>(data);
             if (iflag > 0)
             {
+                if (self.max_evaluations > 0 && self.evaluations >= self.max_evaluations)
+                    return -1;
                 self.functor(x, fvec);
                 ++self.evaluations;
             }
@@ -612,6 +620,8 @@ namespace nonlinear::detail
             auto& self = *static_cast<Context*>(data);
             if (iflag == 1)
             {
+                if (self.max_evaluations > 0 && self.evaluations >= self.max_evaluations)
+                    return -1;
                 self.functor(x, fvec);
                 ++self.evaluations;
             }

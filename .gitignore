@@ -69,6 +69,7 @@ tests/benchmark/
 examples/
 outputs/
 tmp/
+veqlib/artifact/
 
 # Root-only manuscript scratch/artifact directories.
 /figures/

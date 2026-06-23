@@ -125,15 +125,15 @@ namespace geometry::detail
 
             for (size_t i = 0; i < radial_nodes; ++i)
             {
-                const double rho_i   = GridType::nodes[i];
-                const double h_i     = runtime_profiles.profile_field(Shape::h_profile_id, i, profile_value);
-                const double h_r_i   = runtime_profiles.profile_field(Shape::h_profile_id, i, profile_radial);
-                const double h_rr_i  = runtime_profiles.profile_field(Shape::h_profile_id, i, profile_radial2);
-                const double v_r_i   = runtime_profiles.profile_field(Shape::v_profile_id, i, profile_radial);
-                const double v_rr_i  = runtime_profiles.profile_field(Shape::v_profile_id, i, profile_radial2);
-                const double k_i     = runtime_profiles.profile_field(Shape::kappa_profile_id, i, profile_value);
-                const double k_r_i   = runtime_profiles.profile_field(Shape::kappa_profile_id, i, profile_radial);
-                const double k_rr_i  = runtime_profiles.profile_field(Shape::kappa_profile_id, i, profile_radial2);
+                const double rho_i  = GridType::nodes[i];
+                const double h_i    = runtime_profiles.profile_field(Shape::h_profile_id, i, profile_value);
+                const double h_r_i  = runtime_profiles.profile_field(Shape::h_profile_id, i, profile_radial);
+                const double h_rr_i = runtime_profiles.profile_field(Shape::h_profile_id, i, profile_radial2);
+                const double v_r_i  = runtime_profiles.profile_field(Shape::v_profile_id, i, profile_radial);
+                const double v_rr_i = runtime_profiles.profile_field(Shape::v_profile_id, i, profile_radial2);
+                const double k_i    = runtime_profiles.profile_field(Shape::kappa_profile_id, i, profile_value);
+                const double k_r_i  = runtime_profiles.profile_field(Shape::kappa_profile_id, i, profile_radial);
+                const double k_rr_i = runtime_profiles.profile_field(Shape::kappa_profile_id, i, profile_radial2);
 
                 double sum_J          = 0.0;
                 double sum_JR         = 0.0;
@@ -152,17 +152,12 @@ namespace geometry::detail
 
                 for (size_t j = 0; j < theta_rows; ++j)
                 {
-                    double tb_ij = runtime_profiles.boundary_phase_base_field(i, j, ProfilesRuntime::phase_tb);
-                    double tb_r_ij =
-                        runtime_profiles.boundary_phase_base_field(i, j, ProfilesRuntime::phase_tb_r);
-                    double tb_t_ij =
-                        runtime_profiles.boundary_phase_base_field(i, j, ProfilesRuntime::phase_tb_t);
-                    double tb_rr_ij =
-                        runtime_profiles.boundary_phase_base_field(i, j, ProfilesRuntime::phase_tb_rr);
-                    double tb_rt_ij =
-                        runtime_profiles.boundary_phase_base_field(i, j, ProfilesRuntime::phase_tb_rt);
-                    double tb_tt_ij =
-                        runtime_profiles.boundary_phase_base_field(i, j, ProfilesRuntime::phase_tb_tt);
+                    double tb_ij    = runtime_profiles.boundary_phase_base_field(i, j, ProfilesRuntime::phase_tb);
+                    double tb_r_ij  = runtime_profiles.boundary_phase_base_field(i, j, ProfilesRuntime::phase_tb_r);
+                    double tb_t_ij  = runtime_profiles.boundary_phase_base_field(i, j, ProfilesRuntime::phase_tb_t);
+                    double tb_rr_ij = runtime_profiles.boundary_phase_base_field(i, j, ProfilesRuntime::phase_tb_rr);
+                    double tb_rt_ij = runtime_profiles.boundary_phase_base_field(i, j, ProfilesRuntime::phase_tb_rt);
+                    double tb_tt_ij = runtime_profiles.boundary_phase_base_field(i, j, ProfilesRuntime::phase_tb_tt);
 
                     for (size_t active_index = 0; active_index < Shape::active_c_order_count; ++active_index)
                     {
@@ -193,13 +188,13 @@ namespace geometry::detail
 
                     for (size_t active_index = 0; active_index < Shape::active_s_order_count; ++active_index)
                     {
-                        const size_t order      = Shape::active_s_orders[active_index];
-                        const double s_i        = runtime_profiles.s_family_fields(order, i, profile_value);
-                        const double s_r_i      = runtime_profiles.s_family_fields(order, i, profile_radial);
-                        const double s_rr_i     = runtime_profiles.s_family_fields(order, i, profile_radial2);
-                        const double sin_kt     = GridType::sin_mtheta(order, j);
-                        const double k_cos_kt   = GridType::m_cos_mtheta(order, j);
-                        const double k2_sin_kt  = GridType::m2_sin_mtheta(order, j);
+                        const size_t order     = Shape::active_s_orders[active_index];
+                        const double s_i       = runtime_profiles.s_family_fields(order, i, profile_value);
+                        const double s_r_i     = runtime_profiles.s_family_fields(order, i, profile_radial);
+                        const double s_rr_i    = runtime_profiles.s_family_fields(order, i, profile_radial2);
+                        const double sin_kt    = GridType::sin_mtheta(order, j);
+                        const double k_cos_kt  = GridType::m_cos_mtheta(order, j);
+                        const double k2_sin_kt = GridType::m2_sin_mtheta(order, j);
 
                         tb_ij += s_i * sin_kt;
                         tb_r_ij += s_r_i * sin_kt;

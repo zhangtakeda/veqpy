@@ -75,9 +75,8 @@ namespace source::detail
     }
 
     template <typename GridType>
-    constexpr void radial_grid_accumulator_matvec_into(
-        Vector<double, GridType::radial_nodes>&       out,
-        const Vector<double, GridType::radial_nodes>& values) noexcept
+    constexpr void radial_grid_accumulator_matvec_into(Vector<double, GridType::radial_nodes>&       out,
+                                                       const Vector<double, GridType::radial_nodes>& values) noexcept
     {
         using Plan = RadialGridMatvecPlan<GridType>;
         matvec_into(out, Plan::accumulator, values);
@@ -134,8 +133,8 @@ namespace source::detail
 
             regularize_psin_r(n_axis_fix);
             const RadialVector psin_r = const_root_row<root_psin_r>();
-            RadialVector psin_rr{uninitialized};
-            RadialVector integrated{uninitialized};
+            RadialVector       psin_rr{uninitialized};
+            RadialVector       integrated{uninitialized};
             radial_grid_multi_matvec_into<GridType>(psin_rr, integrated, psin_r);
             store_root_row<root_psin_rr>(psin_rr);
             const double offset = integrated[0];
@@ -154,8 +153,7 @@ namespace source::detail
         }
 
         template <typename GeometryRuntime>
-        constexpr void
-        update_pf_psin_uniform_ip(const GeometryRuntime& geometry, double Ip, size_t n_axis_fix) noexcept
+        constexpr void update_pf_psin_uniform_ip(const GeometryRuntime& geometry, double Ip, size_t n_axis_fix) noexcept
         {
             static_assert(GeometryRuntime::radial_nodes == radial_nodes, "source/geometry radial grids must match");
 
@@ -240,10 +238,7 @@ namespace source::detail
                     runtime_profiles.profile_field(Shape::psin_profile_id, i, profile_radial);
         }
 
-        constexpr void benchmark_regularize_psin_r(size_t n_axis_fix) noexcept
-        {
-            regularize_psin_r(n_axis_fix);
-        }
+        constexpr void benchmark_regularize_psin_r(size_t n_axis_fix) noexcept { regularize_psin_r(n_axis_fix); }
 
         constexpr void benchmark_D_psin_into_rr() noexcept
         {
@@ -257,21 +252,15 @@ namespace source::detail
             matvec_into(out, GridType::accumulator, const_root_row<root_psin_r>());
         }
 
-        constexpr void
-        benchmark_DA_psin_into(RadialVector& psin_rr, RadialVector& integrated) const noexcept
+        constexpr void benchmark_DA_psin_into(RadialVector& psin_rr, RadialVector& integrated) const noexcept
         {
             multi_matvec_into(
-                psin_rr,
-                integrated,
-                GridType::differentiator,
-                GridType::accumulator,
-                const_root_row<root_psin_r>());
+                psin_rr, integrated, GridType::differentiator, GridType::accumulator, const_root_row<root_psin_r>());
         }
 
         void benchmark_DA_psin_packed_into(RadialVector& psin_rr, RadialVector& integrated) const noexcept
         {
-            radial_grid_multi_matvec_into<GridType>(
-                psin_rr, integrated, const_root_row<root_psin_r>());
+            radial_grid_multi_matvec_into<GridType>(psin_rr, integrated, const_root_row<root_psin_r>());
         }
 
         constexpr void benchmark_prepare_psin_queries() noexcept
@@ -284,13 +273,10 @@ namespace source::detail
             }
         }
 
-        constexpr void benchmark_interpolate_pair() noexcept
-        {
-            local_barycentric_interpolate_pair();
-        }
+        constexpr void benchmark_interpolate_pair() noexcept { local_barycentric_interpolate_pair(); }
 
         template <typename GeometryRuntime>
-        constexpr void benchmark_fill_pf_psin_integrand(RadialVector& out,
+        constexpr void benchmark_fill_pf_psin_integrand(RadialVector&          out,
                                                         const GeometryRuntime& geometry) const noexcept
         {
             fill_pf_psin_integrand(out, geometry);
@@ -308,12 +294,12 @@ namespace source::detail
         }
 
         template <typename GeometryRuntime>
-        constexpr double benchmark_normalize_psin_r_into(RadialVector&           out,
-                                                         const RadialVector&     integrated,
+        constexpr double benchmark_normalize_psin_r_into(RadialVector&          out,
+                                                         const RadialVector&    integrated,
                                                          const GeometryRuntime& geometry,
                                                          size_t                 n_axis_fix) noexcept
         {
-            out = integrated;
+            out                          = integrated;
             double psin_r_weighted_total = 0.0;
             for (size_t i = 0; i < radial_nodes; ++i)
             {
@@ -345,9 +331,8 @@ namespace source::detail
         }
 
         template <typename GeometryRuntime>
-        constexpr void benchmark_update_alpha_from_integral(const GeometryRuntime& geometry,
-                                                            double                 Ip,
-                                                            double                 integral_prof) noexcept
+        constexpr void
+        benchmark_update_alpha_from_integral(const GeometryRuntime& geometry, double Ip, double integral_prof) noexcept
         {
             const double G1n_integral = g1n_psin_integral_from_radial_moments(geometry);
             alpha1                    = -Ip / G1n_integral;

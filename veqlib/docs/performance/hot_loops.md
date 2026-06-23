@@ -35,16 +35,14 @@ Use `clang-release`, `clang-release-fma`, or a paired release build for timing.
 ## Standard commands
 
 ```bash
-cmake --preset clang-analysis
-cmake --build --preset clang-analysis --target veqlib_main
-
-./build/release/veqlib_main --mode stage --stage all --repeat 30 --warmup 5 --inner 3000
-./build/release/veqlib_main --mode stage --stage evaluate_ring --repeat 30 --warmup 5 --inner 3000
-./build/release/veqlib_main --mode solve --repeat 30 --warmup 5
-
-python stage_topology_matrix.py --matrix-preset simd-tail --stage evaluate_ring \
-  --repeat 10 --warmup 4 --inner 5000 --output experiments/simd-tail-evaluate-ring.json
+cmake --preset clang-release
+cmake --build --preset clang-release --target veqlib_ext
+../.venv/bin/python benchmark_pf_psin_uniform_compare.py   --module-dir build/release   --repeat 30   --warmup 5   --no-write
 ```
+
+The old executable-side stage benchmark has been retired; retained hot-loop
+evidence should use production nanobind/shared-library timings or explicitly
+archived experiment artifacts.
 
 Pinning to one core with `taskset -c <core>` is recommended for retained timing
 artifacts when the environment supports it.
@@ -66,7 +64,7 @@ When adding or updating a row, include the artifact path and record:
 - compiler preset and FP mode;
 - topology (`Nr x Nt x Mmax`);
 - stage command and timing statistics;
-- whether `evaluate`, `evaluate_ring`, and `solve` moved in the same direction;
+- whether production nanobind solve/lifecycle metrics moved in the same direction;
 - vectorization report or assembly file path when the decision relies on codegen;
 - correctness check (`ctest`, Python/C++ comparator, or route-specific validation).
 

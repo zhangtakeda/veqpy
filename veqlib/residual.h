@@ -132,11 +132,8 @@ namespace residual::detail
             benchmark_theta_reduce_profile<0>(moments);
         }
 
-        constexpr void benchmark_radial_project_from(PackedVector&    out,
-                                                     const MomentRows& moments,
-                                                     double            a,
-                                                     double            R0,
-                                                     double            B0) const noexcept
+        constexpr void benchmark_radial_project_from(
+            PackedVector& out, const MomentRows& moments, double a, double R0, double B0) const noexcept
         {
             benchmark_radial_project_profile<0>(out, moments, a, R0, B0);
         }
@@ -241,11 +238,8 @@ namespace residual::detail
         }
 
         template <size_t ProfileId>
-        constexpr void benchmark_radial_project_profile(PackedVector&    out,
-                                                        const MomentRows& moments,
-                                                        double            a,
-                                                        double            R0,
-                                                        double            B0) const noexcept
+        constexpr void benchmark_radial_project_profile(
+            PackedVector& out, const MomentRows& moments, double a, double R0, double B0) const noexcept
         {
             if constexpr (ProfileId < Shape::profile_count)
             {
@@ -257,11 +251,8 @@ namespace residual::detail
         }
 
         template <size_t ProfileId, size_t Count>
-        constexpr void benchmark_radial_project_one(PackedVector&    out,
-                                                    const MomentRows& moments,
-                                                    double            a,
-                                                    double            R0,
-                                                    double            B0) const noexcept
+        constexpr void benchmark_radial_project_one(
+            PackedVector& out, const MomentRows& moments, double a, double R0, double B0) const noexcept
         {
             constexpr size_t code         = block_code<ProfileId>();
             constexpr size_t radial_power = block_radial_power<ProfileId>();
@@ -399,7 +390,7 @@ namespace residual::detail
         }
 
         template <size_t Count, size_t ProfileId, typename WeightA, typename WeightB, typename WeightC>
-        constexpr void project_moment_scaled(PackedVector&    out,
+        constexpr void project_moment_scaled(PackedVector&     out,
                                              const MomentRows& moments,
                                              const WeightA&    weight_a,
                                              const WeightB&    weight_b,

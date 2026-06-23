@@ -23,8 +23,8 @@ namespace operators::detail
     template <typename Shape, typename SourceShape>
     struct PfPsinUniformIpSetup
     {
-        ProfileRuntimeParams<Shape> profile_params{};
-        double                      fix_rho = 0.0;
+        ProfileRuntimeParams<Shape>               profile_params{};
+        double                                    fix_rho = 0.0;
         Vector<double, SourceShape::sample_count> heat{};
         Vector<double, SourceShape::sample_count> current{};
     };
@@ -50,15 +50,15 @@ namespace operators::detail
                       "PF/psin/uniform does not accept an active F profile");
         static_assert(SourceShape::sample_count >= 1, "PF/psin/uniform source needs at least one sample");
 
-        using shape       = Shape;
-        using grid        = GridType;
+        using shape        = Shape;
+        using grid         = GridType;
         using source_shape = SourceShape;
-        using Setup       = PfPsinUniformIpSetup<Shape, SourceShape>;
-        using SolveParams = PfPsinUniformIpSolveParams;
-        using Profiles    = RuntimeProfiles<Shape, GridType>;
-        using Geometry    = GeometryRuntime<GridType>;
-        using Source      = PfPsinUniformIpSourceRuntime<GridType, SourceShape>;
-        using Residual    = ResidualRuntime<Shape, GridType>;
+        using Setup        = PfPsinUniformIpSetup<Shape, SourceShape>;
+        using SolveParams  = PfPsinUniformIpSolveParams;
+        using Profiles     = RuntimeProfiles<Shape, GridType>;
+        using Geometry     = GeometryRuntime<GridType>;
+        using Source       = PfPsinUniformIpSourceRuntime<GridType, SourceShape>;
+        using Residual     = ResidualRuntime<Shape, GridType>;
         using PackedVector = typename Residual::PackedVector;
 
         struct KernelPlan
@@ -99,8 +99,7 @@ namespace operators::detail
             workspace.geometry.update(solve_params_.a, solve_params_.R0, solve_params_.Z0, workspace.profiles);
 
             workspace.source_runtime.materialize_profile_owned_psin(workspace.profiles, plan.n_axis_fix);
-            workspace.source_runtime.update_pf_psin_uniform_ip(
-                workspace.geometry, solve_params_.Ip, plan.n_axis_fix);
+            workspace.source_runtime.update_pf_psin_uniform_ip(workspace.geometry, solve_params_.Ip, plan.n_axis_fix);
 
             workspace.residual.update_compact(workspace.source_runtime, workspace.geometry);
             workspace.residual.pack_into(out, solve_params_.a, solve_params_.R0, solve_params_.B0);
@@ -122,8 +121,7 @@ namespace operators::detail
         static constexpr std::span<const double, SourceShape::sample_count>
         source_span(const Vector<double, SourceShape::sample_count>& values) noexcept
         {
-            return std::span<const double, SourceShape::sample_count>{
-                values.data(), SourceShape::sample_count};
+            return std::span<const double, SourceShape::sample_count>{values.data(), SourceShape::sample_count};
         }
 
         SolveParams solve_params_{};

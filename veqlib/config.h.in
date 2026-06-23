@@ -5,10 +5,11 @@
 
 namespace config
 {
-    struct DefaultTopology
+    struct Topology
     {
         static constexpr std::size_t Nr = @VEQ_NR@;
         static constexpr std::size_t Nt = @VEQ_NT@;
+        static constexpr std::size_t source_sample_count = @VEQ_SOURCE_SAMPLE_COUNT@;
 
         static constexpr std::size_t h_count     = @VEQ_H_PROFILE_COUNT@;
         static constexpr std::size_t v_count     = @VEQ_V_PROFILE_COUNT@;
@@ -56,15 +57,15 @@ namespace config
     };
 
     static_assert(
-        DefaultTopology::L_max >= 1,
+        Topology::L_max >= 1,
         "profile polynomial table requires at least one stored row"
     );
     static_assert(
-        DefaultTopology::M_max >= 1,
+        Topology::M_max >= 1,
         "trig table requires at least one positive harmonic"
     );
     static_assert(
-        DefaultTopology::K_max >= 2,
+        Topology::K_max >= 2,
         "profile rho table requires rho and rho^2 rows"
     );
 } // namespace config

@@ -5,7 +5,6 @@ import argparse
 import importlib
 import importlib.util
 import json
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -16,7 +15,6 @@ import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BENCHMARK_PATH = REPO_ROOT / "tests" / "benchmark.py"
-DEFAULT_CXX_EXE = REPO_ROOT / "veqlib" / "build" / "debug" / "veqlib_main"
 DEFAULT_CXX_MODULE_DIR = REPO_ROOT / "veqlib" / "build" / "release"
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "tests" / "benchmark"
 FIXED_CONSTRAINT = "Ip"
@@ -24,6 +22,11 @@ FIXED_CONSTRAINT = "Ip"
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from veqpy.cpp import (  # noqa: E402
+    INITIAL_POLICY_COLD,
+    RESIDUAL_NORMALIZATION_BLOCK_RMS,
+    SOLVER_METHOD_POWELL,
+)
 from veqpy.operator import Operator  # noqa: E402
 from veqpy.solver import Solver  # noqa: E402
 from veqpy.solver.residual_scale import _build_block_rms_scale  # noqa: E402
@@ -120,7 +123,7 @@ def _x0_for_case(benchmark: ModuleType, operator: Operator, spec) -> np.ndarray:
     return operator.pack_coefficients(coefficients)
 
 
-def _boundary_payload(problem) -> dict[str, float]:
+def _boundary_payload(problem) -> dict[str, Any]:
     c_offsets = np.asarray(problem.c_offsets, dtype=np.float64)
     s_offsets = np.asarray(problem.s_offsets, dtype=np.float64)
     return {
@@ -131,6 +134,8 @@ def _boundary_payload(problem) -> dict[str, float]:
         "ka": float(problem.ka),
         "c0_offset": float(c_offsets[0]) if c_offsets.size else 0.0,
         "s1_offset": float(s_offsets[1]) if s_offsets.size > 1 else 0.0,
+        "c_offsets": c_offsets.tolist(),
+        "s_offsets": s_offsets.tolist(),
     }
 
 
@@ -162,6 +167,37 @@ def _python_case_inputs(
         "initial_raw": initial_raw.tolist(),
         "initial_raw_norm": float(np.linalg.norm(initial_raw)),
         "residual_block_lengths": operator.residual_block_lengths().tolist(),
+    }
+
+
+def _kernel_case_payload(python_inputs: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "case_name": python_inputs["case_name"],
+        "boundary": python_inputs["boundary"],
+        "source": {
+            "scaled_heat": python_inputs["scaled_heat"],
+            "scaled_current": python_inputs["scaled_current"],
+        },
+        "constraints": {
+            "scaled_Ip": python_inputs["scaled_Ip"],
+            "fix_rho": python_inputs["fix_rho"],
+        },
+        "fix_rho": python_inputs["fix_rho"],
+        "solver": {
+            "method_code": SOLVER_METHOD_POWELL,
+            "max_residual": 1.0e-6,
+            "max_evaluations": len(python_inputs["x0"]) ** 2,
+            "accepted_residual_factor": 10.0,
+            "accepted_residual_floor": 1.0e-5,
+            "initial_policy_code": INITIAL_POLICY_COLD,
+            "residual_normalization_code": RESIDUAL_NORMALIZATION_BLOCK_RMS,
+            "residual_normalization_floor": 1.0,
+            "residual_normalization_max_ratio": 1.0e6,
+            "residual_normalization_huber_tau": 3.0,
+            "residual_normalization_probe_count": 4,
+            "residual_normalization_probe_step": 1.0e-6,
+            "residual_normalization_sensitivity_lambda": 0.5,
+        },
     }
 
 
@@ -240,34 +276,29 @@ def _solve_python_timed(
     }
 
 
-def _run_cxx_case(executable: Path, *, repeat: int, warmup: int) -> dict[str, Any]:
-    if not executable.exists():
-        raise FileNotFoundError(
-            f"C++ benchmark executable not found: {executable}. "
-            "Build it with `cmake --build --preset clang-debug --target veqlib_main`."
-        )
-    try:
-        completed = subprocess.run(
-            [str(executable), "--mode", "solve", "--repeat", str(repeat), "--warmup", str(warmup)],
-            check=True,
-            cwd=executable.parent,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-    except subprocess.CalledProcessError as exc:
-        raise RuntimeError(f"C++ benchmark failed:\n{exc.stderr}") from exc
-    return json.loads(completed.stdout)
-
-
-def _run_cxx_binding_case(module_dir: Path, *, repeat: int, warmup: int) -> dict[str, Any]:
+def _run_cxx_binding_case(
+    module_dir: Path,
+    python_inputs: dict[str, Any],
+    *,
+    repeat: int,
+    warmup: int,
+) -> dict[str, Any]:
     module = _load_veqlib_module(module_dir)
-    solver = module.PfPsinUniformIpSolver()
+    solver = module.KernelSolver()
+    solver.set_case_json(json.dumps(_kernel_case_payload(python_inputs)))
 
     for _ in range(warmup):
         solver.solve_direct()
 
-    report = json.loads(solver.initial_json())
+    report = json.loads(solver.metadata_json())
+    report["normalization"] = {
+        "x_scale": python_inputs["x_scale"],
+        "residual_scale": python_inputs["residual_scale"],
+    }
+    report["initial"] = {
+        "x": python_inputs["x0"],
+        "raw_residual": python_inputs["initial_raw"],
+    }
     samples_ms: list[float] = []
     inner_samples_ms: list[float] = []
     interface_samples_ms: list[float] = []
@@ -290,7 +321,8 @@ def _run_cxx_binding_case(module_dir: Path, *, repeat: int, warmup: int) -> dict
 
     report["timing"] = _stats(samples_ms)
     report["binding_timing"] = {
-        "scope": "Python perf_counter around nanobind PfPsinUniformIpSolver.solve_direct()",
+        "scope": "Python perf_counter around nanobind KernelSolver.solve_direct()",
+        "case_refresh": "KernelSolver.set_case_json(payload) before timed solve loop",
         "return_schema": (
             "elapsed_ms, success, info, nfev, njev, callbacks, jacobian_component_evaluations, "
             "jvp_evaluations, linear_iterations, raw_norm, scaled_norm, x_view, raw_view, "
@@ -321,11 +353,9 @@ def _run_cxx_binding_case(module_dir: Path, *, repeat: int, warmup: int) -> dict
 
 def _run_case(
     benchmark: ModuleType,
-    executable: Path,
     module_dir: Path,
     reference,
     *,
-    cxx_backend: str,
     repeat: int,
     warmup: int,
 ) -> dict[str, Any]:
@@ -333,12 +363,7 @@ def _run_case(
     problem = benchmark._make_benchmark_case(spec, reference)
     python_inputs = _python_case_inputs(benchmark, problem, spec)
     x0 = np.asarray(python_inputs["x0"], dtype=np.float64)
-    if cxx_backend == "nanobind":
-        cxx = _run_cxx_binding_case(module_dir, repeat=repeat, warmup=warmup)
-    elif cxx_backend == "subprocess":
-        cxx = _run_cxx_case(executable, repeat=repeat, warmup=warmup)
-    else:
-        raise ValueError(f"unknown C++ backend: {cxx_backend}")
+    cxx = _run_cxx_binding_case(module_dir, python_inputs, repeat=repeat, warmup=warmup)
     python = _solve_python_timed(benchmark, problem, x0, repeat=repeat, warmup=warmup)
 
     x_diff = _max_abs(cxx["final"]["x"], python["final"]["x"])
@@ -364,7 +389,7 @@ def _run_case(
     return {
         "case_name": spec.case_name,
         "constraint": FIXED_CONSTRAINT,
-        "cxx_backend": cxx_backend,
+        "cxx_backend": "nanobind",
         "active_profiles": dict(problem.active_profiles),
         "x_size": int(x0.size),
         "initial_raw_norm": float(python_inputs["initial_raw_norm"]),
@@ -465,10 +490,7 @@ def _write_text_report(path: Path, payload: dict[str, Any]) -> None:
         f"max_final_x_abs_diff          : {summary['max_final_x_abs_diff']:.6e}",
         f"max_final_raw_abs_diff        : {summary['max_final_raw_abs_diff']:.6e}",
         f"max_alpha_abs_diff            : {summary['max_alpha_abs_diff']:.6e}",
-        (
-            "geomean_speedup_py_over_cxx  : "
-            f"{summary['geomean_speedup_python_over_cxx']:.3f}x"
-        ),
+        (f"geomean_speedup_py_over_cxx  : {summary['geomean_speedup_python_over_cxx']:.3f}x"),
         (
             "geomean_median_speedup       : "
             f"{summary['geomean_median_speedup_python_over_cxx']:.3f}x"
@@ -526,8 +548,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Compare benchmark.py-style PF/psin/uniform cases in VEQlib and VEQPy."
     )
-    parser.add_argument("--cxx-backend", choices=("nanobind", "subprocess"), default="nanobind")
-    parser.add_argument("--cxx-exe", type=Path, default=DEFAULT_CXX_EXE)
+    parser.add_argument("--cxx-backend", choices=("nanobind",), default="nanobind")
     parser.add_argument("--module-dir", type=Path, default=DEFAULT_CXX_MODULE_DIR)
     parser.add_argument("--repeat", type=int, default=10)
     parser.add_argument("--warmup", type=int, default=1)
@@ -543,10 +564,8 @@ def main(argv: list[str] | None = None) -> int:
     rows = [
         _run_case(
             benchmark,
-            args.cxx_exe.resolve(),
             args.module_dir.resolve(),
             reference,
-            cxx_backend=args.cxx_backend,
             repeat=args.repeat,
             warmup=args.warmup,
         )
