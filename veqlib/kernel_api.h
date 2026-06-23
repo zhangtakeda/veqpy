@@ -153,6 +153,10 @@ namespace veqlib_kernel_api
         constexpr double veqpy_hybr_factor              = 1.0;
         constexpr int    veqpy_hybr_mode                = 1;
         constexpr int    veqpy_hybr_nprint              = 0;
+        constexpr double veqpy_lm_eps                   = 0.0;
+        constexpr double veqpy_lm_factor                = 100.0;
+        constexpr int    veqpy_lm_mode                  = 2;
+        constexpr int    veqpy_lm_nprint                = 0;
         constexpr double veqpy_accepted_residual_factor = 10.0;
         constexpr double veqpy_accepted_residual_floor  = 1.0e-5;
         constexpr double veqpy_x_scale_floor            = 1.0e-2;
@@ -586,7 +590,7 @@ namespace veqlib_kernel_api
             case SolverKind::EnzymeJacobian:
                 return "cminpack::hybrj";
             case SolverKind::LevenbergMarquardt:
-                return "nonlinear::LevenbergMarquardt";
+                return "cminpack::lmdif";
             case SolverKind::Newton:
                 return "nonlinear::Newton";
             case SolverKind::NewtonKrylov:
@@ -594,7 +598,7 @@ namespace veqlib_kernel_api
             case SolverKind::NewtonRaphson:
                 return "nonlinear::NewtonRaphson";
             case SolverKind::Powell:
-                return "nonlinear::Powell";
+                return "cminpack::hybrd";
             }
             return "unknown";
         }
@@ -943,6 +947,30 @@ namespace veqlib_kernel_api
             return 0;
         }
 
+        int pf_lm_residual_x(void* data, int m, int n, const double* x, double* fvec, int iflag)
+        {
+            if (iflag <= 0 || m != static_cast<int>(BenchShape::x_size) ||
+                n != static_cast<int>(BenchShape::x_size))
+                return 0;
+
+            auto& context = *static_cast<SolveContext*>(data);
+            ++context.evaluations;
+
+            const auto callback_started = std::chrono::steady_clock::now();
+            PackedVector raw{uninitialized};
+            const auto   kernel_started = std::chrono::steady_clock::now();
+            context.raw_residual(std::span<const double, BenchShape::x_size>{x, BenchShape::x_size},
+                                 std::span<double, BenchShape::x_size>{raw.data(), BenchShape::x_size});
+            context.residual_kernel_ms += elapsed_ms_since(kernel_started);
+
+            const auto scale_started = std::chrono::steady_clock::now();
+            for (size_t i = 0; i < BenchShape::x_size; ++i)
+                fvec[i] = std::asinh(raw[i] / context.input.residual_scale[i]);
+            context.residual_scale_ms += elapsed_ms_since(scale_started);
+            context.residual_callback_ms += elapsed_ms_since(callback_started);
+            return 0;
+        }
+
         void scaled_residual_z_no_count(SolveContext& context, const double* z, double* fvec) noexcept
         {
             const auto   callback_started = std::chrono::steady_clock::now();
@@ -1226,6 +1254,39 @@ namespace veqlib_kernel_api
             result.accepted = result.raw_norm <= acceptance_threshold(context.input);
         }
 
+        void fill_solve_result_from_x(
+            SolveContext& context, SolveResult& result, const double* x, int info, int nfev, int njev, int callbacks)
+        {
+            result.info      = info;
+            result.nfev      = nfev;
+            result.njev      = njev;
+            result.callbacks = callbacks;
+            for (size_t i = 0; i < BenchShape::x_size; ++i)
+                result.x[i] = x[i];
+            const auto final_residual_started = std::chrono::steady_clock::now();
+            context.raw_residual(std::span<const double, BenchShape::x_size>{result.x.data(), BenchShape::x_size},
+                                 std::span<double, BenchShape::x_size>{result.raw.data(), BenchShape::x_size});
+            result.final_residual_ms = elapsed_ms_since(final_residual_started);
+            for (size_t i = 0; i < BenchShape::x_size; ++i)
+                result.scaled[i] = result.raw[i] / context.input.residual_scale[i];
+            result.raw_norm             = norm2(std::span<const double, BenchShape::x_size>{
+                result.raw.data(),
+                BenchShape::x_size,
+            });
+            result.scaled_norm          = norm2(std::span<const double, BenchShape::x_size>{
+                result.scaled.data(),
+                BenchShape::x_size,
+            });
+            result.residual_callback_ms = context.residual_callback_ms;
+            result.residual_kernel_ms   = context.residual_kernel_ms;
+            result.residual_scale_ms    = context.residual_scale_ms;
+            result.jacobian_callback_ms = context.jacobian_callback_ms;
+            result.jvp_callback_ms      = context.jvp_callback_ms;
+            result.linear_solve_ms      = context.linear_solve_ms;
+            result.alpha    = {context.op.workspace.source_runtime.alpha1, context.op.workspace.source_runtime.alpha2};
+            result.accepted = result.raw_norm <= acceptance_threshold(context.input);
+        }
+
         SolveResult run_hybrd_once(SolveContext& context)
         {
             context.reset_solve_counters();
@@ -1272,6 +1333,57 @@ namespace veqlib_kernel_api
 
             SolveResult result{};
             fill_solve_result_from_z(context, result, z.data(), info, nfev, 0, context.evaluations);
+            result.jacobian_component_evaluations = context.jacobian_component_evaluations;
+            return result;
+        }
+
+        SolveResult run_lmdif_once(SolveContext& context)
+        {
+            context.reset_solve_counters();
+            std::array<double, BenchShape::x_size> x{};
+            std::copy(context.input.x0.begin(), context.input.x0.end(), x.begin());
+            PackedVector fvec{uninitialized};
+
+            constexpr int                                               m = static_cast<int>(BenchShape::x_size);
+            constexpr int                                               n = static_cast<int>(BenchShape::x_size);
+            std::array<double, BenchShape::x_size>                      diag{};
+            std::array<double, BenchShape::x_size * BenchShape::x_size> fjac;
+            std::array<int, BenchShape::x_size>                         ipvt;
+            std::array<double, BenchShape::x_size>                      qtf;
+            std::array<double, BenchShape::x_size>                      wa1;
+            std::array<double, BenchShape::x_size>                      wa2;
+            std::array<double, BenchShape::x_size>                      wa3;
+            std::array<double, BenchShape::x_size>                      wa4;
+            diag.fill(1.0);
+
+            int       nfev = 0;
+            const int info = lmdif(pf_lm_residual_x,
+                                   &context,
+                                   m,
+                                   n,
+                                   x.data(),
+                                   fvec.data(),
+                                   context.input.max_residual,
+                                   context.input.max_residual,
+                                   context.input.max_residual,
+                                   max_solver_evaluations(context.input),
+                                   veqpy_lm_eps,
+                                   diag.data(),
+                                   veqpy_lm_mode,
+                                   veqpy_lm_factor,
+                                   veqpy_lm_nprint,
+                                   &nfev,
+                                   fjac.data(),
+                                   m,
+                                   ipvt.data(),
+                                   qtf.data(),
+                                   wa1.data(),
+                                   wa2.data(),
+                                   wa3.data(),
+                                   wa4.data());
+
+            SolveResult result{};
+            fill_solve_result_from_x(context, result, x.data(), info, nfev, 0, context.evaluations);
             result.jacobian_component_evaluations = context.jacobian_component_evaluations;
             return result;
         }
@@ -1391,7 +1503,7 @@ namespace veqlib_kernel_api
             if (context.input.solver == SolverKind::ResidualOnly)
                 return run_hybrd_once(context);
             if (context.input.solver == SolverKind::LevenbergMarquardt)
-                return run_nonlinear_residual_policy_once<nonlinear::LevenbergMarquardt>(context);
+                return run_lmdif_once(context);
             if (context.input.solver == SolverKind::Newton)
                 return run_nonlinear_policy_once<nonlinear::Newton>(context);
             if (context.input.solver == SolverKind::NewtonKrylov)
@@ -1399,7 +1511,7 @@ namespace veqlib_kernel_api
             if (context.input.solver == SolverKind::NewtonRaphson)
                 return run_nonlinear_policy_once<nonlinear::NewtonRaphson>(context);
             if (context.input.solver == SolverKind::Powell)
-                return run_nonlinear_residual_policy_once<nonlinear::Powell>(context);
+                return run_hybrd_once(context);
 #ifdef ENABLE_ENZYME
             return run_hybrj_once(context);
 #else
