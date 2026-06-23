@@ -170,7 +170,6 @@ namespace veqlib_kernel_api
         enum class SolverKind
         {
             LevenbergMarquardt,
-            Newton,
             NewtonKrylov,
             NewtonRaphson,
             Powell,
@@ -180,7 +179,6 @@ namespace veqlib_kernel_api
         {
             SolverMethodPowell             = 1,
             SolverMethodLevenbergMarquardt = 2,
-            SolverMethodNewton             = 3,
             SolverMethodNewtonKrylov       = 4,
             SolverMethodNewtonRaphson      = 5,
         };
@@ -771,8 +769,6 @@ namespace veqlib_kernel_api
             {
             case SolverKind::LevenbergMarquardt:
                 return "cminpack::lmdif";
-            case SolverKind::Newton:
-                return "nonlinear::Newton";
             case SolverKind::NewtonKrylov:
                 return "nonlinear::NewtonKrylov";
             case SolverKind::NewtonRaphson:
@@ -789,8 +785,6 @@ namespace veqlib_kernel_api
             {
             case SolverKind::LevenbergMarquardt:
                 return "levenberg-marquardt";
-            case SolverKind::Newton:
-                return "newton";
             case SolverKind::NewtonKrylov:
                 return "newton-krylov";
             case SolverKind::NewtonRaphson:
@@ -809,8 +803,6 @@ namespace veqlib_kernel_api
                 return SolverMethodPowell;
             case SolverKind::LevenbergMarquardt:
                 return SolverMethodLevenbergMarquardt;
-            case SolverKind::Newton:
-                return SolverMethodNewton;
             case SolverKind::NewtonKrylov:
                 return SolverMethodNewtonKrylov;
             case SolverKind::NewtonRaphson:
@@ -828,15 +820,13 @@ namespace veqlib_kernel_api
                 return SolverKind::Powell;
             case SolverMethodLevenbergMarquardt:
                 return SolverKind::LevenbergMarquardt;
-            case SolverMethodNewton:
-                return SolverKind::Newton;
             case SolverMethodNewtonKrylov:
                 return SolverKind::NewtonKrylov;
             case SolverMethodNewtonRaphson:
                 return SolverKind::NewtonRaphson;
             default:
                 throw std::runtime_error("solver.method_code must be 1 (powell), 2 (levenberg-marquardt), "
-                                         "3 (newton), 4 (newton-krylov), or 5 (newton-raphson)");
+                                         "4 (newton-krylov), or 5 (newton-raphson)");
             }
         }
 
@@ -911,7 +901,6 @@ namespace veqlib_kernel_api
             switch (solver)
             {
             case SolverKind::LevenbergMarquardt:
-            case SolverKind::Newton:
             case SolverKind::NewtonKrylov:
             case SolverKind::NewtonRaphson:
             case SolverKind::Powell:
@@ -932,12 +921,6 @@ namespace veqlib_kernel_api
             {
             case SolverKind::LevenbergMarquardt:
                 return "cminpack forward difference";
-            case SolverKind::Newton:
-#ifdef ENABLE_ENZYME
-                return "Enzyme dense Jacobian through full-step Newton";
-#else
-                return "finite-difference dense Jacobian through full-step Newton";
-#endif
             case SolverKind::NewtonKrylov:
 #ifdef ENABLE_ENZYME
                 return "Enzyme Jacobian-vector product through GMRES";
@@ -1787,8 +1770,6 @@ namespace veqlib_kernel_api
         {
             if (context.input.solver == SolverKind::LevenbergMarquardt)
                 return run_lmdif_once(context);
-            if (context.input.solver == SolverKind::Newton)
-                return run_nonlinear_policy_once<nonlinear::Newton>(context);
             if (context.input.solver == SolverKind::NewtonKrylov)
                 return run_nonlinear_policy_once<nonlinear::NewtonKrylov>(context);
             if (context.input.solver == SolverKind::NewtonRaphson)

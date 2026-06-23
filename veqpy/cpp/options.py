@@ -4,7 +4,6 @@ from typing import Final
 
 SOLVER_METHOD_POWELL: Final[int] = 1
 SOLVER_METHOD_LEVENBERG_MARQUARDT: Final[int] = 2
-SOLVER_METHOD_NEWTON: Final[int] = 3
 SOLVER_METHOD_NEWTON_KRYLOV: Final[int] = 4
 SOLVER_METHOD_NEWTON_RAPHSON: Final[int] = 5
 
@@ -21,7 +20,6 @@ RESIDUAL_NORMALIZATION_SAFE: Final[int] = 3
 SOLVER_METHOD_CODES: Final[dict[str, int]] = {
     "powell": SOLVER_METHOD_POWELL,
     "levenberg-marquardt": SOLVER_METHOD_LEVENBERG_MARQUARDT,
-    "newton": SOLVER_METHOD_NEWTON,
     "newton-krylov": SOLVER_METHOD_NEWTON_KRYLOV,
     "newton-raphson": SOLVER_METHOD_NEWTON_RAPHSON,
 }
@@ -46,7 +44,6 @@ def solver_method_code(value: str | int) -> int:
     if code not in (
         SOLVER_METHOD_POWELL,
         SOLVER_METHOD_LEVENBERG_MARQUARDT,
-        SOLVER_METHOD_NEWTON,
         SOLVER_METHOD_NEWTON_KRYLOV,
         SOLVER_METHOD_NEWTON_RAPHSON,
     ):

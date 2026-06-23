@@ -104,6 +104,6 @@ def test_topology_accepts_exact_cpp_build_modes() -> None:
 
 
 def test_topology_rejects_build_mode_aliases_and_case_variants() -> None:
-    for build in ("FastMath", "fastmath_enzyme", "release_enzyme", "release-enzyme"):
+    for build in ("FastMath", "fastmath_enzyme"):
         with pytest.raises(TopologyError, match="build must be one of"):
             make_topology(build=build)

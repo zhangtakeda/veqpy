@@ -12,7 +12,6 @@ from veqpy.cpp import (
     RESIDUAL_NORMALIZATION_NONE,
     RESIDUAL_NORMALIZATION_SAFE,
     SOLVER_METHOD_LEVENBERG_MARQUARDT,
-    SOLVER_METHOD_NEWTON,
     SOLVER_METHOD_NEWTON_KRYLOV,
     SOLVER_METHOD_NEWTON_RAPHSON,
     SOLVER_METHOD_POWELL,
@@ -25,11 +24,10 @@ from veqpy.cpp import (
 def test_cpp_solver_method_strings_are_exact_canonical_tokens() -> None:
     assert solver_method_code("powell") == SOLVER_METHOD_POWELL
     assert solver_method_code("levenberg-marquardt") == SOLVER_METHOD_LEVENBERG_MARQUARDT
-    assert solver_method_code("newton") == SOLVER_METHOD_NEWTON
     assert solver_method_code("newton-krylov") == SOLVER_METHOD_NEWTON_KRYLOV
     assert solver_method_code("newton-raphson") == SOLVER_METHOD_NEWTON_RAPHSON
 
-    for alias in ("lm", "Powell", "newton_krylov", "hybrd"):
+    for alias in ("lm", "Powell", "newton", "newton_krylov", "hybrd"):
         with pytest.raises(ValueError):
             solver_method_code(alias)
 

@@ -27,12 +27,6 @@ namespace nonlinear::detail
         struct Context;
     };
 
-    struct Newton
-    {
-        template <typename Functor>
-        struct Context;
-    };
-
     struct NewtonRaphson
     {
         template <typename Functor>
@@ -134,60 +128,6 @@ namespace nonlinear::detail
         Matrix<double, N, 1>  step{uninitialized};
         std::array<double, N> trial_x{};
         std::array<double, N> trial_f{};
-    };
-
-    template <typename Functor>
-    struct Newton::Context
-    {
-        static constexpr size_t equations = Functor::equations;
-        static constexpr size_t variables = Functor::variables;
-        static_assert(equations == variables, "Newton requires a square residual");
-
-        Functor functor;
-        double  tolerance            = 1.0e-8;
-        int     max_iterations       = 50;
-        int     evaluations          = 0;
-        int     jacobian_evaluations = 0;
-        int     info                 = 0;
-
-        explicit Context(const Functor& value) : functor(value) {}
-
-        void optimize_inplace(double* x)
-        {
-            constexpr size_t      n = variables;
-            Matrix<double, n, n>  jacobian{uninitialized};
-            Matrix<double, n, 1>  rhs{uninitialized};
-            Matrix<double, n, 1>  step{uninitialized};
-            std::array<double, n> f{};
-            evaluations          = 0;
-            jacobian_evaluations = 0;
-            info                 = 5;
-
-            for (int iteration = 0; iteration < max_iterations; ++iteration)
-            {
-                functor(x, f.data());
-                ++evaluations;
-                if (norm2<n>(f.data()) <= tolerance)
-                {
-                    info = 1;
-                    return;
-                }
-
-                evaluate_jacobian<Functor, n, n>(functor, x, jacobian.data());
-                ++jacobian_evaluations;
-                for (size_t i = 0; i < n; ++i)
-                    rhs[i] = -f[i];
-                linalg::solve_into(step, jacobian, rhs);
-
-                if (norm2<n>(step.data()) <= tolerance)
-                {
-                    info = 2;
-                    return;
-                }
-                for (size_t i = 0; i < n; ++i)
-                    x[i] += step[i];
-            }
-        }
     };
 
     template <typename Functor>
@@ -662,7 +602,6 @@ namespace nonlinear::detail
 namespace nonlinear
 {
     using detail::LevenbergMarquardt;
-    using detail::Newton;
     using detail::NewtonKrylov;
     using detail::NewtonRaphson;
     using detail::Powell;
