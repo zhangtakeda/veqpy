@@ -191,7 +191,7 @@ def _metadata_payload(
     build_command: list[str],
     dry_run: bool,
 ) -> dict[str, Any]:
-    module_name = f"veqk_{artifact_id[:20]}"
+    module_name = f"veqpy._kernel_cache.k_{artifact_id}.veqlib_ext"
     return {
         "schema": ARTIFACT_SCHEMA,
         "generator": GENERATOR_VERSION,
