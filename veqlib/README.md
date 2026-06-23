@@ -252,6 +252,17 @@ metadata plus read-only NumPy views for `x`, raw residual, scaled residual, and
 `alpha`; the report also records the C++ internal solve time so the interface
 overhead can be estimated as Python outer time minus C++ inner time.
 
+For optimization gates, run the four-case artifact benchmark from the repository
+root. It covers the 18-parameter PF case plus the solovev, chease, and efit
+GEQDSK cases through the Python `Topology` / nanobind-artifact path:
+
+```bash
+taskset -c 0 .venv/bin/python veqlib/benchmark_4case_compare.py \
+  --repeat 11 \
+  --warmup 3 \
+  --output /tmp/veqlib_4case_compare.json
+```
+
 Executable-side C++ validation/stage diagnostics are intentionally retired. New
 performance evidence should use the production nanobind/shared-library path or a
 Python-level lifecycle benchmark.
