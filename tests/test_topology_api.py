@@ -98,12 +98,12 @@ def test_mvp_gate_rejects_unsupported_route_shape() -> None:
 
 
 def test_topology_accepts_exact_cpp_build_modes() -> None:
-    for build in ("fastmath", "fastmath-enzyme", "release", "release-enzyme", "debug"):
+    for build in ("fastmath", "fastmath-enzyme", "release", "debug"):
         topology = make_topology(build=build)
         assert topology.build == build
 
 
 def test_topology_rejects_build_mode_aliases_and_case_variants() -> None:
-    for build in ("FastMath", "fastmath_enzyme", "release_enzyme"):
+    for build in ("FastMath", "fastmath_enzyme", "release_enzyme", "release-enzyme"):
         with pytest.raises(TopologyError, match="build must be one of"):
             make_topology(build=build)

@@ -45,7 +45,7 @@ class Topology:
     K_max: int | None = None  # 默认 max(2, M_max)；允许显式更高
 
     # artifact/cache metadata
-    build: str = "fastmath"  # fastmath, fastmath-enzyme, release, release-enzyme, debug
+    build: str = "fastmath"  # fastmath, fastmath-enzyme, release, debug
     key: str | None = None
 
     def __post_init__(self) -> None:
@@ -86,9 +86,9 @@ class Topology:
         if calculus != "spectral":
             raise TopologyError("only spectral calculus is supported by the topology schema v1")
         build = _normalize_token(self.build, "build")
-        if build not in {"fastmath", "fastmath-enzyme", "release", "release-enzyme", "debug"}:
+        if build not in {"fastmath", "fastmath-enzyme", "release", "debug"}:
             raise TopologyError(
-                "build must be one of fastmath, fastmath-enzyme, release, release-enzyme, or debug"
+                "build must be one of fastmath, fastmath-enzyme, release, or debug"
             )
         sample_count = self._canonical_sample_count(nodes, nr)
         inferred_l = _infer_l_max((*profile_counts.values(), *c_counts, *s_counts))

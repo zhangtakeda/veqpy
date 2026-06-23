@@ -101,22 +101,17 @@ def test_build_kernel_artifact_id_distinguishes_build_mode(tmp_path: Path) -> No
         make_topology(build="fastmath-enzyme"), cache_root=tmp_path, dry_run=True
     )
     release = build_kernel(make_topology(build="release"), cache_root=tmp_path, dry_run=True)
-    release_enzyme = build_kernel(
-        make_topology(build="release-enzyme"), cache_root=tmp_path, dry_run=True
-    )
     debug = build_kernel(make_topology(build="debug"), cache_root=tmp_path, dry_run=True)
 
     assert len({
         fastmath.artifact_id,
         fastmath_enzyme.artifact_id,
         release.artifact_id,
-        release_enzyme.artifact_id,
         debug.artifact_id,
-    }) == 5
+    }) == 4
     assert fastmath.root_dir.parts[-2] == "fastmath"
     assert fastmath_enzyme.root_dir.parts[-2] == "fastmath-enzyme"
     assert release.root_dir.parts[-2] == "release"
-    assert release_enzyme.root_dir.parts[-2] == "release-enzyme"
     assert debug.root_dir.parts[-2] == "debug"
 
     fastmath_configure = fastmath.metadata["build"]["cmake_configure"]
@@ -128,9 +123,6 @@ def test_build_kernel_artifact_id_distinguishes_build_mode(tmp_path: Path) -> No
     release_configure = release.metadata["build"]["cmake_configure"]
     assert "-DENABLE_ENZYME=OFF" in release_configure
     assert "-DVEQLIB_FP_MODE=STRICT" in release_configure
-    release_enzyme_configure = release_enzyme.metadata["build"]["cmake_configure"]
-    assert "-DENABLE_ENZYME=ON" in release_enzyme_configure
-    assert "-DVEQLIB_FP_MODE=STRICT" in release_enzyme_configure
 
 
 def test_build_kernel_artifact_id_ignores_python_client_digest(
