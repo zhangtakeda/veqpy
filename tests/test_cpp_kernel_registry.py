@@ -55,6 +55,9 @@ class FakeCppSolver:
     def solve_direct(self) -> tuple[bool]:
         return (True,)
 
+    def adopt_last_solution_as_initial(self) -> None:
+        self.adopted = True
+
     def residual_var_into(self, x: Any, out: Any) -> None:
         out[:] = x
 
@@ -79,6 +82,15 @@ def test_thread_owned_kernel_solver_rejects_cross_thread_use() -> None:
 
     assert errors
     assert isinstance(errors[0], SolverThreadError)
+
+
+def test_thread_owned_kernel_solver_forwards_adopt_last_solution() -> None:
+    fake = FakeCppSolver()
+    solver = ThreadOwnedKernelSolver(fake)
+
+    solver.adopt_last_solution_as_initial()
+
+    assert fake.adopted is True
 
 
 def test_veqlib_solver_build_dry_run_uses_registry(tmp_path: Path) -> None:
@@ -135,6 +147,7 @@ def test_veqlib_solver_solve_reuses_prebuilt_artifact_when_fastmath_build_exists
 
     solver = VEQlibSolver(topology, registry=registry)
     result = solver.solve_direct()
+    solver.adopt_last_solution_as_initial()
 
     assert len(result) == 15
     assert result[1] is True

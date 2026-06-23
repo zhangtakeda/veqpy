@@ -269,7 +269,10 @@ Python-level lifecycle benchmark.
 
 For workload-level continuation evidence, run the four-case Ip scan benchmark.
 It keeps one mutable `VEQlibSolver` alive per topology and compares cold restarts
-against the `warm-clone` initial policy over an ordered Ip scan:
+against the `warm-clone` initial policy over an ordered Ip scan. The Python scan
+helper explicitly calls `adopt_last_solution_as_initial()` after accepted solves
+before the next warm-clone point, so a cold first point can seed the continuation
+sequence without changing the residual definition:
 
 ```bash
 taskset -c 0 .venv/bin/python veqlib/benchmark_4case_ip_scan.py \

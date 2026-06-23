@@ -629,10 +629,25 @@ namespace veqlib_python
             }
         }
 
+        void adopt_last_solution_as_initial()
+        {
+            if (!has_last_result_)
+                throw std::runtime_error("KernelSolver has no solve result to adopt");
+            if (!last_result_.accepted || !solver_info_succeeded(context_->input.solver, last_result_.info))
+                throw std::runtime_error("KernelSolver cannot adopt an unsuccessful solve result");
+
+            context_->input.x0      = last_result_.x;
+            context_->input.x_scale = build_x_block_scale_vector<KernelShape>(
+                context_->input.x0,
+                profile_params_for_case(context_->input));
+            refresh_initial_residual_scale(*context_);
+        }
+
         std::string solve_json()
         {
             const auto started = std::chrono::steady_clock::now();
             last_result_       = run_solver_once(*context_);
+            has_last_result_   = true;
             if (initial_policy_is_warm_clone(context_->input.initial_policy_code))
                 context_->input.x0 = last_result_.x;
             const auto elapsed = std::chrono::steady_clock::now() - started;
@@ -654,6 +669,7 @@ namespace veqlib_python
         {
             const auto started = std::chrono::steady_clock::now();
             last_result_       = run_solver_once(*context_);
+            has_last_result_   = true;
             if (initial_policy_is_warm_clone(context_->input.initial_policy_code))
                 context_->input.x0 = last_result_.x;
             const auto elapsed = std::chrono::steady_clock::now() - started;
@@ -691,6 +707,7 @@ namespace veqlib_python
         int                           enzyme_width_;
         std::unique_ptr<SolveContext> context_;
         SolveResult                   last_result_{};
+        bool                          has_last_result_ = false;
         std::string                   last_case_json_  = "{}";
         double                        last_elapsed_ms_ = 0.0;
     };

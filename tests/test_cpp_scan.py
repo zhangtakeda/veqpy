@@ -16,6 +16,7 @@ from veqpy.cpp import (
 class FakeSequenceSolver:
     def __init__(self) -> None:
         self.payloads: list[dict[str, Any]] = []
+        self.adoptions: list[int] = []
         self.calls = 0
 
     def set_case_json(self, payload: str) -> None:
@@ -36,6 +37,9 @@ class FakeSequenceSolver:
             1.0e-12 * self.calls,
             2.0e-12 * self.calls,
         )
+
+    def adopt_last_solution_as_initial(self) -> None:
+        self.adoptions.append(self.calls)
 
 
 def _payload(policy: int = INITIAL_POLICY_COLD, ip: float = 1.0) -> dict[str, Any]:
@@ -74,6 +78,7 @@ def test_solve_payload_sequence_uses_cold_then_warm_clone_by_default() -> None:
     assert [step.nfev for step in steps] == [11, 12, 13]
     assert [step.callbacks for step in steps] == [21, 22, 23]
     assert steps[-1].raw_norm == pytest.approx(3.0e-12)
+    assert fake.adoptions == [1, 2]
 
 
 def test_solve_payload_sequence_can_preserve_payload_policy() -> None:
@@ -95,6 +100,7 @@ def test_solve_payload_sequence_can_preserve_payload_policy() -> None:
         INITIAL_POLICY_WARM_CLONE,
         INITIAL_POLICY_COLD,
     ]
+    assert fake.adoptions == []
 
 
 def test_payload_json_with_initial_policy_requires_solver_object() -> None:

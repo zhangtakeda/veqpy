@@ -16,6 +16,9 @@ NB_MODULE(veqlib_ext, module)
         .def("solve_direct",
              &veqlib_python::KernelSolver::solve_direct,
              "Run one solve and return scalars plus read-only NumPy views without JSON serialization.")
+        .def("adopt_last_solution_as_initial",
+             &veqlib_python::KernelSolver::adopt_last_solution_as_initial,
+             "Use the last accepted solve result as the current initial state.")
         .def("residual_var_into",
              &veqlib_python::KernelSolver::residual_var_into,
              nb::arg("x"),
