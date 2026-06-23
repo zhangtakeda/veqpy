@@ -19,10 +19,12 @@ from .kernel_registry import (
     ThreadOwnedKernelSolver,
     load_kernel,
 )
+from .legacy_compare import LegacyCompareConfig, benchmark_legacy_veqpy_comparison
 from .solver import VEQlibSolver
 
 __all__ = [
     "KernelArtifact",
+    "LegacyCompareConfig",
     "LifecycleBenchmarkConfig",
     "KernelBuildError",
     "KernelLoadError",
@@ -32,6 +34,7 @@ __all__ = [
     "ThreadOwnedKernelSolver",
     "VEQlibSolver",
     "benchmark_kernel_lifecycle",
+    "benchmark_legacy_veqpy_comparison",
     "benchmark_kernel_lifecycle_json",
     "build_kernel",
     "default_kernel_cache_root",
