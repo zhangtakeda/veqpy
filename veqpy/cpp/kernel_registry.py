@@ -96,6 +96,7 @@ class KernelRegistry:
         self.source_dir = source_dir
         self.cxx = cxx
         self._modules: dict[str, LoadedKernel] = {}
+        self._topology_modules: dict[str, LoadedKernel] = {}
         self._thread_local = threading.local()
         self._lock = threading.RLock()
 
@@ -116,14 +117,22 @@ class KernelRegistry:
         )
 
     def load_kernel(self, topology: Topology, *, force: bool = False) -> LoadedKernel:
+        topology_key = topology.artifact_id or topology.compute_artifact_id()
+        with self._lock:
+            cached_by_topology = self._topology_modules.get(topology_key)
+            if cached_by_topology is not None and not force:
+                return cached_by_topology
+
         artifact = self.get_or_build(topology, force=force, dry_run=False)
         with self._lock:
             cached = self._modules.get(artifact.artifact_id)
-            if cached is not None:
+            if cached is not None and not force:
+                self._topology_modules[topology_key] = cached
                 return cached
             module = _load_artifact_module(artifact)
             loaded = LoadedKernel(artifact=artifact, module=module)
             self._modules[artifact.artifact_id] = loaded
+            self._topology_modules[topology_key] = loaded
             return loaded
 
     def get_thread_solver(
