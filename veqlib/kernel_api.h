@@ -1188,11 +1188,15 @@ namespace veqlib_kernel_api
             BenchOperator                          op;
             std::array<double, BenchShape::x_size> x_scale{};
             std::array<double, BenchShape::x_size> residual_scale{};
+
+            EnzymeResidualContext() : op(make_operator_for_case(CaseInput{})) {}
+
+            explicit EnzymeResidualContext(const CaseInput& input) : op(make_operator_for_case(input)) {}
         };
 
         EnzymeResidualContext enzyme_context_for_input(const CaseInput& input) noexcept
         {
-            EnzymeResidualContext context{make_operator_for_case(input)};
+            EnzymeResidualContext context{input};
             context.x_scale        = input.x_scale;
             context.residual_scale = input.residual_scale;
             return context;

@@ -487,6 +487,7 @@ function(veqlib_configure_target target)
             CXX_STANDARD_REQUIRED ON
             CXX_EXTENSIONS OFF
     )
+    veqlib_enable_enzyme("${target}")
     veqlib_enable_strict_conversions("${target}")
     veqlib_enable_constexpr_budget("${target}")
     veqlib_enable_kernel_optimizations("${target}")
