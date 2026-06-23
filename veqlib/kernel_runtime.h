@@ -6,7 +6,6 @@
 #include <array>
 #include <chrono>
 #include <cmath>
-#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <span>
@@ -84,16 +83,16 @@ namespace veqlib_kernel_api
         struct SolveContext
         {
             KernelOperator op;
-            CaseInput     input{};
-            int           evaluations                    = 0;
-            int           jacobian_component_evaluations = 0;
-            double        residual_callback_ms           = 0.0;
-            double        residual_kernel_ms             = 0.0;
-            double        residual_scale_ms              = 0.0;
-            double        final_residual_ms              = 0.0;
-            double        jacobian_callback_ms           = 0.0;
-            double        jvp_callback_ms                = 0.0;
-            double        linear_solve_ms                = 0.0;
+            CaseInput      input{};
+            int            evaluations                    = 0;
+            int            jacobian_component_evaluations = 0;
+            double         residual_callback_ms           = 0.0;
+            double         residual_kernel_ms             = 0.0;
+            double         residual_scale_ms              = 0.0;
+            double         final_residual_ms              = 0.0;
+            double         jacobian_callback_ms           = 0.0;
+            double         jvp_callback_ms                = 0.0;
+            double         linear_solve_ms                = 0.0;
 
             explicit SolveContext(const CaseInput& case_input)
                 : op(make_operator_for_case(case_input)), input(case_input)
@@ -135,24 +134,23 @@ namespace veqlib_kernel_api
             return (value & 1ULL) == 0ULL ? -1.0 : 1.0;
         }
 
-        std::array<double, KernelShape::x_size>
-        build_safe_residual_scale(SolveContext&       context,
-                                  const PackedVector& initial_raw,
-                                  double              floor,
-                                  double              max_ratio,
-                                  double              huber_tau,
-                                  int                 probe_count,
-                                  double              probe_step,
-                                  double              sensitivity_lambda) noexcept
+        std::array<double, KernelShape::x_size> build_safe_residual_scale(SolveContext&       context,
+                                                                          const PackedVector& initial_raw,
+                                                                          double              floor,
+                                                                          double              max_ratio,
+                                                                          double              huber_tau,
+                                                                          int                 probe_count,
+                                                                          double              probe_step,
+                                                                          double sensitivity_lambda) noexcept
         {
             if (probe_count <= 0 || !is_finite(probe_step) || probe_step <= 0.0)
                 return build_balanced_residual_scale(initial_raw, floor, max_ratio, huber_tau);
 
             std::array<double, KernelShape::active_count> amplitude_values{};
-            size_t                                       offset = 0;
+            size_t                                        offset = 0;
             for (size_t block = 0; block < KernelShape::active_count; ++block)
             {
-                const size_t length  = KernelShape::active_lengths[block];
+                const size_t length     = KernelShape::active_lengths[block];
                 amplitude_values[block] = robust_rms_block(initial_raw, offset, length, huber_tau);
                 offset += length;
             }
@@ -162,9 +160,8 @@ namespace veqlib_kernel_api
             {
                 std::array<double, KernelShape::x_size> probe_x{};
                 for (size_t i = 0; i < KernelShape::x_size; ++i)
-                    probe_x[i] = context.input.x0[i] +
-                                 probe_step * context.input.x_scale[i] *
-                                     deterministic_probe_sign(static_cast<size_t>(probe), i);
+                    probe_x[i] = context.input.x0[i] + probe_step * context.input.x_scale[i] *
+                                                           deterministic_probe_sign(static_cast<size_t>(probe), i);
 
                 PackedVector probe_raw{uninitialized};
                 context.raw_residual(std::span<const double, KernelShape::x_size>{probe_x.data(), KernelShape::x_size},
@@ -184,9 +181,7 @@ namespace veqlib_kernel_api
                 }
             }
 
-            const double lambda = is_finite(sensitivity_lambda) && sensitivity_lambda > 0.0
-                                      ? sensitivity_lambda
-                                      : 0.0;
+            const double lambda = is_finite(sensitivity_lambda) && sensitivity_lambda > 0.0 ? sensitivity_lambda : 0.0;
             std::array<double, KernelShape::active_count> combined{};
             for (size_t block = 0; block < KernelShape::active_count; ++block)
             {
@@ -276,14 +271,13 @@ namespace veqlib_kernel_api
 
         int pf_lm_residual_x(void* data, int m, int n, const double* x, double* fvec, int iflag)
         {
-            if (iflag <= 0 || m != static_cast<int>(KernelShape::x_size) ||
-                n != static_cast<int>(KernelShape::x_size))
+            if (iflag <= 0 || m != static_cast<int>(KernelShape::x_size) || n != static_cast<int>(KernelShape::x_size))
                 return 0;
 
             auto& context = *static_cast<SolveContext*>(data);
             ++context.evaluations;
 
-            const auto callback_started = std::chrono::steady_clock::now();
+            const auto   callback_started = std::chrono::steady_clock::now();
             PackedVector raw{uninitialized};
             const auto   kernel_started = std::chrono::steady_clock::now();
             context.raw_residual(std::span<const double, KernelShape::x_size>{x, KernelShape::x_size},
@@ -294,9 +288,8 @@ namespace veqlib_kernel_api
             for (size_t i = 0; i < KernelShape::x_size; ++i)
             {
                 const double scaled = raw[i] / context.input.residual_scale[i];
-                fvec[i] = context.input.residual_normalization_code == ResidualNormalizationFast
-                              ? std::asinh(scaled)
-                              : scaled;
+                fvec[i] = context.input.residual_normalization_code == ResidualNormalizationFast ? std::asinh(scaled) :
+                                                                                                   scaled;
             }
             context.residual_scale_ms += elapsed_ms_since(scale_started);
             context.residual_callback_ms += elapsed_ms_since(callback_started);
@@ -403,8 +396,8 @@ namespace veqlib_kernel_api
                 std::array<double, KernelShape::x_size> z_dot{};
                 std::array<double, KernelShape::x_size> f_primal{};
                 std::array<double, KernelShape::x_size> f_dot{};
-                EnzymeResidualContext                  column_context = enzyme_context_for_input(context.input);
-                EnzymeResidualContext                  column_context_dot{};
+                EnzymeResidualContext                   column_context = enzyme_context_for_input(context.input);
+                EnzymeResidualContext                   column_context_dot{};
                 std::memset(&column_context_dot, 0, sizeof(column_context_dot));
                 z_dot[col] = 1.0;
                 (void)enzyme::autodiff<enzyme::Forward, enzyme::Const<double>>(
@@ -421,7 +414,7 @@ namespace veqlib_kernel_api
 
         void fill_enzyme_jacobian_z(SolveContext& context, const double* z, double* fjac, int ldfjac)
         {
-            constexpr size_t n = KernelShape::x_size;
+            constexpr size_t      n = KernelShape::x_size;
             std::array<double, n> basis{};
             std::array<double, n> column{};
             for (size_t col = 0; col < n; ++col)
@@ -435,7 +428,7 @@ namespace veqlib_kernel_api
             context.jacobian_component_evaluations += static_cast<int>(n);
         }
 
-        void scaled_residual_z_array_no_count(SolveContext&                                 context,
+        void scaled_residual_z_array_no_count(SolveContext&                                  context,
                                               const std::array<double, KernelShape::x_size>& z,
                                               std::array<double, KernelShape::x_size>&       fvec) noexcept
         {
@@ -604,20 +597,20 @@ namespace veqlib_kernel_api
             auto         z = encode_x_to_z(context.input.x0, context.input.x_scale);
             PackedVector fvec{uninitialized};
 
-            constexpr int                                               n  = static_cast<int>(KernelShape::x_size);
-            constexpr int                                               ml = n - 1;
-            constexpr int                                               mu = n - 1;
-            constexpr int                                               lr = n * (n + 1) / 2;
-            std::array<double, KernelShape::x_size>                      diag;
+            constexpr int                                                 n  = static_cast<int>(KernelShape::x_size);
+            constexpr int                                                 ml = n - 1;
+            constexpr int                                                 mu = n - 1;
+            constexpr int                                                 lr = n * (n + 1) / 2;
+            std::array<double, KernelShape::x_size>                       diag;
             std::array<double, KernelShape::x_size * KernelShape::x_size> fjac;
-            std::array<double, static_cast<size_t>(lr)>                 r;
-            std::array<double, KernelShape::x_size>                      qtf;
-            std::array<double, KernelShape::x_size>                      wa1;
-            std::array<double, KernelShape::x_size>                      wa2;
-            std::array<double, KernelShape::x_size>                      wa3;
-            std::array<double, KernelShape::x_size>                      wa4;
-            int                                                         nfev = 0;
-            const int                                                   info = hybrd(pf_residual_z,
+            std::array<double, static_cast<size_t>(lr)>                   r;
+            std::array<double, KernelShape::x_size>                       qtf;
+            std::array<double, KernelShape::x_size>                       wa1;
+            std::array<double, KernelShape::x_size>                       wa2;
+            std::array<double, KernelShape::x_size>                       wa3;
+            std::array<double, KernelShape::x_size>                       wa4;
+            int                                                           nfev = 0;
+            const int                                                     info = hybrd(pf_residual_z,
                                    &context,
                                    n,
                                    z.data(),
@@ -655,16 +648,16 @@ namespace veqlib_kernel_api
             std::copy(context.input.x0.begin(), context.input.x0.end(), x.begin());
             PackedVector fvec{uninitialized};
 
-            constexpr int                                               m = static_cast<int>(KernelShape::x_size);
-            constexpr int                                               n = static_cast<int>(KernelShape::x_size);
-            std::array<double, KernelShape::x_size>                      diag{};
+            constexpr int                                                 m = static_cast<int>(KernelShape::x_size);
+            constexpr int                                                 n = static_cast<int>(KernelShape::x_size);
+            std::array<double, KernelShape::x_size>                       diag{};
             std::array<double, KernelShape::x_size * KernelShape::x_size> fjac;
-            std::array<int, KernelShape::x_size>                         ipvt;
-            std::array<double, KernelShape::x_size>                      qtf;
-            std::array<double, KernelShape::x_size>                      wa1;
-            std::array<double, KernelShape::x_size>                      wa2;
-            std::array<double, KernelShape::x_size>                      wa3;
-            std::array<double, KernelShape::x_size>                      wa4;
+            std::array<int, KernelShape::x_size>                          ipvt;
+            std::array<double, KernelShape::x_size>                       qtf;
+            std::array<double, KernelShape::x_size>                       wa1;
+            std::array<double, KernelShape::x_size>                       wa2;
+            std::array<double, KernelShape::x_size>                       wa3;
+            std::array<double, KernelShape::x_size>                       wa4;
             diag.fill(1.0);
 
             int       nfev = 0;
@@ -706,19 +699,19 @@ namespace veqlib_kernel_api
             auto         z = encode_x_to_z(context.input.x0, context.input.x_scale);
             PackedVector fvec{uninitialized};
 
-            constexpr int                                               n  = static_cast<int>(KernelShape::x_size);
-            constexpr int                                               lr = n * (n + 1) / 2;
-            std::array<double, KernelShape::x_size>                      diag;
+            constexpr int                                                 n  = static_cast<int>(KernelShape::x_size);
+            constexpr int                                                 lr = n * (n + 1) / 2;
+            std::array<double, KernelShape::x_size>                       diag;
             std::array<double, KernelShape::x_size * KernelShape::x_size> fjac;
-            std::array<double, static_cast<size_t>(lr)>                 r;
-            std::array<double, KernelShape::x_size>                      qtf;
-            std::array<double, KernelShape::x_size>                      wa1;
-            std::array<double, KernelShape::x_size>                      wa2;
-            std::array<double, KernelShape::x_size>                      wa3;
-            std::array<double, KernelShape::x_size>                      wa4;
-            int                                                         nfev = 0;
-            int                                                         njev = 0;
-            const int                                                   info = hybrj(pf_residual_jacobian_z,
+            std::array<double, static_cast<size_t>(lr)>                   r;
+            std::array<double, KernelShape::x_size>                       qtf;
+            std::array<double, KernelShape::x_size>                       wa1;
+            std::array<double, KernelShape::x_size>                       wa2;
+            std::array<double, KernelShape::x_size>                       wa3;
+            std::array<double, KernelShape::x_size>                       wa4;
+            int                                                           nfev = 0;
+            int                                                           njev = 0;
+            const int                                                     info = hybrj(pf_residual_jacobian_z,
                                    &context,
                                    n,
                                    z.data(),
@@ -752,7 +745,7 @@ namespace veqlib_kernel_api
         SolveResult run_nonlinear_policy_once(SolveContext& context)
         {
             context.reset_solve_counters();
-            const auto                                 encoded = encode_x_to_z(context.input.x0, context.input.x_scale);
+            const auto encoded = encode_x_to_z(context.input.x0, context.input.x_scale);
             tensor::Vector<double, KernelShape::x_size> z{uninitialized};
             std::copy(encoded.begin(), encoded.end(), z.begin());
 
@@ -784,7 +777,7 @@ namespace veqlib_kernel_api
         SolveResult run_nonlinear_residual_policy_once(SolveContext& context)
         {
             context.reset_solve_counters();
-            const auto                                 encoded = encode_x_to_z(context.input.x0, context.input.x_scale);
+            const auto encoded = encode_x_to_z(context.input.x0, context.input.x_scale);
             tensor::Vector<double, KernelShape::x_size> z{uninitialized};
             std::copy(encoded.begin(), encoded.end(), z.begin());
 
@@ -851,7 +844,6 @@ namespace veqlib_kernel_api
                  }},
             };
         }
-
 
     } // namespace
 

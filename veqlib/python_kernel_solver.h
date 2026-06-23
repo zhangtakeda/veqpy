@@ -16,7 +16,9 @@
 #include <nanobind/stl/string.h>
 #include <nlohmann/json.hpp>
 
-#include "kernel_api.h"
+#include "kernel_case.h"
+#include "kernel_runtime.h"
+#include "kernel_topology.h"
 #include "tensor.h"
 
 namespace nb = nanobind;
@@ -67,7 +69,7 @@ namespace veqlib_python
     using MutablePackedArrayView = nb::ndarray<nb::numpy, double, nb::shape<KernelShape::x_size>, nb::c_contig>;
     using AlphaArrayView         = nb::ndarray<nb::numpy, const double, nb::shape<2>, nb::c_contig>;
 
-    std::unique_ptr<SolveContext> make_context(SolverKind solver, int enzyme_width)
+    inline std::unique_ptr<SolveContext> make_context(SolverKind solver, int enzyme_width)
     {
         if (!supported_enzyme_width(enzyme_width))
             throw std::runtime_error("enzyme_width must be one of 1, 2, 3, 4, 5, 6, 8, 9, 10, 12, 18");
@@ -82,7 +84,7 @@ namespace veqlib_python
         return context;
     }
 
-    const nlohmann::json* find_object(const nlohmann::json& data, const char* name)
+    inline const nlohmann::json* find_object(const nlohmann::json& data, const char* name)
     {
         const auto it = data.find(name);
         if (it == data.end() || it->is_null())
@@ -92,7 +94,7 @@ namespace veqlib_python
         return &*it;
     }
 
-    const nlohmann::json* find_array_field(const nlohmann::json& data, const char* name)
+    inline const nlohmann::json* find_array_field(const nlohmann::json& data, const char* name)
     {
         const auto it = data.find(name);
         if (it == data.end() || it->is_null())
@@ -102,12 +104,12 @@ namespace veqlib_python
         return &*it;
     }
 
-    bool has_array_field(const nlohmann::json& data, const char* name)
+    inline bool has_array_field(const nlohmann::json& data, const char* name)
     {
         return find_array_field(data, name) != nullptr;
     }
 
-    double finite_number(const nlohmann::json& data, const char* name)
+    inline double finite_number(const nlohmann::json& data, const char* name)
     {
         const auto it = data.find(name);
         if (it == data.end() || !it->is_number())
@@ -115,7 +117,7 @@ namespace veqlib_python
         return it->get<double>();
     }
 
-    double optional_finite_number(const nlohmann::json& data, const char* name, double fallback)
+    inline double optional_finite_number(const nlohmann::json& data, const char* name, double fallback)
     {
         const auto it = data.find(name);
         if (it == data.end() || it->is_null())
@@ -125,7 +127,7 @@ namespace veqlib_python
         return it->get<double>();
     }
 
-    int required_int(const nlohmann::json& data, const char* name)
+    inline int required_int(const nlohmann::json& data, const char* name)
     {
         const auto it = data.find(name);
         if (it == data.end() || !it->is_number_integer())
@@ -133,7 +135,7 @@ namespace veqlib_python
         return it->get<int>();
     }
 
-    int optional_int(const nlohmann::json& data, const char* name, int fallback)
+    inline int optional_int(const nlohmann::json& data, const char* name, int fallback)
     {
         const auto it = data.find(name);
         if (it == data.end() || it->is_null())
@@ -190,7 +192,7 @@ namespace veqlib_python
         }
     }
 
-    const nlohmann::json& required_object(const nlohmann::json& data, const char* name)
+    inline const nlohmann::json& required_object(const nlohmann::json& data, const char* name)
     {
         const auto* object = find_object(data, name);
         if (object == nullptr)
@@ -198,13 +200,13 @@ namespace veqlib_python
         return *object;
     }
 
-    const nlohmann::json& object_or_root(const nlohmann::json& data, const char* name)
+    inline const nlohmann::json& object_or_root(const nlohmann::json& data, const char* name)
     {
         const auto* object = find_object(data, name);
         return object == nullptr ? data : *object;
     }
 
-    CaseInput case_input_from_json(const nlohmann::json& data, SolverKind solver, int enzyme_width)
+    inline CaseInput case_input_from_json(const nlohmann::json& data, SolverKind solver, int enzyme_width)
     {
         CaseInput input = build_inline_case(0, 0, solver, enzyme_width);
         if (const auto it = data.find("case_name"); it != data.end() && !it->is_null())
@@ -274,9 +276,9 @@ namespace veqlib_python
         return input;
     }
 
-    double local_abs(double value) noexcept { return value < 0.0 ? -value : value; }
+    inline double local_abs(double value) noexcept { return value < 0.0 ? -value : value; }
 
-    bool cold_policy_uses_geometric_seed(const CaseInput& input) noexcept
+    inline bool cold_policy_uses_geometric_seed(const CaseInput& input) noexcept
     {
         if (input.initial_policy_code == InitialPolicyColdGeometric)
             return true;
@@ -285,7 +287,7 @@ namespace veqlib_python
         return false;
     }
 
-    bool project_psin0_from_source_target(SolveContext& context, double& coeff_out) noexcept
+    inline bool project_psin0_from_source_target(SolveContext& context, double& coeff_out) noexcept
     {
         constexpr bool has_active_psin = KernelShape::slot_for_profile_id(KernelShape::psin_profile_id).optimized();
         if constexpr (!has_active_psin)
@@ -409,7 +411,7 @@ namespace veqlib_python
         }
     }
 
-    void refine_cold_initial_state(SolveContext& context)
+    inline void refine_cold_initial_state(SolveContext& context)
     {
         if (!cold_policy_uses_geometric_seed(context.input))
             return;
@@ -425,7 +427,7 @@ namespace veqlib_python
         }
     }
 
-    void refresh_initial_residual_scale(SolveContext& context)
+    inline void refresh_initial_residual_scale(SolveContext& context)
     {
         PackedVector initial_raw{uninitialized};
         context.raw_residual(
@@ -437,7 +439,7 @@ namespace veqlib_python
         context.input.residual_scale = build_residual_scale_for_context(context, initial_raw);
     }
 
-    nlohmann::json solver_json(const CaseInput& input)
+    inline nlohmann::json solver_json(const CaseInput& input)
     {
         return {
             {"method_code", solver_method_code(input.solver)},
@@ -456,7 +458,7 @@ namespace veqlib_python
         };
     }
 
-    nlohmann::json case_prefix_json(SolveContext& context)
+    inline nlohmann::json case_prefix_json(SolveContext& context)
     {
         const CaseInput& input = context.input;
 
@@ -504,12 +506,12 @@ namespace veqlib_python
         };
     }
 
-    PackedArrayView packed_view(const double* data, nb::handle owner)
+    inline PackedArrayView packed_view(const double* data, nb::handle owner)
     {
         return PackedArrayView(data, {KernelShape::x_size}, owner);
     }
 
-    AlphaArrayView alpha_view(const double* data, nb::handle owner) { return AlphaArrayView(data, {2}, owner); }
+    inline AlphaArrayView alpha_view(const double* data, nb::handle owner) { return AlphaArrayView(data, {2}, owner); }
 
     template <typename Counts>
     nb::list counts_list(const Counts& counts)
@@ -520,7 +522,7 @@ namespace veqlib_python
         return out;
     }
 
-    nb::dict topology_metadata_dict(const CaseInput& input)
+    inline nb::dict topology_metadata_dict(const CaseInput& input)
     {
         nb::dict source;
         source["route"]        = "PF";

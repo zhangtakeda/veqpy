@@ -85,7 +85,7 @@ def test_build_kernel_dry_run_writes_artifact_plan(tmp_path: Path) -> None:
 def test_source_digest_ignores_repo_local_kernel_artifacts(tmp_path: Path) -> None:
     source_dir = tmp_path / "veqlib"
     source_dir.mkdir()
-    (source_dir / "kernel_api.h").write_text("stable source\n")
+    (source_dir / "kernel_runtime.h").write_text("stable source\n")
     artifact_generated = source_dir / "artifact" / "fastmath" / "abc" / "cmake-build" / "generated"
     artifact_generated.mkdir(parents=True)
     (artifact_generated / "config.h").write_text("generated artifact header\n")
