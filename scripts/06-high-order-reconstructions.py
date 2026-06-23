@@ -330,6 +330,7 @@ class CaseResult:
     parameter_count: int
     boundary_fit_rms: float
     solver_residual: float
+    nfev: int
     solve_elapsed_ms: float
     solve_timing: SolveTimingStats
     solve_cost_audit: SolveCostAudit
@@ -1532,6 +1533,7 @@ def build_case_result(case_spec: CaseSpec) -> CaseResult:
         parameter_count=profile_parameter_count(case_spec.profile_coeffs),
         boundary_fit_rms=float(fit["rms"]),
         solver_residual=float("nan") if result is None else float(result.residual_norm_final),
+        nfev=0 if result is None else int(getattr(result, "function_evaluations", 0)),
         solve_elapsed_ms=timing.median_ms,
         solve_timing=timing,
         solve_cost_audit=cost_audit,
@@ -1654,6 +1656,7 @@ def build_case_summary_latex_table(case_results: list[CaseResult]) -> str:
         "Case",
         "Params",
         "Time [ms]",
+        r"$n_{\mathrm{fev}}$",
         r"$E_{\mathrm{gqdsk}}/a$",
         r"$E_{\mathrm{lcfs}}/a$",
         "Core",
@@ -1668,6 +1671,7 @@ def build_case_summary_latex_table(case_results: list[CaseResult]) -> str:
                 CASE_DISPLAY_NAMES.get(label, label),
                 f"${int(case_result.parameter_count)}$",
                 f"${float(case_result.solve_timing.median_ms):.{FIXED_DECIMALS}f}$",
+                f"${int(case_result.nfev)}$",
                 format_case_error_metric(case_result),
                 format_boundary_fit_metric(case_result),
                 format_core_psin_tuple(case_result.case_spec),

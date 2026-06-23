@@ -23,6 +23,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <cminpack.h>
@@ -114,7 +115,8 @@ namespace
               auto   CFamilyCounts,
               auto   SFamilyCounts,
               typename QuadratureScheme,
-              typename CalculusScheme>
+              typename CalculusScheme,
+              size_t BoundaryMmax = inferred_M_max<CFamilyCounts, SFamilyCounts>()>
     struct PfPsinUniformIpTopology
     {
         static constexpr size_t L_max = inferred_L_max<
@@ -125,12 +127,14 @@ namespace
             FCount,
             CFamilyCounts,
             SFamilyCounts>();
-        static constexpr size_t M_max = inferred_M_max<CFamilyCounts, SFamilyCounts>();
+        static constexpr size_t M_max = BoundaryMmax;
         static constexpr size_t K_max = inferred_K_max<M_max>();
+        static_assert(M_max >= inferred_M_max<CFamilyCounts, SFamilyCounts>());
 
-        using Shape = profiles::OptimizedProfileShapeFromCountsT<
+        using Shape = profiles::OptimizedProfileShapeFromCountsWithMmaxT<
             L_max,
             K_max,
+            M_max,
             HCount,
             VCount,
             KappaCount,
@@ -2685,6 +2689,7 @@ int run(int, char**)
 #include <exception>
 #include <iostream>
 #include <memory>
+#include <new>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -2718,10 +2723,12 @@ namespace
     using grid::Grid;
     using grid::Legendre;
     using grid::Spectral;
+    using math::abs;
     using math::cos;
     using math::sin;
     using operators::PfPsinUniformIpOperator;
     using profiles::OptimizedProfileShapeFromCountsT;
+    using profiles::boundary_amplitude_prune_threshold;
     using residual::surface_G;
     using source::axis_fix_count;
     using source::UniformSourceShape;
@@ -2786,16 +2793,19 @@ namespace
               auto   CFamilyCounts,
               auto   SFamilyCounts,
               typename QuadratureScheme,
-              typename CalculusScheme>
+              typename CalculusScheme,
+              size_t BoundaryMmax = inferred_M_max<CFamilyCounts, SFamilyCounts>()>
     struct PfPsinUniformIpTopology
     {
         static constexpr size_t L_max =
             inferred_L_max<HCount, VCount, KappaCount, PsinCount, FCount, CFamilyCounts, SFamilyCounts>();
-        static constexpr size_t M_max = inferred_M_max<CFamilyCounts, SFamilyCounts>();
+        static constexpr size_t M_max = BoundaryMmax;
         static constexpr size_t K_max = inferred_K_max<M_max>();
+        static_assert(M_max >= inferred_M_max<CFamilyCounts, SFamilyCounts>());
 
-        using Shape    = OptimizedProfileShapeFromCountsT<L_max,
+        using Shape    = profiles::OptimizedProfileShapeFromCountsWithMmaxT<L_max,
                                                           K_max,
+                                                          M_max,
                                                           HCount,
                                                           VCount,
                                                           KappaCount,
@@ -2823,7 +2833,8 @@ namespace
                                 bench_c_counts,
                                 bench_s_counts,
                                 Legendre,
-                                Spectral>;
+                                Spectral,
+                                DefaultTopology::M_max>;
     using BenchShape    = BenchTopology::Shape;
     using BenchGrid     = BenchTopology::Grid;
     using BenchSource   = BenchTopology::Source;
@@ -2896,9 +2907,17 @@ namespace
         EvaluateRing,
     };
 
+    enum class BackendKind
+    {
+        Compile,
+        Runtime,
+        Both,
+    };
+
     struct Options
     {
         std::string stage  = "all";
+        BackendKind backend = BackendKind::Compile;
         size_t      repeat = 30;
         size_t      warmup = 5;
         size_t      inner  = 1000;
@@ -2916,8 +2935,1822 @@ namespace
     };
 
     volatile double benchmark_sink = 0.0;
+    size_t          runtime_heap_allocation_counter = 0;
 
     void compiler_barrier(const void* pointer) noexcept { asm volatile("" : : "r"(pointer) : "memory"); }
+
+    struct AlignedDoubles
+    {
+        static constexpr size_t alignment = tensor::detail::simd_alignment;
+
+        double* values = nullptr;
+        size_t  count  = 0;
+
+        AlignedDoubles() noexcept = default;
+
+        explicit AlignedDoubles(size_t size) { reset(size); }
+
+        AlignedDoubles(const AlignedDoubles&)            = delete;
+        AlignedDoubles& operator=(const AlignedDoubles&) = delete;
+
+        AlignedDoubles(AlignedDoubles&& other) noexcept : values(other.values), count(other.count)
+        {
+            other.values = nullptr;
+            other.count  = 0;
+        }
+
+        AlignedDoubles& operator=(AlignedDoubles&& other) noexcept
+        {
+            if (this != &other)
+            {
+                std::free(values);
+                values       = other.values;
+                count        = other.count;
+                other.values = nullptr;
+                other.count  = 0;
+            }
+            return *this;
+        }
+
+        ~AlignedDoubles() { std::free(values); }
+
+        void reset(size_t size)
+        {
+            if (size == count)
+            {
+                fill(0.0);
+                return;
+            }
+
+            std::free(values);
+            values = nullptr;
+            count  = size;
+            if (count == 0)
+                return;
+
+            const size_t bytes         = count * sizeof(double);
+            const size_t aligned_bytes = ((bytes + alignment - 1) / alignment) * alignment;
+            void*        pointer       = std::aligned_alloc(alignment, aligned_bytes);
+            if (pointer == nullptr)
+                throw std::bad_alloc{};
+            ++runtime_heap_allocation_counter;
+            values = static_cast<double*>(pointer);
+            fill(0.0);
+        }
+
+        void fill(double value) noexcept
+        {
+            if (count == 0)
+                return;
+            std::fill(values, values + count, value);
+        }
+
+        double* data() noexcept { return values; }
+
+        const double* data() const noexcept { return values; }
+
+        double& operator[](size_t index) noexcept { return values[index]; }
+
+        double operator[](size_t index) const noexcept { return values[index]; }
+    };
+
+    constexpr int runtime_profile_absent    = 0;
+    constexpr int runtime_profile_fixed     = 1;
+    constexpr int runtime_profile_optimized = 2;
+
+    constexpr size_t runtime_block_h     = 0;
+    constexpr size_t runtime_block_v     = 1;
+    constexpr size_t runtime_block_kappa = 2;
+    constexpr size_t runtime_block_c0    = 3;
+    constexpr size_t runtime_block_c     = 4;
+    constexpr size_t runtime_block_s     = 5;
+    constexpr size_t runtime_block_psin  = 6;
+    constexpr size_t runtime_block_F     = 7;
+
+    struct RuntimeProfileSlot
+    {
+        int    mode              = runtime_profile_absent;
+        size_t coefficient_count = 0;
+
+        constexpr bool fixed() const noexcept { return mode == runtime_profile_fixed; }
+        constexpr bool optimized() const noexcept { return mode == runtime_profile_optimized; }
+        constexpr bool enabled() const noexcept { return mode != runtime_profile_absent; }
+    };
+
+    consteval RuntimeProfileSlot runtime_slot_from(profiles::ProfileSlot slot) noexcept
+    {
+        if (slot.optimized())
+            return {runtime_profile_optimized, slot.coefficient_count};
+        if (slot.fixed())
+            return {runtime_profile_fixed, slot.coefficient_count};
+        return {runtime_profile_absent, 0};
+    }
+
+    consteval auto make_bench_runtime_slots() noexcept
+    {
+        std::array<RuntimeProfileSlot, BenchShape::profile_count> out{};
+        for (size_t profile_id = 0; profile_id < BenchShape::profile_count; ++profile_id)
+            out[profile_id] = runtime_slot_from(BenchShape::slot_for_profile_id(profile_id));
+        return out;
+    }
+
+    constexpr auto bench_runtime_slots = make_bench_runtime_slots();
+
+    struct RuntimeProfileParams
+    {
+        std::vector<double> offsets;
+        std::vector<double> scales;
+    };
+
+    struct RuntimeSolveParams
+    {
+        double a  = 1.0;
+        double R0 = 1.0;
+        double Z0 = 0.0;
+        double B0 = 1.0;
+        double Ip = 0.0;
+    };
+
+    struct RuntimePlan
+    {
+        size_t nr            = BenchGrid::radial_nodes;
+        size_t nt            = BenchGrid::theta_rows;
+        size_t l_max         = BenchShape::L_max;
+        size_t m_max         = BenchShape::M_max;
+        size_t k_max         = BenchShape::K_max;
+        size_t harmonic_rows = BenchGrid::harmonic_rows;
+        size_t profile_count = BenchShape::profile_count;
+        size_t x_size        = BenchShape::x_size;
+        size_t max_active_len = BenchShape::max_active_len;
+        size_t sample_count   = BenchSource::sample_count;
+        size_t stencil_size   = BenchSource::stencil_size;
+
+        size_t h_profile_id     = BenchShape::h_profile_id;
+        size_t v_profile_id     = BenchShape::v_profile_id;
+        size_t kappa_profile_id = BenchShape::kappa_profile_id;
+        size_t c0_profile_id    = BenchShape::c0_profile_id;
+        size_t psin_profile_id  = BenchShape::psin_profile_id;
+        size_t F_profile_id     = BenchShape::F_profile_id;
+
+        std::vector<RuntimeProfileSlot> slots;
+        std::vector<int>                coeff_index;
+        std::vector<int>                c_family_source_profile_ids;
+        std::vector<int>                s_family_source_profile_ids;
+        std::vector<size_t>             active_c_orders;
+        std::vector<size_t>             active_s_orders;
+        std::vector<size_t>             boundary_c_orders;
+        std::vector<size_t>             boundary_s_orders;
+
+        RuntimeProfileParams profile_params;
+        size_t               n_axis_fix = 0;
+
+        AlignedDoubles nodes;
+        AlignedDoubles weights;
+        AlignedDoubles y;
+        AlignedDoubles rhos;
+        AlignedDoubles T;
+        AlignedDoubles T_r;
+        AlignedDoubles T_rr;
+        AlignedDoubles theta;
+        AlignedDoubles cos_mtheta;
+        AlignedDoubles sin_mtheta;
+        AlignedDoubles m_cos_mtheta;
+        AlignedDoubles m_sin_mtheta;
+        AlignedDoubles m2_cos_mtheta;
+        AlignedDoubles m2_sin_mtheta;
+        AlignedDoubles accumulator;
+        AlignedDoubles differentiator;
+        AlignedDoubles barycentric_weights;
+        AlignedDoubles fixed_profile_fields;
+
+        RuntimePlan()
+            : slots(profile_count),
+              coeff_index(profile_count * max_active_len, -1),
+              c_family_source_profile_ids(harmonic_rows, -1),
+              s_family_source_profile_ids(harmonic_rows, -1),
+              nodes(nr),
+              weights(nr),
+              y(nr),
+              rhos(k_max * nr),
+              T(l_max * nr),
+              T_r(l_max * nr),
+              T_rr(l_max * nr),
+              theta(nt),
+              cos_mtheta(harmonic_rows * nt),
+              sin_mtheta(harmonic_rows * nt),
+              m_cos_mtheta(harmonic_rows * nt),
+              m_sin_mtheta(harmonic_rows * nt),
+              m2_cos_mtheta(harmonic_rows * nt),
+              m2_sin_mtheta(harmonic_rows * nt),
+              accumulator(nr * nr),
+              differentiator(nr * nr),
+              barycentric_weights(stencil_size),
+              fixed_profile_fields(profile_count * nr * 3)
+        {
+            profile_params.offsets.assign(profile_count, 0.0);
+            profile_params.scales.assign(profile_count, 1.0);
+
+            for (size_t profile_id = 0; profile_id < profile_count; ++profile_id)
+            {
+                slots[profile_id] = bench_runtime_slots[profile_id];
+                for (size_t degree = 0; degree < max_active_len; ++degree)
+                    coeff_index[profile_id * max_active_len + degree] =
+                        BenchShape::coeff_index[profile_id][degree];
+            }
+            for (size_t order = 0; order < harmonic_rows; ++order)
+            {
+                c_family_source_profile_ids[order] = BenchShape::c_family_source_profile_ids[order];
+                s_family_source_profile_ids[order] = BenchShape::s_family_source_profile_ids[order];
+                if (c_family_source_profile_ids[order] >= 0)
+                    active_c_orders.push_back(order);
+                if (order > 0 && s_family_source_profile_ids[order] >= 0)
+                    active_s_orders.push_back(order);
+            }
+            boundary_c_orders.reserve(harmonic_rows);
+            boundary_s_orders.reserve(harmonic_rows);
+
+            for (size_t i = 0; i < nr; ++i)
+            {
+                nodes[i]   = BenchGrid::nodes[i];
+                weights[i] = BenchGrid::weights[i];
+                y[i]       = BenchGrid::y[i];
+                for (size_t row = 0; row < k_max; ++row)
+                    rhos[row * nr + i] = BenchGrid::rhos(row, i);
+                for (size_t row = 0; row < l_max; ++row)
+                {
+                    T[row * nr + i]    = BenchGrid::T(row, i);
+                    T_r[row * nr + i]  = BenchGrid::T_r(row, i);
+                    T_rr[row * nr + i] = BenchGrid::T_rr(row, i);
+                }
+            }
+            for (size_t row = 0; row < nr; ++row)
+                for (size_t col = 0; col < nr; ++col)
+                {
+                    accumulator[row * nr + col]    = BenchGrid::accumulator(row, col);
+                    differentiator[row * nr + col] = BenchGrid::differentiator(row, col);
+                }
+            for (size_t j = 0; j < nt; ++j)
+            {
+                theta[j] = BenchGrid::theta[j];
+                for (size_t order = 0; order < harmonic_rows; ++order)
+                {
+                    const size_t index    = order * nt + j;
+                    cos_mtheta[index]     = BenchGrid::cos_mtheta(order, j);
+                    sin_mtheta[index]     = BenchGrid::sin_mtheta(order, j);
+                    m_cos_mtheta[index]   = BenchGrid::m_cos_mtheta(order, j);
+                    m_sin_mtheta[index]   = BenchGrid::m_sin_mtheta(order, j);
+                    m2_cos_mtheta[index]  = BenchGrid::m2_cos_mtheta(order, j);
+                    m2_sin_mtheta[index]  = BenchGrid::m2_sin_mtheta(order, j);
+                }
+            }
+            for (size_t i = 0; i < stencil_size; ++i)
+                barycentric_weights[i] = BenchSource::barycentric_weights[i];
+        }
+
+        size_t profile_index(size_t profile_id, size_t node, size_t component) const noexcept
+        {
+            return (profile_id * nr + node) * 3 + component;
+        }
+
+        size_t family_index(size_t order, size_t node, size_t component) const noexcept
+        {
+            return (order * nr + node) * 3 + component;
+        }
+
+        size_t surface_index(size_t node, size_t field, size_t theta_node) const noexcept
+        {
+            return (node * residual::residual_surface_count + field) * nt + theta_node;
+        }
+
+        size_t geometry_surface_index(size_t node, size_t field, size_t theta_node) const noexcept
+        {
+            return (node * geometry::surface_field_count + field) * nt + theta_node;
+        }
+
+        size_t radial_index(size_t field, size_t node) const noexcept { return field * nr + node; }
+
+        size_t c_profile_id(size_t order) const noexcept { return c0_profile_id + order; }
+
+        size_t s_profile_id(size_t order) const noexcept { return c0_profile_id + m_max + order; }
+
+        int coeff_index_for(size_t profile_id, size_t degree) const noexcept
+        {
+            return coeff_index[profile_id * max_active_len + degree];
+        }
+
+        size_t profile_order(size_t profile_id) const noexcept
+        {
+            if (profile_id > c0_profile_id && profile_id <= c_profile_id(m_max))
+                return profile_id - c0_profile_id;
+            if (profile_id >= s_profile_id(1) && profile_id <= s_profile_id(m_max))
+                return profile_id - c0_profile_id - m_max;
+            return 0;
+        }
+
+        size_t profile_code(size_t profile_id) const noexcept
+        {
+            if (profile_id == h_profile_id)
+                return runtime_block_h;
+            if (profile_id == v_profile_id)
+                return runtime_block_v;
+            if (profile_id == kappa_profile_id)
+                return runtime_block_kappa;
+            if (profile_id == c0_profile_id)
+                return runtime_block_c0;
+            if (profile_id > c0_profile_id && profile_id <= c_profile_id(m_max))
+                return runtime_block_c;
+            if (profile_id >= s_profile_id(1) && profile_id <= s_profile_id(m_max))
+                return runtime_block_s;
+            if (profile_id == psin_profile_id)
+                return runtime_block_psin;
+            return runtime_block_F;
+        }
+
+        size_t radial_power(size_t profile_id) const noexcept
+        {
+            const size_t order = profile_order(profile_id);
+            return order == 0 ? 0 : (order < k_max ? order : k_max);
+        }
+
+        void refresh_fixed_profile_fields() noexcept
+        {
+            fixed_profile_fields.fill(0.0);
+            for (size_t profile_id = 0; profile_id < profile_count; ++profile_id)
+            {
+                const RuntimeProfileSlot slot = slots[profile_id];
+                if (!slot.fixed())
+                    continue;
+                const double value = profile_params.offsets[profile_id] * profile_params.scales[profile_id];
+                for (size_t node = 0; node < nr; ++node)
+                {
+                    fixed_profile_fields[profile_index(profile_id, node, 0)] = value;
+                    fixed_profile_fields[profile_index(profile_id, node, 1)] = 0.0;
+                    fixed_profile_fields[profile_index(profile_id, node, 2)] = 0.0;
+                }
+            }
+        }
+
+        void update_axis_fix(double fix_rho) noexcept
+        {
+            n_axis_fix = 0;
+            while (n_axis_fix < nr && nodes[n_axis_fix] < fix_rho)
+                ++n_axis_fix;
+        }
+
+        size_t aligned_bytes() const noexcept
+        {
+            return (nodes.count + weights.count + y.count + rhos.count + T.count + T_r.count +
+                    T_rr.count + theta.count + cos_mtheta.count + sin_mtheta.count +
+                    m_cos_mtheta.count + m_sin_mtheta.count + m2_cos_mtheta.count +
+                    m2_sin_mtheta.count + accumulator.count + differentiator.count +
+                    barycentric_weights.count + fixed_profile_fields.count) *
+                   sizeof(double);
+        }
+
+        size_t metadata_bytes() const noexcept
+        {
+            return slots.size() * sizeof(RuntimeProfileSlot) + coeff_index.size() * sizeof(int) +
+                   c_family_source_profile_ids.size() * sizeof(int) +
+                   s_family_source_profile_ids.size() * sizeof(int) +
+                   active_c_orders.size() * sizeof(size_t) + active_s_orders.size() * sizeof(size_t) +
+                   boundary_c_orders.capacity() * sizeof(size_t) +
+                   boundary_s_orders.capacity() * sizeof(size_t) +
+                   profile_params.offsets.size() * sizeof(double) +
+                   profile_params.scales.size() * sizeof(double);
+        }
+    };
+
+    struct RuntimeWorkspace
+    {
+        AlignedDoubles profile_fields;
+        AlignedDoubles profile_rp_fields;
+        AlignedDoubles profile_env_fields;
+        AlignedDoubles c_family_fields;
+        AlignedDoubles s_family_fields;
+        AlignedDoubles c_family_base_fields;
+        AlignedDoubles s_family_base_fields;
+        AlignedDoubles boundary_phase_base;
+        AlignedDoubles geometry_surface_fields;
+        AlignedDoubles geometry_radial_fields;
+        AlignedDoubles heat_input;
+        AlignedDoubles current_input;
+        AlignedDoubles source_psin_query;
+        AlignedDoubles source_parameter_query;
+        AlignedDoubles materialized_heat_input;
+        AlignedDoubles materialized_current_input;
+        AlignedDoubles profile_root_fields;
+        AlignedDoubles source_target_root_fields;
+        AlignedDoubles FFn_psin;
+        AlignedDoubles Pn_psin;
+        AlignedDoubles residual_surface_fields;
+        AlignedDoubles residual_scratch;
+        AlignedDoubles source_aux;
+        AlignedDoubles geometry_tb;
+        AlignedDoubles geometry_tb_r;
+        AlignedDoubles geometry_tb_t;
+        AlignedDoubles geometry_tb_rr;
+        AlignedDoubles geometry_tb_rt;
+        AlignedDoubles geometry_tb_tt;
+        AlignedDoubles geometry_sin_tb;
+        AlignedDoubles geometry_cos_tb;
+        double         alpha1 = 0.0;
+        double         alpha2 = 0.0;
+
+        explicit RuntimeWorkspace(const RuntimePlan& plan)
+            : profile_fields(plan.profile_count * plan.nr * 3),
+              profile_rp_fields(plan.profile_count * plan.nr * 3),
+              profile_env_fields(plan.profile_count * plan.nr * 3),
+              c_family_fields(plan.harmonic_rows * plan.nr * 3),
+              s_family_fields(plan.harmonic_rows * plan.nr * 3),
+              c_family_base_fields(plan.harmonic_rows * plan.nr * 3),
+              s_family_base_fields(plan.harmonic_rows * plan.nr * 3),
+              boundary_phase_base(plan.nr * plan.nt * 6),
+              geometry_surface_fields(plan.nr * geometry::surface_field_count * plan.nt),
+              geometry_radial_fields(geometry::radial_field_count * plan.nr),
+              heat_input(plan.sample_count),
+              current_input(plan.sample_count),
+              source_psin_query(plan.nr),
+              source_parameter_query(plan.nr),
+              materialized_heat_input(plan.nr),
+              materialized_current_input(plan.nr),
+              profile_root_fields(source::root_field_count * plan.nr),
+              source_target_root_fields(source::root_field_count * plan.nr),
+              FFn_psin(plan.nr),
+              Pn_psin(plan.nr),
+              residual_surface_fields(plan.nr * residual::residual_surface_count * plan.nt),
+              residual_scratch(plan.nr),
+              source_aux(plan.nr),
+              geometry_tb(plan.nt),
+              geometry_tb_r(plan.nt),
+              geometry_tb_t(plan.nt),
+              geometry_tb_rr(plan.nt),
+              geometry_tb_rt(plan.nt),
+              geometry_tb_tt(plan.nt),
+              geometry_sin_tb(plan.nt),
+              geometry_cos_tb(plan.nt)
+        {
+        }
+
+        size_t bytes() const noexcept
+        {
+            return (profile_fields.count + profile_rp_fields.count + profile_env_fields.count +
+                    c_family_fields.count + s_family_fields.count + c_family_base_fields.count +
+                    s_family_base_fields.count + boundary_phase_base.count + geometry_surface_fields.count +
+                    geometry_radial_fields.count + heat_input.count + current_input.count + source_psin_query.count +
+                    source_parameter_query.count + materialized_heat_input.count +
+                    materialized_current_input.count + profile_root_fields.count +
+                    source_target_root_fields.count + FFn_psin.count + Pn_psin.count +
+                    residual_surface_fields.count + residual_scratch.count + source_aux.count +
+                    geometry_tb.count + geometry_tb_r.count + geometry_tb_t.count +
+                    geometry_tb_rr.count + geometry_tb_rt.count + geometry_tb_tt.count +
+                    geometry_sin_tb.count + geometry_cos_tb.count) *
+                   sizeof(double);
+        }
+    };
+
+    struct RuntimeStageBuffers
+    {
+        AlignedDoubles packed;
+        AlignedDoubles source_scratch;
+        AlignedDoubles source_aux;
+        AlignedDoubles residual_moments;
+
+        explicit RuntimeStageBuffers(const RuntimePlan& plan)
+            : packed(plan.x_size),
+              source_scratch(plan.nr),
+              source_aux(plan.nr),
+              residual_moments(plan.profile_count * plan.nr)
+        {
+        }
+
+        size_t bytes() const noexcept
+        {
+            return (packed.count + source_scratch.count + source_aux.count + residual_moments.count) *
+                   sizeof(double);
+        }
+    };
+
+    struct RuntimeOperator
+    {
+        RuntimePlan      plan;
+        RuntimeWorkspace workspace;
+        RuntimeSolveParams solve_params{};
+
+        explicit RuntimeOperator(const BenchOperator::Setup& setup) : plan(), workspace(plan)
+        {
+            reprepare(setup);
+        }
+
+        void set_solve_params(const BenchOperator::SolveParams& params) noexcept
+        {
+            solve_params.a  = params.a;
+            solve_params.R0 = params.R0;
+            solve_params.Z0 = params.Z0;
+            solve_params.B0 = params.B0;
+            solve_params.Ip = params.Ip;
+        }
+
+        void reprepare(const BenchOperator::Setup& setup) noexcept
+        {
+            for (size_t profile_id = 0; profile_id < plan.profile_count; ++profile_id)
+            {
+                plan.profile_params.offsets[profile_id] = setup.profile_params.offsets[profile_id];
+                plan.profile_params.scales[profile_id]  = setup.profile_params.scales[profile_id];
+            }
+            plan.update_axis_fix(setup.fix_rho);
+            plan.refresh_fixed_profile_fields();
+            load_fixed_from_plan();
+            for (size_t i = 0; i < plan.sample_count; ++i)
+            {
+                workspace.heat_input[i]    = setup.heat[i];
+                workspace.current_input[i] = setup.current[i];
+            }
+        }
+
+        double& profile_field(size_t profile_id, size_t node, size_t component) noexcept
+        {
+            return workspace.profile_fields[plan.profile_index(profile_id, node, component)];
+        }
+
+        double profile_field(size_t profile_id, size_t node, size_t component) const noexcept
+        {
+            return workspace.profile_fields[plan.profile_index(profile_id, node, component)];
+        }
+
+        double& c_family_field(size_t order, size_t node, size_t component) noexcept
+        {
+            return workspace.c_family_fields[plan.family_index(order, node, component)];
+        }
+
+        double c_family_field(size_t order, size_t node, size_t component) const noexcept
+        {
+            return workspace.c_family_fields[plan.family_index(order, node, component)];
+        }
+
+        double& s_family_field(size_t order, size_t node, size_t component) noexcept
+        {
+            return workspace.s_family_fields[plan.family_index(order, node, component)];
+        }
+
+        double s_family_field(size_t order, size_t node, size_t component) const noexcept
+        {
+            return workspace.s_family_fields[plan.family_index(order, node, component)];
+        }
+
+        size_t boundary_phase_index(size_t node, size_t theta_node, size_t component) const noexcept
+        {
+            return (node * plan.nt + theta_node) * 6 + component;
+        }
+
+        double& boundary_phase_base(size_t node, size_t theta_node, size_t component) noexcept
+        {
+            return workspace.boundary_phase_base[boundary_phase_index(node, theta_node, component)];
+        }
+
+        double boundary_phase_base(size_t node, size_t theta_node, size_t component) const noexcept
+        {
+            return workspace.boundary_phase_base[boundary_phase_index(node, theta_node, component)];
+        }
+
+        double& geometry_surface_field(size_t field, size_t node, size_t theta_node) noexcept
+        {
+            return workspace.geometry_surface_fields[plan.geometry_surface_index(node, field, theta_node)];
+        }
+
+        double geometry_surface_field(size_t field, size_t node, size_t theta_node) const noexcept
+        {
+            return workspace.geometry_surface_fields[plan.geometry_surface_index(node, field, theta_node)];
+        }
+
+        double& geometry_radial_field(size_t field, size_t node) noexcept
+        {
+            return workspace.geometry_radial_fields[plan.radial_index(field, node)];
+        }
+
+        double geometry_radial_field(size_t field, size_t node) const noexcept
+        {
+            return workspace.geometry_radial_fields[plan.radial_index(field, node)];
+        }
+
+        double& source_target_root_field(size_t row, size_t node) noexcept
+        {
+            return workspace.source_target_root_fields[row * plan.nr + node];
+        }
+
+        double source_target_root_field(size_t row, size_t node) const noexcept
+        {
+            return workspace.source_target_root_fields[row * plan.nr + node];
+        }
+
+        double& profile_root_field(size_t row, size_t node) noexcept
+        {
+            return workspace.profile_root_fields[row * plan.nr + node];
+        }
+
+        double profile_root_field(size_t row, size_t node) const noexcept
+        {
+            return workspace.profile_root_fields[row * plan.nr + node];
+        }
+
+        double& residual_surface_field(size_t field, size_t node, size_t theta_node) noexcept
+        {
+            return workspace.residual_surface_fields[plan.surface_index(node, field, theta_node)];
+        }
+
+        double residual_surface_field(size_t field, size_t node, size_t theta_node) const noexcept
+        {
+            return workspace.residual_surface_fields[plan.surface_index(node, field, theta_node)];
+        }
+
+        double residual_moment(const RuntimeStageBuffers& buffers, size_t profile_id, size_t node) const noexcept
+        {
+            return buffers.residual_moments[profile_id * plan.nr + node];
+        }
+
+        double& residual_moment(RuntimeStageBuffers& buffers, size_t profile_id, size_t node) const noexcept
+        {
+            return buffers.residual_moments[profile_id * plan.nr + node];
+        }
+
+        void load_fixed_from_plan() noexcept
+        {
+            for (size_t profile_id = 0; profile_id < plan.profile_count; ++profile_id)
+            {
+                if (!plan.slots[profile_id].fixed())
+                    continue;
+                for (size_t node = 0; node < plan.nr; ++node)
+                    for (size_t component = 0; component < 3; ++component)
+                        profile_field(profile_id, node, component) =
+                            plan.fixed_profile_fields[plan.profile_index(profile_id, node, component)];
+            }
+            refresh_boundary_family_base();
+            refresh_boundary_phase_base();
+            workspace.c_family_fields.fill(0.0);
+            workspace.s_family_fields.fill(0.0);
+        }
+
+        double coefficient(std::span<const double> x, size_t profile_id, size_t degree) const noexcept
+        {
+            const int index = plan.coeff_index_for(profile_id, degree);
+            return index >= 0 ? x[static_cast<size_t>(index)] : 0.0;
+        }
+
+        void polynomial_values(std::span<const double> x,
+                               size_t                  profile_id,
+                               size_t                  count,
+                               size_t                  node,
+                               double&                 value,
+                               double&                 diff,
+                               double&                 diff2) const noexcept
+        {
+            value = count > 0 ? coefficient(x, profile_id, 0) : 0.0;
+            diff  = 0.0;
+            diff2 = 0.0;
+            for (size_t degree = 1; degree < count; ++degree)
+            {
+                const double coeff = coefficient(x, profile_id, degree);
+                const size_t row   = degree - 1;
+                value += coeff * plan.T[row * plan.nr + node];
+                diff += coeff * plan.T_r[row * plan.nr + node];
+                diff2 += coeff * plan.T_rr[row * plan.nr + node];
+            }
+        }
+
+        void rho_power_values(size_t power,
+                              size_t node,
+                              double& value,
+                              double& diff,
+                              double& diff2) const noexcept
+        {
+            if (power == 0)
+            {
+                value = 1.0;
+                diff  = 0.0;
+                diff2 = 0.0;
+                return;
+            }
+            if (power == 1)
+            {
+                value = plan.nodes[node];
+                diff  = 1.0;
+                diff2 = 0.0;
+                return;
+            }
+
+            const double rho_pm2 = power == 2 ? 1.0 : plan.rhos[(power - 3) * plan.nr + node];
+            const double rho_pm1 = plan.rhos[(power - 2) * plan.nr + node];
+            const double rho_p   = plan.rhos[(power - 1) * plan.nr + node];
+            value                = rho_p;
+            diff                 = static_cast<double>(power) * rho_pm1;
+            diff2                = static_cast<double>(power * (power - 1)) * rho_pm2;
+        }
+
+        void store_enveloped_profile(std::span<const double> x, size_t profile_id, size_t count) noexcept
+        {
+            for (size_t node = 0; node < plan.nr; ++node)
+            {
+                double value = 0.0;
+                double diff  = 0.0;
+                double diff2 = 0.0;
+                polynomial_values(x, profile_id, count, node, value, diff, diff2);
+                const double rho = plan.nodes[node];
+                const double y   = plan.y[node];
+                profile_field(profile_id, node, 0) = y * value;
+                profile_field(profile_id, node, 1) = -2.0 * rho * value + y * diff;
+                profile_field(profile_id, node, 2) = -2.0 * value - 4.0 * rho * diff + y * diff2;
+            }
+        }
+
+        void store_kappa_profile(std::span<const double> x, size_t profile_id, size_t count) noexcept
+        {
+            const double ka = plan.profile_params.offsets[profile_id];
+            for (size_t node = 0; node < plan.nr; ++node)
+            {
+                double value = 0.0;
+                double diff  = 0.0;
+                double diff2 = 0.0;
+                polynomial_values(x, profile_id, count, node, value, diff, diff2);
+                const double rho     = plan.nodes[node];
+                const double y       = plan.y[node];
+                const double base    = y * value;
+                const double base_r  = -2.0 * rho * value + y * diff;
+                const double base_rr = -2.0 * value - 4.0 * rho * diff + y * diff2;
+                profile_field(profile_id, node, 0) = ka + base;
+                profile_field(profile_id, node, 1) = base_r;
+                profile_field(profile_id, node, 2) = base_rr;
+            }
+        }
+
+        void store_psin_profile(std::span<const double> x, size_t profile_id, size_t count) noexcept
+        {
+            for (size_t node = 0; node < plan.nr; ++node)
+            {
+                double value = 0.0;
+                double diff  = 0.0;
+                double diff2 = 0.0;
+                polynomial_values(x, profile_id, count, node, value, diff, diff2);
+                const double rho     = plan.nodes[node];
+                const double y       = plan.y[node];
+                const double base    = y * value;
+                const double base_r  = -2.0 * rho * value + y * diff;
+                const double base_rr = -2.0 * value - 4.0 * rho * diff + y * diff2;
+                const double amp     = 1.0 + base;
+                const double rp      = plan.rhos[node + plan.nr];
+                const double rp_r    = 2.0 * rho;
+                const double rp_rr   = 2.0;
+                profile_field(profile_id, node, 0) = rp * amp;
+                profile_field(profile_id, node, 1) = rp_r * amp + rp * base_r;
+                profile_field(profile_id, node, 2) = rp_rr * amp + 2.0 * rp_r * base_r + rp * base_rr;
+            }
+        }
+
+        void store_F_profile(std::span<const double> x, size_t profile_id, size_t count) noexcept
+        {
+            constexpr double floor = 1.0e-10;
+            const double     scale = plan.profile_params.scales[profile_id];
+            for (size_t node = 0; node < plan.nr; ++node)
+            {
+                double value = 0.0;
+                double diff  = 0.0;
+                double diff2 = 0.0;
+                polynomial_values(x, profile_id, count, node, value, diff, diff2);
+                const double rho               = plan.nodes[node];
+                const double y                 = plan.y[node];
+                const double base              = y * value;
+                const double base_r            = -2.0 * rho * value + y * diff;
+                const double base_rr           = -2.0 * value - 4.0 * rho * diff + y * diff2;
+                const double amp_raw_unclamped = 1.0 + base;
+                const double amp_raw           = amp_raw_unclamped > floor ? amp_raw_unclamped : floor;
+                const double amp               = std::sqrt(amp_raw);
+                const double inv_amp           = 1.0 / amp;
+                const double inv_amp3          = inv_amp / amp_raw;
+                const double amp_r             = 0.5 * base_r * inv_amp;
+                const double amp_rr            = 0.5 * base_rr * inv_amp - 0.25 * base_r * base_r * inv_amp3;
+                profile_field(profile_id, node, 0) = scale * amp;
+                profile_field(profile_id, node, 1) = scale * amp_r;
+                profile_field(profile_id, node, 2) = scale * amp_rr;
+            }
+        }
+
+        void store_fourier_profile(std::span<const double> x,
+                                   size_t                  profile_id,
+                                   size_t                  count,
+                                   size_t                  order) noexcept
+        {
+            const size_t power  = order < plan.k_max ? order : plan.k_max;
+            constexpr double offset = 0.0;
+            for (size_t node = 0; node < plan.nr; ++node)
+            {
+                double value = 0.0;
+                double diff  = 0.0;
+                double diff2 = 0.0;
+                polynomial_values(x, profile_id, count, node, value, diff, diff2);
+                double rp_value = 0.0;
+                double rp_diff  = 0.0;
+                double rp_diff2 = 0.0;
+                rho_power_values(power, node, rp_value, rp_diff, rp_diff2);
+                const double rho     = plan.nodes[node];
+                const double y       = plan.y[node];
+                const double base    = y * value;
+                const double base_r  = -2.0 * rho * value + y * diff;
+                const double base_rr = -2.0 * value - 4.0 * rho * diff + y * diff2;
+                const double amp     = offset + base;
+                profile_field(profile_id, node, 0) = rp_value * amp;
+                profile_field(profile_id, node, 1) = rp_diff * amp + rp_value * base_r;
+                profile_field(profile_id, node, 2) = rp_diff2 * amp + 2.0 * rp_diff * base_r + rp_value * base_rr;
+            }
+        }
+
+        void refresh_active(std::span<const double> x) noexcept
+        {
+            for (size_t profile_id = 0; profile_id < plan.profile_count; ++profile_id)
+            {
+                const RuntimeProfileSlot slot = plan.slots[profile_id];
+                if (!slot.optimized())
+                    continue;
+                const size_t code  = plan.profile_code(profile_id);
+                const size_t order = plan.profile_order(profile_id);
+                if (code == runtime_block_h || code == runtime_block_v)
+                    store_enveloped_profile(x, profile_id, slot.coefficient_count);
+                else if (code == runtime_block_kappa)
+                    store_kappa_profile(x, profile_id, slot.coefficient_count);
+                else if (code == runtime_block_psin)
+                    store_psin_profile(x, profile_id, slot.coefficient_count);
+                else if (code == runtime_block_F)
+                    store_F_profile(x, profile_id, slot.coefficient_count);
+                else
+                    store_fourier_profile(x, profile_id, slot.coefficient_count, order);
+            }
+            refresh_fourier_family_fields();
+        }
+
+        void refresh_fixed() noexcept
+        {
+            for (size_t profile_id = 0; profile_id < plan.profile_count; ++profile_id)
+            {
+                const RuntimeProfileSlot slot = plan.slots[profile_id];
+                if (!slot.fixed())
+                    continue;
+                const double value = plan.profile_params.offsets[profile_id] * plan.profile_params.scales[profile_id];
+                for (size_t node = 0; node < plan.nr; ++node)
+                {
+                    profile_field(profile_id, node, 0) = value;
+                    profile_field(profile_id, node, 1) = 0.0;
+                    profile_field(profile_id, node, 2) = 0.0;
+                }
+            }
+            refresh_boundary_family_base();
+            refresh_boundary_phase_base();
+            workspace.c_family_fields.fill(0.0);
+            workspace.s_family_fields.fill(0.0);
+        }
+
+        void refresh_boundary_family_base() noexcept
+        {
+            for (size_t active = 0; active < plan.boundary_c_orders.size(); ++active)
+                clear_family_order(workspace.c_family_base_fields, plan.boundary_c_orders[active]);
+            for (size_t active = 0; active < plan.boundary_s_orders.size(); ++active)
+                clear_family_order(workspace.s_family_base_fields, plan.boundary_s_orders[active]);
+            plan.boundary_c_orders.clear();
+            plan.boundary_s_orders.clear();
+            for (size_t order = 0; order < plan.harmonic_rows; ++order)
+            {
+                const size_t profile_id = plan.c_profile_id(order);
+                const double offset =
+                    plan.profile_params.offsets[profile_id] * plan.profile_params.scales[profile_id];
+                if (abs(offset) <= boundary_amplitude_prune_threshold)
+                    continue;
+                plan.boundary_c_orders.push_back(order);
+                for (size_t node = 0; node < plan.nr; ++node)
+                {
+                    double rp_value = 0.0;
+                    double rp_diff  = 0.0;
+                    double rp_diff2 = 0.0;
+                    rho_power_values(plan.radial_power(profile_id), node, rp_value, rp_diff, rp_diff2);
+                    const size_t index0 = plan.family_index(order, node, 0);
+                    workspace.c_family_base_fields[index0]     = offset * rp_value;
+                    workspace.c_family_base_fields[index0 + 1] = offset * rp_diff;
+                    workspace.c_family_base_fields[index0 + 2] = offset * rp_diff2;
+                }
+            }
+            for (size_t order = 1; order < plan.harmonic_rows; ++order)
+            {
+                const size_t profile_id = plan.s_profile_id(order);
+                const double offset =
+                    plan.profile_params.offsets[profile_id] * plan.profile_params.scales[profile_id];
+                if (abs(offset) <= boundary_amplitude_prune_threshold)
+                    continue;
+                plan.boundary_s_orders.push_back(order);
+                for (size_t node = 0; node < plan.nr; ++node)
+                {
+                    double rp_value = 0.0;
+                    double rp_diff  = 0.0;
+                    double rp_diff2 = 0.0;
+                    rho_power_values(plan.radial_power(profile_id), node, rp_value, rp_diff, rp_diff2);
+                    const size_t index0 = plan.family_index(order, node, 0);
+                    workspace.s_family_base_fields[index0]     = offset * rp_value;
+                    workspace.s_family_base_fields[index0 + 1] = offset * rp_diff;
+                    workspace.s_family_base_fields[index0 + 2] = offset * rp_diff2;
+                }
+            }
+        }
+
+        void clear_family_order(AlignedDoubles& family, size_t order) noexcept
+        {
+            for (size_t node = 0; node < plan.nr; ++node)
+                for (size_t component = 0; component < 3; ++component)
+                    family[plan.family_index(order, node, component)] = 0.0;
+        }
+
+        void refresh_boundary_phase_base() noexcept
+        {
+            for (size_t node = 0; node < plan.nr; ++node)
+            {
+                const size_t c0_index = plan.family_index(0, node, 0);
+                const double c0_i     = workspace.c_family_base_fields[c0_index];
+                const double c0_r_i   = workspace.c_family_base_fields[c0_index + 1];
+                const double c0_rr_i  = workspace.c_family_base_fields[c0_index + 2];
+                for (size_t theta_node = 0; theta_node < plan.nt; ++theta_node)
+                {
+                    double tb    = plan.theta[theta_node] + c0_i;
+                    double tb_r  = c0_r_i;
+                    double tb_t  = 1.0;
+                    double tb_rr = c0_rr_i;
+                    double tb_rt = 0.0;
+                    double tb_tt = 0.0;
+                    for (size_t active = 0; active < plan.boundary_c_orders.size(); ++active)
+                    {
+                        const size_t order = plan.boundary_c_orders[active];
+                        if (order == 0)
+                            continue;
+                        const size_t c_index   = plan.family_index(order, node, 0);
+                        const double c_i       = workspace.c_family_base_fields[c_index];
+                        const double c_r_i     = workspace.c_family_base_fields[c_index + 1];
+                        const double c_rr_i    = workspace.c_family_base_fields[c_index + 2];
+                        const double cos_kt    = plan.cos_mtheta[order * plan.nt + theta_node];
+                        const double k_sin_kt  = plan.m_sin_mtheta[order * plan.nt + theta_node];
+                        const double k2_cos_kt = plan.m2_cos_mtheta[order * plan.nt + theta_node];
+                        tb += c_i * cos_kt;
+                        tb_r += c_r_i * cos_kt;
+                        tb_t -= c_i * k_sin_kt;
+                        tb_rr += c_rr_i * cos_kt;
+                        tb_rt -= c_r_i * k_sin_kt;
+                        tb_tt -= c_i * k2_cos_kt;
+                    }
+
+                    for (size_t active = 0; active < plan.boundary_s_orders.size(); ++active)
+                    {
+                        const size_t order = plan.boundary_s_orders[active];
+                        const size_t s_index   = plan.family_index(order, node, 0);
+                        const double s_i       = workspace.s_family_base_fields[s_index];
+                        const double s_r_i     = workspace.s_family_base_fields[s_index + 1];
+                        const double s_rr_i    = workspace.s_family_base_fields[s_index + 2];
+                        const double sin_kt    = plan.sin_mtheta[order * plan.nt + theta_node];
+                        const double k_cos_kt  = plan.m_cos_mtheta[order * plan.nt + theta_node];
+                        const double k2_sin_kt = plan.m2_sin_mtheta[order * plan.nt + theta_node];
+                        tb += s_i * sin_kt;
+                        tb_r += s_r_i * sin_kt;
+                        tb_t += s_i * k_cos_kt;
+                        tb_rr += s_rr_i * sin_kt;
+                        tb_rt += s_r_i * k_cos_kt;
+                        tb_tt -= s_i * k2_sin_kt;
+                    }
+
+                    boundary_phase_base(node, theta_node, 0) = tb;
+                    boundary_phase_base(node, theta_node, 1) = tb_r;
+                    boundary_phase_base(node, theta_node, 2) = tb_t;
+                    boundary_phase_base(node, theta_node, 3) = tb_rr;
+                    boundary_phase_base(node, theta_node, 4) = tb_rt;
+                    boundary_phase_base(node, theta_node, 5) = tb_tt;
+                }
+            }
+        }
+
+        void refresh_fourier_family_fields() noexcept
+        {
+            for (size_t order = 0; order < plan.harmonic_rows; ++order)
+            {
+                const int c_profile = plan.c_family_source_profile_ids[order];
+                if (c_profile >= 0)
+                    copy_profile_to_family(static_cast<size_t>(c_profile), order, workspace.c_family_fields);
+                const int s_profile = plan.s_family_source_profile_ids[order];
+                if (s_profile >= 0)
+                    copy_profile_to_family(static_cast<size_t>(s_profile), order, workspace.s_family_fields);
+            }
+        }
+
+        void copy_profile_to_family(size_t          profile_id,
+                                    size_t          order,
+                                    AlignedDoubles& family) noexcept
+        {
+            for (size_t node = 0; node < plan.nr; ++node)
+                for (size_t component = 0; component < 3; ++component)
+                {
+                    const double value = profile_field(profile_id, node, component);
+                    const size_t index = plan.family_index(order, node, component);
+                    family[index] = value;
+                }
+        }
+
+        void matvec_into(AlignedDoubles& out, const AlignedDoubles& matrix, const AlignedDoubles& values) const noexcept
+        {
+            for (size_t row = 0; row < plan.nr; ++row)
+            {
+                double total = 0.0;
+                for (size_t col = 0; col < plan.nr; ++col)
+                    total += matrix[row * plan.nr + col] * values[col];
+                out[row] = total;
+            }
+        }
+
+        void multi_matvec_into(AlignedDoubles&       out0,
+                               AlignedDoubles&       out1,
+                               const AlignedDoubles& matrix0,
+                               const AlignedDoubles& matrix1,
+                               const AlignedDoubles& values) const noexcept
+        {
+            for (size_t row = 0; row < plan.nr; ++row)
+            {
+                double total0 = 0.0;
+                double total1 = 0.0;
+                for (size_t col = 0; col < plan.nr; ++col)
+                {
+                    const double value = values[col];
+                    total0 += matrix0[row * plan.nr + col] * value;
+                    total1 += matrix1[row * plan.nr + col] * value;
+                }
+                out0[row] = total0;
+                out1[row] = total1;
+            }
+        }
+
+        void copy_root_row(size_t row, AlignedDoubles& out) const noexcept
+        {
+            for (size_t node = 0; node < plan.nr; ++node)
+                out[node] = source_target_root_field(row, node);
+        }
+
+        void store_root_row(size_t row, const AlignedDoubles& values) noexcept
+        {
+            for (size_t node = 0; node < plan.nr; ++node)
+                source_target_root_field(row, node) = values[node];
+        }
+
+        void regularize_psin_r() noexcept
+        {
+            if (plan.n_axis_fix > 0 && plan.n_axis_fix + 1 < plan.nr)
+            {
+                const size_t anchor0  = plan.n_axis_fix;
+                const size_t anchor1  = plan.n_axis_fix + 1;
+                const double rho0     = plan.nodes[anchor0];
+                const double rho1     = plan.nodes[anchor1];
+                const double x0       = rho0 * rho0;
+                const double x1       = rho1 * rho1;
+                const double slope0   = source_target_root_field(source::root_psin_r, anchor0) / rho0;
+                const double slope1   = source_target_root_field(source::root_psin_r, anchor1) / rho1;
+                const double gradient = (slope1 - slope0) / (x1 - x0);
+                for (size_t node = 0; node < plan.n_axis_fix; ++node)
+                {
+                    const double rho  = plan.nodes[node];
+                    const double xval = rho * rho;
+                    source_target_root_field(source::root_psin_r, node) =
+                        rho * (slope0 + gradient * (xval - x0));
+                }
+            }
+            for (size_t node = 0; node < plan.nr; ++node)
+                if (source_target_root_field(source::root_psin_r, node) < 1.0e-10)
+                    source_target_root_field(source::root_psin_r, node) = 1.0e-10;
+        }
+
+        void store_psin_coordinate(const AlignedDoubles& integrated, double offset, double scale) noexcept
+        {
+            for (size_t node = 0; node < plan.nr; ++node)
+                source_target_root_field(source::root_psin, node) = (integrated[node] - offset) / scale;
+            source_target_root_field(source::root_psin, 0)             = 0.0;
+            source_target_root_field(source::root_psin, plan.nr - 1)   = 1.0;
+        }
+
+        static double clip_unit(double value) noexcept
+        {
+            if (value < 0.0)
+                return 0.0;
+            if (value > 1.0)
+                return 1.0;
+            return value;
+        }
+
+        size_t local_uniform_stencil_start(double q) const noexcept
+        {
+            if (plan.stencil_size >= plan.sample_count)
+                return 0;
+            const double pos    = q * static_cast<double>(plan.sample_count - 1);
+            size_t       center = static_cast<size_t>(pos);
+            if (pos > static_cast<double>(center))
+                ++center;
+            const size_t half = plan.stencil_size / 2;
+            if (center < half)
+                return 0;
+            const size_t start     = center - half;
+            const size_t max_start = plan.sample_count - plan.stencil_size;
+            return start > max_start ? max_start : start;
+        }
+
+        void local_barycentric_interpolate_pair() noexcept
+        {
+            if (plan.sample_count == 1)
+            {
+                for (size_t node = 0; node < plan.nr; ++node)
+                {
+                    workspace.materialized_heat_input[node]    = workspace.heat_input[0];
+                    workspace.materialized_current_input[node] = workspace.current_input[0];
+                }
+                return;
+            }
+
+            const double denom_scale = static_cast<double>(plan.sample_count - 1);
+            for (size_t node = 0; node < plan.nr; ++node)
+            {
+                const double q         = clip_unit(workspace.source_parameter_query[node]);
+                const size_t start     = local_uniform_stencil_start(q);
+                const size_t nearest   = static_cast<size_t>(q * denom_scale + 0.5);
+                const double x_nearest = static_cast<double>(nearest) / denom_scale;
+                if (math::abs(q - x_nearest) <= 1.0e-14)
+                {
+                    workspace.materialized_heat_input[node]    = workspace.heat_input[nearest];
+                    workspace.materialized_current_input[node] = workspace.current_input[nearest];
+                    continue;
+                }
+
+                double denominator       = 0.0;
+                double numerator_heat    = 0.0;
+                double numerator_current = 0.0;
+                for (size_t local_j = 0; local_j < plan.stencil_size; ++local_j)
+                {
+                    const size_t j = start + local_j;
+                    const double term =
+                        plan.barycentric_weights[local_j] / (q - static_cast<double>(j) / denom_scale);
+                    denominator += term;
+                    numerator_heat += term * workspace.heat_input[j];
+                    numerator_current += term * workspace.current_input[j];
+                }
+                workspace.materialized_heat_input[node]    = numerator_heat / denominator;
+                workspace.materialized_current_input[node] = numerator_current / denominator;
+            }
+        }
+
+        void copy_source_target_to_profile_root() noexcept
+        {
+            for (size_t row = 0; row < source::root_field_count; ++row)
+                for (size_t node = 0; node < plan.nr; ++node)
+                    profile_root_field(row, node) = source_target_root_field(row, node);
+        }
+
+        void materialize_profile_owned_psin() noexcept
+        {
+            for (size_t node = 0; node < plan.nr; ++node)
+                source_target_root_field(source::root_psin_r, node) =
+                    profile_field(plan.psin_profile_id, node, 1);
+            regularize_psin_r();
+
+            copy_root_row(source::root_psin_r, workspace.residual_scratch);
+            multi_matvec_into(workspace.source_aux, workspace.source_psin_query, plan.differentiator, plan.accumulator, workspace.residual_scratch);
+            store_root_row(source::root_psin_rr, workspace.source_aux);
+            const double offset = workspace.source_psin_query[0];
+            const double scale  = workspace.source_psin_query[plan.nr - 1] - offset;
+            store_psin_coordinate(workspace.source_psin_query, offset, scale);
+            copy_source_target_to_profile_root();
+
+            for (size_t node = 0; node < plan.nr; ++node)
+            {
+                const double psin_value              = source_target_root_field(source::root_psin, node);
+                workspace.source_psin_query[node]      = psin_value;
+                workspace.source_parameter_query[node] = psin_value;
+            }
+            local_barycentric_interpolate_pair();
+        }
+
+        void fill_pf_psin_integrand(AlignedDoubles& out) const noexcept
+        {
+            constexpr double pressure_factor = 1.0 / (4.0 * geometry::detail::pi * geometry::detail::pi);
+            for (size_t node = 0; node < plan.nr; ++node)
+            {
+                out[node] = workspace.materialized_current_input[node] *
+                                geometry_radial_field(geometry::radial_Ln_r, node) +
+                            geometry_radial_field(geometry::radial_V_r, node) *
+                                workspace.materialized_heat_input[node] * pressure_factor;
+            }
+        }
+
+        double dot_radial(const AlignedDoubles& values, const AlignedDoubles& weights) const noexcept
+        {
+            double total = 0.0;
+            for (size_t node = 0; node < plan.nr; ++node)
+                total += values[node] * weights[node];
+            return total;
+        }
+
+        double g1n_psin_integral_from_radial_moments() const noexcept
+        {
+            constexpr double two_pi     = 2.0 * geometry::detail::pi;
+            constexpr double inv_two_pi = 1.0 / two_pi;
+            double           total      = 0.0;
+            for (size_t node = 0; node < plan.nr; ++node)
+            {
+                total += plan.weights[node] *
+                         (two_pi * geometry_radial_field(geometry::radial_Ln_r, node) * workspace.FFn_psin[node] +
+                          inv_two_pi * geometry_radial_field(geometry::radial_V_r, node) * workspace.Pn_psin[node]);
+            }
+            return total;
+        }
+
+        void regularize_ffn_psin() noexcept
+        {
+            if (plan.n_axis_fix == 0 || plan.n_axis_fix + 1 >= plan.nr)
+                return;
+            const size_t anchor0  = plan.n_axis_fix;
+            const size_t anchor1  = plan.n_axis_fix + 1;
+            const double x0       = plan.nodes[anchor0] * plan.nodes[anchor0];
+            const double x1       = plan.nodes[anchor1] * plan.nodes[anchor1];
+            const double value0   = workspace.FFn_psin[anchor0];
+            const double value1   = workspace.FFn_psin[anchor1];
+            const double gradient = (value1 - value0) / (x1 - x0);
+            for (size_t node = 0; node < plan.n_axis_fix; ++node)
+            {
+                const double x = plan.nodes[node] * plan.nodes[node];
+                workspace.FFn_psin[node] = value0 + gradient * (x - x0);
+            }
+        }
+
+        void update_pf_psin_uniform_ip() noexcept
+        {
+            fill_pf_psin_integrand(workspace.residual_scratch);
+            matvec_into(workspace.source_aux, plan.accumulator, workspace.residual_scratch);
+
+            double psin_r_weighted_total = 0.0;
+            for (size_t node = 0; node < plan.nr; ++node)
+            {
+                workspace.source_aux[node] *= -1.0;
+                workspace.source_aux[node] /= geometry_radial_field(geometry::radial_Kn, node);
+                psin_r_weighted_total += workspace.source_aux[node] * plan.weights[node];
+            }
+            if (psin_r_weighted_total < 0.0)
+                for (size_t node = 0; node < plan.nr; ++node)
+                    workspace.source_aux[node] *= -1.0;
+
+            store_root_row(source::root_psin_r, workspace.source_aux);
+            regularize_psin_r();
+            copy_root_row(source::root_psin_r, workspace.source_aux);
+            const double integral_prof = dot_radial(workspace.source_aux, plan.weights);
+            for (size_t node = 0; node < plan.nr; ++node)
+                workspace.source_aux[node] /= integral_prof;
+            store_root_row(source::root_psin_r, workspace.source_aux);
+
+            multi_matvec_into(workspace.source_psin_query, workspace.residual_scratch, plan.differentiator, plan.accumulator, workspace.source_aux);
+            store_root_row(source::root_psin_rr, workspace.source_psin_query);
+            const double offset = workspace.residual_scratch[0];
+            const double scale  = workspace.residual_scratch[plan.nr - 1] - offset;
+            store_psin_coordinate(workspace.residual_scratch, offset, scale);
+
+            for (size_t node = 0; node < plan.nr; ++node)
+            {
+                workspace.Pn_psin[node]  = workspace.materialized_heat_input[node];
+                workspace.FFn_psin[node] = workspace.materialized_current_input[node];
+            }
+            regularize_ffn_psin();
+
+            const double G1n_integral = g1n_psin_integral_from_radial_moments();
+            workspace.alpha1          = -solve_params.Ip / G1n_integral;
+            workspace.alpha2          = integral_prof * workspace.alpha1;
+        }
+
+        void prepare_phase_rows(size_t node) noexcept
+        {
+            for (size_t theta_node = 0; theta_node < plan.nt; ++theta_node)
+            {
+                double tb    = boundary_phase_base(node, theta_node, 0);
+                double tb_r  = boundary_phase_base(node, theta_node, 1);
+                double tb_t  = boundary_phase_base(node, theta_node, 2);
+                double tb_rr = boundary_phase_base(node, theta_node, 3);
+                double tb_rt = boundary_phase_base(node, theta_node, 4);
+                double tb_tt = boundary_phase_base(node, theta_node, 5);
+
+                for (size_t active_index = 0; active_index < plan.active_c_orders.size(); ++active_index)
+                {
+                    const size_t order  = plan.active_c_orders[active_index];
+                    const size_t index0 = plan.family_index(order, node, 0);
+                    const double c_i    = workspace.c_family_fields[index0];
+                    const double c_r_i  = workspace.c_family_fields[index0 + 1];
+                    const double c_rr_i = workspace.c_family_fields[index0 + 2];
+                    if (order == 0)
+                    {
+                        tb += c_i;
+                        tb_r += c_r_i;
+                        tb_rr += c_rr_i;
+                        continue;
+                    }
+
+                    const double cos_kt    = plan.cos_mtheta[order * plan.nt + theta_node];
+                    const double k_sin_kt  = plan.m_sin_mtheta[order * plan.nt + theta_node];
+                    const double k2_cos_kt = plan.m2_cos_mtheta[order * plan.nt + theta_node];
+                    tb += c_i * cos_kt;
+                    tb_r += c_r_i * cos_kt;
+                    tb_t -= c_i * k_sin_kt;
+                    tb_rr += c_rr_i * cos_kt;
+                    tb_rt -= c_r_i * k_sin_kt;
+                    tb_tt -= c_i * k2_cos_kt;
+                }
+
+                for (size_t active_index = 0; active_index < plan.active_s_orders.size(); ++active_index)
+                {
+                    const size_t order     = plan.active_s_orders[active_index];
+                    const size_t index0    = plan.family_index(order, node, 0);
+                    const double s_i       = workspace.s_family_fields[index0];
+                    const double s_r_i     = workspace.s_family_fields[index0 + 1];
+                    const double s_rr_i    = workspace.s_family_fields[index0 + 2];
+                    const double sin_kt    = plan.sin_mtheta[order * plan.nt + theta_node];
+                    const double k_cos_kt  = plan.m_cos_mtheta[order * plan.nt + theta_node];
+                    const double k2_sin_kt = plan.m2_sin_mtheta[order * plan.nt + theta_node];
+                    tb += s_i * sin_kt;
+                    tb_r += s_r_i * sin_kt;
+                    tb_t += s_i * k_cos_kt;
+                    tb_rr += s_rr_i * sin_kt;
+                    tb_rt += s_r_i * k_cos_kt;
+                    tb_tt -= s_i * k2_sin_kt;
+                }
+
+                workspace.geometry_tb[theta_node]    = tb;
+                workspace.geometry_tb_r[theta_node]  = tb_r;
+                workspace.geometry_tb_t[theta_node]  = tb_t;
+                workspace.geometry_tb_rr[theta_node] = tb_rr;
+                workspace.geometry_tb_rt[theta_node] = tb_rt;
+                workspace.geometry_tb_tt[theta_node] = tb_tt;
+            }
+        }
+
+        void geometry_update() noexcept
+        {
+            for (size_t node = 0; node < plan.nr; ++node)
+            {
+                const double rho_i  = plan.nodes[node];
+                const double h_i    = profile_field(plan.h_profile_id, node, 0);
+                const double h_r_i  = profile_field(plan.h_profile_id, node, 1);
+                const double h_rr_i = profile_field(plan.h_profile_id, node, 2);
+                const double v_r_i  = profile_field(plan.v_profile_id, node, 1);
+                const double v_rr_i = profile_field(plan.v_profile_id, node, 2);
+                const double k_i    = profile_field(plan.kappa_profile_id, node, 0);
+                const double k_r_i  = profile_field(plan.kappa_profile_id, node, 1);
+                const double k_rr_i = profile_field(plan.kappa_profile_id, node, 2);
+
+                prepare_phase_rows(node);
+                for (size_t theta_node = 0; theta_node < plan.nt; ++theta_node)
+                    geometry::detail::reduced_taylor_sincos(
+                        workspace.geometry_tb[theta_node],
+                        workspace.geometry_sin_tb[theta_node],
+                        workspace.geometry_cos_tb[theta_node]);
+
+                double sum_J          = 0.0;
+                double sum_JR         = 0.0;
+                double sum_gttdivJR   = 0.0;
+                double sum_gttdivJR_r = 0.0;
+                double sum_JdivR      = 0.0;
+                for (size_t theta_node = 0; theta_node < plan.nt; ++theta_node)
+                {
+                    const double sin_t     = plan.sin_mtheta[plan.nt + theta_node];
+                    const double cos_t     = plan.cos_mtheta[plan.nt + theta_node];
+                    const double tb_r      = workspace.geometry_tb_r[theta_node];
+                    const double tb_t      = workspace.geometry_tb_t[theta_node];
+                    const double tb_rr     = workspace.geometry_tb_rr[theta_node];
+                    const double tb_rt     = workspace.geometry_tb_rt[theta_node];
+                    const double tb_tt     = workspace.geometry_tb_tt[theta_node];
+                    const double cos_tb    = workspace.geometry_cos_tb[theta_node];
+                    const double sin_tb    = workspace.geometry_sin_tb[theta_node];
+                    double       R         = solve_params.R0 + solve_params.a * (h_i + rho_i * cos_tb);
+                    if (R < 1.0e-6)
+                        R = 1.0e-6;
+                    const double R_r  = solve_params.a * (h_r_i + cos_tb - rho_i * sin_tb * tb_r);
+                    const double R_t  = -solve_params.a * rho_i * sin_tb * tb_t;
+                    const double R_rr = solve_params.a *
+                        (h_rr_i - 2.0 * sin_tb * tb_r - rho_i * (cos_tb * tb_r * tb_r + sin_tb * tb_rr));
+                    const double R_rt = -solve_params.a *
+                        (sin_tb * tb_t + rho_i * (cos_tb * tb_r * tb_t + sin_tb * tb_rt));
+                    const double R_tt = -solve_params.a * rho_i * (cos_tb * tb_t * tb_t + sin_tb * tb_tt);
+
+                    const double Z_r  = solve_params.a * (v_r_i - (k_i + rho_i * k_r_i) * sin_t);
+                    const double Z_t  = -solve_params.a * rho_i * k_i * cos_t;
+                    const double Z_rr = solve_params.a * (v_rr_i - (2.0 * k_r_i + rho_i * k_rr_i) * sin_t);
+                    const double Z_rt = -solve_params.a * (k_i + rho_i * k_r_i) * cos_t;
+                    const double Z_tt = solve_params.a * rho_i * k_i * sin_t;
+
+                    double J = R_t * Z_r - R_r * Z_t;
+                    if (J < 1.0e-6)
+                        J = 1.0e-6;
+                    const double J_r      = -(R_rr * Z_t - R_rt * Z_r + R_r * Z_rt - R_t * Z_rr);
+                    const double J_t      = -(R_rt * Z_t - R_tt * Z_r + R_r * Z_tt - R_t * Z_rt);
+                    const double JR       = J * R;
+                    const double JR_r     = J_r * R + J * R_r;
+                    const double JR_t     = J_t * R + J * R_t;
+                    const double JdivR    = J / R;
+                    const double grt      = R_r * R_t + Z_r * Z_t;
+                    const double grt_t    = R_rt * R_t + R_r * R_tt + Z_rt * Z_t + Z_r * Z_tt;
+                    const double gtt      = R_t * R_t + Z_t * Z_t;
+                    const double gtt_r    = 2.0 * (R_t * R_rt + Z_t * Z_rt);
+                    const double inv_JR   = 1.0 / JR;
+                    const double grtdivJR_t = (grt_t - grt * JR_t * inv_JR) * inv_JR;
+                    const double gttdivJR   = gtt * inv_JR;
+                    const double gttdivJR_r = gtt_r * inv_JR - gtt * JR_r * inv_JR * inv_JR;
+
+                    geometry_surface_field(geometry::surface_sin_tb, node, theta_node)     = sin_tb;
+                    geometry_surface_field(geometry::surface_R, node, theta_node)          = R;
+                    geometry_surface_field(geometry::surface_R_t, node, theta_node)        = R_t;
+                    geometry_surface_field(geometry::surface_Z_t, node, theta_node)        = Z_t;
+                    geometry_surface_field(geometry::surface_J, node, theta_node)          = J;
+                    geometry_surface_field(geometry::surface_JdivR, node, theta_node)      = JdivR;
+                    geometry_surface_field(geometry::surface_grtdivJR_t, node, theta_node) = grtdivJR_t;
+                    geometry_surface_field(geometry::surface_gttdivJR, node, theta_node)   = gttdivJR;
+                    geometry_surface_field(geometry::surface_gttdivJR_r, node, theta_node) = gttdivJR_r;
+
+                    sum_J += J;
+                    sum_JR += JR;
+                    sum_gttdivJR += gttdivJR;
+                    sum_gttdivJR_r += gttdivJR_r;
+                    sum_JdivR += JdivR;
+                }
+                const double theta_scale = 2.0 * geometry::detail::pi / static_cast<double>(plan.nt);
+                const double mean_scale  = 1.0 / static_cast<double>(plan.nt);
+                geometry_radial_field(geometry::radial_S_r, node)  = sum_J * theta_scale;
+                geometry_radial_field(geometry::radial_V_r, node)  = sum_JR * theta_scale * 2.0 * geometry::detail::pi;
+                geometry_radial_field(geometry::radial_Kn, node)   = sum_gttdivJR * mean_scale;
+                geometry_radial_field(geometry::radial_Kn_r, node) = sum_gttdivJR_r * mean_scale;
+                geometry_radial_field(geometry::radial_Ln_r, node) = sum_JdivR * mean_scale;
+            }
+        }
+
+        void geometry_metric_no_store() noexcept
+        {
+            for (size_t node = 0; node < plan.nr; ++node)
+            {
+                const double rho_i  = plan.nodes[node];
+                const double h_i    = profile_field(plan.h_profile_id, node, 0);
+                const double h_r_i  = profile_field(plan.h_profile_id, node, 1);
+                const double h_rr_i = profile_field(plan.h_profile_id, node, 2);
+                const double v_r_i  = profile_field(plan.v_profile_id, node, 1);
+                const double v_rr_i = profile_field(plan.v_profile_id, node, 2);
+                const double k_i    = profile_field(plan.kappa_profile_id, node, 0);
+                const double k_r_i  = profile_field(plan.kappa_profile_id, node, 1);
+                const double k_rr_i = profile_field(plan.kappa_profile_id, node, 2);
+
+                prepare_phase_rows(node);
+                for (size_t theta_node = 0; theta_node < plan.nt; ++theta_node)
+                    geometry::detail::reduced_taylor_sincos(
+                        workspace.geometry_tb[theta_node],
+                        workspace.geometry_sin_tb[theta_node],
+                        workspace.geometry_cos_tb[theta_node]);
+
+                double sum_J          = 0.0;
+                double sum_JR         = 0.0;
+                double sum_gttdivJR   = 0.0;
+                double sum_gttdivJR_r = 0.0;
+                double sum_JdivR      = 0.0;
+                double sum_grtdivJR_t = 0.0;
+                for (size_t theta_node = 0; theta_node < plan.nt; ++theta_node)
+                {
+                    const double sin_t     = plan.sin_mtheta[plan.nt + theta_node];
+                    const double cos_t     = plan.cos_mtheta[plan.nt + theta_node];
+                    const double tb_r      = workspace.geometry_tb_r[theta_node];
+                    const double tb_t      = workspace.geometry_tb_t[theta_node];
+                    const double tb_rr     = workspace.geometry_tb_rr[theta_node];
+                    const double tb_rt     = workspace.geometry_tb_rt[theta_node];
+                    const double tb_tt     = workspace.geometry_tb_tt[theta_node];
+                    const double cos_tb    = workspace.geometry_cos_tb[theta_node];
+                    const double sin_tb    = workspace.geometry_sin_tb[theta_node];
+                    double       R         = solve_params.R0 + solve_params.a * (h_i + rho_i * cos_tb);
+                    if (R < 1.0e-6)
+                        R = 1.0e-6;
+                    const double R_r  = solve_params.a * (h_r_i + cos_tb - rho_i * sin_tb * tb_r);
+                    const double R_t  = -solve_params.a * rho_i * sin_tb * tb_t;
+                    const double R_rr = solve_params.a *
+                        (h_rr_i - 2.0 * sin_tb * tb_r - rho_i * (cos_tb * tb_r * tb_r + sin_tb * tb_rr));
+                    const double R_rt = -solve_params.a *
+                        (sin_tb * tb_t + rho_i * (cos_tb * tb_r * tb_t + sin_tb * tb_rt));
+                    const double R_tt = -solve_params.a * rho_i * (cos_tb * tb_t * tb_t + sin_tb * tb_tt);
+
+                    const double Z_r  = solve_params.a * (v_r_i - (k_i + rho_i * k_r_i) * sin_t);
+                    const double Z_t  = -solve_params.a * rho_i * k_i * cos_t;
+                    const double Z_rr = solve_params.a * (v_rr_i - (2.0 * k_r_i + rho_i * k_rr_i) * sin_t);
+                    const double Z_rt = -solve_params.a * (k_i + rho_i * k_r_i) * cos_t;
+                    const double Z_tt = solve_params.a * rho_i * k_i * sin_t;
+
+                    double J = R_t * Z_r - R_r * Z_t;
+                    if (J < 1.0e-6)
+                        J = 1.0e-6;
+                    const double J_r        = -(R_rr * Z_t - R_rt * Z_r + R_r * Z_rt - R_t * Z_rr);
+                    const double J_t        = -(R_rt * Z_t - R_tt * Z_r + R_r * Z_tt - R_t * Z_rt);
+                    const double JR         = J * R;
+                    const double JR_r       = J_r * R + J * R_r;
+                    const double JR_t       = J_t * R + J * R_t;
+                    const double JdivR      = J / R;
+                    const double grt        = R_r * R_t + Z_r * Z_t;
+                    const double grt_t      = R_rt * R_t + R_r * R_tt + Z_rt * Z_t + Z_r * Z_tt;
+                    const double gtt        = R_t * R_t + Z_t * Z_t;
+                    const double gtt_r      = 2.0 * (R_t * R_rt + Z_t * Z_rt);
+                    const double inv_JR     = 1.0 / JR;
+                    const double grtdivJR_t = (grt_t - grt * JR_t * inv_JR) * inv_JR;
+                    const double gttdivJR   = gtt * inv_JR;
+                    const double gttdivJR_r = gtt_r * inv_JR - gtt * JR_r * inv_JR * inv_JR;
+
+                    sum_J += J;
+                    sum_JR += JR;
+                    sum_gttdivJR += gttdivJR;
+                    sum_gttdivJR_r += gttdivJR_r;
+                    sum_JdivR += JdivR;
+                    sum_grtdivJR_t += grtdivJR_t;
+                }
+                const double theta_scale = 2.0 * geometry::detail::pi / static_cast<double>(plan.nt);
+                const double mean_scale  = 1.0 / static_cast<double>(plan.nt);
+                geometry_radial_field(geometry::radial_S_r, node)  = sum_J * theta_scale;
+                geometry_radial_field(geometry::radial_V_r, node)  = sum_JR * theta_scale * 2.0 * geometry::detail::pi;
+                geometry_radial_field(geometry::radial_Kn, node)   = sum_gttdivJR * mean_scale;
+                geometry_radial_field(geometry::radial_Kn_r, node) = sum_gttdivJR_r * mean_scale;
+                geometry_radial_field(geometry::radial_Ln_r, node) =
+                    (sum_JdivR + sum_grtdivJR_t) * mean_scale;
+            }
+        }
+
+        void residual_update_compact() noexcept
+        {
+            for (size_t node = 0; node < plan.nr; ++node)
+            {
+                const double psin_r   = profile_root_field(source::root_psin_r, node);
+                const double psin_rr  = profile_root_field(source::root_psin_rr, node);
+                const double FFn_psin = workspace.FFn_psin[node];
+                const double Pn_psin  = workspace.Pn_psin[node];
+                for (size_t theta_node = 0; theta_node < plan.nt; ++theta_node)
+                {
+                    const double sin_tb      = geometry_surface_field(geometry::surface_sin_tb, node, theta_node);
+                    const double R           = geometry_surface_field(geometry::surface_R, node, theta_node);
+                    const double R_t         = geometry_surface_field(geometry::surface_R_t, node, theta_node);
+                    const double Z_t         = geometry_surface_field(geometry::surface_Z_t, node, theta_node);
+                    const double J           = geometry_surface_field(geometry::surface_J, node, theta_node);
+                    const double JdivR       = geometry_surface_field(geometry::surface_JdivR, node, theta_node);
+                    const double grtdivJR_t  = geometry_surface_field(geometry::surface_grtdivJR_t, node, theta_node);
+                    const double gttdivJR    = geometry_surface_field(geometry::surface_gttdivJR, node, theta_node);
+                    const double gttdivJR_r  = geometry_surface_field(geometry::surface_gttdivJR_r, node, theta_node);
+                    const double inv_J       = 1.0 / J;
+                    const double psin_R      = -Z_t * inv_J * psin_r;
+                    const double psin_Z      = R_t * inv_J * psin_r;
+                    const double G1n         = JdivR * (FFn_psin + R * R * Pn_psin);
+                    const double G2n         = gttdivJR * psin_rr + (gttdivJR_r - grtdivJR_t) * psin_r;
+                    const double G           = workspace.alpha1 * G1n + workspace.alpha2 * G2n;
+                    residual_surface_field(residual::surface_G, node, theta_node) = G;
+                    const double Gpsin_R = G * psin_R;
+                    residual_surface_field(residual::surface_Gpsin_R, node, theta_node) = Gpsin_R;
+                    residual_surface_field(residual::surface_Gpsin_Z, node, theta_node) = G * psin_Z;
+                    residual_surface_field(residual::surface_Gpsin_R_sin_tb, node, theta_node) =
+                        Gpsin_R * sin_tb;
+                }
+            }
+        }
+
+        void rowwise_sum(size_t surface_row) noexcept
+        {
+            for (size_t node = 0; node < plan.nr; ++node)
+            {
+                double total = 0.0;
+                for (size_t theta_node = 0; theta_node < plan.nt; ++theta_node)
+                    total += residual_surface_field(surface_row, node, theta_node);
+                workspace.residual_scratch[node] = total;
+            }
+        }
+
+        void rowwise_weighted_sum(size_t surface_row, const AlignedDoubles& theta_weights, size_t order) noexcept
+        {
+            for (size_t node = 0; node < plan.nr; ++node)
+            {
+                double total = 0.0;
+                for (size_t theta_node = 0; theta_node < plan.nt; ++theta_node)
+                    total += residual_surface_field(surface_row, node, theta_node) *
+                             theta_weights[order * plan.nt + theta_node];
+                workspace.residual_scratch[node] = total;
+            }
+        }
+
+        double projection_basis(size_t degree, size_t node) const noexcept
+        {
+            return degree == 0 ? 1.0 : plan.T[(degree - 1) * plan.nr + node];
+        }
+
+        double rho_power_value(size_t power, size_t node) const noexcept
+        {
+            double value = 1.0;
+            for (size_t i = 0; i < power; ++i)
+                value *= plan.nodes[node];
+            return value;
+        }
+
+        void project_scaled(AlignedDoubles& out,
+                            size_t          profile_id,
+                            size_t          count,
+                            size_t          weight_kind,
+                            size_t          order,
+                            double          scalar) noexcept
+        {
+            for (size_t degree = 0; degree < count; ++degree)
+            {
+                double total = 0.0;
+                for (size_t node = 0; node < plan.nr; ++node)
+                {
+                    double weight = 1.0;
+                    if (weight_kind == 1)
+                        weight = plan.y[node];
+                    else if (weight_kind == 2)
+                        weight = rho_power_value(order, node) * plan.y[node];
+                    else if (weight_kind == 3)
+                        weight = plan.y[node] * plan.y[node];
+                    total += projection_basis(degree, node) * workspace.residual_scratch[node] * weight *
+                             plan.weights[node] * scalar;
+                }
+                out[static_cast<size_t>(plan.coeff_index_for(profile_id, degree))] = total;
+            }
+        }
+
+        void pack_one(AlignedDoubles& out, size_t profile_id, size_t count) noexcept
+        {
+            const size_t code         = plan.profile_code(profile_id);
+            const size_t order        = plan.profile_order(profile_id);
+            const size_t radial_power = plan.radial_power(profile_id);
+            const double base_scale   = 2.0 * geometry::detail::pi / static_cast<double>(plan.nt);
+            if (code == runtime_block_h)
+            {
+                rowwise_sum(residual::surface_Gpsin_R);
+                project_scaled(out, profile_id, count, 1, 0, solve_params.a * base_scale);
+            }
+            else if (code == runtime_block_v)
+            {
+                rowwise_sum(residual::surface_Gpsin_Z);
+                project_scaled(out, profile_id, count, 1, 0, solve_params.a * base_scale);
+            }
+            else if (code == runtime_block_kappa)
+            {
+                rowwise_weighted_sum(residual::surface_Gpsin_Z, plan.sin_mtheta, 1);
+                project_scaled(out, profile_id, count, 2, 1, -solve_params.a * base_scale);
+            }
+            else if (code == runtime_block_c0)
+            {
+                rowwise_sum(residual::surface_Gpsin_R_sin_tb);
+                project_scaled(out, profile_id, count, 2, 1, -solve_params.a * base_scale);
+            }
+            else if (code == runtime_block_c)
+            {
+                rowwise_weighted_sum(residual::surface_Gpsin_R_sin_tb, plan.cos_mtheta, order);
+                project_scaled(out, profile_id, count, 2, radial_power + 1, -solve_params.a * base_scale);
+            }
+            else if (code == runtime_block_s)
+            {
+                rowwise_weighted_sum(residual::surface_Gpsin_R_sin_tb, plan.sin_mtheta, order);
+                project_scaled(out, profile_id, count, 2, radial_power + 1, -solve_params.a * base_scale);
+            }
+            else if (code == runtime_block_psin)
+            {
+                rowwise_sum(residual::surface_G);
+                project_scaled(out, profile_id, count, 2, 2, base_scale);
+            }
+            else
+            {
+                rowwise_sum(residual::surface_G);
+                const double rb0 = solve_params.R0 * solve_params.B0;
+                project_scaled(out, profile_id, count, 3, 0, base_scale * rb0 * rb0);
+            }
+        }
+
+        void residual_pack_into(AlignedDoubles& out) noexcept
+        {
+            for (size_t profile_id = 0; profile_id < plan.profile_count; ++profile_id)
+            {
+                const RuntimeProfileSlot slot = plan.slots[profile_id];
+                if (slot.optimized())
+                    pack_one(out, profile_id, slot.coefficient_count);
+            }
+        }
+
+        void rowwise_sum_into(RuntimeStageBuffers& buffers, size_t profile_id, size_t surface_row) const noexcept
+        {
+            for (size_t node = 0; node < plan.nr; ++node)
+            {
+                double total = 0.0;
+                for (size_t theta_node = 0; theta_node < plan.nt; ++theta_node)
+                    total += residual_surface_field(surface_row, node, theta_node);
+                residual_moment(buffers, profile_id, node) = total;
+            }
+        }
+
+        void rowwise_weighted_sum_into(RuntimeStageBuffers& buffers,
+                                       size_t               profile_id,
+                                       size_t               surface_row,
+                                       const AlignedDoubles& theta_weights,
+                                       size_t               order) const noexcept
+        {
+            for (size_t node = 0; node < plan.nr; ++node)
+            {
+                double total = 0.0;
+                for (size_t theta_node = 0; theta_node < plan.nt; ++theta_node)
+                    total += residual_surface_field(surface_row, node, theta_node) *
+                             theta_weights[order * plan.nt + theta_node];
+                residual_moment(buffers, profile_id, node) = total;
+            }
+        }
+
+        void residual_theta_reduce_into(RuntimeStageBuffers& buffers) const noexcept
+        {
+            for (size_t profile_id = 0; profile_id < plan.profile_count; ++profile_id)
+            {
+                const RuntimeProfileSlot slot = plan.slots[profile_id];
+                if (!slot.optimized())
+                    continue;
+                const size_t code  = plan.profile_code(profile_id);
+                const size_t order = plan.profile_order(profile_id);
+                if (code == runtime_block_h)
+                    rowwise_sum_into(buffers, profile_id, residual::surface_Gpsin_R);
+                else if (code == runtime_block_v)
+                    rowwise_sum_into(buffers, profile_id, residual::surface_Gpsin_Z);
+                else if (code == runtime_block_kappa)
+                    rowwise_weighted_sum_into(buffers, profile_id, residual::surface_Gpsin_Z, plan.sin_mtheta, 1);
+                else if (code == runtime_block_c0)
+                    rowwise_sum_into(buffers, profile_id, residual::surface_Gpsin_R_sin_tb);
+                else if (code == runtime_block_c)
+                    rowwise_weighted_sum_into(
+                        buffers, profile_id, residual::surface_Gpsin_R_sin_tb, plan.cos_mtheta, order);
+                else if (code == runtime_block_s)
+                    rowwise_weighted_sum_into(
+                        buffers, profile_id, residual::surface_Gpsin_R_sin_tb, plan.sin_mtheta, order);
+                else
+                    rowwise_sum_into(buffers, profile_id, residual::surface_G);
+            }
+        }
+
+        void project_moment_scaled(AlignedDoubles&              out,
+                                   const RuntimeStageBuffers&   buffers,
+                                   size_t                       profile_id,
+                                   size_t                       count,
+                                   size_t                       weight_kind,
+                                   size_t                       order,
+                                   double                       scalar) const noexcept
+        {
+            for (size_t degree = 0; degree < count; ++degree)
+            {
+                double total = 0.0;
+                for (size_t node = 0; node < plan.nr; ++node)
+                {
+                    double weight = 1.0;
+                    if (weight_kind == 1)
+                        weight = plan.y[node];
+                    else if (weight_kind == 2)
+                        weight = rho_power_value(order, node) * plan.y[node];
+                    else if (weight_kind == 3)
+                        weight = plan.y[node] * plan.y[node];
+                    total += projection_basis(degree, node) * residual_moment(buffers, profile_id, node) *
+                             weight * plan.weights[node] * scalar;
+                }
+                out[static_cast<size_t>(plan.coeff_index_for(profile_id, degree))] = total;
+            }
+        }
+
+        void residual_radial_project_from(AlignedDoubles& out, const RuntimeStageBuffers& buffers) const noexcept
+        {
+            const double base_scale = 2.0 * geometry::detail::pi / static_cast<double>(plan.nt);
+            for (size_t profile_id = 0; profile_id < plan.profile_count; ++profile_id)
+            {
+                const RuntimeProfileSlot slot = plan.slots[profile_id];
+                if (!slot.optimized())
+                    continue;
+                const size_t code         = plan.profile_code(profile_id);
+                const size_t radial_power = plan.radial_power(profile_id);
+                if (code == runtime_block_h || code == runtime_block_v)
+                    project_moment_scaled(out, buffers, profile_id, slot.coefficient_count, 1, 0, solve_params.a * base_scale);
+                else if (code == runtime_block_kappa || code == runtime_block_c0)
+                    project_moment_scaled(out, buffers, profile_id, slot.coefficient_count, 2, 1, -solve_params.a * base_scale);
+                else if (code == runtime_block_c || code == runtime_block_s)
+                    project_moment_scaled(
+                        out, buffers, profile_id, slot.coefficient_count, 2, radial_power + 1, -solve_params.a * base_scale);
+                else if (code == runtime_block_psin)
+                    project_moment_scaled(out, buffers, profile_id, slot.coefficient_count, 2, 2, base_scale);
+                else
+                {
+                    const double rb0 = solve_params.R0 * solve_params.B0;
+                    project_moment_scaled(out, buffers, profile_id, slot.coefficient_count, 3, 0, base_scale * rb0 * rb0);
+                }
+            }
+        }
+
+        void evaluate(std::span<const double> x, AlignedDoubles& out) noexcept
+        {
+            refresh_active(x);
+            geometry_update();
+            materialize_profile_owned_psin();
+            update_pf_psin_uniform_ip();
+            residual_update_compact();
+            residual_pack_into(out);
+        }
+    };
 
     std::span<const double, BenchShape::x_size> x_span(const std::array<double, BenchShape::x_size>& x) noexcept
     {
@@ -3362,6 +5195,146 @@ namespace
             op.workspace.geometry.radial_fields(radial_S_r, 0) = sink;
     }
 
+    void run_runtime_geometry_probe(GeometryProbeMode mode, RuntimeOperator& op) noexcept
+    {
+        double sink = 0.0;
+        if (mode == GeometryProbeMode::MetricNoStore)
+        {
+            op.geometry_metric_no_store();
+            return;
+        }
+
+        for (size_t node = 0; node < op.plan.nr; ++node)
+        {
+            op.prepare_phase_rows(node);
+            if (mode == GeometryProbeMode::PhaseSplitSincos)
+            {
+                for (size_t theta_node = 0; theta_node < op.plan.nt; ++theta_node)
+                {
+                    double sin_tb = 0.0;
+                    double cos_tb = 0.0;
+                    geometry::detail::reduced_taylor_sincos(op.workspace.geometry_tb[theta_node], sin_tb, cos_tb);
+                    sink += sin_tb + cos_tb + op.workspace.geometry_tb_r[theta_node] +
+                            op.workspace.geometry_tb_t[theta_node] + op.workspace.geometry_tb_rr[theta_node] +
+                            op.workspace.geometry_tb_rt[theta_node] + op.workspace.geometry_tb_tt[theta_node];
+                }
+                continue;
+            }
+
+            for (size_t theta_node = 0; theta_node < op.plan.nt; ++theta_node)
+            {
+                if (mode == GeometryProbeMode::Phase)
+                {
+                    sink += op.workspace.geometry_tb[theta_node] + op.workspace.geometry_tb_r[theta_node] +
+                            op.workspace.geometry_tb_t[theta_node] + op.workspace.geometry_tb_rr[theta_node] +
+                            op.workspace.geometry_tb_rt[theta_node] + op.workspace.geometry_tb_tt[theta_node];
+                }
+                else
+                {
+                    const double tb = op.workspace.geometry_tb[theta_node];
+                    sink += math::sin(tb) + math::cos(tb) + op.workspace.geometry_tb_r[theta_node] +
+                            op.workspace.geometry_tb_t[theta_node] + op.workspace.geometry_tb_rr[theta_node] +
+                            op.workspace.geometry_tb_rt[theta_node] + op.workspace.geometry_tb_tt[theta_node];
+                }
+            }
+        }
+        op.geometry_radial_field(geometry::radial_S_r, 0) = sink;
+    }
+
+    std::unique_ptr<RuntimeOperator> make_runtime_benchmark_operator()
+    {
+        auto op = std::make_unique<RuntimeOperator>(benchmark_setup());
+        op->set_solve_params(benchmark_solve_params());
+        return op;
+    }
+
+    void runtime_refresh_profiles(RuntimeOperator& op, std::span<const double> x) noexcept
+    {
+        op.refresh_active(x);
+    }
+
+    void runtime_prepare_geometry(RuntimeOperator& op, std::span<const double> x) noexcept
+    {
+        runtime_refresh_profiles(op, x);
+        op.geometry_update();
+    }
+
+    void runtime_prepare_source_materialized(RuntimeOperator& op, std::span<const double> x) noexcept
+    {
+        runtime_refresh_profiles(op, x);
+        op.materialize_profile_owned_psin();
+    }
+
+    void runtime_prepare_source_updated(RuntimeOperator& op, std::span<const double> x) noexcept
+    {
+        runtime_prepare_geometry(op, x);
+        op.materialize_profile_owned_psin();
+        op.update_pf_psin_uniform_ip();
+    }
+
+    void runtime_prepare_residual_updated(RuntimeOperator& op, std::span<const double> x) noexcept
+    {
+        runtime_prepare_source_updated(op, x);
+        op.residual_update_compact();
+    }
+
+    void runtime_prepare_source_profile_root(RuntimeOperator& op, std::span<const double> x) noexcept
+    {
+        runtime_refresh_profiles(op, x);
+        for (size_t node = 0; node < op.plan.nr; ++node)
+            op.source_target_root_field(source::root_psin_r, node) =
+                op.profile_field(op.plan.psin_profile_id, node, 1);
+        op.regularize_psin_r();
+    }
+
+    void runtime_prepare_source_integrand(RuntimeOperator& op,
+                                          std::span<const double> x,
+                                          AlignedDoubles&         integrand) noexcept
+    {
+        runtime_prepare_source_materialized(op, x);
+        op.geometry_update();
+        op.fill_pf_psin_integrand(integrand);
+    }
+
+    void runtime_prepare_source_accumulated_integrand(RuntimeOperator& op,
+                                                      std::span<const double> x,
+                                                      AlignedDoubles&         accumulated) noexcept
+    {
+        runtime_prepare_source_integrand(op, x, op.workspace.residual_scratch);
+        op.matvec_into(accumulated, op.plan.accumulator, op.workspace.residual_scratch);
+    }
+
+    void runtime_prepare_source_normalized_psin(RuntimeOperator& op,
+                                                std::span<const double> x,
+                                                AlignedDoubles&         normalized) noexcept
+    {
+        runtime_prepare_source_accumulated_integrand(op, x, op.workspace.residual_scratch);
+        double total = 0.0;
+        for (size_t node = 0; node < op.plan.nr; ++node)
+        {
+            normalized[node] = -op.workspace.residual_scratch[node] /
+                               op.geometry_radial_field(geometry::radial_Kn, node);
+            total += normalized[node] * op.plan.weights[node];
+        }
+        if (total < 0.0)
+            for (size_t node = 0; node < op.plan.nr; ++node)
+                normalized[node] *= -1.0;
+        op.store_root_row(source::root_psin_r, normalized);
+        op.regularize_psin_r();
+        op.copy_root_row(source::root_psin_r, normalized);
+        const double integral = op.dot_radial(normalized, op.plan.weights);
+        for (size_t node = 0; node < op.plan.nr; ++node)
+            normalized[node] /= integral;
+    }
+
+    double consume_runtime_state(const RuntimeOperator& op, const RuntimeStageBuffers& buffers) noexcept
+    {
+        return op.profile_field(op.plan.psin_profile_id, 0, 0) +
+               op.geometry_surface_field(geometry::surface_R, 0, 0) + op.workspace.alpha1 +
+               op.residual_surface_field(residual::surface_G, 0, 0) + buffers.packed[0] +
+               buffers.source_scratch[0] + buffers.residual_moments[0];
+    }
+
     double consume_state(const BenchOperator&       op,
                          const PackedVector&        packed,
                          const SourceRadialVector&  source_scratch,
@@ -3504,6 +5477,146 @@ namespace
         }
     }
 
+    void run_runtime_stage_once(StageKind              stage,
+                                RuntimeOperator&       op,
+                                std::span<const double> x,
+                                RuntimeStageBuffers&   buffers) noexcept
+    {
+        switch (stage)
+        {
+        case StageKind::ProfilesFixed:
+            op.refresh_fixed();
+            compiler_barrier(op.workspace.profile_fields.data());
+            break;
+        case StageKind::ProfilesActive:
+            op.refresh_active(x);
+            compiler_barrier(op.workspace.profile_fields.data());
+            break;
+        case StageKind::ProfilesAll:
+            runtime_refresh_profiles(op, x);
+            compiler_barrier(op.workspace.profile_fields.data());
+            break;
+        case StageKind::GeometryPhase:
+            run_runtime_geometry_probe(GeometryProbeMode::Phase, op);
+            compiler_barrier(op.workspace.geometry_radial_fields.data());
+            break;
+        case StageKind::GeometryPhaseSincos:
+            run_runtime_geometry_probe(GeometryProbeMode::PhaseSincos, op);
+            compiler_barrier(op.workspace.geometry_radial_fields.data());
+            break;
+        case StageKind::GeometryPhaseSplitSincos:
+            run_runtime_geometry_probe(GeometryProbeMode::PhaseSplitSincos, op);
+            compiler_barrier(op.workspace.geometry_radial_fields.data());
+            break;
+        case StageKind::GeometryMetricNoStore:
+            run_runtime_geometry_probe(GeometryProbeMode::MetricNoStore, op);
+            compiler_barrier(op.workspace.geometry_radial_fields.data());
+            break;
+        case StageKind::Geometry:
+            op.geometry_update();
+            compiler_barrier(op.workspace.geometry_surface_fields.data());
+            break;
+        case StageKind::SourceMaterialize:
+            op.materialize_profile_owned_psin();
+            compiler_barrier(op.workspace.materialized_heat_input.data());
+            break;
+        case StageKind::SourceCopyRegularize:
+            for (size_t node = 0; node < op.plan.nr; ++node)
+                op.source_target_root_field(source::root_psin_r, node) =
+                    op.profile_field(op.plan.psin_profile_id, node, 1);
+            op.regularize_psin_r();
+            compiler_barrier(op.workspace.source_target_root_fields.data());
+            break;
+        case StageKind::SourceDpsin:
+            op.copy_root_row(source::root_psin_r, buffers.source_scratch);
+            op.matvec_into(buffers.source_aux, op.plan.differentiator, buffers.source_scratch);
+            op.store_root_row(source::root_psin_rr, buffers.source_aux);
+            compiler_barrier(op.workspace.source_target_root_fields.data());
+            break;
+        case StageKind::SourceApsin:
+            op.copy_root_row(source::root_psin_r, buffers.source_aux);
+            op.matvec_into(buffers.source_scratch, op.plan.accumulator, buffers.source_aux);
+            compiler_barrier(buffers.source_scratch.data());
+            break;
+        case StageKind::SourceDApsin:
+        case StageKind::SourceDApsinPacked:
+            op.copy_root_row(source::root_psin_r, op.workspace.residual_scratch);
+            op.multi_matvec_into(
+                buffers.source_scratch, buffers.source_aux, op.plan.differentiator, op.plan.accumulator, op.workspace.residual_scratch);
+            compiler_barrier(buffers.source_scratch.data());
+            break;
+        case StageKind::SourceInterpolatePair:
+            for (size_t node = 0; node < op.plan.nr; ++node)
+            {
+                const double psin_value = op.source_target_root_field(source::root_psin, node);
+                op.workspace.source_psin_query[node]      = psin_value;
+                op.workspace.source_parameter_query[node] = psin_value;
+            }
+            op.local_barycentric_interpolate_pair();
+            compiler_barrier(op.workspace.materialized_heat_input.data());
+            break;
+        case StageKind::SourceIntegrand:
+            op.fill_pf_psin_integrand(buffers.source_scratch);
+            compiler_barrier(buffers.source_scratch.data());
+            break;
+        case StageKind::SourceAIntegrand:
+        case StageKind::SourceAIntegrandRowdot:
+            op.matvec_into(buffers.source_aux, op.plan.accumulator, buffers.source_scratch);
+            compiler_barrier(buffers.source_aux.data());
+            break;
+        case StageKind::SourceNormalize:
+        {
+            double total = 0.0;
+            for (size_t node = 0; node < op.plan.nr; ++node)
+            {
+                buffers.source_aux[node] = -buffers.source_scratch[node] /
+                                           op.geometry_radial_field(geometry::radial_Kn, node);
+                total += buffers.source_aux[node] * op.plan.weights[node];
+            }
+            if (total < 0.0)
+                for (size_t node = 0; node < op.plan.nr; ++node)
+                    buffers.source_aux[node] *= -1.0;
+            compiler_barrier(buffers.source_aux.data());
+            break;
+        }
+        case StageKind::SourceDNormalized:
+            op.matvec_into(buffers.source_aux, op.plan.differentiator, buffers.source_scratch);
+            op.store_root_row(source::root_psin_rr, buffers.source_aux);
+            compiler_barrier(op.workspace.source_target_root_fields.data());
+            break;
+        case StageKind::SourceAlpha:
+            op.workspace.alpha1 = -op.solve_params.Ip / op.g1n_psin_integral_from_radial_moments();
+            op.workspace.alpha2 = op.workspace.alpha1;
+            compiler_barrier(&op.workspace.alpha1);
+            break;
+        case StageKind::SourceUpdate:
+            op.update_pf_psin_uniform_ip();
+            compiler_barrier(op.workspace.FFn_psin.data());
+            break;
+        case StageKind::ResidualUpdate:
+            op.residual_update_compact();
+            compiler_barrier(op.workspace.residual_surface_fields.data());
+            break;
+        case StageKind::ResidualThetaReduce:
+            op.residual_theta_reduce_into(buffers);
+            compiler_barrier(buffers.residual_moments.data());
+            break;
+        case StageKind::ResidualRadialProject:
+            op.residual_radial_project_from(buffers.packed, buffers);
+            compiler_barrier(buffers.packed.data());
+            break;
+        case StageKind::ResidualPack:
+            op.residual_pack_into(buffers.packed);
+            compiler_barrier(buffers.packed.data());
+            break;
+        case StageKind::Evaluate:
+        case StageKind::EvaluateRing:
+            op.evaluate(x, buffers.packed);
+            compiler_barrier(buffers.packed.data());
+            break;
+        }
+    }
+
     const char* stage_name(StageKind stage) noexcept
     {
         switch (stage)
@@ -3566,6 +5679,31 @@ namespace
             return "evaluate_ring";
         }
         return "unknown";
+    }
+
+    const char* backend_name(BackendKind backend) noexcept
+    {
+        switch (backend)
+        {
+        case BackendKind::Compile:
+            return "compile";
+        case BackendKind::Runtime:
+            return "runtime";
+        case BackendKind::Both:
+            return "both";
+        }
+        return "unknown";
+    }
+
+    BackendKind parse_backend(const std::string& value)
+    {
+        if (value == "compile")
+            return BackendKind::Compile;
+        if (value == "runtime")
+            return BackendKind::Runtime;
+        if (value == "both")
+            return BackendKind::Both;
+        throw std::invalid_argument("unknown --backend: " + value);
     }
 
     StageKind parse_stage_one(const std::string& value)
@@ -3697,7 +5835,7 @@ namespace
                              "source_A_integrand|source_A_integrand_rowdot|source_normalize|"
                              "source_D_normalized|source_alpha|source_update|residual_update|"
                              "residual_theta_reduce|residual_radial_project|residual_pack|"
-                             "evaluate|evaluate_ring] [--repeat N] [--warmup N] "
+                             "evaluate|evaluate_ring] [--backend compile|runtime|both] [--repeat N] [--warmup N] "
                              "[--inner N] [--ring-size N]\n";
                 std::exit(0);
             }
@@ -3706,6 +5844,8 @@ namespace
             const std::string value = argv[++i];
             if (arg == "--stage")
                 options.stage = value;
+            else if (arg == "--backend")
+                options.backend = parse_backend(value);
             else if (arg == "--repeat")
                 options.repeat = parse_size_arg(arg, value, false);
             else if (arg == "--warmup")
@@ -3833,6 +5973,80 @@ namespace
         }
     }
 
+    void prepare_runtime_for_stage(StageKind              stage,
+                                   RuntimeOperator&       op,
+                                   std::span<const double> x,
+                                   RuntimeStageBuffers&   buffers)
+    {
+        switch (stage)
+        {
+        case StageKind::ProfilesFixed:
+            break;
+        case StageKind::ProfilesActive:
+            op.load_fixed_from_plan();
+            break;
+        case StageKind::ProfilesAll:
+            break;
+        case StageKind::GeometryPhase:
+        case StageKind::GeometryPhaseSincos:
+        case StageKind::GeometryPhaseSplitSincos:
+        case StageKind::GeometryMetricNoStore:
+        case StageKind::Geometry:
+            runtime_refresh_profiles(op, x);
+            break;
+        case StageKind::SourceMaterialize:
+        case StageKind::SourceCopyRegularize:
+            runtime_refresh_profiles(op, x);
+            break;
+        case StageKind::SourceDpsin:
+        case StageKind::SourceApsin:
+        case StageKind::SourceDApsin:
+        case StageKind::SourceDApsinPacked:
+            runtime_prepare_source_profile_root(op, x);
+            break;
+        case StageKind::SourceInterpolatePair:
+            runtime_prepare_source_materialized(op, x);
+            break;
+        case StageKind::SourceIntegrand:
+            runtime_prepare_source_materialized(op, x);
+            op.geometry_update();
+            break;
+        case StageKind::SourceAIntegrand:
+        case StageKind::SourceAIntegrandRowdot:
+            runtime_prepare_source_integrand(op, x, buffers.source_scratch);
+            break;
+        case StageKind::SourceNormalize:
+            runtime_prepare_source_accumulated_integrand(op, x, buffers.source_scratch);
+            break;
+        case StageKind::SourceDNormalized:
+            runtime_prepare_source_normalized_psin(op, x, buffers.source_scratch);
+            break;
+        case StageKind::SourceAlpha:
+            runtime_prepare_source_updated(op, x);
+            break;
+        case StageKind::SourceUpdate:
+            runtime_prepare_source_materialized(op, x);
+            op.geometry_update();
+            break;
+        case StageKind::ResidualUpdate:
+            runtime_prepare_source_updated(op, x);
+            break;
+        case StageKind::ResidualThetaReduce:
+            runtime_prepare_residual_updated(op, x);
+            break;
+        case StageKind::ResidualRadialProject:
+            runtime_prepare_residual_updated(op, x);
+            op.residual_theta_reduce_into(buffers);
+            break;
+        case StageKind::ResidualPack:
+            runtime_prepare_residual_updated(op, x);
+            break;
+        case StageKind::Evaluate:
+        case StageKind::EvaluateRing:
+            break;
+        }
+    }
+
     std::vector<std::array<double, BenchShape::x_size>> make_state_ring(size_t ring_size)
     {
         std::vector<std::array<double, BenchShape::x_size>> states(ring_size);
@@ -3907,6 +6121,130 @@ namespace
             {"samples_ns", samples},
         };
     }
+
+    std::span<const double> runtime_x_span(const std::array<double, BenchShape::x_size>& x) noexcept
+    {
+        return std::span<const double>{x.data(), x.size()};
+    }
+
+    nlohmann::json run_runtime_benchmark(StageKind stage, const Options& options)
+    {
+        const size_t allocation_start = runtime_heap_allocation_counter;
+        auto         op               = make_runtime_benchmark_operator();
+        RuntimeStageBuffers buffers(op->plan);
+        const size_t setup_allocations = runtime_heap_allocation_counter - allocation_start;
+
+        std::array<double, BenchShape::x_size> x{};
+        auto                                  state_ring = make_state_ring(options.ring_size);
+        const auto                            x_values   = runtime_x_span(x);
+
+        prepare_runtime_for_stage(stage, *op, x_values, buffers);
+
+        for (size_t sample = 0; sample < options.warmup; ++sample)
+            for (size_t i = 0; i < options.inner; ++i)
+            {
+                std::span<const double> input = x_values;
+                if (stage == StageKind::EvaluateRing)
+                    input = runtime_x_span(state_ring[(sample * options.inner + i) % state_ring.size()]);
+                run_runtime_stage_once(stage, *op, input, buffers);
+            }
+
+        std::vector<double> samples;
+        samples.reserve(options.repeat);
+        using clock = std::chrono::steady_clock;
+        const size_t timed_allocation_start = runtime_heap_allocation_counter;
+        for (size_t sample = 0; sample < options.repeat; ++sample)
+        {
+            const auto start = clock::now();
+            for (size_t i = 0; i < options.inner; ++i)
+            {
+                std::span<const double> input = x_values;
+                if (stage == StageKind::EvaluateRing)
+                    input = runtime_x_span(state_ring[(sample * options.inner + i) % state_ring.size()]);
+                run_runtime_stage_once(stage, *op, input, buffers);
+            }
+            const auto                                     stop    = clock::now();
+            const std::chrono::duration<double, std::nano> elapsed = stop - start;
+            samples.push_back(elapsed.count() / static_cast<double>(options.inner));
+        }
+        const size_t timed_allocations = runtime_heap_allocation_counter - timed_allocation_start;
+
+        benchmark_sink += consume_runtime_state(*op, buffers);
+        const Stats  stats          = compute_stats(samples);
+        const size_t plan_bytes     = op->plan.aligned_bytes();
+        const size_t metadata_bytes = op->plan.metadata_bytes();
+        const size_t workspace_bytes = op->workspace.bytes();
+        const size_t stage_buffer_bytes = buffers.bytes();
+
+        return {
+            {"stage", stage_name(stage)},
+            {"backend", backend_name(BackendKind::Runtime)},
+            {"storage_model", "runtime_heap_cached_aligned64"},
+            {"repeat", options.repeat},
+            {"warmup", options.warmup},
+            {"inner", options.inner},
+            {"ring_size", stage == StageKind::EvaluateRing ? options.ring_size : size_t{1}},
+            {"calls", options.repeat * options.inner},
+            {"avg_ns", stats.avg_ns},
+            {"min_ns", stats.min_ns},
+            {"max_ns", stats.max_ns},
+            {"median_ns", stats.median_ns},
+            {"p95_ns", stats.p95_ns},
+            {"std_ns", stats.std_ns},
+            {"samples_ns", samples},
+            {"runtime_plan_aligned_bytes", plan_bytes},
+            {"runtime_metadata_bytes", metadata_bytes},
+            {"runtime_workspace_bytes", workspace_bytes},
+            {"runtime_stage_buffer_bytes", stage_buffer_bytes},
+            {"runtime_total_cached_bytes", plan_bytes + metadata_bytes + workspace_bytes + stage_buffer_bytes},
+            {"runtime_setup_heap_allocations", setup_allocations},
+            {"runtime_timed_heap_allocations", timed_allocations},
+        };
+    }
+
+    double evaluate_runtime_compile_max_abs_diff()
+    {
+        auto op_compile = make_benchmark_operator();
+        auto op_runtime = make_runtime_benchmark_operator();
+
+        std::array<double, BenchShape::x_size> x{};
+        PackedVector                           packed_compile{};
+        RuntimeStageBuffers                    buffers(op_runtime->plan);
+
+        op_compile->evaluate(x_span(x), packed_compile);
+        op_runtime->evaluate(runtime_x_span(x), buffers.packed);
+
+        double max_abs_diff = 0.0;
+        for (size_t i = 0; i < BenchShape::x_size; ++i)
+        {
+            const double diff = math::abs(packed_compile[i] - buffers.packed[i]);
+            if (diff > max_abs_diff)
+                max_abs_diff = diff;
+        }
+        return max_abs_diff;
+    }
+
+    nlohmann::json run_paired_benchmark(StageKind stage, const Options& options)
+    {
+        nlohmann::json compile_result = run_benchmark(stage, options);
+        compile_result["backend"]       = backend_name(BackendKind::Compile);
+        compile_result["storage_model"] = "compile_time_fixed_topology";
+
+        nlohmann::json runtime_result = run_runtime_benchmark(stage, options);
+
+        const double compile_median = compile_result["median_ns"].get<double>();
+        const double runtime_median = runtime_result["median_ns"].get<double>();
+
+        return {
+            {"stage", stage_name(stage)},
+            {"backend", backend_name(BackendKind::Both)},
+            {"compile", compile_result},
+            {"runtime", runtime_result},
+            {"runtime_vs_compile_median_ratio",
+             compile_median == 0.0 ? nlohmann::json(nullptr) : nlohmann::json(runtime_median / compile_median)},
+            {"evaluate_max_abs_diff", evaluate_runtime_compile_max_abs_diff()},
+        };
+    }
 } // namespace
 
 int run(int argc, char** argv)
@@ -3916,12 +6254,20 @@ int run(int argc, char** argv)
         const Options  options = parse_args(argc, argv);
         nlohmann::json results = nlohmann::json::array();
         for (StageKind stage : stages_for(options.stage))
-            results.push_back(run_benchmark(stage, options));
+        {
+            if (options.backend == BackendKind::Compile)
+                results.push_back(run_benchmark(stage, options));
+            else if (options.backend == BackendKind::Runtime)
+                results.push_back(run_runtime_benchmark(stage, options));
+            else
+                results.push_back(run_paired_benchmark(stage, options));
+        }
 
         const double         sink   = benchmark_sink;
         const nlohmann::json report = {
             {"schema_version", 1},
             {"case_name", "PF_psin_uniform_Ip"},
+            {"backend", backend_name(options.backend)},
             {"topology",
              {
                  {"Nr", BenchGrid::radial_nodes},
@@ -4034,9 +6380,10 @@ namespace
         Legendre,
         Spectral>;
 
-    using ProbeProfilesFromCounts = profiles::Profiles<
+    using ProbeProfileShapeFromCounts = profiles::OptimizedProfileShapeFromCountsWithMmaxT<
         Topology::L_max,
         Topology::K_max,
+        Topology::M_max,
         Topology::h_count,
         Topology::v_count,
         Topology::kappa_count,
@@ -4044,6 +6391,7 @@ namespace
         Topology::F_count,
         Topology::c_family_counts,
         Topology::s_family_counts>;
+    using ProbeProfilesFromCounts = profiles::ProfileEvaluator<ProbeProfileShapeFromCounts>;
 
     constexpr auto topology_c_slots = profiles::tail_optimized_slots_from_counts<Topology::c_family_counts>();
     constexpr auto topology_s_slots = profiles::optimized_slots_from_counts<Topology::s_family_counts>();
@@ -4161,6 +6509,23 @@ namespace
     using RuntimeProbeGrid     = Grid<8, 8, 2, 2, 2, Legendre, Spectral>;
     using MixedRuntimeProfiles = profiles::RuntimeProfiles<MixedProfileShape, RuntimeProbeGrid>;
 
+    constexpr auto split_boundary_c_counts = std::array<size_t, 1>{1};
+    constexpr auto split_boundary_s_counts = std::array<size_t, 1>{1};
+
+    using SplitBoundaryProfileShape = profiles::OptimizedProfileShapeFromCountsWithMmaxT<
+        1,
+        2,
+        4,
+        0,
+        0,
+        0,
+        0,
+        0,
+        split_boundary_c_counts,
+        split_boundary_s_counts>;
+    using SplitBoundaryGrid     = Grid<8, 8, 1, 4, 2, Legendre, Spectral>;
+    using SplitBoundaryProfiles = profiles::RuntimeProfiles<SplitBoundaryProfileShape, SplitBoundaryGrid>;
+
     constexpr auto semantic_c_slots = std::array{
         profiles::absent_slot(),
         profiles::absent_slot(),
@@ -4267,14 +6632,29 @@ namespace
     static_assert(MixedProfileShape::order_offsets[3] == 8);
     static_assert(MixedProfileShape::c_family_source_profile_ids[0] ==
                   static_cast<int>(MixedProfileShape::c_profile_id<0>()));
-    static_assert(MixedProfileShape::c_family_source_profile_ids[2] ==
-                  static_cast<int>(MixedProfileShape::c_profile_id<2>()));
+    static_assert(MixedProfileShape::c_family_source_profile_ids[2] == -1);
     static_assert(MixedProfileShape::s_family_source_profile_ids[0] == -1);
     static_assert(MixedProfileShape::s_family_source_profile_ids[1] == -1);
     static_assert(MixedProfileShape::s_family_source_profile_ids[2] ==
                   static_cast<int>(MixedProfileShape::s_profile_id<2>()));
     static_assert(MixedRuntimeProfiles::profile_field_count == MixedProfileShape::profile_count);
     static_assert(MixedRuntimeProfiles::family_field_count == MixedProfileShape::M_max + 1);
+    static_assert(SplitBoundaryProfileShape::M_max == 4);
+    static_assert(SplitBoundaryProfileShape::K_max == 2);
+    static_assert(SplitBoundaryProfileShape::profile_count == 14);
+    static_assert(SplitBoundaryProfileShape::active_count == 2);
+    static_assert(SplitBoundaryProfileShape::x_size == 2);
+    static_assert(SplitBoundaryProfileShape::active_c_order_count == 1);
+    static_assert(SplitBoundaryProfileShape::active_s_order_count == 1);
+    static_assert(SplitBoundaryProfileShape::active_c_orders[0] == 0);
+    static_assert(SplitBoundaryProfileShape::active_s_orders[0] == 1);
+    static_assert(SplitBoundaryProfileShape::c_family_source_profile_ids[0] ==
+                  static_cast<int>(SplitBoundaryProfileShape::c_profile_id<0>()));
+    static_assert(SplitBoundaryProfileShape::c_family_source_profile_ids[4] == -1);
+    static_assert(SplitBoundaryProfileShape::s_family_source_profile_ids[1] ==
+                  static_cast<int>(SplitBoundaryProfileShape::s_profile_id<1>()));
+    static_assert(SplitBoundaryProfileShape::s_family_source_profile_ids[4] == -1);
+    static_assert(SplitBoundaryProfiles::family_field_count == SplitBoundaryProfileShape::M_max + 1);
     static_assert(RuntimeSemanticEvaluator::fourier_power<4>() == RuntimeSemanticShape::K_max);
 
     constexpr double tolerance = 1.0e-8;
@@ -4882,26 +7262,72 @@ namespace
                    runtime.template profile_matrix<c0_id>(),
                    c0_coeffs,
                    5,
-                   params.offsets[c0_id]
+                   0.0
                ) &&
                check_fourier_profile<1, RuntimeProbeGrid>(
                    runtime.template profile_matrix<c1_id>(),
                    c1_coeffs,
                    5,
-                   params.offsets[c1_id]
+                   0.0
                ) &&
                check_fourier_profile<2, RuntimeProbeGrid>(
                    runtime.template profile_matrix<s2_id>(),
                    s2_coeffs,
                    6,
-                   params.offsets[s2_id]
+                   0.0
                ) &&
                close(runtime.template profile_field<c2_id>(0, 0), 9.0) &&
                close(runtime.template profile_field<c2_id>(0, 1), 0.0) &&
                close(runtime.template profile_field<c2_id>(0, 2), 0.0) &&
-               close(runtime.template c_family_field<2>(0, 0), 9.0) &&
+               close(runtime.c_family_base_fields(2, 0, 0), 9.0 * RuntimeProbeGrid::rhos(1, 0)) &&
+               close(runtime.template c_family_field<2>(0, 0), 0.0) &&
                close(runtime.template s_family_field<1>(0, 0), 0.0) &&
                close(runtime.template s_family_field<2>(0, 0), runtime.template profile_field<s2_id>(0, 0));
+    }
+
+    constexpr bool split_boundary_profile_constexpr_ok()
+    {
+        using Shape   = SplitBoundaryProfileShape;
+        using Runtime = SplitBoundaryProfiles;
+
+        constexpr size_t c3_id      = Shape::c_profile_id<3>();
+        constexpr size_t c4_id      = Shape::c_profile_id<4>();
+        constexpr size_t s3_id      = Shape::s_profile_id<3>();
+        constexpr size_t s4_id      = Shape::s_profile_id<4>();
+        constexpr size_t node       = 3;
+        constexpr size_t theta_node = 2;
+        constexpr double c4_amp     = 0.375;
+        constexpr double s4_amp     = -0.25;
+
+        profiles::ProfileRuntimeParams<Shape> params{};
+        params.offsets[c3_id] = 0.5e-10;
+        params.offsets[c4_id] = c4_amp;
+        params.offsets[s3_id] = -0.5e-10;
+        params.offsets[s4_id] = s4_amp;
+
+        Runtime runtime{};
+        runtime.refresh_fixed(params);
+
+        constexpr double rho2 = SplitBoundaryGrid::rhos(1, node);
+        const double expected_tb =
+            SplitBoundaryGrid::theta[theta_node] +
+            c4_amp * rho2 * SplitBoundaryGrid::cos_mtheta(4, theta_node) +
+            s4_amp * rho2 * SplitBoundaryGrid::sin_mtheta(4, theta_node);
+
+        return close(runtime.c_family_base_fields(3, node, 0), 0.0) &&
+               close(runtime.s_family_base_fields(3, node, 0), 0.0) &&
+               runtime.boundary_c_order_count == 1 &&
+               runtime.boundary_s_order_count == 1 &&
+               runtime.boundary_c_orders[0] == 4 &&
+               runtime.boundary_s_orders[0] == 4 &&
+               close(runtime.c_family_base_fields(4, node, 0), c4_amp * rho2) &&
+               close(runtime.s_family_base_fields(4, node, 0), s4_amp * rho2) &&
+               close(runtime.c_family_base_fields(4, node, 1),
+                     c4_amp * 2.0 * SplitBoundaryGrid::nodes[node]) &&
+               close(runtime.s_family_base_fields(4, node, 2), s4_amp * 2.0) &&
+               close(runtime.template c_family_field<4>(node, 0), 0.0) &&
+               close(runtime.template s_family_field<4>(node, 0), 0.0) &&
+               close(runtime.boundary_phase_base_field(node, theta_node, Runtime::phase_tb), expected_tb);
     }
 
     constexpr bool runtime_profile_semantics_constexpr_ok()
@@ -4938,19 +7364,19 @@ namespace
                    runtime.template profile_matrix<c0_id>(),
                    c0_coeffs,
                    0,
-                   params.offsets[c0_id]
+                   0.0
                ) &&
                check_fourier_profile<2, RuntimeSemanticGrid>(
                    runtime.template profile_matrix<c4_id>(),
                    c4_coeffs,
                    1,
-                   params.offsets[c4_id]
+                   0.0
                ) &&
                check_fourier_profile<2, RuntimeSemanticGrid>(
                    runtime.template profile_matrix<s4_id>(),
                    s4_coeffs,
                    2,
-                   params.offsets[s4_id]
+                   0.0
                ) &&
                check_F_profile<RuntimeSemanticGrid>(
                    runtime.template profile_matrix<F_id>(),
@@ -5312,6 +7738,7 @@ namespace
     static_assert(grid_constexpr_ok());
     static_assert(profiles_grid_constexpr_ok());
     static_assert(runtime_profiles_constexpr_ok());
+    static_assert(split_boundary_profile_constexpr_ok());
     static_assert(runtime_profile_semantics_constexpr_ok());
     static_assert(source_materialization_constexpr_ok());
 
@@ -5362,6 +7789,7 @@ int run(int, char**)
         {"grid", grid_constexpr_ok()},
         {"profiles_grid", profiles_grid_constexpr_ok()},
         {"runtime_profiles", runtime_profiles_constexpr_ok()},
+        {"split_boundary_profiles", split_boundary_profile_constexpr_ok()},
         {"runtime_profile_semantics", runtime_profile_semantics_constexpr_ok()},
         {"geometry_circular", geometry_circular_constexpr_ok()},
         {"source_materialization", source_materialization_constexpr_ok()},
@@ -5389,9 +7817,9 @@ int run(int, char**)
 
     const bool ok = linalg_constexpr_ok() && tensor_math_constexpr_ok() && finite_semantics_constexpr_ok() &&
                     grid_constexpr_ok() && profiles_grid_constexpr_ok() && runtime_profiles_constexpr_ok() &&
-                    runtime_profile_semantics_constexpr_ok() && geometry_circular_constexpr_ok() &&
-                    source_materialization_constexpr_ok() && pf_source_constexpr_ok() &&
-                    residual_pack_constexpr_ok() && pf_operator_constexpr_ok() &&
+                    split_boundary_profile_constexpr_ok() && runtime_profile_semantics_constexpr_ok() &&
+                    geometry_circular_constexpr_ok() && source_materialization_constexpr_ok() &&
+                    pf_source_constexpr_ok() && residual_pack_constexpr_ok() && pf_operator_constexpr_ok() &&
                     pf_operator_setup_lifecycle_ok() &&
                     runtime_library_ok(report);
 
@@ -5400,4 +7828,3 @@ int run(int, char**)
 }
 
 } // namespace veqlib_temp_validation_cli
-

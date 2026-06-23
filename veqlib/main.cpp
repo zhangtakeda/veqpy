@@ -313,7 +313,7 @@ namespace
 
     bool is_stage_option(const std::string& option)
     {
-        return option == "--stage" || option == "--inner" || option == "--ring-size";
+        return option == "--stage" || option == "--backend" || option == "--inner" || option == "--ring-size";
     }
 } // namespace
 

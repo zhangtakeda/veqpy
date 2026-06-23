@@ -406,8 +406,7 @@ def latex_error_table(case_results: list[tuple[str, list[TransportResult]]]) -> 
     lines = [
         r"\hline",
         (
-            r"Case & \(\mathrm{RMS}(\delta_T)\) & \(\mathrm{RMS}(\delta_{V'})\) & "
-            r"\(\mathrm{RMS}(\delta_{V'\langle|\nabla\hat{\psi}|^2\rangle})\) & "
+            r"Case & \(\mathrm{RMS}(\delta_T)\) & "
             r"\(\Delta_W\) & \(\Delta_{\beta_t}\) \\"
         ),
         r"\hline",
@@ -416,12 +415,9 @@ def latex_error_table(case_results: list[tuple[str, list[TransportResult]]]) -> 
         reference = results[0]
         x = reference.geometry.x
         for result in results[1:]:
-            geom = result.geometry
             lines.append(
                 f"{result.label} & "
-                f"{format_sci(rel_rms(reference.temperature, result.temperature, x))} & "
-                f"{format_sci(rel_rms(reference.geometry.vprime, geom.vprime, x))} & "
-                f"{format_sci(rel_rms(reference.geometry.metric_weight, geom.metric_weight, x))}"
+                f"{format_sci(rel_rms(reference.temperature, result.temperature, x))}"
                 f" & {format_sci(rel_abs(reference.thermal_energy, result.thermal_energy))} & "
                 f"{format_sci(rel_abs(reference.beta_proxy, result.beta_proxy))} \\\\"
             )
@@ -525,7 +521,7 @@ def plot_results(
     fig, axes = plt.subplots(
         len(case_results),
         4,
-        figsize=(DOUBLE_COLUMN_WIDTH, 6.15),
+        figsize=(DOUBLE_COLUMN_WIDTH, 6),
         constrained_layout=True,
         sharex="col",
     )

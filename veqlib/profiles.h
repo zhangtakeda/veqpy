@@ -11,6 +11,9 @@
 namespace profiles
 {
     using std::size_t;
+    using math::abs;
+
+    inline constexpr double boundary_amplitude_prune_threshold = 1.0e-10;
 
     enum class ProfileMode
     {
@@ -117,9 +120,9 @@ namespace profiles
         static constexpr size_t F_profile_id     = 2 * Mmax + 5;
         static constexpr size_t profile_count    = 2 * Mmax + 6;
 
-        static consteval size_t c_profile_id(size_t order) { return c0_profile_id + order; }
+        static constexpr size_t c_profile_id(size_t order) { return c0_profile_id + order; }
 
-        static consteval size_t s_profile_id(size_t order) { return c0_profile_id + Mmax + order; }
+        static constexpr size_t s_profile_id(size_t order) { return c0_profile_id + Mmax + order; }
 
         template <size_t Order>
         static consteval size_t c_profile_id()
@@ -265,6 +268,47 @@ namespace profiles
             return out;
         }
 
+        static consteval size_t compute_active_c_order_count()
+        {
+            size_t count = 0;
+            for (size_t order = 0; order <= Mmax; ++order)
+                if (c_slot(order).optimized())
+                    ++count;
+            return count;
+        }
+
+        static consteval size_t compute_active_s_order_count()
+        {
+            size_t count = 0;
+            for (size_t order = 1; order <= Mmax; ++order)
+                if (s_slot(order).optimized())
+                    ++count;
+            return count;
+        }
+
+        static constexpr size_t active_c_order_count = compute_active_c_order_count();
+        static constexpr size_t active_s_order_count = compute_active_s_order_count();
+
+        static consteval auto make_active_c_orders()
+        {
+            std::array<size_t, active_c_order_count> out{};
+            size_t                                   active_slot = 0;
+            for (size_t order = 0; order <= Mmax; ++order)
+                if (c_slot(order).optimized())
+                    out[active_slot++] = order;
+            return out;
+        }
+
+        static consteval auto make_active_s_orders()
+        {
+            std::array<size_t, active_s_order_count> out{};
+            size_t                                   active_slot = 0;
+            for (size_t order = 1; order <= Mmax; ++order)
+                if (s_slot(order).optimized())
+                    out[active_slot++] = order;
+            return out;
+        }
+
         static consteval auto make_coeff_index()
         {
             std::array<std::array<int, max_active_len>, profile_count> out{};
@@ -306,7 +350,7 @@ namespace profiles
         {
             std::array<int, Mmax + 1> out{};
             for (size_t order = 0; order <= Mmax; ++order)
-                out[order] = c_slot(order).enabled() ? static_cast<int>(c_profile_id(order)) : -1;
+                out[order] = c_slot(order).optimized() ? static_cast<int>(c_profile_id(order)) : -1;
             return out;
         }
 
@@ -315,13 +359,15 @@ namespace profiles
             std::array<int, Mmax + 1> out{};
             out[0] = -1;
             for (size_t order = 1; order <= Mmax; ++order)
-                out[order] = s_slot(order).enabled() ? static_cast<int>(s_profile_id(order)) : -1;
+                out[order] = s_slot(order).optimized() ? static_cast<int>(s_profile_id(order)) : -1;
             return out;
         }
 
         static constexpr auto profile_L                   = make_profile_L();
         static constexpr auto active_profile_ids          = make_active_profile_ids();
         static constexpr auto active_lengths              = make_active_lengths();
+        static constexpr auto active_c_orders             = make_active_c_orders();
+        static constexpr auto active_s_orders             = make_active_s_orders();
         static constexpr auto coeff_index                 = make_coeff_index();
         static constexpr auto order_offsets               = make_order_offsets();
         static constexpr auto c_family_source_profile_ids = make_c_family_source_profile_ids();
@@ -718,6 +764,7 @@ namespace profiles
 
     template <size_t Lmax,
               size_t Kmax,
+              size_t Mmax,
               size_t HCount,
               size_t VCount,
               size_t KappaCount,
@@ -725,11 +772,12 @@ namespace profiles
               size_t FCount,
               auto   CFamilyCounts,
               auto   SFamilyCounts>
-    struct OptimizedProfileShapeFromCounts
+    struct OptimizedProfileShapeFromCountsWithMmax
     {
         static constexpr size_t Cmax = CFamilyCounts.size() == 0 ? 0 : CFamilyCounts.size() - 1;
         static constexpr size_t Smax = SFamilyCounts.size();
-        static constexpr size_t Mmax = Cmax > Smax ? Cmax : Smax;
+        static constexpr size_t active_Mmax = Cmax > Smax ? Cmax : Smax;
+        static_assert(Mmax >= active_Mmax, "boundary Mmax must cover configured c/s profile orders");
 
         static constexpr auto c_family_slots = tail_optimized_slots_from_counts<CFamilyCounts>();
         static constexpr auto s_family_slots = optimized_slots_from_counts<SFamilyCounts>();
@@ -746,6 +794,55 @@ namespace profiles
                                   c_family_slots,
                                   s_family_slots>;
     };
+
+    template <size_t Lmax,
+              size_t Kmax,
+              size_t HCount,
+              size_t VCount,
+              size_t KappaCount,
+              size_t PsinCount,
+              size_t FCount,
+              auto   CFamilyCounts,
+              auto   SFamilyCounts>
+    struct OptimizedProfileShapeFromCounts
+    {
+        static constexpr size_t Cmax = CFamilyCounts.size() == 0 ? 0 : CFamilyCounts.size() - 1;
+        static constexpr size_t Smax = SFamilyCounts.size();
+        static constexpr size_t Mmax = Cmax > Smax ? Cmax : Smax;
+
+        using type = typename OptimizedProfileShapeFromCountsWithMmax<Lmax,
+                                                                       Kmax,
+                                                                       Mmax,
+                                                                       HCount,
+                                                                       VCount,
+                                                                       KappaCount,
+                                                                       PsinCount,
+                                                                       FCount,
+                                                                       CFamilyCounts,
+                                                                       SFamilyCounts>::type;
+    };
+
+    template <size_t Lmax,
+              size_t Kmax,
+              size_t Mmax,
+              size_t HCount,
+              size_t VCount,
+              size_t KappaCount,
+              size_t PsinCount,
+              size_t FCount,
+              auto   CFamilyCounts,
+              auto   SFamilyCounts>
+    using OptimizedProfileShapeFromCountsWithMmaxT =
+        typename OptimizedProfileShapeFromCountsWithMmax<Lmax,
+                                                         Kmax,
+                                                         Mmax,
+                                                         HCount,
+                                                         VCount,
+                                                         KappaCount,
+                                                         PsinCount,
+                                                         FCount,
+                                                         CFamilyCounts,
+                                                         SFamilyCounts>::type;
 
     template <size_t Lmax,
               size_t Kmax,
@@ -812,10 +909,18 @@ namespace profiles
         static constexpr size_t radial_nodes        = GridType::radial_nodes;
         static constexpr size_t profile_field_count = Shape::profile_count;
         static constexpr size_t family_field_count  = Shape::M_max + 1;
+        static constexpr size_t phase_component_count = 6;
+        static constexpr size_t phase_tb              = 0;
+        static constexpr size_t phase_tb_r            = 1;
+        static constexpr size_t phase_tb_t            = 2;
+        static constexpr size_t phase_tb_rr           = 3;
+        static constexpr size_t phase_tb_rt           = 4;
+        static constexpr size_t phase_tb_tt           = 5;
 
         using ProfileField = Matrix<double, radial_nodes, 3>;
         using ProfileSlab  = Tensor<double, profile_field_count, radial_nodes, 3>;
         using FamilySlab   = Tensor<double, family_field_count, radial_nodes, 3>;
+        using PhaseBaseSlab = Tensor<double, radial_nodes, GridType::theta_rows, phase_component_count>;
 
         ProfileSlab profile_fields{};
         ProfileSlab profile_rp_fields{};
@@ -824,6 +929,11 @@ namespace profiles
         FamilySlab  s_family_fields{};
         FamilySlab  c_family_base_fields{};
         FamilySlab  s_family_base_fields{};
+        PhaseBaseSlab boundary_phase_base{};
+        std::array<size_t, family_field_count> boundary_c_orders{};
+        std::array<size_t, family_field_count> boundary_s_orders{};
+        size_t boundary_c_order_count = 0;
+        size_t boundary_s_order_count = 0;
 
         constexpr void clear() noexcept
         {
@@ -834,6 +944,9 @@ namespace profiles
             s_family_fields.clear();
             c_family_base_fields.clear();
             s_family_base_fields.clear();
+            boundary_phase_base.clear();
+            boundary_c_order_count = 0;
+            boundary_s_order_count = 0;
         }
 
         constexpr double& profile_field(size_t profile_id, size_t node, size_t component) noexcept
@@ -900,10 +1013,16 @@ namespace profiles
             return s_family_fields(Order, node, component);
         }
 
+        constexpr double boundary_phase_base_field(size_t node, size_t theta_node, size_t component) const noexcept
+        {
+            return boundary_phase_base(node, theta_node, component);
+        }
+
         constexpr void refresh_fixed(const ProfileRuntimeParams<Shape>& params) noexcept
         {
             refresh_fixed_profile<0>(params);
-            refresh_fourier_family_fields();
+            refresh_boundary_family_base(params);
+            refresh_boundary_phase_base();
         }
 
         constexpr void refresh_active(std::span<const double, Shape::x_size> x,
@@ -921,7 +1040,8 @@ namespace profiles
 
         constexpr void refresh_fourier_family_fields() noexcept
         {
-            // Active/fixed family rows are overwritten below; absent rows stay zero from construction.
+            // Active family rows are overwritten below; boundary-only rows stay zero
+            // here and enter geometry through boundary_phase_base.
             refresh_c_family_order<0>();
             refresh_s_family_order<1>();
         }
@@ -929,7 +1049,9 @@ namespace profiles
         constexpr void load_fixed_from(const RuntimeProfiles& fixed_profiles) noexcept
         {
             load_fixed_profile<0>(fixed_profiles);
-            refresh_fourier_family_fields();
+            copy_boundary_base_from(fixed_profiles);
+            c_family_fields.clear();
+            s_family_fields.clear();
         }
 
     private:
@@ -989,6 +1111,172 @@ namespace profiles
                 if constexpr (slot.fixed())
                     copy_profile_from<ProfileId>(fixed_profiles);
                 load_fixed_profile<ProfileId + 1>(fixed_profiles);
+            }
+        }
+
+        constexpr void copy_boundary_base_from(const RuntimeProfiles& fixed_profiles) noexcept
+        {
+            boundary_c_order_count = fixed_profiles.boundary_c_order_count;
+            boundary_s_order_count = fixed_profiles.boundary_s_order_count;
+            for (size_t active = 0; active < boundary_c_order_count; ++active)
+                boundary_c_orders[active] = fixed_profiles.boundary_c_orders[active];
+            for (size_t active = 0; active < boundary_s_order_count; ++active)
+                boundary_s_orders[active] = fixed_profiles.boundary_s_orders[active];
+
+            for (size_t order = 0; order < family_field_count; ++order)
+                for (size_t node = 0; node < radial_nodes; ++node)
+                    for (size_t component = 0; component < 3; ++component)
+                    {
+                        c_family_base_fields(order, node, component) =
+                            fixed_profiles.c_family_base_fields(order, node, component);
+                        s_family_base_fields(order, node, component) =
+                            fixed_profiles.s_family_base_fields(order, node, component);
+                    }
+
+            for (size_t node = 0; node < radial_nodes; ++node)
+                for (size_t theta_node = 0; theta_node < GridType::theta_rows; ++theta_node)
+                    for (size_t component = 0; component < phase_component_count; ++component)
+                        boundary_phase_base(node, theta_node, component) =
+                            fixed_profiles.boundary_phase_base(node, theta_node, component);
+        }
+
+        static constexpr size_t fourier_power_runtime(size_t order) noexcept
+        {
+            return order < Shape::K_max ? order : Shape::K_max;
+        }
+
+        static constexpr detail::ProfileValues rho_power_rows_runtime(size_t power, size_t node) noexcept
+        {
+            if (power == 0)
+                return {1.0, 0.0, 0.0};
+            if (power == 1)
+                return {GridType::rhos(0, node), 1.0, 0.0};
+
+            const double rho_pm2 = power == 2 ? 1.0 : GridType::rhos(power - 3, node);
+            const double rho_pm1 = GridType::rhos(power - 2, node);
+            const double rho_p   = GridType::rhos(power - 1, node);
+            return {
+                rho_p,
+                static_cast<double>(power) * rho_pm1,
+                static_cast<double>(power * (power - 1)) * rho_pm2,
+            };
+        }
+
+        static constexpr void store_boundary_order(FamilySlab& family, size_t order, size_t node, double offset) noexcept
+        {
+            const detail::ProfileValues rp = rho_power_rows_runtime(fourier_power_runtime(order), node);
+            family(order, node, 0)         = offset * rp.value;
+            family(order, node, 1)         = offset * rp.diff;
+            family(order, node, 2)         = offset * rp.diff2;
+        }
+
+        static constexpr void clear_boundary_order(FamilySlab& family, size_t order) noexcept
+        {
+            for (size_t node = 0; node < radial_nodes; ++node)
+                for (size_t component = 0; component < 3; ++component)
+                    family(order, node, component) = 0.0;
+        }
+
+        constexpr void remember_boundary_c_order(size_t order) noexcept
+        {
+            boundary_c_orders[boundary_c_order_count++] = order;
+        }
+
+        constexpr void remember_boundary_s_order(size_t order) noexcept
+        {
+            boundary_s_orders[boundary_s_order_count++] = order;
+        }
+
+        constexpr void refresh_boundary_family_base(const ProfileRuntimeParams<Shape>& params) noexcept
+        {
+            for (size_t active = 0; active < boundary_c_order_count; ++active)
+                clear_boundary_order(c_family_base_fields, boundary_c_orders[active]);
+            for (size_t active = 0; active < boundary_s_order_count; ++active)
+                clear_boundary_order(s_family_base_fields, boundary_s_orders[active]);
+            boundary_c_order_count = 0;
+            boundary_s_order_count = 0;
+            for (size_t order = 0; order <= Shape::M_max; ++order)
+            {
+                const size_t profile_id = Shape::c_profile_id(order);
+                const double offset     = params.offsets[profile_id] * params.scales[profile_id];
+                if (abs(offset) <= boundary_amplitude_prune_threshold)
+                    continue;
+                remember_boundary_c_order(order);
+                for (size_t node = 0; node < radial_nodes; ++node)
+                    store_boundary_order(c_family_base_fields, order, node, offset);
+            }
+            for (size_t order = 1; order <= Shape::M_max; ++order)
+            {
+                const size_t profile_id = Shape::s_profile_id(order);
+                const double offset     = params.offsets[profile_id] * params.scales[profile_id];
+                if (abs(offset) <= boundary_amplitude_prune_threshold)
+                    continue;
+                remember_boundary_s_order(order);
+                for (size_t node = 0; node < radial_nodes; ++node)
+                    store_boundary_order(s_family_base_fields, order, node, offset);
+            }
+        }
+
+        constexpr void refresh_boundary_phase_base() noexcept
+        {
+            for (size_t node = 0; node < radial_nodes; ++node)
+            {
+                const double c0_i    = c_family_base_fields(0, node, 0);
+                const double c0_r_i  = c_family_base_fields(0, node, 1);
+                const double c0_rr_i = c_family_base_fields(0, node, 2);
+
+                for (size_t theta_node = 0; theta_node < GridType::theta_rows; ++theta_node)
+                {
+                    double tb    = GridType::theta[theta_node] + c0_i;
+                    double tb_r  = c0_r_i;
+                    double tb_t  = 1.0;
+                    double tb_rr = c0_rr_i;
+                    double tb_rt = 0.0;
+                    double tb_tt = 0.0;
+
+                    for (size_t active = 0; active < boundary_c_order_count; ++active)
+                    {
+                        const size_t order = boundary_c_orders[active];
+                        if (order == 0)
+                            continue;
+                        const double c_i       = c_family_base_fields(order, node, 0);
+                        const double c_r_i     = c_family_base_fields(order, node, 1);
+                        const double c_rr_i    = c_family_base_fields(order, node, 2);
+                        const double cos_kt    = GridType::cos_mtheta(order, theta_node);
+                        const double k_sin_kt  = GridType::m_sin_mtheta(order, theta_node);
+                        const double k2_cos_kt = GridType::m2_cos_mtheta(order, theta_node);
+                        tb += c_i * cos_kt;
+                        tb_r += c_r_i * cos_kt;
+                        tb_t -= c_i * k_sin_kt;
+                        tb_rr += c_rr_i * cos_kt;
+                        tb_rt -= c_r_i * k_sin_kt;
+                        tb_tt -= c_i * k2_cos_kt;
+                    }
+
+                    for (size_t active = 0; active < boundary_s_order_count; ++active)
+                    {
+                        const size_t order = boundary_s_orders[active];
+                        const double s_i       = s_family_base_fields(order, node, 0);
+                        const double s_r_i     = s_family_base_fields(order, node, 1);
+                        const double s_rr_i    = s_family_base_fields(order, node, 2);
+                        const double sin_kt    = GridType::sin_mtheta(order, theta_node);
+                        const double k_cos_kt  = GridType::m_cos_mtheta(order, theta_node);
+                        const double k2_sin_kt = GridType::m2_sin_mtheta(order, theta_node);
+                        tb += s_i * sin_kt;
+                        tb_r += s_r_i * sin_kt;
+                        tb_t += s_i * k_cos_kt;
+                        tb_rr += s_rr_i * sin_kt;
+                        tb_rt += s_r_i * k_cos_kt;
+                        tb_tt -= s_i * k2_sin_kt;
+                    }
+
+                    boundary_phase_base(node, theta_node, phase_tb)    = tb;
+                    boundary_phase_base(node, theta_node, phase_tb_r)  = tb_r;
+                    boundary_phase_base(node, theta_node, phase_tb_t)  = tb_t;
+                    boundary_phase_base(node, theta_node, phase_tb_rr) = tb_rr;
+                    boundary_phase_base(node, theta_node, phase_tb_rt) = tb_rt;
+                    boundary_phase_base(node, theta_node, phase_tb_tt) = tb_tt;
+                }
             }
         }
 
@@ -1082,7 +1370,7 @@ namespace profiles
         constexpr void refresh_c_active(std::span<const double, Shape::x_size> x,
                                         const ProfileRuntimeParams<Shape>&     params) noexcept
         {
-            if constexpr (Order <= Shape::M_max)
+            if constexpr (Order < evaluator::c_family_size)
             {
                 if constexpr (Order < evaluator::c_family_size && Shape::c_slot(Order).optimized())
                 {
@@ -1096,7 +1384,7 @@ namespace profiles
                                                         GridType::T_r,
                                                         GridType::T_rr,
                                                         GridType::rhos,
-                                                        params.offsets[profile_id]);
+                                                        0.0);
                     store_profile<profile_id>(out);
                 }
                 refresh_c_active<Order + 1>(x, params);
@@ -1107,7 +1395,7 @@ namespace profiles
         constexpr void refresh_s_active(std::span<const double, Shape::x_size> x,
                                         const ProfileRuntimeParams<Shape>&     params) noexcept
         {
-            if constexpr (Order <= Shape::M_max)
+            if constexpr (Order <= evaluator::s_family_size)
             {
                 if constexpr (Order <= evaluator::s_family_size && Shape::s_slot(Order).optimized())
                 {
@@ -1121,7 +1409,7 @@ namespace profiles
                                                         GridType::T_r,
                                                         GridType::T_rr,
                                                         GridType::rhos,
-                                                        params.offsets[profile_id]);
+                                                        0.0);
                     store_profile<profile_id>(out);
                 }
                 refresh_s_active<Order + 1>(x, params);
@@ -1129,15 +1417,14 @@ namespace profiles
         }
 
         template <size_t ProfileId, size_t Order>
-        constexpr void copy_profile_to_family(FamilySlab& family, FamilySlab& family_base) noexcept
+        constexpr void copy_profile_to_family(FamilySlab& family) noexcept
         {
             for (size_t node = 0; node < radial_nodes; ++node)
             {
                 for (size_t component = 0; component < 3; ++component)
                 {
-                    const double value                  = profile_fields(ProfileId, node, component);
-                    family(Order, node, component)      = value;
-                    family_base(Order, node, component) = value;
+                    const double value             = profile_fields(ProfileId, node, component);
+                    family(Order, node, component) = value;
                 }
             }
         }
@@ -1145,12 +1432,11 @@ namespace profiles
         template <size_t Order>
         constexpr void refresh_c_family_order() noexcept
         {
-            if constexpr (Order <= Shape::M_max)
+            if constexpr (Order < evaluator::c_family_size)
             {
                 constexpr int profile_id = Shape::c_family_source_profile_ids[Order];
                 if constexpr (profile_id >= 0)
-                    copy_profile_to_family<static_cast<size_t>(profile_id), Order>(c_family_fields,
-                                                                                   c_family_base_fields);
+                    copy_profile_to_family<static_cast<size_t>(profile_id), Order>(c_family_fields);
                 refresh_c_family_order<Order + 1>();
             }
         }
@@ -1158,12 +1444,11 @@ namespace profiles
         template <size_t Order>
         constexpr void refresh_s_family_order() noexcept
         {
-            if constexpr (Order <= Shape::M_max)
+            if constexpr (Order <= evaluator::s_family_size)
             {
                 constexpr int profile_id = Shape::s_family_source_profile_ids[Order];
                 if constexpr (profile_id >= 0)
-                    copy_profile_to_family<static_cast<size_t>(profile_id), Order>(s_family_fields,
-                                                                                   s_family_base_fields);
+                    copy_profile_to_family<static_cast<size_t>(profile_id), Order>(s_family_fields);
                 refresh_s_family_order<Order + 1>();
             }
         }

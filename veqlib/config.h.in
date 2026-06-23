@@ -26,9 +26,10 @@ namespace config
             @VEQ_SIN_PROFILE_COUNTS_VALUES@
         };
 
-        static constexpr std::size_t C_max = @VEQ_C_MAX@;
-        static constexpr std::size_t S_max = @VEQ_S_MAX@;
-        static constexpr std::size_t M_max = @VEQ_M_MAX@;
+        static constexpr std::size_t C_max        = @VEQ_C_MAX@;
+        static constexpr std::size_t S_max        = @VEQ_S_MAX@;
+        static constexpr std::size_t active_M_max = @VEQ_ACTIVE_M_MAX@;
+        static constexpr std::size_t M_max        = @VEQ_M_MAX@;
         static constexpr std::size_t L_max = @VEQ_L_MAX@;
         static constexpr std::size_t K_max = @VEQ_K_MAX@;
 

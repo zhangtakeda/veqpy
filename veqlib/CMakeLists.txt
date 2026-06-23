@@ -45,6 +45,12 @@ set(
     CACHE STRING
     "Upper bound for K_max; config uses min(M_max, this value)"
 )
+set(
+    VEQ_BOUNDARY_M_MAX
+    "AUTO"
+    CACHE STRING
+    "Boundary/geometric Fourier M_max; AUTO derives it from active c/s profile counts"
+)
 
 string(TOUPPER "${VEQLIB_FP_MODE}" VEQLIB_FP_MODE_NORMALIZED)
 if(NOT VEQLIB_FP_MODE_NORMALIZED MATCHES "^(STRICT|FMA|RELAXED)$")
@@ -127,6 +133,9 @@ veqlib_require_nonnegative_int_var(VEQ_KAPPA_PROFILE_COUNT)
 veqlib_require_nonnegative_int_var(VEQ_PSIN_PROFILE_COUNT)
 veqlib_require_nonnegative_int_var(VEQ_F_PROFILE_COUNT)
 veqlib_require_int_at_least(VEQ_PROFILE_KMAX_LIMIT 2)
+if(NOT VEQ_BOUNDARY_M_MAX STREQUAL "AUTO")
+    veqlib_require_int_at_least(VEQ_BOUNDARY_M_MAX 1)
+endif()
 
 veqlib_prepare_nonnegative_int_list(
     VEQ_COS_PROFILE_COUNTS
@@ -182,12 +191,24 @@ if(VEQ_S_MAX LESS 0)
     set(VEQ_S_MAX 0)
 endif()
 
-set(VEQ_M_MAX "${VEQ_C_MAX}")
-if(VEQ_S_MAX GREATER VEQ_M_MAX)
-    set(VEQ_M_MAX "${VEQ_S_MAX}")
+set(VEQ_ACTIVE_M_MAX "${VEQ_C_MAX}")
+if(VEQ_S_MAX GREATER VEQ_ACTIVE_M_MAX)
+    set(VEQ_ACTIVE_M_MAX "${VEQ_S_MAX}")
 endif()
-if(VEQ_M_MAX LESS 1)
-    message(FATAL_ERROR "Derived M_max must be at least 1; enable at least one positive c/s order")
+if(VEQ_ACTIVE_M_MAX LESS 1)
+    message(FATAL_ERROR "Derived active M_max must be at least 1; enable at least one positive c/s order")
+endif()
+
+if(VEQ_BOUNDARY_M_MAX STREQUAL "AUTO")
+    set(VEQ_M_MAX "${VEQ_ACTIVE_M_MAX}")
+else()
+    set(VEQ_M_MAX "${VEQ_BOUNDARY_M_MAX}")
+    if(VEQ_M_MAX LESS VEQ_ACTIVE_M_MAX)
+        message(
+            FATAL_ERROR
+            "VEQ_BOUNDARY_M_MAX (${VEQ_M_MAX}) must be >= active profile M (${VEQ_ACTIVE_M_MAX})"
+        )
+    endif()
 endif()
 
 set(VEQ_RHO_ORDER_BASE "${VEQ_M_MAX}")

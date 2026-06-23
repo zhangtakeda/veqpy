@@ -89,11 +89,15 @@ The main topology variables are:
   `VEQ_PSIN_PROFILE_COUNT`, and `VEQ_F_PROFILE_COUNT`;
 - `VEQ_COS_PROFILE_COUNTS` and `VEQ_SIN_PROFILE_COUNTS` for Fourier-family
   coefficient counts;
+- `VEQ_BOUNDARY_M_MAX` for the boundary/geometric Fourier ceiling. The default
+  `AUTO` keeps the historical behavior by deriving it from active c/s counts;
+  an explicit value lets boundary `ca`/`sa` orders exceed the optimized profile
+  topology;
 - `VEQ_PROFILE_KMAX_LIMIT` for the upper bound used when deriving `K_max`.
 
 Configure-time validation requires `VEQ_NR >= 4`, `VEQ_NT >= 4`, derived
-`L_max >= 1`, derived `M_max >= 1`, derived `K_max >= 2`, and
-`VEQ_PROFILE_KMAX_LIMIT >= 2`.
+`L_max >= 1`, derived active `M >= 1`, boundary `M_max >= active M`, derived
+`K_max >= 2`, and `VEQ_PROFILE_KMAX_LIMIT >= 2`.
 
 ## Static Profile Layout
 
@@ -112,10 +116,18 @@ contributing coefficients to packed `x`.
 
 `profiles::RuntimeProfiles<Shape, GridType>` is the storage boundary for later
 source, geometry, and residual code. It owns fixed-size slabs for stable
-profile-id fields and c/s Fourier-family fields. The shape decides profile ids,
-family extents, active profile order, and packed coefficient indices at compile
-time; runtime refresh only moves numerical values from fixed parameters or
-packed `x` into those slots.
+profile-id fields, active c/s Fourier-family deltas, boundary-family bases, and
+the cached boundary phase. The shape decides profile ids, family extents, active
+profile order, and packed coefficient indices at compile time; runtime refresh
+only moves numerical values from fixed parameters or packed `x` into those
+slots. Boundary-only Fourier orders are computed once from setup/profile
+parameters and cached outside the residual callback hot path, while optimized
+orders are recomputed from packed `x` on each callback. Boundary amplitudes with
+`abs(offset * scale) <= 1.0e-10` are pruned when building the cached boundary
+base. The cached boundary setup records only the surviving c/s orders and clears
+only the previously surviving rows on refresh, so zero/pruned high-order
+capacity is not read by phase synthesis and does not force a full family-slab
+clear.
 
 Later stages should consume `RuntimeProfiles<Shape, GridType>&` and the
 compile-time metadata on `Shape`. They should not recompute profile order,
