@@ -267,18 +267,21 @@ Executable-side C++ validation/stage diagnostics are intentionally retired. New
 performance evidence should use the production nanobind/shared-library path or a
 Python-level lifecycle benchmark.
 
-For workload-level continuation evidence on the simple 18-parameter case, run
-the PF/Ip scan benchmark. It keeps one mutable `VEQlibSolver` alive and compares
-cold restarts against the `warm-clone` initial policy over an ordered Ip scan:
+For workload-level continuation evidence, run the four-case Ip scan benchmark.
+It keeps one mutable `VEQlibSolver` alive per topology and compares cold restarts
+against the `warm-clone` initial policy over an ordered Ip scan:
 
 ```bash
-taskset -c 0 .venv/bin/python veqlib/benchmark_pf_ip_scan.py \
+taskset -c 0 .venv/bin/python veqlib/benchmark_4case_ip_scan.py \
   --points 11 \
   --relative-span 0.20 \
   --repeat 11 \
   --warmup 3 \
-  --output /tmp/veqlib_pf_ip_scan.json
+  --output /tmp/veqlib_4case_ip_scan.json
 ```
+
+Add `--case PF_psin_uniform_Ip` when only the simple 18-parameter case is
+needed.
 
 ## Build Presets
 
