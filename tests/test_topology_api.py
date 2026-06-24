@@ -5,7 +5,7 @@ import sys
 
 import pytest
 
-from veqpy.topology import Topology, TopologyError
+from veqpy.model import Topology, TopologyError
 
 
 def make_topology(**overrides: object) -> Topology:
@@ -54,9 +54,22 @@ def test_topology_key_is_stable_for_inferred_values_and_trailing_zeros() -> None
     assert inferred.key == explicit.key
 
 
+def test_topology_keeps_one_basis_row_for_constant_profiles() -> None:
+    topology = make_topology(
+        h_count=1,
+        kappa_count=1,
+        psin_count=1,
+        s_counts=(1,),
+        L_max=None,
+    )
+
+    assert topology.L_max == 1
+    topology.validate_supported_for_veqlib_mvp()
+
+
 def test_topology_key_is_stable_across_python_processes() -> None:
     code = """
-from veqpy.topology import Topology
+from veqpy.model import Topology
 print(Topology(
     h_count=3, v_count=0, kappa_count=6, psin_count=6, F_count=0,
     c_counts=(0, 0), s_counts=(3, 0), Nr=32, Nt=16, route='PF',

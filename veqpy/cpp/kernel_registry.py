@@ -8,7 +8,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-from veqpy.topology import Topology
+from veqpy.model import Topology
 
 from .kernel_builder import KernelArtifact, build_kernel
 from .options import solver_method_code

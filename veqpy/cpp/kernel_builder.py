@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator
 
-from veqpy.topology import Topology
+from veqpy.model import Topology
 
 GENERATOR_VERSION = "veqpy.cpp.kernel_builder.v1"
 ARTIFACT_SCHEMA = "veqpy.kernel_artifact.v1"
@@ -240,7 +240,7 @@ def _metadata_payload(
 
 def _write_kernel_py(path: Path, metadata: dict[str, Any]) -> None:
     module_name = metadata["artifact"]["module_name"]
-    text = f'''from __future__ import annotations
+    text = f"""from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
@@ -257,9 +257,8 @@ def load():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
-'''
+"""
     path.write_text(text)
-
 
 
 def _cmake_build_type(build: str) -> str:

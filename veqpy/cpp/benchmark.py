@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from veqpy.topology import Topology
+from veqpy.model import Topology
 
 from .kernel_registry import KernelRegistry, SolverThreadError
 from .solver import VEQlibSolver

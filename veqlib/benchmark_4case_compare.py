@@ -21,6 +21,7 @@ import sys
 import tempfile
 import time
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -28,6 +29,8 @@ from typing import Any
 import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+SCRIPT_DIR = REPO_ROOT / "scripts"
+FIGURE06_PATH = SCRIPT_DIR / "06-high-order-reconstructions.py"
 DEFAULT_OUTPUT = Path("/tmp/veqlib_4case_compare.json")
 DEFAULT_MPLCONFIG = Path("/tmp/veqpy-mpl")
 
@@ -40,15 +43,16 @@ os.environ.setdefault("MPLCONFIGDIR", str(DEFAULT_MPLCONFIG))
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tests.test_cpp_geqdsk_incremental import (  # noqa: E402
-    _case_bundle,
-    _case_specs,
-    _kernel_payload,
+from veqpy.cpp import (  # noqa: E402
+    INITIAL_POLICY_COLD,
+    RESIDUAL_NORMALIZATION_FAST,
+    SOLVER_METHOD_POWELL,
+    KernelRegistry,
+    VEQlibSolver,
 )
-from veqpy.cpp import KernelRegistry, VEQlibSolver  # noqa: E402
+from veqpy.model import Topology  # noqa: E402
 from veqpy.operator import Operator  # noqa: E402
 from veqpy.solver import Solver  # noqa: E402
-from veqpy.topology import Topology  # noqa: E402
 
 
 def _load_module(name: str, path: Path) -> ModuleType:
@@ -59,6 +63,17 @@ def _load_module(name: str, path: Path) -> ModuleType:
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+@lru_cache(maxsize=1)
+def _figure06_module() -> ModuleType:
+    if str(SCRIPT_DIR) not in sys.path:
+        sys.path.insert(0, str(SCRIPT_DIR))
+    return _load_module("veqpy_figure06_for_veqlib_4case", FIGURE06_PATH)
+
+
+def _case_specs() -> tuple[Any, ...]:
+    return tuple(_figure06_module().CASE_SPECS)
 
 
 def _quantile(values: list[float], q: float) -> float:
@@ -116,6 +131,136 @@ def _family_counts(profile_coeffs: dict[str, Any], prefix: str, first: int) -> t
 def _profile_count(profile_coeffs: dict[str, Any], name: str) -> int:
     values = profile_coeffs.get(name)
     return 0 if values is None else int(np.asarray(values, dtype=np.float64).size)
+
+
+def _topology_from_geqdsk_case(case_spec: Any, geqdsk: Any) -> Topology:
+    profile_coeffs = case_spec.profile_coeffs
+    return Topology(
+        h_count=_profile_count(profile_coeffs, "h"),
+        v_count=_profile_count(profile_coeffs, "v"),
+        kappa_count=_profile_count(profile_coeffs, "k"),
+        psin_count=_profile_count(profile_coeffs, "psin"),
+        F_count=_profile_count(profile_coeffs, "F"),
+        c_counts=_family_counts(profile_coeffs, "c", 0),
+        s_counts=_family_counts(profile_coeffs, "s", 1),
+        Nr=int(case_spec.solve_nr),
+        Nt=int(case_spec.solve_nt),
+        route="PF",
+        coordinate="psin",
+        constraint="Ip",
+        nodes="uniform",
+        sample_count=int(np.asarray(geqdsk.P_psi, dtype=np.float64).size),
+        M_max=int(case_spec.boundary_fit_m),
+        K_max=max(2, int(case_spec.boundary_fit_m)),
+    )
+
+
+def _geqdsk_case_payload(
+    case_spec: Any,
+    geqdsk: Any,
+    case: Any,
+    boundary: Any,
+    fit: dict[str, Any],
+    topology: Topology,
+) -> dict[str, Any]:
+    c_offsets = np.asarray(boundary.c_offsets, dtype=np.float64)
+    s_offsets = np.asarray(boundary.s_offsets, dtype=np.float64)
+    return {
+        "schema": "veqpy.cpp.geqdsk_case_payload.v1",
+        "case_key": str(case_spec.case_key),
+        "topology_key": topology.key,
+        "topology": topology.to_canonical_dict(),
+        "grid": {"Nr": int(case_spec.solve_nr), "Nt": int(case_spec.solve_nt)},
+        "profiles": {
+            "active_profiles": {
+                str(name): int(count) for name, count in case.active_profiles.items()
+            },
+            "initial_coefficients": {
+                str(name): np.asarray(values, dtype=np.float64).tolist()
+                for name, values in case_spec.profile_coeffs.items()
+            },
+        },
+        "boundary": {
+            "a": float(boundary.a),
+            "R0": float(boundary.R0),
+            "Z0": float(boundary.Z0),
+            "B0": float(boundary.B0),
+            "ka": float(boundary.ka),
+            "c_offsets": c_offsets.tolist(),
+            "s_offsets": s_offsets.tolist(),
+            "fit_rms": float(fit["rms"]),
+        },
+        "source": {
+            "heat_input": np.asarray(case.heat_input, dtype=np.float64).tolist(),
+            "current_input": np.asarray(case.current_input, dtype=np.float64).tolist(),
+            "sample_count": int(np.asarray(case.heat_input, dtype=np.float64).size),
+            "Ip": float(case.Ip),
+            "geqdsk_shape": {"NR": int(geqdsk.NR), "NZ": int(geqdsk.NZ)},
+        },
+    }
+
+
+def _case_bundle(case_spec: Any) -> tuple[Any, Any, Any, Any, Topology, dict[str, Any]]:
+    return _case_bundle_by_key(str(case_spec.case_key))
+
+
+@lru_cache(maxsize=None)
+def _case_bundle_by_key(case_key: str) -> tuple[Any, Any, Any, Any, Topology, dict[str, Any]]:
+    fig06 = _figure06_module()
+    case_spec = next(spec for spec in fig06.CASE_SPECS if spec.case_key == case_key)
+    geqdsk = fig06.read_geqdsk(case_spec.gfile_path)
+    boundary, fit = fig06.build_boundary(
+        geqdsk,
+        fit_m=int(case_spec.boundary_fit_m),
+        fit_n=int(case_spec.boundary_fit_n),
+    )
+    case = fig06.build_solver_case(boundary, geqdsk, profile_coeffs=case_spec.profile_coeffs)
+    topology = _topology_from_geqdsk_case(case_spec, geqdsk)
+    payload = _geqdsk_case_payload(case_spec, geqdsk, case, boundary, fit, topology)
+    return fig06, geqdsk, case, boundary, topology, payload
+
+
+def _kernel_payload(
+    fig06: ModuleType,
+    case_spec: Any,
+    case: Any,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    solve_grid = fig06.Grid(Nr=int(case_spec.solve_nr), Nt=int(case_spec.solve_nt))
+    operator = Operator(solve_grid, case)
+    coefficients = {
+        str(name): np.asarray(values, dtype=np.float64)
+        for name, values in case_spec.profile_coeffs.items()
+    }
+    x0 = operator.pack_coefficients(coefficients)
+    source_plan = operator.plan.source_plan
+    return {
+        "case_name": str(case_spec.case_key),
+        "boundary": payload["boundary"],
+        "source": {
+            "scaled_heat": source_plan.scaled_heat.tolist(),
+            "scaled_current": source_plan.scaled_current.tolist(),
+        },
+        "constraints": {
+            "scaled_Ip": float(source_plan.scaled_Ip),
+            "fix_rho": float(operator.fix_rho),
+        },
+        "solver": {
+            "method_code": SOLVER_METHOD_POWELL,
+            "max_residual": 1.0e-6,
+            "max_evaluations": int(x0.size) ** 2,
+            "accepted_residual_factor": 10.0,
+            "accepted_residual_floor": 1.0e-5,
+            "initial_policy_code": INITIAL_POLICY_COLD,
+            "residual_normalization_code": RESIDUAL_NORMALIZATION_FAST,
+            "residual_normalization_floor": 1.0,
+            "residual_normalization_max_ratio": 1.0e6,
+            "residual_normalization_huber_tau": 3.0,
+            "residual_normalization_probe_count": 4,
+            "residual_normalization_probe_step": 1.0e-6,
+            "residual_normalization_sensitivity_lambda": 0.5,
+        },
+    }
 
 
 @dataclass(frozen=True)

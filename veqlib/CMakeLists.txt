@@ -190,10 +190,7 @@ endforeach()
 
 math(EXPR VEQ_L_MAX "${VEQ_PROFILE_COUNT_MAX} - 1")
 if(VEQ_L_MAX LESS 1)
-    message(
-        FATAL_ERROR
-        "Derived L_max must be at least 1; increase at least one profile count to 2 or higher"
-    )
+    set(VEQ_L_MAX 1)
 endif()
 
 if(VEQ_C_MAX LESS 0)

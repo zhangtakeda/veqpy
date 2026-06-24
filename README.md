@@ -18,7 +18,7 @@
 [![Package](https://img.shields.io/badge/package-veqpy-blue)](https://pypi.org/project/veqpy/)
 [![License](https://img.shields.io/badge/License-BSD--3--Clause-green)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-pytest-informational)](tests/)
-[![Style](https://img.shields.io/badge/style-ruff-black)](https://docs.astral.sh/ruff/)
+[![Style](https://img.shields.io/badge/style-ruff)](https://docs.astral.sh/ruff/)
 
 ---
 
@@ -58,6 +58,10 @@ and easier to reuse than full solver-native equilibrium or reconstruction pipeli
   active profile lengths, while `Profile` is used for serializable shape-profile
   snapshots on `Equilibrium`. `Grid` and `Equilibrium` use reactive derived properties
   to lazily reconstruct geometry and physics diagnostics by formula.
+- **Experimental VEQlib bridge**: `veqpy.model.Topology` canonicalizes fixed kernel
+  topologies, and `veqpy.cpp` can build/load optional topology-specific VEQlib
+  C++/nanobind kernels for the current PF(`psin`)/uniform/`Ip` MVP path. This is an
+  optional acceleration path; the standard Python/Numba solver remains the default.
 
 ## Installation
 
@@ -88,6 +92,13 @@ For a runtime-only install from a local source checkout, omit the `dev` extra:
 .venv/bin/python -m pip install .
 ```
 
+The optional VEQlib C++ kernel layer under `veqlib/` is not required for normal
+Python/Numba use. It is built on demand through `veqpy.cpp` and currently targets the
+PF(`psin`)/uniform/`Ip` topology. Building it requires a local C++20 toolchain and
+native libraries such as CMake 3.24+, `clang++`, nanobind, GCEM, nlohmann-json,
+CMINPACK, LAPACKE/LAPACK, and OpenBLAS; see [`veqlib/README.md`](veqlib/README.md)
+for the current build boundary and supported topology.
+
 All commands below use `.venv` explicitly; activating the environment is optional.
 
 ## Example Workflows
@@ -114,8 +125,9 @@ PF(`psin`) and PQ(`psin`) cases with an `Ip` constraint using one-dimensional so
 profiles from the GEQDSK file, and writes a two-column VEQPy-vs-GEQDSK comparison
 figure. By default, it reads `./data/EFIT.geqdsk` and writes outputs under
 `./outputs/geqdsk_workflow`; set `VEQPY_GEQDSK` and `VEQPY_OUTPUT_DIR` to override
-those paths. **Reproducible scripts for manuscript figures will be released in the
-corresponding tagged artifact package for the first public arXiv version.**
+those paths. Manuscript-oriented reproduction scripts are available under
+[`scripts/`](scripts/); they are heavier than the minimal examples and may write
+paper/data artifacts rather than user-demo outputs.
 
 ## Development Checks
 
@@ -137,6 +149,8 @@ Design patterns and model layer:
   and persistence boundaries.
 - [[model.md]](docs/details/model.md): responsibilities, snapshot boundaries, and diagnostic
   interfaces for `Grid`, `Profile`, `Boundary`, `Geqdsk`, and `Equilibrium`.
+- [`veqlib/README.md`](veqlib/README.md): the optional VEQlib C++/nanobind kernel
+  layer, topology keys, and the current PF(`psin`)/uniform/`Ip` support boundary.
 
 Hot-path operator and solver:
 
@@ -156,10 +170,10 @@ Numerical construction:
 
 VEQPy is associated with the companion manuscript **"VEQ: a fast parametric
 Grad--Shafranov solver for fixed-boundary tokamak equilibria with flexible source
-inputs"**. The article-specific reproduction package will be released as a tagged
-artifact accompanying the first public arXiv version. It will include figure scripts,
-benchmark scripts, GEQDSK inputs or generation scripts, rendered figures, and dependency
-metadata.
+inputs"**. The repository includes manuscript-oriented figure and benchmark scripts
+under [`scripts/`](scripts/) and benchmark helpers under [`veqlib/`](veqlib/). Tagged
+release artifacts can pin rendered figures, generated reference data, and dependency
+metadata for archival reproduction.
 
 Related VEQ-family and representation papers include:
 

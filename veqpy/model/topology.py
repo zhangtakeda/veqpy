@@ -275,12 +275,11 @@ def _trim_trailing_zeros(values: tuple[int, ...]) -> tuple[int, ...]:
 
 def _infer_l_max(profile_counts: tuple[int, ...]) -> int:
     highest_count = max(profile_counts, default=0)
-    inferred = highest_count - 1
-    if inferred < 1:
+    if highest_count < 1:
         raise TopologyError(
-            "derived L_max must be at least 1; at least one profile count must be >= 2"
+            "derived L_max requires at least one active profile count"
         )
-    return inferred
+    return max(1, highest_count - 1)
 
 
 def _infer_m_max(c_counts: tuple[int, ...], s_counts: tuple[int, ...]) -> int:

@@ -1656,7 +1656,7 @@ def build_case_summary_latex_table(case_results: list[CaseResult]) -> str:
         "Case",
         "Params",
         "Time [ms]",
-        r"$n_{\mathrm{fev}}$",
+        r"$N_{\mathrm{fev}}$",
         r"$E_{\mathrm{gqdsk}}/a$",
         r"$E_{\mathrm{lcfs}}/a$",
         "Core",

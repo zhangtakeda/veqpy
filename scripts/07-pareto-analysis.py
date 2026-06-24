@@ -229,7 +229,7 @@ FOURIER_FAMILIES = (
     "c5",
     "s6",
 )
-PLOT_EPS = 1.0e-12
+PLOT_EPS = 1.0e-8
 FRONTIER_MIN_REL_ERROR_IMPROVEMENT = 0.05
 FRONTIER_MIN_REL_ERROR = 1.0e-5
 FRONTIER_MAX_REL_ERROR = 1.0e-1
@@ -280,7 +280,7 @@ STRATEGY_LABELS = {
 
 SWEEP_MODES = ("partial", "full")
 DEFAULT_REPEAT_COUNT = 10
-DEFAULT_SWEEP_MODE = "partial"
+DEFAULT_SWEEP_MODE = "full"
 
 # ``partial`` mode is intentionally not a cache-backed sweep.  It always reruns
 # only the three selected representative configurations for each case so the
@@ -3564,7 +3564,7 @@ def build_fastest_config_latex_table_body(
     header = [
         "Case (Params)",
         "Time [ms]",
-        r"$n_{\mathrm{fev}}$",
+        r"$N_{\mathrm{fev}}$",
         r"$E_{\mathrm{ref}}/a$",
         r"$E_{\mathrm{gqdsk}}/a$",
         "Core",

@@ -13,7 +13,8 @@ introduced C++20 pieces:
 - GCEM-backed compile-time math for generated constants and fixed-size kernels;
 - compile-time quadrature nodes, weights, spectral calculus, compact finite
   difference calculus, and fixed-size tensor/linalg helpers;
-- route-specific residual implementations for the variational formulation;
+- route-specific residual implementations for the variational formulation, with
+  the current production nanobind path limited to PF/psin/uniform/Ip;
 - CMINPACK-backed nonlinear solves compatible with VEQPy's `hybr` / `lm`
   migration path;
 - optional Enzyme-based automatic differentiation for C++ kernels;
@@ -49,6 +50,13 @@ solver.solve_direct()  # scalars plus read-only NumPy views
 objects are mutable workspace owners and should not be shared across Python
 threads; use one solver instance per thread.
 
+VEQPy's Python bridge builds topology-specific shared-library artifacts through
+`veqpy.cpp`. The canonical topology type is `veqpy.model.Topology`; kernel
+artifacts are cached under `veqlib/artifact/` by default, or under
+`VEQPY_KERNEL_CACHE` when that environment variable is set. The bridge currently
+gates unsupported topologies before CMake generation; only PF/psin/uniform/Ip is
+accepted by `Topology.validate_supported_for_veqlib_mvp()`.
+
 ## Default Topology
 
 CMake generates `config.h` from cache variables and exposes them through
@@ -70,9 +78,12 @@ The main topology variables are:
   topology;
 - `VEQ_PROFILE_KMAX_LIMIT` for the upper bound used when deriving `K_max`.
 
-Configure-time validation requires `VEQ_NR >= 4`, `VEQ_NT >= 4`, derived
-`L_max >= 1`, derived active `M >= 1`, boundary `M_max >= active M`, derived
-`K_max >= 2`, and `VEQ_PROFILE_KMAX_LIMIT >= 2`.
+Configure-time validation requires `VEQ_NR >= 4`, `VEQ_NT >= 4`, derived active
+`M >= 1`, boundary `M_max >= active M`, derived `K_max >= 2`, and
+`VEQ_PROFILE_KMAX_LIMIT >= 2`. `L_max` is derived from the largest active
+profile coefficient count and clamped to at least one storage row, so a
+constant profile topology with one coefficient per active family maps to
+`L_max=1` rather than failing as a zero-row implementation case.
 
 ## Static Profile Layout
 
@@ -230,13 +241,15 @@ free `linalg` functions.
 VEQPy's production-facing VEQlib path is the nanobind `KernelSolver`. Runtime
 case setup is supplied by JSON payloads from Python; topology, layout, and route
 kernel structure remain compile-time C++ metadata. Solver choices exposed to
-Python are intentionally limited to the production-supported runtime method
-codes, currently Powell hybrid and Levenberg-Marquardt.
+Python are intentionally limited to explicit runtime method codes: Powell
+hybrid, Levenberg-Marquardt, Newton-Krylov, and Newton-Raphson. The current
+benchmark gates use Powell hybrid unless a script or payload says otherwise.
 
 To compare VEQPy's Python solve latency against a direct VEQlib nanobind call,
 build the Release module and run the Python comparison script:
 
 ```bash
+cd veqlib
 cmake --preset clang-release
 cmake --build --preset clang-release --target veqlib_ext
 ../.venv/bin/python benchmark_pf_psin_uniform_compare.py \
@@ -307,6 +320,7 @@ Available presets:
 | `clang-release`        | Aggressive Release without Enzyme   |
 | `clang-release-strict` | Release with strict FP contract     |
 | `clang-release-fma`    | Release with strict math plus FMA   |
+| `clang-analysis`       | FMA build with vectorization diagnostics |
 | `clang-enzyme-release` | Aggressive Release with ClangEnzyme |
 
 The Enzyme preset currently records the local plugin path. On another machine,
@@ -341,7 +355,7 @@ Useful local checks:
 
 ```bash
 clangd --compile-commands-dir=~/veqpy/veqlib/build/enzyme-release \
-  --check=~/veqpy/veqlib/main.cpp
+  --check=~/veqpy/veqlib/python_bindings.cpp
 
 clang-format --version
 ```

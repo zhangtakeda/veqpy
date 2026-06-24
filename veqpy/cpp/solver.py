@@ -4,7 +4,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from veqpy.topology import Topology
+from veqpy.model import Topology
 
 from .kernel_builder import KernelArtifact
 from .kernel_registry import KernelRegistry, SolverThreadError, ThreadOwnedKernelSolver
