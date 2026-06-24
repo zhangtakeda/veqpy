@@ -27,6 +27,8 @@ def test_model_public_exports_are_stable() -> None:
         "Problem",
         "Reactive",
         "Serial",
+        "Topology",
+        "TopologyError",
     ]
     assert not hasattr(Equilibrium, "compare")
 

@@ -229,7 +229,7 @@ FOURIER_FAMILIES = (
     "c5",
     "s6",
 )
-PLOT_EPS = 1.0e-12
+PLOT_EPS = 1.0e-8
 FRONTIER_MIN_REL_ERROR_IMPROVEMENT = 0.05
 FRONTIER_MIN_REL_ERROR = 1.0e-5
 FRONTIER_MAX_REL_ERROR = 1.0e-1
@@ -280,7 +280,7 @@ STRATEGY_LABELS = {
 
 SWEEP_MODES = ("partial", "full")
 DEFAULT_REPEAT_COUNT = 10
-DEFAULT_SWEEP_MODE = "partial"
+DEFAULT_SWEEP_MODE = "full"
 
 # ``partial`` mode is intentionally not a cache-backed sweep.  It always reruns
 # only the three selected representative configurations for each case so the
@@ -3564,6 +3564,7 @@ def build_fastest_config_latex_table_body(
     header = [
         "Case (Params)",
         "Time [ms]",
+        r"$N_{\mathrm{fev}}$",
         r"$E_{\mathrm{ref}}/a$",
         r"$E_{\mathrm{gqdsk}}/a$",
         "Core",
@@ -3579,7 +3580,7 @@ def build_fastest_config_latex_table_body(
     for case_key, _threshold, sample in config_rows:
         case_label = CASE_LABELS[case_key]
         if sample is None:
-            rows.append([case_label, "--", "--", "--", "--", "--", "--"])
+            rows.append([case_label, "--", "--", "--", "--", "--", "--", "--"])
             continue
         core_tuple, c_tuple, s_tuple = signature_group_tuples(sample)
         external_error = external_shape_errors.get(
@@ -3590,6 +3591,7 @@ def build_fastest_config_latex_table_body(
             [
                 f"{case_label} ({int(sample.parameter_count)})",
                 f"${float(sample.elapsed_ms):.{FIXED_DECIMALS}f}$",
+                f"${int(sample.nfev)}$",
                 format_normalized_error(float(sample.aggregate_rel_error), normalizer),
                 format_normalized_error(float(external_error), normalizer),
                 format_tuple_tex(core_tuple),

@@ -18,7 +18,7 @@
 [![Package](https://img.shields.io/badge/package-veqpy-blue)](https://pypi.org/project/veqpy/)
 [![License](https://img.shields.io/badge/License-BSD--3--Clause-green)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-pytest-informational)](tests/)
-[![Style](https://img.shields.io/badge/style-ruff-black)](https://docs.astral.sh/ruff/)
+[![Style](https://img.shields.io/badge/style-ruff)](https://docs.astral.sh/ruff/)
 
 ---
 
@@ -35,6 +35,7 @@ VEQPy 适合参数扫描、源项预处理、控制导向迭代、输运耦合�
 - **明确的运行时边界**: `Grid + Problem -> Operator -> Solver -> Equilibrium` 将 packed 系数、运行时 workspace、非线性求解和求解后快照分层处理。`Problem` 是公开的问题定义类型。
 - **GEQDSK 工作流**: 支持 GEQDSK 读写、从 GEQDSK 边界拟合固定边界、快照导出、磁通面比较和常用诊断。
 - **公式化模型对象**: `Problem` 保存用户侧求解输入和 active profile 长度，`Profile` 用于 `Equilibrium` 上可序列化的形状剖面快照；`Grid` 与 `Equilibrium` 使用 reactive 派生属性按公式惰性重建几何量和物理诊断量。
+- **实验性 VEQlib bridge**: `veqpy.model.Topology` 负责规范化固定 kernel topology，`veqpy.cpp` 可按需构建/加载 topology-specific 的 VEQlib C++/nanobind kernel；当前 MVP 支持 PF(`psin`)/uniform/`Ip` 路径。这是可选加速路径，标准 Python/Numba 求解器仍是默认路径。
 
 ## 安装
 
@@ -62,6 +63,8 @@ python3.12 -m venv .venv
 .venv/bin/python -m pip install .
 ```
 
+`veqlib/` 下的可选 VEQlib C++ kernel 层不是普通 Python/Numba 使用的必要依赖。它由 `veqpy.cpp` 按需构建，目前面向 PF(`psin`)/uniform/`Ip` topology。构建它需要本地 C++20 工具链和原生库，例如 CMake 3.24+、`clang++`、nanobind、GCEM、nlohmann-json、CMINPACK、LAPACKE/LAPACK 和 OpenBLAS；当前构建边界与支持 topology 见 [`veqlib/README.md`](../veqlib/README.md)。
+
 下面的命令都显式使用 `.venv`；是否执行 `source .venv/bin/activate` 只是个人习惯。
 
 ## 示例工作流
@@ -81,7 +84,7 @@ GEQDSK demo:
 .venv/bin/python examples/geqdsk_workflow.py
 ```
 
-该脚本读取 EFIT 风格 GEQDSK 文件，拟合为 VEQPy 的固定边界，使用 GEQDSK 中的一维源项剖面求解带 `Ip` 约束的 PF(`psin`) 和 PQ(`psin`) 案例，并输出双列 VEQPy 与 GEQDSK 磁通面比较图。默认读取 `./data/EFIT.geqdsk`，输出到 `./outputs/geqdsk_workflow`；可用 `VEQPY_GEQDSK` 和 `VEQPY_OUTPUT_DIR` 覆盖这些路径。**论文图像的可复现脚本会随首个公开 arXiv 版本对应的 tagged artifact 发布**。
+该脚本读取 EFIT 风格 GEQDSK 文件，拟合为 VEQPy 的固定边界，使用 GEQDSK 中的一维源项剖面求解带 `Ip` 约束的 PF(`psin`) 和 PQ(`psin`) 案例，并输出双列 VEQPy 与 GEQDSK 磁通面比较图。默认读取 `./data/EFIT.geqdsk`，输出到 `./outputs/geqdsk_workflow`；可用 `VEQPY_GEQDSK` 和 `VEQPY_OUTPUT_DIR` 覆盖这些路径。论文相关复现脚本位于 [`scripts/`](../scripts/)；它们比 minimal example 更重，可能写入论文/数据产物而不是用户 demo 输出。
 
 ## 开发检查
 
@@ -99,6 +102,7 @@ GEQDSK demo:
 - [[registry.md]](details_cn/registry.md): registry-backed 方法族、source route 坐标化和分发边界。
 - [[serial.md]](details_cn/serial.md): root-state 序列化、格式 handler 和持久化边界。
 - [[model.md]](details_cn/model.md): `Grid`、`Profile`、`Boundary`、`Geqdsk`、`Equilibrium` 的职责、快照边界和诊断接口。
+- [`veqlib/README.md`](../veqlib/README.md): 可选 VEQlib C++/nanobind kernel 层、topology key，以及当前 PF(`psin`)/uniform/`Ip` 支持边界。
 
 热路径算子与求解器:
 
@@ -113,7 +117,7 @@ GEQDSK demo:
 
 ## 论文与复现资源
 
-VEQPy 与配套论文 **"VEQ: a fast parametric Grad--Shafranov solver for fixed-boundary tokamak equilibria with flexible source inputs"** 相关。论文专用复现包会作为 tagged artifact 随首个公开 arXiv 版本发布，内容包括 figure scripts、benchmark scripts、GEQDSK 输入或生成脚本、渲染图像以及依赖元数据。
+VEQPy 与配套论文 **"VEQ: a fast parametric Grad--Shafranov solver for fixed-boundary tokamak equilibria with flexible source inputs"** 相关。仓库在 [`scripts/`](../scripts/) 中包含论文图像和 benchmark 脚本，并在 [`veqlib/`](../veqlib/) 中包含 benchmark helper。Tagged release artifact 可进一步固定渲染图像、生成的 reference data 和依赖元数据，便于归档复现。
 
 相关 VEQ 系列和表示方法论文包括:
 

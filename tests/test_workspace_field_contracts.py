@@ -11,7 +11,7 @@ from veqpy.engine.backend_abi import (
     build_fused_source_eval_abi,
 )
 from veqpy.engine.numba_geometry import update_geometry_hot, update_geometry_hot_auto
-from veqpy.model import Problem
+from veqpy.model import Grid, Problem
 from veqpy.operator import Operator
 from veqpy.workspace.geometry_workspace import GeometryWorkspace
 from veqpy.workspace.grid_workspace import GridWorkspace
@@ -128,6 +128,26 @@ def test_grid_workspace_properties_alias_static_field_rows() -> None:
     )
     assert not workspace.radial_fields.flags.writeable
     assert not workspace.poloidal_fields.flags.writeable
+
+
+def test_grid_workspace_pads_rho_power_block_to_declared_kmax() -> None:
+    grid = Grid(
+        Nr=8,
+        Nt=8,
+        L_max=1,
+        M_max=1,
+        K_max=2,
+        quadrature_scheme="legendre",
+        calculus_scheme="spectral",
+    )
+    workspace = GridWorkspace.from_grid(grid)
+
+    assert workspace.rho_powers.shape == (workspace.K_max + 2, grid.Nr)
+    assert_allclose(workspace.rho_powers[: grid.rho_powers.shape[0]], grid.rho_powers)
+    assert_allclose(workspace.rho_powers[3], grid.rho**3)
+    assert_allclose(workspace.T, grid.T)
+    assert_allclose(workspace.T_r, grid.T_r)
+    assert_allclose(workspace.T_rr, grid.T_rr)
 
 
 def test_rho_source_eval_bindings_use_grid_radial_fields() -> None:

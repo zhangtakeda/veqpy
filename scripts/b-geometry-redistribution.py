@@ -151,8 +151,6 @@ class GeometryRedistributionSample:
     collocation_external_shape_error_over_a: float
     external_shape_error_ratio: float
     force_rms_ratio: float
-    timing_ratio: float
-    postprocess_elapsed_ms: float
     nfev: int
     success: bool
 
@@ -759,7 +757,7 @@ def solve_geometry_redistribution_sample(
     weak_packed = np.asarray(operator(weak_x), dtype=np.float64)
     weak_force_vector = np.asarray(operator.residual_collocation(weak_x), dtype=np.float64)
 
-    collocation_result, collocation_equilibrium, elapsed_ms, postprocess_elapsed_ms = (
+    collocation_result, collocation_equilibrium, elapsed_ms, _postprocess_elapsed_ms = (
         solve_collocation_with_average_timing(
             benchmark,
             operator,
@@ -805,11 +803,6 @@ def solve_geometry_redistribution_sample(
     )
     weak_force_rms = rms(weak_force_vector)
     collocation_force_rms = rms(collocation_force_vector)
-    timing_ratio = (
-        float(elapsed_ms) / float(weak_elapsed_ms)
-        if np.isfinite(weak_elapsed_ms) and float(weak_elapsed_ms) > 0.0
-        else float("nan")
-    )
 
     return GeometryRedistributionSample(
         weak=weak_sample,
@@ -827,8 +820,6 @@ def solve_geometry_redistribution_sample(
         force_rms_ratio=collocation_force_rms / weak_force_rms
         if weak_force_rms > 0.0
         else float("nan"),
-        timing_ratio=timing_ratio,
-        postprocess_elapsed_ms=float(postprocess_elapsed_ms),
         nfev=result_count(collocation_result, "function_evaluations", "nfev"),
         success=bool(collocation_result.success),
     )
@@ -1263,7 +1254,6 @@ def geometry_redistribution_table_rows(
                         float(collocation_row["G_max"]), float(var_row["G_max"])
                     ),
                     "ratio_e_geqdsk": float(item.external_shape_error_ratio),
-                    "ratio_solve_time": float(item.timing_ratio),
                     "nfev": int(item.nfev),
                     "success": bool(item.success),
                 }
@@ -1280,7 +1270,6 @@ def build_geometry_redistribution_latex_table(rows: list[dict[str, object]]) -> 
         r"$r_{\mathrm{RMS},\geq0.8}$",
         r"$r_{|\mathcal{G}_{\mathrm{std}}|_{\max}}$",
         r"$r_{E_{\mathrm{gqdsk}}}$",
-        r"$t_{\mathrm{rel}}$",
     ]
     table_rows: list[list[str]] = []
     for row in rows:
@@ -1299,7 +1288,6 @@ def build_geometry_redistribution_latex_table(rows: list[dict[str, object]]) -> 
                 fmt_ratio("ratio_rms_edge"),
                 fmt_ratio("ratio_max"),
                 fmt_ratio("ratio_e_geqdsk"),
-                fmt_ratio("ratio_solve_time"),
             ]
         )
 
@@ -1331,7 +1319,7 @@ def print_summary(
     print(
         "[geometry-redistribution-summary] "
         "case config params shape_rms/a shape_max/a e_gqdsk_ratio force_rms_ratio "
-        "timing_ratio nfev success"
+        "nfev success"
     )
     for case_key, items in samples_by_case.items():
         for item in items:
@@ -1341,8 +1329,7 @@ def print_summary(
                 f"{int(item.collocation.parameter_count)} "
                 f"{item.shape_rms_over_a:.6e} {item.shape_max_over_a:.6e} "
                 f"{item.external_shape_error_ratio:.6e} "
-                f"{item.force_rms_ratio:.6e} {item.timing_ratio:.3f} "
-                f"{int(item.nfev)} {bool(item.success)}"
+                f"{item.force_rms_ratio:.6e} {int(item.nfev)} {bool(item.success)}"
             )
 
 
