@@ -573,8 +573,7 @@ if(VEQLIB_ENABLE_PYTHON_BINDINGS)
         NAME veqlib_python_binding
         COMMAND
             "${Python_EXECUTABLE}"
-            -c
-            "import veqlib_ext; kernel=veqlib_ext.KernelSolver(); meta=kernel.metadata(); kres=kernel.solve_direct(); ok=meta['route'] == 'PF/psin/uniform/Ip' and len(kres) == 15 and kres[1] and kres[11].shape == (18,) and kres[14].shape == (2,) and not kres[11].flags.writeable; raise SystemExit(0 if ok else 1)"
+            "${PROJECT_SOURCE_DIR}/binding_smoke.py"
     )
     set_tests_properties(
         veqlib_python_binding

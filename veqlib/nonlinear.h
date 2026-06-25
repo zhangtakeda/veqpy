@@ -519,6 +519,7 @@ namespace nonlinear::detail
         Vector<double, equations>             fvec{uninitialized};
         Vector<double, variables>             diag{uninitialized};
         Vector<double, equations * variables> fjac{uninitialized};
+        Vector<double, equations * variables> jacobian{uninitialized};
         Vector<double, static_cast<size_t>(lr_size)> r{uninitialized};
         Vector<double, variables>             qtf{uninitialized};
         Vector<double, variables>             wa1{uninitialized};
@@ -656,11 +657,11 @@ namespace nonlinear::detail
             }
             else if (iflag == 2)
             {
-                evaluate_jacobian<Functor, equations, variables>(self.functor, x, self.fjac.data());
+                evaluate_jacobian<Functor, equations, variables>(self.functor, x, self.jacobian.data());
                 ++self.jacobian_evaluations;
                 for (size_t row = 0; row < equations; ++row)
                     for (size_t col = 0; col < variables; ++col)
-                        fjac[row + static_cast<size_t>(ldfjac) * col] = self.fjac[row * variables + col];
+                        fjac[row + static_cast<size_t>(ldfjac) * col] = self.jacobian[row * variables + col];
             }
             return 0;
         }
@@ -678,6 +679,7 @@ namespace nonlinear::detail
         Vector<double, equations>             fvec{uninitialized};
         Vector<double, variables>             diag{uninitialized};
         Vector<double, equations * variables> fjac{uninitialized};
+        Vector<double, equations * variables> jacobian{uninitialized};
         Vector<int, variables>                ipvt{uninitialized};
         Vector<double, variables>             qtf{uninitialized};
         Vector<double, variables>             wa1{uninitialized};
@@ -815,11 +817,11 @@ namespace nonlinear::detail
             }
             else if (iflag == 2)
             {
-                evaluate_jacobian<Functor, equations, variables>(self.functor, x, self.fjac.data());
+                evaluate_jacobian<Functor, equations, variables>(self.functor, x, self.jacobian.data());
                 ++self.jacobian_evaluations;
                 for (size_t row = 0; row < equations; ++row)
                     for (size_t col = 0; col < variables; ++col)
-                        fjac[row + static_cast<size_t>(ldfjac) * col] = self.fjac[row * variables + col];
+                        fjac[row + static_cast<size_t>(ldfjac) * col] = self.jacobian[row * variables + col];
             }
             return 0;
         }
