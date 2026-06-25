@@ -23,7 +23,6 @@ class VEQlibSolver:
         source_dir: Path | None = None,
         cxx: str = "clang++",
         solver: str | int = "powell",
-        enzyme_width: int = 1,
     ) -> None:
         topology.validate_supported_for_veqlib_mvp()
         self.topology = topology
@@ -33,7 +32,6 @@ class VEQlibSolver:
             cxx=cxx,
         )
         self.solver_code = solver_method_code(solver)
-        self.enzyme_width = enzyme_width
         self._owner_thread_id = threading.get_ident()
         self._cpp_solver: ThreadOwnedKernelSolver | None = None
 
@@ -60,7 +58,6 @@ class VEQlibSolver:
             self._cpp_solver = self.registry.get_thread_solver(
                 self.topology,
                 solver=self.solver_code,
-                enzyme_width=self.enzyme_width,
             )
         return self._cpp_solver
 

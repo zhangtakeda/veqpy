@@ -40,6 +40,12 @@ def main() -> int:
     _require(not powell_result[11].flags.writeable, "packed solution view should be read-only")
 
     if "Enzyme" in meta["solver"]["jacobian"]:
+        batch_width = int(meta["solver"]["enzyme_jacobian_batch_width"])
+        expected_batch_width = 4 if x_size >= 8 else 1
+        _require(
+            batch_width == expected_batch_width,
+            f"unexpected Enzyme batch width: {batch_width}",
+        )
         _require(
             "fallback" not in meta["solver"]["jacobian"].lower(),
             "AD path should not advertise fallback",

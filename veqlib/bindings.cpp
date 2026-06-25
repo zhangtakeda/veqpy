@@ -5,9 +5,8 @@ NB_MODULE(veqlib_ext, module)
     module.doc() = "Single-thread nanobind bridge for the production VEQlib kernel solver.";
 
     nb::class_<veqlib_python::KernelSolver>(module, "KernelSolver")
-        .def(nb::init<int, int>(),
-             nb::arg("solver_code")  = static_cast<int>(veqlib_kernel_api::SolverMethodPowell),
-             nb::arg("enzyme_width") = 1)
+        .def(nb::init<int>(),
+             nb::arg("solver_code") = static_cast<int>(veqlib_kernel_api::SolverMethodPowell))
         .def("metadata", &veqlib_python::KernelSolver::metadata)
         .def("metadata_json", &veqlib_python::KernelSolver::metadata_json)
         .def("set_case_json", &veqlib_python::KernelSolver::set_case_json, nb::arg("payload"))

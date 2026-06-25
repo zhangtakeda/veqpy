@@ -216,7 +216,6 @@ namespace veqlib_kernel_api
             int                                           residual_normalization_probe_count = 4;
             int                                           repeat                             = 10;
             int                                           warmup                             = 1;
-            int                                           enzyme_width                       = 1;
             SolverKind                                    solver                             = SolverKind::Powell;
             int                                           initial_policy_code                = InitialPolicyCold;
             int                                           residual_normalization_code         = ResidualNormalizationFast;

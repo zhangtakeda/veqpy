@@ -54,7 +54,6 @@ namespace veqlib_python
     using veqlib_kernel_api::solver_kind_from_runtime_method_code;
     using veqlib_kernel_api::solver_method_code;
     using veqlib_kernel_api::solver_method;
-    using veqlib_kernel_api::supported_enzyme_width;
     using veqlib_kernel_api::initial_policy_is_warm_clone;
     using veqlib_kernel_api::initial_policy_name;
     using veqlib_kernel_api::residual_normalization_name;
@@ -62,6 +61,9 @@ namespace veqlib_python
     using veqlib_kernel_api::validate_residual_normalization_code;
     using veqlib_kernel_api::kernel_c_counts;
     using veqlib_kernel_api::kernel_s_counts;
+#ifdef ENABLE_ENZYME
+    using veqlib_kernel_api::enzyme_dense_jacobian_batch_width;
+#endif
 
     using tensor::uninitialized;
 
@@ -69,12 +71,9 @@ namespace veqlib_python
     using MutablePackedArrayView = nb::ndarray<nb::numpy, double, nb::shape<KernelShape::x_size>, nb::c_contig>;
     using AlphaArrayView         = nb::ndarray<nb::numpy, const double, nb::shape<2>, nb::c_contig>;
 
-    inline std::unique_ptr<SolveContext> make_context(SolverKind solver, int enzyme_width)
+    inline std::unique_ptr<SolveContext> make_context(SolverKind solver)
     {
-        if (!supported_enzyme_width(enzyme_width))
-            throw std::runtime_error("enzyme_width must be one of 1, 2, 3, 4, 5, 6, 8, 9, 10, 12, 18");
-
-        CaseInput input   = build_inline_case(0, 0, solver, enzyme_width);
+        CaseInput input   = build_inline_case(0, 0, solver);
         auto      context = std::make_unique<SolveContext>(input);
 
         PackedVector initial_raw{uninitialized};
@@ -206,9 +205,9 @@ namespace veqlib_python
         return object == nullptr ? data : *object;
     }
 
-    inline CaseInput case_input_from_json(const nlohmann::json& data, SolverKind solver, int enzyme_width)
+    inline CaseInput case_input_from_json(const nlohmann::json& data, SolverKind solver)
     {
-        CaseInput input = build_inline_case(0, 0, solver, enzyme_width);
+        CaseInput input = build_inline_case(0, 0, solver);
         if (const auto it = data.find("case_name"); it != data.end() && !it->is_null())
         {
             if (!it->is_string())
@@ -555,7 +554,10 @@ namespace veqlib_python
         solver["method"]                      = solver_method(input.solver);
         solver["entrypoint"]                  = solver_entrypoint(input.solver);
         solver["jacobian"]                    = solver_jacobian(input);
-        solver["enzyme_width"]                = input.enzyme_width;
+#ifdef ENABLE_ENZYME
+        if (input.solver != SolverKind::NewtonKrylov)
+            solver["enzyme_jacobian_batch_width"] = enzyme_dense_jacobian_batch_width();
+#endif
         solver["initial_policy_code"]         = input.initial_policy_code;
         solver["initial_policy"]              = initial_policy_name(input.initial_policy_code);
         solver["residual_normalization_code"] = input.residual_normalization_code;
@@ -578,10 +580,8 @@ namespace veqlib_python
     class KernelSolver
     {
     public:
-        explicit KernelSolver(int solver_code  = static_cast<int>(veqlib_kernel_api::SolverMethodPowell),
-                              int enzyme_width = 1)
-            : solver_(solver_kind_from_runtime_method_code(solver_code)), enzyme_width_(enzyme_width),
-              context_(make_context(solver_, enzyme_width_))
+        explicit KernelSolver(int solver_code = static_cast<int>(veqlib_kernel_api::SolverMethodPowell))
+            : solver_(solver_kind_from_runtime_method_code(solver_code)), context_(make_context(solver_))
         {
         }
 
@@ -605,7 +605,7 @@ namespace veqlib_python
                 return;
             }
 
-            CaseInput next_input = case_input_from_json(data, solver_, enzyme_width_);
+            CaseInput next_input = case_input_from_json(data, solver_);
             if (initial_policy_is_warm_clone(next_input.initial_policy_code))
             {
                 next_input.x0 = context_->input.x0;
@@ -704,7 +704,6 @@ namespace veqlib_python
 
     private:
         SolverKind                    solver_;
-        int                           enzyme_width_;
         std::unique_ptr<SolveContext> context_;
         SolveResult                   last_result_{};
         bool                          has_last_result_ = false;

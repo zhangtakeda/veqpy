@@ -294,6 +294,14 @@ namespace veqlib_kernel_api
                 enzyme::Duplicated<void*>{static_cast<void*>(&jvp_context), static_cast<void*>(&jvp_context_dot)});
         }
 
+        constexpr size_t enzyme_dense_jacobian_batch_width() noexcept
+        {
+            if constexpr (KernelShape::x_size >= 8)
+                return 4;
+            else
+                return 1;
+        }
+
         template <size_t Width>
         void fill_enzyme_jacobian_z_vector(SolveContext& context, const double* z, double* fjac, int ldfjac)
         {
@@ -373,18 +381,11 @@ namespace veqlib_kernel_api
 
         void fill_enzyme_jacobian_z(SolveContext& context, const double* z, double* fjac, int ldfjac)
         {
-            constexpr size_t      n = KernelShape::x_size;
-            std::array<double, n> basis{};
-            std::array<double, n> column{};
-            for (size_t col = 0; col < n; ++col)
-            {
-                basis.fill(0.0);
-                basis[col] = 1.0;
-                fill_enzyme_jvp_z(context, z, basis.data(), column.data());
-                for (size_t row = 0; row < n; ++row)
-                    fjac[row + static_cast<size_t>(ldfjac) * col] = column[row];
-            }
-            context.jacobian_component_evaluations += static_cast<int>(n);
+            constexpr size_t width = enzyme_dense_jacobian_batch_width();
+            if constexpr (width == 1)
+                fill_enzyme_jacobian_z_scalar(context, z, fjac, ldfjac);
+            else
+                fill_enzyme_jacobian_z_vector<width>(context, z, fjac, ldfjac);
         }
 #endif
 

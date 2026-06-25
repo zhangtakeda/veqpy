@@ -145,25 +145,23 @@ class KernelRegistry:
         topology: Topology,
         *,
         solver: str | int = "powell",
-        enzyme_width: int = 1,
         force: bool = False,
     ) -> ThreadOwnedKernelSolver:
         loaded = self.load_kernel(topology, force=force)
         solvers = self._thread_solver_cache()
         solver_code = solver_method_code(solver)
-        key = (loaded.artifact.artifact_id, solver_code, enzyme_width)
+        key = (loaded.artifact.artifact_id, solver_code)
         cached = solvers.get(key)
         if cached is not None:
             return cached
         cpp_solver = loaded.module.KernelSolver(
             solver_code=solver_code,
-            enzyme_width=enzyme_width,
         )
         wrapped = ThreadOwnedKernelSolver(cpp_solver)
         solvers[key] = wrapped
         return wrapped
 
-    def _thread_solver_cache(self) -> dict[tuple[str, int, int], ThreadOwnedKernelSolver]:
+    def _thread_solver_cache(self) -> dict[tuple[str, int], ThreadOwnedKernelSolver]:
         solvers = getattr(self._thread_local, "solvers", None)
         if solvers is None:
             solvers = {}

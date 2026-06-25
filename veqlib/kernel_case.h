@@ -607,19 +607,13 @@ namespace veqlib_kernel_api
             return false;
         }
 
-        constexpr bool supported_enzyme_width(int width) noexcept
-        {
-            return width == 1 || width == 2 || width == 3 || width == 4 || width == 5 || width == 6 || width == 8 ||
-                   width == 9 || width == 10 || width == 12 || width == 18;
-        }
-
         constexpr const char* solver_jacobian(const CaseInput& input) noexcept
         {
             switch (input.solver)
             {
             case SolverKind::LevenbergMarquardt:
 #ifdef ENABLE_ENZYME
-                return "Enzyme dense Jacobian through nonlinear::LevenbergMarquardt";
+                return "Enzyme batched dense Jacobian through nonlinear::LevenbergMarquardt";
 #else
                 return "CMINPACK forward difference through nonlinear::LevenbergMarquardt";
 #endif
@@ -631,13 +625,13 @@ namespace veqlib_kernel_api
 #endif
             case SolverKind::NewtonRaphson:
 #ifdef ENABLE_ENZYME
-                return "Enzyme dense Jacobian through dense Newton";
+                return "Enzyme batched dense Jacobian through dense Newton";
 #else
                 return "finite-difference dense Jacobian through dense Newton";
 #endif
             case SolverKind::Powell:
 #ifdef ENABLE_ENZYME
-                return "Enzyme dense Jacobian through nonlinear::Powell";
+                return "Enzyme batched dense Jacobian through nonlinear::Powell";
 #else
                 return "CMINPACK forward difference through nonlinear::Powell";
 #endif
@@ -645,7 +639,7 @@ namespace veqlib_kernel_api
             return "unknown";
         }
 
-        CaseInput build_inline_case(int repeat, int warmup, SolverKind solver, int enzyme_jacobian_width)
+        CaseInput build_inline_case(int repeat, int warmup, SolverKind solver)
         {
             CaseInput input{};
             input.heat         = default_scaled_heat;
@@ -653,7 +647,6 @@ namespace veqlib_kernel_api
             input.repeat       = repeat;
             input.warmup       = warmup;
             input.solver       = solver;
-            input.enzyme_width = enzyme_jacobian_width;
             input.c_offsets[0] = input.c0_offset;
             if constexpr (KernelShape::M_max >= 1)
                 input.s_offsets[1] = input.s1_offset;
