@@ -991,7 +991,6 @@ class Solver:
             x_guess,
             solve_config=solve_config,
             residual_kind="variational",
-            legacy_transform="linear",
             balanced_scope=balanced_scope,
             initial_residual=initial_residual if balanced_scope == "block" else None,
         )
@@ -1033,7 +1032,6 @@ class Solver:
         *,
         solve_config: SolverConfig,
         residual_kind: str,
-        legacy_transform: str = "linear",
         balanced_scope: str = "block",
         initial_residual: np.ndarray | None = None,
     ) -> tuple[
@@ -1045,9 +1043,7 @@ class Solver:
         if mode == "none":
             return None, None
         if _mode_is_block_rms(mode):
-            return self._build_legacy_residual_transform_wrapper(
-                x_guess, transform=legacy_transform
-            )
+            return self._build_legacy_residual_transform_wrapper(x_guess)
         return self._build_balanced_residual_transform_wrapper(
             x_guess,
             solve_config=solve_config,
@@ -1061,8 +1057,6 @@ class Solver:
     def _build_legacy_residual_transform_wrapper(
         self,
         x_guess: np.ndarray,
-        *,
-        transform: str,
     ) -> tuple[
         Callable[[np.ndarray], np.ndarray] | None, Callable[[np.ndarray], np.ndarray] | None
     ]:
@@ -1096,8 +1090,6 @@ class Solver:
                 if scale is None:
                     scale = np.ones_like(raw_buffer)
             np.divide(raw_buffer, scale, out=scaled_buffer)
-            if transform == "asinh":
-                np.arcsinh(scaled_buffer, out=scaled_buffer)
             return scaled_buffer.copy()
 
         def get_raw_residual(x: np.ndarray) -> np.ndarray:
@@ -1290,20 +1282,18 @@ class Solver:
         normalizer_applied = False
 
         if residual_kind == "variational":
-            legacy_transform = "asinh" if solve_config.method == "lm" else "linear"
             normalized_fun, get_raw_residual = self._build_normalized_residual_wrapper(
                 x_guess,
                 solve_config=solve_config,
                 residual_kind=residual_kind,
-                legacy_transform=legacy_transform,
             )
             if normalized_fun is not None:
                 least_squares_fun = normalized_fun
                 normalizer_applied = True
                 if solve_config.method == "lm":
-                    # LM already uses the transformed residual scale; x_scale=1
-                    # prevents SciPy from layering a second heuristic scale on
-                    # top of the solver's block-aware coefficient scale.
+                    # LM already sees a fixed block-normalized objective;
+                    # x_scale=1 prevents SciPy from layering a separate
+                    # heuristic variable scale onto that calibrated residual.
                     kwargs["x_scale"] = 1.0
 
         if (

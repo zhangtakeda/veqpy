@@ -355,7 +355,7 @@ Useful local checks:
 
 ```bash
 clangd --compile-commands-dir=~/veqpy/veqlib/build/enzyme-release \
-  --check=~/veqpy/veqlib/python_bindings.cpp
+  --check=~/veqpy/veqlib/bindings.cpp
 
 clang-format --version
 ```

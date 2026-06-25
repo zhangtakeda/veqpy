@@ -63,6 +63,37 @@ def test_solver_default_normalization_is_single_source() -> None:
     )
 
 
+@pytest.mark.parametrize("method", ["hybr", "lm", "trf"])
+def test_solver_fast_normalization_is_linear_for_all_methods(
+    monkeypatch, method: str
+) -> None:
+    solver = Solver(operator=tiny_operator(), config=SolverConfig(enable_history=False))
+    x0 = np.zeros(solver.operator.x_size, dtype=np.float64)
+    raw_value = 2.0
+
+    assert solver.operator.residual_block_lengths() is not None
+
+    def fake_residual_var_into(
+        self: Operator, x: np.ndarray, out: np.ndarray, *, check: bool = True
+    ) -> None:
+        out.fill(raw_value)
+
+    monkeypatch.setattr(Operator, "residual_var_into", fake_residual_var_into)
+
+    residual_fun, _ = solver._build_normalized_residual_wrapper(
+        x0,
+        solve_config=SolverConfig(
+            method=method,
+            enable_history=False,
+            residual_normalization="fast",
+        ),
+        residual_kind="variational",
+    )
+
+    assert residual_fun is not None
+    assert np.allclose(residual_fun(x0), np.ones(solver.operator.x_size))
+
+
 def test_solver_homothetic_lambda_interface_is_removed() -> None:
     assert "initial_homothetic_lambda" not in SolverConfig.__dataclass_fields__
     assert "initial_homothetic_lambda" not in inspect.signature(Solver.solve).parameters

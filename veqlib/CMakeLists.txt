@@ -468,7 +468,7 @@ endfunction()
 
 veqlib_require_clang()
 
-set(VEQLIB_COMMON_SOURCES linalg.cpp)
+set(VEQLIB_COMMON_SOURCES nonlinear.cpp linalg.cpp)
 
 function(veqlib_configure_target target)
     target_include_directories(
@@ -542,7 +542,7 @@ if(VEQLIB_ENABLE_PYTHON_BINDINGS)
         endif()
         get_filename_component(VEQLIB_NANOBIND_ROOT "${VEQLIB_NANOBIND_INCLUDE_DIR}" DIRECTORY)
 
-        add_library(veqlib_ext MODULE python_bindings.cpp ${VEQLIB_COMMON_SOURCES})
+        add_library(veqlib_ext MODULE bindings.cpp ${VEQLIB_COMMON_SOURCES})
         nanobind_compile_options(veqlib_ext)
         nanobind_link_options(veqlib_ext)
         set_target_properties(veqlib_ext PROPERTIES LINKER_LANGUAGE CXX)
@@ -561,7 +561,7 @@ if(VEQLIB_ENABLE_PYTHON_BINDINGS)
         )
         target_link_libraries(veqlib_ext PRIVATE "${VEQLIB_PREBUILT_NANOBIND_STATIC}" Python::Module)
     else()
-        nanobind_add_module(veqlib_ext NB_SUPPRESS_WARNINGS python_bindings.cpp ${VEQLIB_COMMON_SOURCES})
+        nanobind_add_module(veqlib_ext NB_SUPPRESS_WARNINGS bindings.cpp ${VEQLIB_COMMON_SOURCES})
     endif()
     veqlib_configure_target(veqlib_ext)
     target_compile_definitions(veqlib_ext PRIVATE "NB_DOMAIN=${VEQLIB_NB_DOMAIN}")

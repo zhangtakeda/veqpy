@@ -466,13 +466,13 @@ namespace veqlib_kernel_api
             switch (solver)
             {
             case SolverKind::LevenbergMarquardt:
-                return "cminpack::lmdif";
+                return "nonlinear::LevenbergMarquardt";
             case SolverKind::NewtonKrylov:
                 return "nonlinear::NewtonKrylov";
             case SolverKind::NewtonRaphson:
                 return "nonlinear::NewtonRaphson";
             case SolverKind::Powell:
-                return "cminpack::hybrd";
+                return "nonlinear::Powell";
             }
             return "unknown";
         }
@@ -618,7 +618,11 @@ namespace veqlib_kernel_api
             switch (input.solver)
             {
             case SolverKind::LevenbergMarquardt:
-                return "cminpack forward difference";
+#ifdef ENABLE_ENZYME
+                return "Enzyme dense Jacobian with CMINPACK fallback through nonlinear::LevenbergMarquardt";
+#else
+                return "CMINPACK forward difference through nonlinear::LevenbergMarquardt";
+#endif
             case SolverKind::NewtonKrylov:
 #ifdef ENABLE_ENZYME
                 return "Enzyme Jacobian-vector product through GMRES";
@@ -632,7 +636,11 @@ namespace veqlib_kernel_api
                 return "finite-difference dense Jacobian through dense Newton";
 #endif
             case SolverKind::Powell:
-                return "cminpack forward difference";
+#ifdef ENABLE_ENZYME
+                return "Enzyme dense Jacobian with CMINPACK fallback through nonlinear::Powell";
+#else
+                return "CMINPACK forward difference through nonlinear::Powell";
+#endif
             }
             return "unknown";
         }

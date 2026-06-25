@@ -5,7 +5,6 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <cminpack.h>
 #include <cstddef>
 
 namespace nonlinear::detail
@@ -118,6 +117,112 @@ namespace nonlinear::detail
             for (size_t i = 0; i < N; ++i)
                 jv[i] = (f_plus[i] - f_base[i]) / eps;
         }
+    }
+
+    using FuncNN    = int (*)(void*, int, const double*, double*, int);
+    using FuncDerNN = int (*)(void*, int, const double*, double*, double*, int, int);
+    using FuncMN    = int (*)(void*, int, int, const double*, double*, int);
+    using FuncDerMN = int (*)(void*, int, int, const double*, double*, double*, int, int);
+
+    namespace cminpack
+    {
+        int hybrd(FuncNN  callback,
+                  void*   data,
+                  int     n,
+                  double* x,
+                  double* fvec,
+                  double  xtol,
+                  int     max_evaluations,
+                  int     ml,
+                  int     mu,
+                  double  epsfcn,
+                  double* diag,
+                  int     mode,
+                  double  factor,
+                  int     nprint,
+                  int*    nfev,
+                  double* fjac,
+                  int     ldfjac,
+                  double* r,
+                  int     lr,
+                  double* qtf,
+                  double* wa1,
+                  double* wa2,
+                  double* wa3,
+                  double* wa4);
+
+        int hybrj(FuncDerNN callback,
+                  void*     data,
+                  int       n,
+                  double*   x,
+                  double*   fvec,
+                  double*   fjac,
+                  int       ldfjac,
+                  double    xtol,
+                  int       max_evaluations,
+                  double*   diag,
+                  int       mode,
+                  double    factor,
+                  int       nprint,
+                  int*      nfev,
+                  int*      njev,
+                  double*   r,
+                  int       lr,
+                  double*   qtf,
+                  double*   wa1,
+                  double*   wa2,
+                  double*   wa3,
+                  double*   wa4);
+
+        int lmdif(FuncMN  callback,
+                  void*   data,
+                  int     m,
+                  int     n,
+                  double* x,
+                  double* fvec,
+                  double  ftol,
+                  double  xtol,
+                  double  gtol,
+                  int     max_evaluations,
+                  double  epsfcn,
+                  double* diag,
+                  int     mode,
+                  double  factor,
+                  int     nprint,
+                  int*    nfev,
+                  double* fjac,
+                  int     ldfjac,
+                  int*    ipvt,
+                  double* qtf,
+                  double* wa1,
+                  double* wa2,
+                  double* wa3,
+                  double* wa4);
+
+        int lmder(FuncDerMN callback,
+                  void*     data,
+                  int       m,
+                  int       n,
+                  double*   x,
+                  double*   fvec,
+                  double*   fjac,
+                  int       ldfjac,
+                  double    ftol,
+                  double    xtol,
+                  double    gtol,
+                  int       max_evaluations,
+                  double*   diag,
+                  int       mode,
+                  double    factor,
+                  int       nprint,
+                  int*      nfev,
+                  int*      njev,
+                  int*      ipvt,
+                  double*   qtf,
+                  double*   wa1,
+                  double*   wa2,
+                  double*   wa3,
+                  double*   wa4);
     }
 
     template <size_t N>
@@ -407,14 +512,27 @@ namespace nonlinear::detail
         static constexpr size_t equations = Functor::equations;
         static constexpr size_t variables = Functor::variables;
         static_assert(equations == variables, "Powell hybrid requires a square residual");
-        static constexpr size_t work_size = variables * (3 * variables + 13) / 2;
+        static constexpr int    cminpack_size = static_cast<int>(variables);
+        static constexpr int    lr_size       = cminpack_size * (cminpack_size + 1) / 2;
 
         Functor                               functor;
         Vector<double, equations>             fvec{uninitialized};
-        Vector<double, work_size>             work{uninitialized};
+        Vector<double, variables>             diag{uninitialized};
         Vector<double, equations * variables> fjac{uninitialized};
+        Vector<double, static_cast<size_t>(lr_size)> r{uninitialized};
+        Vector<double, variables>             qtf{uninitialized};
+        Vector<double, variables>             wa1{uninitialized};
+        Vector<double, variables>             wa2{uninitialized};
+        Vector<double, variables>             wa3{uninitialized};
+        Vector<double, variables>             wa4{uninitialized};
         double                                tolerance            = 1.0e-8;
+        double                                finite_difference_step = 1.0e-6;
+        double                                initial_step_bound    = 1.0;
         int                                   max_evaluations      = 1000;
+        int                                   lower_bandwidth      = cminpack_size - 1;
+        int                                   upper_bandwidth      = cminpack_size - 1;
+        int                                   scale_mode           = 1;
+        int                                   print_interval       = 0;
         int                                   evaluations          = 0;
         int                                   jacobian_evaluations = 0;
         int                                   info                 = 0;
@@ -427,28 +545,89 @@ namespace nonlinear::detail
             jacobian_evaluations = 0;
             if constexpr (has_jacobian_v<Functor>)
             {
-                info = hybrj1(callback_with_jacobian,
-                              this,
-                              static_cast<int>(variables),
-                              x,
-                              fvec.data(),
-                              fjac.data(),
-                              static_cast<int>(equations),
-                              tolerance,
-                              work.data(),
-                              static_cast<int>(work_size));
+                Vector<double, variables> initial_x{uninitialized};
+                std::copy(x, x + variables, initial_x.begin());
+                run_jacobian_backend(x);
+                if (!residual_converged())
+                {
+                    const int jacobian_backend_evaluations = evaluations;
+                    const int jacobian_backend_jacobians   = jacobian_evaluations;
+                    std::copy(initial_x.begin(), initial_x.end(), x);
+                    evaluations          = 0;
+                    jacobian_evaluations = 0;
+                    run_finite_difference_backend(x);
+                    evaluations += jacobian_backend_evaluations;
+                    jacobian_evaluations += jacobian_backend_jacobians;
+                }
             }
             else
             {
-                info = hybrd1(callback,
-                              this,
-                              static_cast<int>(variables),
-                              x,
-                              fvec.data(),
-                              tolerance,
-                              work.data(),
-                              static_cast<int>(work_size));
+                run_finite_difference_backend(x);
             }
+        }
+
+        bool residual_converged() const noexcept { return norm2<equations>(fvec.data()) <= tolerance; }
+
+        void run_jacobian_backend(double* x)
+        {
+            diag.fill(1.0);
+            int nfev = 0;
+            int njev = 0;
+            info     = cminpack::hybrj(callback_with_jacobian,
+                                   this,
+                                   cminpack_size,
+                                   x,
+                                   fvec.data(),
+                                   fjac.data(),
+                                   cminpack_size,
+                                   tolerance,
+                                   max_evaluations,
+                                   diag.data(),
+                                   scale_mode,
+                                   initial_step_bound,
+                                   print_interval,
+                                   &nfev,
+                                   &njev,
+                                   r.data(),
+                                   lr_size,
+                                   qtf.data(),
+                                   wa1.data(),
+                                   wa2.data(),
+                                   wa3.data(),
+                                   wa4.data());
+            evaluations          = nfev;
+            jacobian_evaluations = njev;
+        }
+
+        void run_finite_difference_backend(double* x)
+        {
+            diag.fill(1.0);
+            int nfev = 0;
+            info     = cminpack::hybrd(callback,
+                                   this,
+                                   cminpack_size,
+                                   x,
+                                   fvec.data(),
+                                   tolerance,
+                                   max_evaluations,
+                                   lower_bandwidth,
+                                   upper_bandwidth,
+                                   finite_difference_step,
+                                   diag.data(),
+                                   scale_mode,
+                                   initial_step_bound,
+                                   print_interval,
+                                   &nfev,
+                                   fjac.data(),
+                                   cminpack_size,
+                                   r.data(),
+                                   lr_size,
+                                   qtf.data(),
+                                   wa1.data(),
+                                   wa2.data(),
+                                   wa3.data(),
+                                   wa4.data());
+            evaluations = nfev;
         }
 
         static int callback(void* data, int, const double* x, double* fvec, int iflag)
@@ -492,15 +671,25 @@ namespace nonlinear::detail
     {
         static constexpr size_t equations = Functor::equations;
         static constexpr size_t variables = Functor::variables;
-        static constexpr size_t work_size = equations * variables + 5 * variables + equations;
+        static constexpr int    cminpack_equations = static_cast<int>(equations);
+        static constexpr int    cminpack_variables = static_cast<int>(variables);
 
         Functor                               functor;
         Vector<double, equations>             fvec{uninitialized};
-        Vector<double, work_size>             work{uninitialized};
+        Vector<double, variables>             diag{uninitialized};
         Vector<double, equations * variables> fjac{uninitialized};
         Vector<int, variables>                ipvt{uninitialized};
+        Vector<double, variables>             qtf{uninitialized};
+        Vector<double, variables>             wa1{uninitialized};
+        Vector<double, variables>             wa2{uninitialized};
+        Vector<double, variables>             wa3{uninitialized};
+        Vector<double, equations>             wa4{uninitialized};
         double                                tolerance            = 1.0e-8;
+        double                                finite_difference_step = 0.0;
+        double                                initial_step_bound    = 100.0;
         int                                   max_evaluations      = 1000;
+        int                                   scale_mode           = 2;
+        int                                   print_interval       = 0;
         int                                   evaluations          = 0;
         int                                   jacobian_evaluations = 0;
         int                                   info                 = 0;
@@ -513,32 +702,91 @@ namespace nonlinear::detail
             jacobian_evaluations = 0;
             if constexpr (has_jacobian_v<Functor>)
             {
-                info = lmder1(callback_with_jacobian,
-                              this,
-                              static_cast<int>(equations),
-                              static_cast<int>(variables),
-                              x,
-                              fvec.data(),
-                              fjac.data(),
-                              static_cast<int>(equations),
-                              tolerance,
-                              ipvt.data(),
-                              work.data(),
-                              static_cast<int>(work_size));
+                Vector<double, variables> initial_x{uninitialized};
+                std::copy(x, x + variables, initial_x.begin());
+                run_jacobian_backend(x);
+                if (!residual_converged())
+                {
+                    const int jacobian_backend_evaluations = evaluations;
+                    const int jacobian_backend_jacobians   = jacobian_evaluations;
+                    std::copy(initial_x.begin(), initial_x.end(), x);
+                    evaluations          = 0;
+                    jacobian_evaluations = 0;
+                    run_finite_difference_backend(x);
+                    evaluations += jacobian_backend_evaluations;
+                    jacobian_evaluations += jacobian_backend_jacobians;
+                }
             }
             else
             {
-                info = lmdif1(callback,
-                              this,
-                              static_cast<int>(equations),
-                              static_cast<int>(variables),
-                              x,
-                              fvec.data(),
-                              tolerance,
-                              ipvt.data(),
-                              work.data(),
-                              static_cast<int>(work_size));
+                run_finite_difference_backend(x);
             }
+        }
+
+        bool residual_converged() const noexcept { return norm2<equations>(fvec.data()) <= tolerance; }
+
+        void run_jacobian_backend(double* x)
+        {
+            diag.fill(1.0);
+            int nfev = 0;
+            int njev = 0;
+            info     = cminpack::lmder(callback_with_jacobian,
+                                   this,
+                                   cminpack_equations,
+                                   cminpack_variables,
+                                   x,
+                                   fvec.data(),
+                                   fjac.data(),
+                                   cminpack_equations,
+                                   tolerance,
+                                   tolerance,
+                                   tolerance,
+                                   max_evaluations,
+                                   diag.data(),
+                                   scale_mode,
+                                   initial_step_bound,
+                                   print_interval,
+                                   &nfev,
+                                   &njev,
+                                   ipvt.data(),
+                                   qtf.data(),
+                                   wa1.data(),
+                                   wa2.data(),
+                                   wa3.data(),
+                                   wa4.data());
+            evaluations          = nfev;
+            jacobian_evaluations = njev;
+        }
+
+        void run_finite_difference_backend(double* x)
+        {
+            diag.fill(1.0);
+            int nfev = 0;
+            info     = cminpack::lmdif(callback,
+                                   this,
+                                   cminpack_equations,
+                                   cminpack_variables,
+                                   x,
+                                   fvec.data(),
+                                   tolerance,
+                                   tolerance,
+                                   tolerance,
+                                   max_evaluations,
+                                   finite_difference_step,
+                                   diag.data(),
+                                   scale_mode,
+                                   initial_step_bound,
+                                   print_interval,
+                                   &nfev,
+                                   fjac.data(),
+                                   cminpack_equations,
+                                   ipvt.data(),
+                                   qtf.data(),
+                                   wa1.data(),
+                                   wa2.data(),
+                                   wa3.data(),
+                                   wa4.data());
+            evaluations = nfev;
         }
 
         static int callback(void* data, int, int, const double* x, double* fvec, int iflag)

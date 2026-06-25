@@ -11,7 +11,6 @@
 #include <span>
 #include <stdexcept>
 
-#include <cminpack.h>
 #ifdef ENABLE_ENZYME
     #include <enzyme/enzyme>
 extern int enzyme_dupv;
@@ -84,7 +83,6 @@ namespace veqlib_kernel_api
         {
             KernelOperator op;
             CaseInput      input{};
-            int            evaluations                    = 0;
             int            jacobian_component_evaluations = 0;
             double         residual_callback_ms           = 0.0;
             double         residual_kernel_ms             = 0.0;
@@ -101,7 +99,6 @@ namespace veqlib_kernel_api
 
             void reset_solve_counters() noexcept
             {
-                evaluations                    = 0;
                 jacobian_component_evaluations = 0;
                 residual_callback_ms           = 0.0;
                 residual_kernel_ms             = 0.0;
@@ -258,44 +255,6 @@ namespace veqlib_kernel_api
         }
 #endif
 
-        int pf_residual_z(void* data, int n, const double* z, double* fvec, int iflag)
-        {
-            if (iflag <= 0 || n != static_cast<int>(KernelShape::x_size))
-                return 0;
-
-            auto& context = *static_cast<SolveContext*>(data);
-            ++context.evaluations;
-            scaled_residual_z_no_count(context, z, fvec);
-            return 0;
-        }
-
-        int pf_lm_residual_x(void* data, int m, int n, const double* x, double* fvec, int iflag)
-        {
-            if (iflag <= 0 || m != static_cast<int>(KernelShape::x_size) || n != static_cast<int>(KernelShape::x_size))
-                return 0;
-
-            auto& context = *static_cast<SolveContext*>(data);
-            ++context.evaluations;
-
-            const auto   callback_started = std::chrono::steady_clock::now();
-            PackedVector raw{uninitialized};
-            const auto   kernel_started = std::chrono::steady_clock::now();
-            context.raw_residual(std::span<const double, KernelShape::x_size>{x, KernelShape::x_size},
-                                 std::span<double, KernelShape::x_size>{raw.data(), KernelShape::x_size});
-            context.residual_kernel_ms += elapsed_ms_since(kernel_started);
-
-            const auto scale_started = std::chrono::steady_clock::now();
-            for (size_t i = 0; i < KernelShape::x_size; ++i)
-            {
-                const double scaled = raw[i] / context.input.residual_scale[i];
-                fvec[i] = context.input.residual_normalization_code == ResidualNormalizationFast ? std::asinh(scaled) :
-                                                                                                   scaled;
-            }
-            context.residual_scale_ms += elapsed_ms_since(scale_started);
-            context.residual_callback_ms += elapsed_ms_since(callback_started);
-            return 0;
-        }
-
         void scaled_residual_z_no_count(SolveContext& context, const double* z, double* fvec) noexcept
         {
             const auto   callback_started = std::chrono::steady_clock::now();
@@ -427,30 +386,6 @@ namespace veqlib_kernel_api
             }
             context.jacobian_component_evaluations += static_cast<int>(n);
         }
-
-        void scaled_residual_z_array_no_count(SolveContext&                                  context,
-                                              const std::array<double, KernelShape::x_size>& z,
-                                              std::array<double, KernelShape::x_size>&       fvec) noexcept
-        {
-            scaled_residual_z_no_count(context, z.data(), fvec.data());
-        }
-
-        int
-        pf_residual_jacobian_z(void* data, int n, const double* z, double* fvec, double* fjac, int ldfjac, int iflag)
-        {
-            if (n != static_cast<int>(KernelShape::x_size))
-                return 0;
-            if (iflag == 1)
-                return pf_residual_z(data, n, z, fvec, iflag);
-            if (iflag == 2)
-            {
-                auto&      context = *static_cast<SolveContext*>(data);
-                const auto started = std::chrono::steady_clock::now();
-                fill_enzyme_jacobian_z(context, z, fjac, ldfjac);
-                context.jacobian_callback_ms += elapsed_ms_since(started);
-            }
-            return 0;
-        }
 #endif
 
         struct ScaledResidualProblem
@@ -470,7 +405,9 @@ namespace veqlib_kernel_api
             {
                 constexpr size_t          n = KernelShape::x_size;
                 std::array<double, n * n> column_major{};
+                const auto                started = std::chrono::steady_clock::now();
                 fill_enzyme_jacobian_z(*context, z, column_major.data(), static_cast<int>(n));
+                context->jacobian_callback_ms += elapsed_ms_since(started);
                 for (size_t row = 0; row < n; ++row)
                     for (size_t col = 0; col < n; ++col)
                         jacobian[row * n + col] = column_major[row + n * col];
@@ -483,19 +420,6 @@ namespace veqlib_kernel_api
                 context->jvp_callback_ms += elapsed_ms_since(started);
             }
 #endif
-        };
-
-        struct ScaledResidualOnlyProblem
-        {
-            static constexpr size_t equations = KernelShape::x_size;
-            static constexpr size_t variables = KernelShape::x_size;
-
-            SolveContext* context = nullptr;
-
-            void operator()(const double* z, double* fvec) const noexcept
-            {
-                (void)scaled_residual_z_no_count(*context, z, fvec);
-            }
         };
 
         template <typename Context>
@@ -558,188 +482,50 @@ namespace veqlib_kernel_api
             result.accepted = result.raw_norm <= acceptance_threshold(context.input);
         }
 
-        void fill_solve_result_from_x(
-            SolveContext& context, SolveResult& result, const double* x, int info, int nfev, int njev, int callbacks)
+        template <typename SolverContext>
+        void configure_common_solver(SolverContext& solver_context, const CaseInput& input) noexcept
         {
-            result.info      = info;
-            result.nfev      = nfev;
-            result.njev      = njev;
-            result.callbacks = callbacks;
-            for (size_t i = 0; i < KernelShape::x_size; ++i)
-                result.x[i] = x[i];
-            const auto final_residual_started = std::chrono::steady_clock::now();
-            context.raw_residual(std::span<const double, KernelShape::x_size>{result.x.data(), KernelShape::x_size},
-                                 std::span<double, KernelShape::x_size>{result.raw.data(), KernelShape::x_size});
-            result.final_residual_ms = elapsed_ms_since(final_residual_started);
-            for (size_t i = 0; i < KernelShape::x_size; ++i)
-                result.scaled[i] = result.raw[i] / context.input.residual_scale[i];
-            result.raw_norm             = norm2(std::span<const double, KernelShape::x_size>{
-                result.raw.data(),
-                KernelShape::x_size,
-            });
-            result.scaled_norm          = norm2(std::span<const double, KernelShape::x_size>{
-                result.scaled.data(),
-                KernelShape::x_size,
-            });
-            result.residual_callback_ms = context.residual_callback_ms;
-            result.residual_kernel_ms   = context.residual_kernel_ms;
-            result.residual_scale_ms    = context.residual_scale_ms;
-            result.jacobian_callback_ms = context.jacobian_callback_ms;
-            result.jvp_callback_ms      = context.jvp_callback_ms;
-            result.linear_solve_ms      = context.linear_solve_ms;
-            result.alpha    = {context.op.workspace.source_runtime.alpha1, context.op.workspace.source_runtime.alpha2};
-            result.accepted = result.raw_norm <= acceptance_threshold(context.input);
+            if constexpr (requires { solver_context.tolerance; })
+                solver_context.tolerance = input.max_residual;
+            if constexpr (requires { solver_context.max_evaluations; })
+                solver_context.max_evaluations = max_solver_evaluations(input);
+            if constexpr (requires { solver_context.max_iterations; })
+                solver_context.max_iterations = max_solver_evaluations(input);
+            if constexpr (requires { solver_context.max_dimension; })
+                solver_context.max_dimension = static_cast<int>(KernelShape::x_size);
         }
 
-        SolveResult run_hybrd_once(SolveContext& context)
+        template <typename SolverContext>
+        void configure_scaled_z_solver(SolverContext& solver_context, const CaseInput& input) noexcept
         {
-            context.reset_solve_counters();
-            auto         z = encode_x_to_z(context.input.x0, context.input.x_scale);
-            PackedVector fvec{uninitialized};
-
-            constexpr int                                                 n  = static_cast<int>(KernelShape::x_size);
-            constexpr int                                                 ml = n - 1;
-            constexpr int                                                 mu = n - 1;
-            constexpr int                                                 lr = n * (n + 1) / 2;
-            std::array<double, KernelShape::x_size>                       diag;
-            std::array<double, KernelShape::x_size * KernelShape::x_size> fjac;
-            std::array<double, static_cast<size_t>(lr)>                   r;
-            std::array<double, KernelShape::x_size>                       qtf;
-            std::array<double, KernelShape::x_size>                       wa1;
-            std::array<double, KernelShape::x_size>                       wa2;
-            std::array<double, KernelShape::x_size>                       wa3;
-            std::array<double, KernelShape::x_size>                       wa4;
-            int                                                           nfev = 0;
-            const int                                                     info = hybrd(pf_residual_z,
-                                   &context,
-                                   n,
-                                   z.data(),
-                                   fvec.data(),
-                                   context.input.max_residual,
-                                   max_solver_evaluations(context.input),
-                                   ml,
-                                   mu,
-                                   veqpy_hybr_eps,
-                                   diag.data(),
-                                   veqpy_hybr_mode,
-                                   veqpy_hybr_factor,
-                                   veqpy_hybr_nprint,
-                                   &nfev,
-                                   fjac.data(),
-                                   n,
-                                   r.data(),
-                                   lr,
-                                   qtf.data(),
-                                   wa1.data(),
-                                   wa2.data(),
-                                   wa3.data(),
-                                   wa4.data());
-
-            SolveResult result{};
-            fill_solve_result_from_z(context, result, z.data(), info, nfev, 0, context.evaluations);
-            result.jacobian_component_evaluations = context.jacobian_component_evaluations;
-            return result;
+            configure_common_solver(solver_context, input);
+            if constexpr (requires { solver_context.finite_difference_step; })
+                solver_context.finite_difference_step = veqpy_hybr_eps;
+            if constexpr (requires { solver_context.initial_step_bound; })
+                solver_context.initial_step_bound = veqpy_hybr_factor;
+            if constexpr (requires { solver_context.lower_bandwidth; })
+                solver_context.lower_bandwidth = static_cast<int>(KernelShape::x_size) - 1;
+            if constexpr (requires { solver_context.upper_bandwidth; })
+                solver_context.upper_bandwidth = static_cast<int>(KernelShape::x_size) - 1;
+            if constexpr (requires { solver_context.scale_mode; })
+                solver_context.scale_mode = veqpy_hybr_mode;
+            if constexpr (requires { solver_context.print_interval; })
+                solver_context.print_interval = veqpy_hybr_nprint;
         }
 
-        SolveResult run_lmdif_once(SolveContext& context)
+        template <typename SolverContext>
+        void configure_levenberg_marquardt_solver(SolverContext& solver_context, const CaseInput& input) noexcept
         {
-            context.reset_solve_counters();
-            std::array<double, KernelShape::x_size> x{};
-            std::copy(context.input.x0.begin(), context.input.x0.end(), x.begin());
-            PackedVector fvec{uninitialized};
-
-            constexpr int                                                 m = static_cast<int>(KernelShape::x_size);
-            constexpr int                                                 n = static_cast<int>(KernelShape::x_size);
-            std::array<double, KernelShape::x_size>                       diag{};
-            std::array<double, KernelShape::x_size * KernelShape::x_size> fjac;
-            std::array<int, KernelShape::x_size>                          ipvt;
-            std::array<double, KernelShape::x_size>                       qtf;
-            std::array<double, KernelShape::x_size>                       wa1;
-            std::array<double, KernelShape::x_size>                       wa2;
-            std::array<double, KernelShape::x_size>                       wa3;
-            std::array<double, KernelShape::x_size>                       wa4;
-            diag.fill(1.0);
-
-            int       nfev = 0;
-            const int info = lmdif(pf_lm_residual_x,
-                                   &context,
-                                   m,
-                                   n,
-                                   x.data(),
-                                   fvec.data(),
-                                   context.input.max_residual,
-                                   context.input.max_residual,
-                                   context.input.max_residual,
-                                   max_solver_evaluations(context.input),
-                                   veqpy_lm_eps,
-                                   diag.data(),
-                                   veqpy_lm_mode,
-                                   veqpy_lm_factor,
-                                   veqpy_lm_nprint,
-                                   &nfev,
-                                   fjac.data(),
-                                   m,
-                                   ipvt.data(),
-                                   qtf.data(),
-                                   wa1.data(),
-                                   wa2.data(),
-                                   wa3.data(),
-                                   wa4.data());
-
-            SolveResult result{};
-            fill_solve_result_from_x(context, result, x.data(), info, nfev, 0, context.evaluations);
-            result.jacobian_component_evaluations = context.jacobian_component_evaluations;
-            return result;
+            configure_common_solver(solver_context, input);
+            if constexpr (requires { solver_context.finite_difference_step; })
+                solver_context.finite_difference_step = veqpy_lm_eps;
+            if constexpr (requires { solver_context.initial_step_bound; })
+                solver_context.initial_step_bound = veqpy_lm_factor;
+            if constexpr (requires { solver_context.scale_mode; })
+                solver_context.scale_mode = veqpy_lm_mode;
+            if constexpr (requires { solver_context.print_interval; })
+                solver_context.print_interval = veqpy_lm_nprint;
         }
-
-#ifdef ENABLE_ENZYME
-        SolveResult run_hybrj_once(SolveContext& context)
-        {
-            context.reset_solve_counters();
-            auto         z = encode_x_to_z(context.input.x0, context.input.x_scale);
-            PackedVector fvec{uninitialized};
-
-            constexpr int                                                 n  = static_cast<int>(KernelShape::x_size);
-            constexpr int                                                 lr = n * (n + 1) / 2;
-            std::array<double, KernelShape::x_size>                       diag;
-            std::array<double, KernelShape::x_size * KernelShape::x_size> fjac;
-            std::array<double, static_cast<size_t>(lr)>                   r;
-            std::array<double, KernelShape::x_size>                       qtf;
-            std::array<double, KernelShape::x_size>                       wa1;
-            std::array<double, KernelShape::x_size>                       wa2;
-            std::array<double, KernelShape::x_size>                       wa3;
-            std::array<double, KernelShape::x_size>                       wa4;
-            int                                                           nfev = 0;
-            int                                                           njev = 0;
-            const int                                                     info = hybrj(pf_residual_jacobian_z,
-                                   &context,
-                                   n,
-                                   z.data(),
-                                   fvec.data(),
-                                   fjac.data(),
-                                   n,
-                                   context.input.max_residual,
-                                   max_solver_evaluations(context.input),
-                                   diag.data(),
-                                   veqpy_hybr_mode,
-                                   veqpy_hybr_factor,
-                                   veqpy_hybr_nprint,
-                                   &nfev,
-                                   &njev,
-                                   r.data(),
-                                   lr,
-                                   qtf.data(),
-                                   wa1.data(),
-                                   wa2.data(),
-                                   wa3.data(),
-                                   wa4.data());
-
-            SolveResult result{};
-            fill_solve_result_from_z(context, result, z.data(), info, nfev, njev, context.evaluations);
-            result.jacobian_component_evaluations = context.jacobian_component_evaluations;
-            return result;
-        }
-#endif
 
         template <typename Policy>
         SolveResult run_nonlinear_policy_once(SolveContext& context)
@@ -751,11 +537,7 @@ namespace veqlib_kernel_api
 
             ScaledResidualProblem problem{&context};
             auto                  solver = nonlinear::make_solver<Policy>(problem);
-            solver.context.tolerance     = context.input.max_residual;
-            if constexpr (requires { solver.context.max_iterations; })
-                solver.context.max_iterations = max_solver_evaluations(context.input);
-            if constexpr (requires { solver.context.max_dimension; })
-                solver.context.max_dimension = static_cast<int>(KernelShape::x_size);
+            configure_scaled_z_solver(solver.context, context.input);
 
             solver.optimize_inplace(z);
 
@@ -773,21 +555,16 @@ namespace veqlib_kernel_api
             return result;
         }
 
-        template <typename Policy>
-        SolveResult run_nonlinear_residual_policy_once(SolveContext& context)
+        SolveResult run_levenberg_marquardt_once(SolveContext& context)
         {
             context.reset_solve_counters();
             const auto encoded = encode_x_to_z(context.input.x0, context.input.x_scale);
             tensor::Vector<double, KernelShape::x_size> z{uninitialized};
             std::copy(encoded.begin(), encoded.end(), z.begin());
 
-            ScaledResidualOnlyProblem problem{&context};
-            auto                      solver = nonlinear::make_solver<Policy>(problem);
-            solver.context.tolerance         = context.input.max_residual;
-            if constexpr (requires { solver.context.max_evaluations; })
-                solver.context.max_evaluations = max_solver_evaluations(context.input);
-            if constexpr (requires { solver.context.max_iterations; })
-                solver.context.max_iterations = max_solver_evaluations(context.input);
+            ScaledResidualProblem problem{&context};
+            auto                  solver = nonlinear::make_solver<nonlinear::LevenbergMarquardt>(problem);
+            configure_levenberg_marquardt_solver(solver.context, context.input);
 
             solver.optimize_inplace(z);
 
@@ -799,19 +576,22 @@ namespace veqlib_kernel_api
                                      solver.context.evaluations,
                                      jacobian_evaluation_count(solver.context),
                                      solver.context.evaluations);
+            result.jacobian_component_evaluations = context.jacobian_component_evaluations;
+            result.jvp_evaluations                = jvp_evaluation_count(solver.context);
+            result.linear_iterations              = linear_iteration_count(solver.context);
             return result;
         }
 
         SolveResult run_solver_once(SolveContext& context)
         {
             if (context.input.solver == SolverKind::LevenbergMarquardt)
-                return run_lmdif_once(context);
+                return run_levenberg_marquardt_once(context);
             if (context.input.solver == SolverKind::NewtonKrylov)
                 return run_nonlinear_policy_once<nonlinear::NewtonKrylov>(context);
             if (context.input.solver == SolverKind::NewtonRaphson)
                 return run_nonlinear_policy_once<nonlinear::NewtonRaphson>(context);
             if (context.input.solver == SolverKind::Powell)
-                return run_hybrd_once(context);
+                return run_nonlinear_policy_once<nonlinear::Powell>(context);
             throw std::runtime_error("unsupported solver kind");
         }
 
