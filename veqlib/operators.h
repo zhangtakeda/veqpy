@@ -93,16 +93,25 @@ namespace operators::detail
             workspace.source_runtime.set_uniform_sources(source_span(setup.heat), source_span(setup.current));
         }
 
-        constexpr void evaluate(std::span<const double, Shape::x_size> x, PackedVector& out) noexcept
+        static constexpr void evaluate_with(const KernelPlan&    plan,
+                                            const SolveParams&   solve_params,
+                                            KernelWorkspace&     workspace,
+                                            std::span<const double, Shape::x_size> x,
+                                            PackedVector& out) noexcept
         {
             workspace.profiles.refresh_active(x, plan.profile_params);
-            workspace.geometry.update(solve_params_.a, solve_params_.R0, solve_params_.Z0, workspace.profiles);
+            workspace.geometry.update(solve_params.a, solve_params.R0, solve_params.Z0, workspace.profiles);
 
             workspace.source_runtime.materialize_profile_owned_psin(workspace.profiles, plan.n_axis_fix);
-            workspace.source_runtime.update_pf_psin_uniform_ip(workspace.geometry, solve_params_.Ip, plan.n_axis_fix);
+            workspace.source_runtime.update_pf_psin_uniform_ip(workspace.geometry, solve_params.Ip, plan.n_axis_fix);
 
             workspace.residual.update_compact(workspace.source_runtime, workspace.geometry);
-            workspace.residual.pack_into(out, solve_params_.a, solve_params_.R0, solve_params_.B0);
+            workspace.residual.pack_into(out, solve_params.a, solve_params.R0, solve_params.B0);
+        }
+
+        constexpr void evaluate(std::span<const double, Shape::x_size> x, PackedVector& out) noexcept
+        {
+            evaluate_with(plan, solve_params_, workspace, x, out);
         }
 
         KernelPlan      plan{};
