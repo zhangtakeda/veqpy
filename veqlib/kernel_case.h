@@ -619,7 +619,7 @@ namespace veqlib_kernel_api
             {
             case SolverKind::LevenbergMarquardt:
 #ifdef ENABLE_ENZYME
-                return "Enzyme dense Jacobian with CMINPACK fallback through nonlinear::LevenbergMarquardt";
+                return "Enzyme dense Jacobian through nonlinear::LevenbergMarquardt";
 #else
                 return "CMINPACK forward difference through nonlinear::LevenbergMarquardt";
 #endif
@@ -637,7 +637,7 @@ namespace veqlib_kernel_api
 #endif
             case SolverKind::Powell:
 #ifdef ENABLE_ENZYME
-                return "Enzyme dense Jacobian with CMINPACK fallback through nonlinear::Powell";
+                return "Enzyme dense Jacobian through nonlinear::Powell";
 #else
                 return "CMINPACK forward difference through nonlinear::Powell";
 #endif

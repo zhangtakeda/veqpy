@@ -546,28 +546,13 @@ namespace nonlinear::detail
             jacobian_evaluations = 0;
             if constexpr (has_jacobian_v<Functor>)
             {
-                Vector<double, variables> initial_x{uninitialized};
-                std::copy(x, x + variables, initial_x.begin());
                 run_jacobian_backend(x);
-                if (!residual_converged())
-                {
-                    const int jacobian_backend_evaluations = evaluations;
-                    const int jacobian_backend_jacobians   = jacobian_evaluations;
-                    std::copy(initial_x.begin(), initial_x.end(), x);
-                    evaluations          = 0;
-                    jacobian_evaluations = 0;
-                    run_finite_difference_backend(x);
-                    evaluations += jacobian_backend_evaluations;
-                    jacobian_evaluations += jacobian_backend_jacobians;
-                }
             }
             else
             {
                 run_finite_difference_backend(x);
             }
         }
-
-        bool residual_converged() const noexcept { return norm2<equations>(fvec.data()) <= tolerance; }
 
         void run_jacobian_backend(double* x)
         {
@@ -704,28 +689,13 @@ namespace nonlinear::detail
             jacobian_evaluations = 0;
             if constexpr (has_jacobian_v<Functor>)
             {
-                Vector<double, variables> initial_x{uninitialized};
-                std::copy(x, x + variables, initial_x.begin());
                 run_jacobian_backend(x);
-                if (!residual_converged())
-                {
-                    const int jacobian_backend_evaluations = evaluations;
-                    const int jacobian_backend_jacobians   = jacobian_evaluations;
-                    std::copy(initial_x.begin(), initial_x.end(), x);
-                    evaluations          = 0;
-                    jacobian_evaluations = 0;
-                    run_finite_difference_backend(x);
-                    evaluations += jacobian_backend_evaluations;
-                    jacobian_evaluations += jacobian_backend_jacobians;
-                }
             }
             else
             {
                 run_finite_difference_backend(x);
             }
         }
-
-        bool residual_converged() const noexcept { return norm2<equations>(fvec.data()) <= tolerance; }
 
         void run_jacobian_backend(double* x)
         {

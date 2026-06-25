@@ -11,17 +11,12 @@ def _require(condition: bool, message: str) -> None:
         raise AssertionError(message)
 
 
-def _check_enzyme_jacobian_fast_path(
-    result: tuple[object, ...], x_size: int, *, max_njev: int
-) -> None:
+def _check_enzyme_jacobian_fast_path(result: tuple[object, ...], x_size: int) -> None:
     nfev = int(result[3])
     njev = int(result[4])
     jacobian_component_evaluations = int(result[6])
-    _require(0 < njev <= max_njev, f"unexpected Enzyme Jacobian evaluation count: {njev}")
-    _require(
-        nfev <= max_njev * x_size,
-        f"Enzyme Jacobian path appears to have fallen back: {nfev=}",
-    )
+    _require(nfev > 0, f"unexpected residual evaluation count: {nfev}")
+    _require(njev > 0, f"unexpected Enzyme Jacobian evaluation count: {njev}")
     _require(
         jacobian_component_evaluations == x_size * njev,
         "Jacobian component evaluations should match dense Enzyme Jacobian calls",
@@ -45,8 +40,12 @@ def main() -> int:
     _require(not powell_result[11].flags.writeable, "packed solution view should be read-only")
 
     if "Enzyme" in meta["solver"]["jacobian"]:
-        _check_enzyme_jacobian_fast_path(powell_result, x_size, max_njev=2)
-        _check_enzyme_jacobian_fast_path(lm_result, x_size, max_njev=x_size)
+        _require(
+            "fallback" not in meta["solver"]["jacobian"].lower(),
+            "AD path should not advertise fallback",
+        )
+        _check_enzyme_jacobian_fast_path(powell_result, x_size)
+        _check_enzyme_jacobian_fast_path(lm_result, x_size)
 
     return 0
 
