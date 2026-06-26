@@ -32,17 +32,23 @@ def test_kernel_builder_dry_run_emits_full_topology_contract(tmp_path) -> None:
 
     assert artifact.built is False
     assert artifact.metadata["topology"]["source"] == {
+        "route_key": ["PQ", "rho", "grid"],
         "route": "PQ",
         "route_code": 6,
         "coordinate": "rho",
         "coordinate_code": 1,
         "constraint": "beta",
         "constraint_code": 2,
+        "supported_constraints": ["Ip_beta", "Ip", "beta", "null"],
+        "uses_Ip": False,
+        "uses_beta": True,
         "nodes": "grid",
         "nodes_code": 2,
         "sample_count": 32,
         "active_family": "none",
         "active_family_code": 0,
+        "parameterization": "identity",
+        "parameterization_code": 0,
     }
     assert artifact.metadata["topology"]["layout"] == {
         "packed": "family",
@@ -56,6 +62,7 @@ def test_kernel_builder_dry_run_emits_full_topology_contract(tmp_path) -> None:
     assert "-DVEQ_SOURCE_CONSTRAINT_CODE=2" in configure
     assert "-DVEQ_SOURCE_NODES_CODE=2" in configure
     assert "-DVEQ_SOURCE_ACTIVE_FAMILY_CODE=0" in configure
+    assert "-DVEQ_SOURCE_PARAMETERIZATION_CODE=0" in configure
     assert "-DVEQ_LAYOUT_PROFILE_FIRST=1" in configure
     assert "-DVEQ_ENZYME_JACOBIAN_BATCH_WIDTH=8" in configure
     assert "-DVEQLIB_FP_MODE=FMA" in configure

@@ -47,6 +47,21 @@ def test_topology_canonicalizes_and_keys_supported_mvp() -> None:
     assert topology.source_nodes_code == 1
     assert topology.source_active_family == "psin"
     assert topology.source_active_family_code == 1
+    assert topology.source_parameterization == "identity"
+    assert topology.source_parameterization_code == 0
+    assert topology.source_supported_constraints == ("Ip", "beta", "null")
+    assert topology.source_uses_ip_constraint is True
+    assert topology.source_uses_beta_constraint is False
+    assert topology.source_policy_dict() == {
+        "route_key": ["PF", "psin", "uniform"],
+        "active_family": "psin",
+        "active_family_code": 1,
+        "parameterization": "identity",
+        "parameterization_code": 0,
+        "supported_constraints": ["Ip", "beta", "null"],
+        "uses_Ip": True,
+        "uses_beta": False,
+    }
     assert topology.layout == "degree"
     assert topology.layout_code == 0
     assert topology.layout_profile_first is False
@@ -127,6 +142,19 @@ def test_mvp_gate_rejects_unsupported_route_shape() -> None:
 
     with pytest.raises(TopologyError, match="PF/psin/uniform/Ip"):
         topology.validate_supported_for_veqlib_mvp()
+
+
+def test_source_topology_rejects_unsupported_route_constraints() -> None:
+    with pytest.raises(TopologyError, match="PF source topology does not support"):
+        make_topology(constraint="Ip_beta")
+
+
+def test_source_topology_captures_route_parameterization() -> None:
+    topology = make_topology(route="PP", coordinate="psin", nodes="uniform")
+
+    assert topology.source_parameterization == "sqrt_psin"
+    assert topology.source_parameterization_code == 1
+    assert topology.source_supported_constraints == ("Ip_beta", "Ip", "beta", "null")
 
 
 def test_source_topology_codes_cover_pj2_f_ownership() -> None:

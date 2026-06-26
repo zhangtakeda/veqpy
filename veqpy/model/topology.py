@@ -35,6 +35,18 @@ _SOURCE_ACTIVE_FAMILY_CODES = {
     "psin": 1,
     "F": 2,
 }
+_SOURCE_PARAMETERIZATION_CODES = {
+    "identity": 0,
+    "sqrt_psin": 1,
+}
+_SOURCE_CONSTRAINTS_BY_ROUTE = {
+    "PF": frozenset({"null", "Ip", "beta"}),
+    "PP": frozenset({"null", "Ip", "beta", "Ip_beta"}),
+    "PI": frozenset({"null", "Ip", "beta", "Ip_beta"}),
+    "PJ1": frozenset({"null", "Ip", "beta", "Ip_beta"}),
+    "PJ2": frozenset({"null", "Ip", "beta", "Ip_beta"}),
+    "PQ": frozenset({"null", "Ip", "beta", "Ip_beta"}),
+}
 _LAYOUT_CODES = {
     "degree": 0,
     "family": 1,
@@ -154,6 +166,7 @@ class Topology:
             raise TopologyError(f"unsupported source nodes {nodes!r}")
 
         constraint = _normalize_constraint(self.constraint)
+        _validate_source_constraint(route, constraint)
         quadrature = _normalize_token(self.quadrature, "quadrature").lower()
         if quadrature != "legendre":
             raise TopologyError("only legendre quadrature is supported by the topology schema v1")
@@ -288,17 +301,23 @@ class Topology:
                 "calculus": self.calculus,
             },
             "source": {
+                "route_key": list(self.source_route_key),
                 "route": self.route,
                 "route_code": self.source_route_code,
                 "coordinate": self.coordinate,
                 "coordinate_code": self.source_coordinate_code,
                 "constraint": self.constraint,
                 "constraint_code": self.source_constraint_code,
+                "supported_constraints": list(self.source_supported_constraints),
+                "uses_Ip": self.source_uses_ip_constraint,
+                "uses_beta": self.source_uses_beta_constraint,
                 "nodes": self.nodes,
                 "nodes_code": self.source_nodes_code,
                 "sample_count": self.sample_count,
                 "active_family": self.source_active_family,
                 "active_family_code": self.source_active_family_code,
+                "parameterization": self.source_parameterization,
+                "parameterization_code": self.source_parameterization_code,
             },
             "layout": {
                 "packed": self.layout,
@@ -329,6 +348,10 @@ class Topology:
         return _SOURCE_ROUTE_CODES[self.route]
 
     @property
+    def source_route_key(self) -> tuple[str, str, str]:
+        return (self.route, self.coordinate, self.nodes)
+
+    @property
     def source_coordinate_code(self) -> int:
         return _SOURCE_COORDINATE_CODES[self.coordinate]
 
@@ -347,6 +370,44 @@ class Topology:
     @property
     def source_active_family_code(self) -> int:
         return _SOURCE_ACTIVE_FAMILY_CODES[self.source_active_family]
+
+    @property
+    def source_parameterization(self) -> str:
+        return _source_parameterization(self.route, self.coordinate, self.nodes)
+
+    @property
+    def source_parameterization_code(self) -> int:
+        return _SOURCE_PARAMETERIZATION_CODES[self.source_parameterization]
+
+    @property
+    def source_supported_constraints(self) -> tuple[str, ...]:
+        ordered_constraints = ("Ip_beta", "Ip", "beta", "null")
+        supported_constraints = _SOURCE_CONSTRAINTS_BY_ROUTE[self.route]
+        return tuple(
+            constraint for constraint in ordered_constraints if constraint in supported_constraints
+        )
+
+    @property
+    def source_uses_ip_constraint(self) -> bool:
+        return self.constraint in {"Ip", "Ip_beta"}
+
+    @property
+    def source_uses_beta_constraint(self) -> bool:
+        return self.constraint in {"beta", "Ip_beta"}
+
+    def source_policy_dict(self) -> dict[str, object]:
+        """Return source-route policy metadata derived at topology setup time."""
+
+        return {
+            "route_key": list(self.source_route_key),
+            "active_family": self.source_active_family,
+            "active_family_code": self.source_active_family_code,
+            "parameterization": self.source_parameterization,
+            "parameterization_code": self.source_parameterization_code,
+            "supported_constraints": list(self.source_supported_constraints),
+            "uses_Ip": self.source_uses_ip_constraint,
+            "uses_beta": self.source_uses_beta_constraint,
+        }
 
     @property
     def layout_code(self) -> int:
@@ -432,6 +493,16 @@ def _normalize_constraint(value: str | None) -> str:
         raise TopologyError(f"unsupported constraint {value!r}") from exc
 
 
+def _validate_source_constraint(route: str, constraint: str) -> None:
+    supported_constraints = _SOURCE_CONSTRAINTS_BY_ROUTE[route]
+    if constraint not in supported_constraints:
+        supported = ", ".join(sorted(supported_constraints))
+        raise TopologyError(
+            f"{route} source topology does not support constraint {constraint!r}; "
+            f"supported constraints: {supported}"
+        )
+
+
 def _normalize_layout(value: str) -> str:
     normalized = _normalize_token(value, "layout").lower().replace("-", "_")
     mapping = {
@@ -454,6 +525,12 @@ def _source_active_family(route: str, coordinate: str, nodes: str) -> str:
     if coordinate == "psin" and nodes == "uniform":
         return "psin"
     return "none"
+
+
+def _source_parameterization(route: str, coordinate: str, nodes: str) -> str:
+    if route == "PP" and coordinate == "psin" and nodes == "uniform":
+        return "sqrt_psin"
+    return "identity"
 
 
 def _validate_source_active_family(

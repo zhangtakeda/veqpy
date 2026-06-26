@@ -70,9 +70,10 @@ The main topology variables are:
 - `VEQ_NR`, `VEQ_NT` for radial and poloidal grid sizes;
 - `VEQ_SOURCE_ROUTE_CODE`, `VEQ_SOURCE_COORDINATE_CODE`,
   `VEQ_SOURCE_CONSTRAINT_CODE`, `VEQ_SOURCE_NODES_CODE`, and
-  `VEQ_SOURCE_ACTIVE_FAMILY_CODE` for the Python-canonicalized source
-  topology. Legal codes are validated by CMake, while route/profile ownership
-  policy is intentionally checked in the Python topology layer;
+  `VEQ_SOURCE_ACTIVE_FAMILY_CODE`, and `VEQ_SOURCE_PARAMETERIZATION_CODE` for
+  the Python-canonicalized source topology. Legal codes are validated by CMake,
+  while route/profile ownership policy is intentionally checked in the Python
+  topology layer;
 - `VEQ_H_PROFILE_COUNT`, `VEQ_V_PROFILE_COUNT`, `VEQ_KAPPA_PROFILE_COUNT`,
   `VEQ_PSIN_PROFILE_COUNT`, and `VEQ_F_PROFILE_COUNT`;
 - `VEQ_COS_PROFILE_COUNTS` and `VEQ_SIN_PROFILE_COUNTS` for Fourier-family

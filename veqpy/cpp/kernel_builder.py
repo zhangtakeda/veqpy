@@ -18,7 +18,7 @@ from typing import Any, Iterator
 
 from veqpy.model import Topology
 
-GENERATOR_VERSION = "veqpy.cpp.kernel_builder.v2"
+GENERATOR_VERSION = "veqpy.cpp.kernel_builder.v3"
 ARTIFACT_SCHEMA = "veqpy.kernel_artifact.v1"
 SOURCE_DIGEST_SCHEMA = "veqlib.source_digest.v1"
 PYTHON_SOURCE_DIGEST_SCHEMA = "veqpy.cpp_python_source_digest.v1"
@@ -299,6 +299,7 @@ def _cmake_configure_args(
         f"-DVEQ_SOURCE_CONSTRAINT_CODE={topology.source_constraint_code}",
         f"-DVEQ_SOURCE_NODES_CODE={topology.source_nodes_code}",
         f"-DVEQ_SOURCE_ACTIVE_FAMILY_CODE={topology.source_active_family_code}",
+        f"-DVEQ_SOURCE_PARAMETERIZATION_CODE={topology.source_parameterization_code}",
         f"-DVEQ_H_PROFILE_COUNT={topology.h_count}",
         f"-DVEQ_V_PROFILE_COUNT={topology.v_count}",
         f"-DVEQ_KAPPA_PROFILE_COUNT={topology.kappa_count}",
@@ -481,6 +482,7 @@ def _native_build_contract(topology: Topology, *, cxx: str) -> dict[str, Any]:
             "VEQ_SOURCE_CONSTRAINT_CODE": topology.source_constraint_code,
             "VEQ_SOURCE_NODES_CODE": topology.source_nodes_code,
             "VEQ_SOURCE_ACTIVE_FAMILY_CODE": topology.source_active_family_code,
+            "VEQ_SOURCE_PARAMETERIZATION_CODE": topology.source_parameterization_code,
             "VEQ_H_PROFILE_COUNT": topology.h_count,
             "VEQ_V_PROFILE_COUNT": topology.v_count,
             "VEQ_KAPPA_PROFILE_COUNT": topology.kappa_count,

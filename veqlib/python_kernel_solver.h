@@ -535,6 +535,7 @@ namespace veqlib_python
         source["nodes_code"]   = Topology::source_nodes_code;
         source["sample_count"] = KernelSource::sample_count;
         source["active_family_code"] = Topology::source_active_family_code;
+        source["parameterization_code"] = Topology::source_parameterization_code;
 
         nb::dict grid;
         grid["Nr"]         = KernelGrid::radial_nodes;

@@ -44,6 +44,12 @@ namespace config
             SourceActiveFamilyF    = 2,
         };
 
+        enum SourceParameterizationCode : int
+        {
+            SourceParameterizationIdentity = 0,
+            SourceParameterizationSqrtPsin = 1,
+        };
+
         static constexpr std::size_t Nr = @VEQ_NR@;
         static constexpr std::size_t Nt = @VEQ_NT@;
         static constexpr std::size_t source_sample_count = @VEQ_SOURCE_SAMPLE_COUNT@;
@@ -52,6 +58,7 @@ namespace config
         static constexpr int source_constraint_code = @VEQ_SOURCE_CONSTRAINT_CODE@;
         static constexpr int source_nodes_code = @VEQ_SOURCE_NODES_CODE@;
         static constexpr int source_active_family_code = @VEQ_SOURCE_ACTIVE_FAMILY_CODE@;
+        static constexpr int source_parameterization_code = @VEQ_SOURCE_PARAMETERIZATION_CODE@;
         static constexpr bool layout_profile_first = @VEQ_LAYOUT_PROFILE_FIRST@ != 0;
         static constexpr std::size_t enzyme_jacobian_batch_width = @VEQ_ENZYME_JACOBIAN_BATCH_WIDTH@;
 
