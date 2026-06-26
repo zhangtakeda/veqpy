@@ -383,9 +383,9 @@ namespace residual::detail
                 for (size_t i = 0; i < radial_nodes; ++i)
                 {
                     total += projection_basis(degree, i) * scratch[i] * weight_a[i] * weight_b[i] * weight_c[i] *
-                             GridType::weights[i] * scalar;
+                             GridType::weights[i];
                 }
-                out[static_cast<size_t>(Shape::coeff_index[ProfileId][degree])] = total;
+                out[static_cast<size_t>(Shape::coeff_index[ProfileId][degree])] = total * scalar;
             }
         }
 
@@ -403,9 +403,9 @@ namespace residual::detail
                 for (size_t i = 0; i < radial_nodes; ++i)
                 {
                     total += projection_basis(degree, i) * moments(ProfileId, i) * weight_a[i] * weight_b[i] *
-                             weight_c[i] * GridType::weights[i] * scalar;
+                             weight_c[i] * GridType::weights[i];
                 }
-                out[static_cast<size_t>(Shape::coeff_index[ProfileId][degree])] = total;
+                out[static_cast<size_t>(Shape::coeff_index[ProfileId][degree])] = total * scalar;
             }
         }
 
