@@ -21,6 +21,37 @@
 #include "kernel_topology.h"
 #include "tensor.h"
 
+#ifndef VEQLIB_STAGE_GIT_SHA
+#define VEQLIB_STAGE_GIT_SHA "unknown"
+#endif
+#ifndef VEQLIB_STAGE_GIT_DIRTY
+#define VEQLIB_STAGE_GIT_DIRTY 0
+#endif
+#ifndef VEQLIB_STAGE_CXX_COMPILER_ID
+#define VEQLIB_STAGE_CXX_COMPILER_ID "unknown"
+#endif
+#ifndef VEQLIB_STAGE_CXX_COMPILER_VERSION
+#define VEQLIB_STAGE_CXX_COMPILER_VERSION "unknown"
+#endif
+#ifndef VEQLIB_STAGE_BUILD_TYPE
+#define VEQLIB_STAGE_BUILD_TYPE "unknown"
+#endif
+#ifndef VEQLIB_STAGE_FP_MODE
+#define VEQLIB_STAGE_FP_MODE "unknown"
+#endif
+#ifndef VEQLIB_STAGE_NATIVE_OPTIMIZATIONS
+#define VEQLIB_STAGE_NATIVE_OPTIMIZATIONS 0
+#endif
+#ifndef VEQLIB_STAGE_THIN_LTO
+#define VEQLIB_STAGE_THIN_LTO 0
+#endif
+#ifndef VEQLIB_STAGE_ANALYSIS_BUILD
+#define VEQLIB_STAGE_ANALYSIS_BUILD 0
+#endif
+#ifndef VEQLIB_STAGE_ENZYME
+#define VEQLIB_STAGE_ENZYME 0
+#endif
+
 namespace
 {
     using Clock = std::chrono::steady_clock;
@@ -407,19 +438,36 @@ namespace
         return out;
     }
 
+    nlohmann::json build_metadata_json()
+    {
+        nlohmann::json out;
+        out["git_sha"]              = VEQLIB_STAGE_GIT_SHA;
+        out["git_dirty"]            = VEQLIB_STAGE_GIT_DIRTY != 0;
+        out["compiler_id"]          = VEQLIB_STAGE_CXX_COMPILER_ID;
+        out["compiler_version"]     = VEQLIB_STAGE_CXX_COMPILER_VERSION;
+        out["build_type"]           = VEQLIB_STAGE_BUILD_TYPE;
+        out["fp_mode"]              = VEQLIB_STAGE_FP_MODE;
+        out["native_optimizations"] = VEQLIB_STAGE_NATIVE_OPTIMIZATIONS != 0;
+        out["thin_lto"]             = VEQLIB_STAGE_THIN_LTO != 0;
+        out["analysis_build"]       = VEQLIB_STAGE_ANALYSIS_BUILD != 0;
+        out["enzyme"]               = VEQLIB_STAGE_ENZYME != 0;
+        return out;
+    }
+
     nlohmann::json run_benchmark(const Options& options)
     {
         nlohmann::json root;
-        root["schema"]    = "veqlib.stage_benchmark.v1";
-        root["unit"]      = "ns_per_call";
-        root["build"]     = "current-source";
-        root["stage_arg"] = options.stage;
-        root["repeat"]    = options.repeat;
-        root["warmup"]    = options.warmup;
-        root["inner"]     = options.inner;
-        root["ring_size"] = options.ring_size;
-        root["topology"]  = topology_json();
-        root["results"]   = nlohmann::json::array();
+        root["schema"]         = "veqlib.stage_benchmark.v1";
+        root["unit"]           = "ns_per_call";
+        root["build"]          = "current-source";
+        root["build_metadata"] = build_metadata_json();
+        root["stage_arg"]      = options.stage;
+        root["repeat"]         = options.repeat;
+        root["warmup"]         = options.warmup;
+        root["inner"]          = options.inner;
+        root["ring_size"]      = options.ring_size;
+        root["topology"]       = topology_json();
+        root["results"]        = nlohmann::json::array();
 
         if (options.stage == "all")
         {
