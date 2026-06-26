@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -294,71 +295,72 @@ namespace
 
     double run_one_sample(Stage stage, size_t inner, size_t ring_size)
     {
-        BenchState state{ring_size};
+        auto state = std::make_unique<BenchState>(ring_size);
 
         switch (stage)
         {
         case Stage::ProfilesActive:
             return time_stage_calls(inner, [&](size_t) noexcept {
-                state.op.workspace.profiles.refresh_active(state.x_span(), state.op.plan.profile_params);
-                return state.profile_sink();
+                state->op.workspace.profiles.refresh_active(state->x_span(), state->op.plan.profile_params);
+                return state->profile_sink();
             });
         case Stage::ProfilesAll:
             return time_stage_calls(inner, [&](size_t) noexcept {
-                state.op.workspace.profiles.load_fixed_from(state.op.plan.fixed_profiles);
-                state.op.workspace.profiles.refresh_active(state.x_span(), state.op.plan.profile_params);
-                return state.profile_sink();
+                state->op.workspace.profiles.load_fixed_from(state->op.plan.fixed_profiles);
+                state->op.workspace.profiles.refresh_active(state->x_span(), state->op.plan.profile_params);
+                return state->profile_sink();
             });
         case Stage::Geometry:
-            state.prepare_profiles();
+            state->prepare_profiles();
             return time_stage_calls(inner, [&](size_t) noexcept {
-                state.op.workspace.geometry.update(state.op.solve_params().a,
-                                                   state.op.solve_params().R0,
-                                                   state.op.solve_params().Z0,
-                                                   state.op.workspace.profiles);
-                return state.geometry_sink();
+                state->op.workspace.geometry.update(state->op.solve_params().a,
+                                                    state->op.solve_params().R0,
+                                                    state->op.solve_params().Z0,
+                                                    state->op.workspace.profiles);
+                return state->geometry_sink();
             });
         case Stage::SourceMaterialize:
-            state.prepare_geometry();
+            state->prepare_geometry();
             return time_stage_calls(inner, [&](size_t) noexcept {
-                state.op.workspace.source_runtime.materialize_profile_owned_psin(state.op.workspace.profiles,
-                                                                                state.op.plan.n_axis_fix);
-                return state.source_sink();
+                state->op.workspace.source_runtime.materialize_profile_owned_psin(state->op.workspace.profiles,
+                                                                                 state->op.plan.n_axis_fix);
+                return state->source_sink();
             });
         case Stage::SourceUpdate:
-            state.prepare_source_materialize();
+            state->prepare_source_materialize();
             return time_stage_calls(inner, [&](size_t) noexcept {
-                state.op.workspace.source_runtime.update_pf_psin_uniform_ip(state.op.workspace.geometry,
-                                                                           state.op.solve_params().Ip,
-                                                                           state.op.plan.n_axis_fix);
-                return state.source_sink();
+                state->op.workspace.source_runtime.update_pf_psin_uniform_ip(state->op.workspace.geometry,
+                                                                            state->op.solve_params().Ip,
+                                                                            state->op.plan.n_axis_fix);
+                return state->source_sink();
             });
         case Stage::ResidualUpdate:
-            state.prepare_source_update();
+            state->prepare_source_update();
             return time_stage_calls(inner, [&](size_t) noexcept {
-                state.op.workspace.residual.update_compact(state.op.workspace.source_runtime, state.op.workspace.geometry);
-                return state.op.workspace.residual.surface_field(0, 0, 0);
+                state->op.workspace.residual.update_compact(state->op.workspace.source_runtime,
+                                                            state->op.workspace.geometry);
+                return state->op.workspace.residual.surface_field(0, 0, 0);
             });
         case Stage::ResidualPack:
-            state.prepare_residual_update();
+            state->prepare_residual_update();
             return time_stage_calls(inner, [&](size_t) noexcept {
-                state.op.workspace.residual.pack_into(state.out,
-                                                      state.op.solve_params().a,
-                                                      state.op.solve_params().R0,
-                                                      state.op.solve_params().B0);
-                return state.residual_sink();
+                state->op.workspace.residual.pack_into(state->out,
+                                                       state->op.solve_params().a,
+                                                       state->op.solve_params().R0,
+                                                       state->op.solve_params().B0);
+                return state->residual_sink();
             });
         case Stage::Evaluate:
             return time_stage_calls(inner, [&](size_t) noexcept {
-                state.op.evaluate(state.x_span(), state.out);
-                return state.residual_sink();
+                state->op.evaluate(state->x_span(), state->out);
+                return state->residual_sink();
             });
         case Stage::EvaluateRing:
             return time_stage_calls(inner, [&](size_t i) noexcept {
-                const auto& x = state.ring[i % state.ring.size()];
-                state.op.evaluate(std::span<const double, KernelShape::x_size>{x.data(), KernelShape::x_size},
-                                  state.out);
-                return state.residual_sink();
+                const auto& x = state->ring[i % state->ring.size()];
+                state->op.evaluate(std::span<const double, KernelShape::x_size>{x.data(), KernelShape::x_size},
+                                   state->out);
+                return state->residual_sink();
             });
         }
         return 0.0;
