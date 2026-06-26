@@ -79,24 +79,42 @@ namespace residual::detail
             const double alpha1 = source_runtime.alpha1;
             const double alpha2 = source_runtime.alpha2;
 
+            constexpr size_t geometry_row_stride    = theta_rows;
+            constexpr size_t geometry_radial_stride = geometry::surface_field_count * theta_rows;
+            constexpr size_t residual_row_stride    = theta_rows;
+            constexpr size_t residual_radial_stride = residual_surface_count * theta_rows;
+
+            const double* const geometry_surface = geometry_runtime.surface_fields.aligned_data();
+            double* const       residual_surface = surface_fields.aligned_data();
+
             for (size_t i = 0; i < radial_nodes; ++i)
             {
                 const double psin_r_i   = source_runtime.profile_root_fields(source::root_psin_r, i);
                 const double psin_rr_i  = source_runtime.profile_root_fields(source::root_psin_rr, i);
                 const double FFn_psin_i = source_runtime.FFn_psin[i];
                 const double Pn_psin_i  = source_runtime.Pn_psin[i];
+                const size_t geometry_radial_base = i * geometry_radial_stride;
+                const size_t residual_radial_base = i * residual_radial_stride;
 
                 for (size_t j = 0; j < theta_rows; ++j)
                 {
-                    const double sin_tb_ij     = geometry_runtime.surface_field(geometry::surface_sin_tb, i, j);
-                    const double R_ij          = geometry_runtime.surface_field(geometry::surface_R, i, j);
-                    const double R_t_ij        = geometry_runtime.surface_field(geometry::surface_R_t, i, j);
-                    const double Z_t_ij        = geometry_runtime.surface_field(geometry::surface_Z_t, i, j);
-                    const double J_ij          = geometry_runtime.surface_field(geometry::surface_J, i, j);
-                    const double JdivR_ij      = geometry_runtime.surface_field(geometry::surface_JdivR, i, j);
-                    const double grtdivJR_t_ij = geometry_runtime.surface_field(geometry::surface_grtdivJR_t, i, j);
-                    const double gttdivJR_ij   = geometry_runtime.surface_field(geometry::surface_gttdivJR, i, j);
-                    const double gttdivJR_r_ij = geometry_runtime.surface_field(geometry::surface_gttdivJR_r, i, j);
+                    const size_t geometry_base = geometry_radial_base + j;
+                    const double sin_tb_ij =
+                        geometry_surface[geometry_base + geometry::surface_sin_tb * geometry_row_stride];
+                    const double R_ij = geometry_surface[geometry_base + geometry::surface_R * geometry_row_stride];
+                    const double R_t_ij =
+                        geometry_surface[geometry_base + geometry::surface_R_t * geometry_row_stride];
+                    const double Z_t_ij =
+                        geometry_surface[geometry_base + geometry::surface_Z_t * geometry_row_stride];
+                    const double J_ij = geometry_surface[geometry_base + geometry::surface_J * geometry_row_stride];
+                    const double JdivR_ij =
+                        geometry_surface[geometry_base + geometry::surface_JdivR * geometry_row_stride];
+                    const double grtdivJR_t_ij =
+                        geometry_surface[geometry_base + geometry::surface_grtdivJR_t * geometry_row_stride];
+                    const double gttdivJR_ij =
+                        geometry_surface[geometry_base + geometry::surface_gttdivJR * geometry_row_stride];
+                    const double gttdivJR_r_ij =
+                        geometry_surface[geometry_base + geometry::surface_gttdivJR_r * geometry_row_stride];
 
                     const double inv_J  = 1.0 / J_ij;
                     const double psin_R = -Z_t_ij * inv_J * psin_r_i;
@@ -105,12 +123,13 @@ namespace residual::detail
                     const double G1n  = JdivR_ij * (FFn_psin_i + R_ij * R_ij * Pn_psin_i);
                     const double G2n  = gttdivJR_ij * psin_rr_i + (gttdivJR_r_ij - grtdivJR_t_ij) * psin_r_i;
                     const double G_ij = alpha1 * G1n + alpha2 * G2n;
-                    surface_field(surface_G, i, j) = G_ij;
+                    const size_t residual_base = residual_radial_base + j;
+                    residual_surface[residual_base + surface_G * residual_row_stride] = G_ij;
 
-                    const double Gpsin_R                        = G_ij * psin_R;
-                    surface_field(surface_Gpsin_R, i, j)        = Gpsin_R;
-                    surface_field(surface_Gpsin_Z, i, j)        = G_ij * psin_Z;
-                    surface_field(surface_Gpsin_R_sin_tb, i, j) = Gpsin_R * sin_tb_ij;
+                    const double Gpsin_R = G_ij * psin_R;
+                    residual_surface[residual_base + surface_Gpsin_R * residual_row_stride]        = Gpsin_R;
+                    residual_surface[residual_base + surface_Gpsin_Z * residual_row_stride]        = G_ij * psin_Z;
+                    residual_surface[residual_base + surface_Gpsin_R_sin_tb * residual_row_stride] = Gpsin_R * sin_tb_ij;
                 }
             }
         }
