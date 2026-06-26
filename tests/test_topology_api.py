@@ -140,7 +140,7 @@ def test_key_mismatch_is_rejected() -> None:
 def test_mvp_gate_rejects_unsupported_route_shape() -> None:
     topology = make_topology(route="PQ")
 
-    with pytest.raises(TopologyError, match="PF, PP, and PI"):
+    with pytest.raises(TopologyError, match="PF, PP, PI, and PJ1"):
         topology.validate_supported_for_veqlib_mvp()
 
 
@@ -179,6 +179,19 @@ def test_mvp_gate_accepts_pi_route_constraint_slice() -> None:
     for constraint in ("null", "Ip", "beta", "Ip_beta"):
         for overrides in route_overrides:
             topology = make_topology(route="PI", constraint=constraint, **overrides)
+            topology.validate_supported_for_veqlib_mvp()
+
+
+def test_mvp_gate_accepts_pj1_route_constraint_slice() -> None:
+    route_overrides = (
+        {"coordinate": "psin", "nodes": "uniform", "psin_count": 6, "sample_count": 8},
+        {"coordinate": "rho", "nodes": "uniform", "psin_count": 0, "sample_count": 8},
+        {"coordinate": "rho", "nodes": "grid", "psin_count": 0, "sample_count": 32},
+        {"coordinate": "psin", "nodes": "grid", "psin_count": 0, "sample_count": 32},
+    )
+    for constraint in ("null", "Ip", "beta", "Ip_beta"):
+        for overrides in route_overrides:
+            topology = make_topology(route="PJ1", constraint=constraint, **overrides)
             topology.validate_supported_for_veqlib_mvp()
 
 
