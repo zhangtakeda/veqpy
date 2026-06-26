@@ -204,3 +204,25 @@ def test_route_matrix_grid_cases_use_grid_sample_count() -> None:
     assert topology.nodes == "grid"
     assert topology.sample_count == benchmark.TEST_GRID.Nr
     assert topology.source_active_family == "none"
+    topology.validate_supported_for_veqlib_mvp()
+
+
+def test_route_matrix_builds_native_pq_rho_topology() -> None:
+    benchmark = matrix._benchmark_module()
+    for input_kind in ("uniform", "grid"):
+        spec = benchmark.BenchmarkCaseSpec(
+            mode="PQ",
+            coordinate="rho",
+            constraint="Ip_beta",
+            input_kind=input_kind,
+        )
+
+        topology, warnings = matrix._topology_from_spec(benchmark, spec, build="fastmath")
+
+        assert warnings == ()
+        assert topology.route == "PQ"
+        assert topology.coordinate == "rho"
+        assert topology.source_active_family == "none"
+        assert topology.psin_count == 0
+        assert topology.F_count == 0
+        topology.validate_supported_for_veqlib_mvp()

@@ -44,6 +44,7 @@ namespace operators::detail
     inline constexpr int source_route_pi                  = 3;
     inline constexpr int source_route_pj1                 = 4;
     inline constexpr int source_route_pj2                 = 5;
+    inline constexpr int source_route_pq                  = 6;
     inline constexpr int source_coordinate_rho            = 1;
     inline constexpr int source_coordinate_psin           = 2;
     inline constexpr int source_nodes_uniform             = 1;
@@ -70,12 +71,13 @@ namespace operators::detail
         static_assert(Shape::M_max + 1 == GridType::harmonic_rows, "operator/profile harmonics must match");
         static_assert(SourceRouteCode == source_route_pf || SourceRouteCode == source_route_pp ||
                           SourceRouteCode == source_route_pi || SourceRouteCode == source_route_pj1 ||
-                          SourceRouteCode == source_route_pj2,
-                      "native source topology currently supports PF, PP, PI, PJ1, and PJ2 routes");
+                          SourceRouteCode == source_route_pj2 || SourceRouteCode == source_route_pq,
+                      "native source topology currently supports PF, PP, PI, PJ1, PJ2, and PQ routes");
         static_assert((SourceRouteCode == source_route_pf &&
                        (SourceConstraintCode == 0 || SourceConstraintCode == 1 || SourceConstraintCode == 2)) ||
                           ((SourceRouteCode == source_route_pp || SourceRouteCode == source_route_pi ||
-                            SourceRouteCode == source_route_pj1 || SourceRouteCode == source_route_pj2) &&
+                            SourceRouteCode == source_route_pj1 || SourceRouteCode == source_route_pj2 ||
+                            SourceRouteCode == source_route_pq) &&
                            (SourceConstraintCode == 0 || SourceConstraintCode == 1 || SourceConstraintCode == 2 ||
                             SourceConstraintCode == 3)),
                       "source topology constraint is not implemented for this native route");
@@ -106,6 +108,8 @@ namespace operators::detail
                           !(SourceCoordinateCode == source_coordinate_psin &&
                             SourceNodesCode == source_nodes_uniform),
                       "PJ2/psin/uniform fixed-point source topology is not implemented natively");
+        static_assert(SourceRouteCode != source_route_pq || SourceCoordinateCode == source_coordinate_rho,
+                      "PQ/psin strict-q source topology is not implemented natively");
         static_assert(SourceActiveFamilyCode != source_active_F || SourceRouteCode == source_route_pj2,
                       "active F ownership is only implemented for PJ2 source topology");
         static_assert(SourceRouteCode != source_route_pj2 || SourceActiveFamilyCode == source_active_F,
@@ -261,7 +265,7 @@ namespace operators::detail
                         solve_params.B0,
                         plan.n_axis_fix);
             }
-            else
+            else if constexpr (SourceRouteCode == source_route_pj2)
             {
                 if constexpr (SourceCoordinateCode == source_coordinate_rho)
                     workspace.source_runtime.template update_pj2_rho<SourceConstraintCode>(
@@ -279,6 +283,16 @@ namespace operators::detail
                         solve_params.beta,
                         solve_params.B0,
                         plan.n_axis_fix);
+            }
+            else
+            {
+                workspace.source_runtime.template update_pq_rho<SourceConstraintCode>(
+                    workspace.geometry,
+                    solve_params.R0,
+                    solve_params.Ip,
+                    solve_params.beta,
+                    solve_params.B0,
+                    plan.n_axis_fix);
             }
 
             if constexpr (SourceActiveFamilyCode == source_active_none || SourceActiveFamilyCode == source_active_F)
