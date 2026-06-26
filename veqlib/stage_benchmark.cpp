@@ -20,6 +20,7 @@
 #include "kernel_case.h"
 #include "kernel_runtime.h"
 #include "kernel_topology.h"
+#include "math.h"
 #include "tensor.h"
 
 #ifndef VEQLIB_STAGE_GIT_SHA
@@ -353,7 +354,7 @@ namespace
             {
                 double sin_tb = 0.0;
                 double cos_tb = 0.0;
-                geometry::detail::reduced_taylor_sincos(tb_values[j], sin_tb, cos_tb);
+                math::relaxed_sincos(tb_values[j], sin_tb, cos_tb);
                 sink += sin_tb + cos_tb + tb_r_values[j] + tb_t_values[j] + tb_rr_values[j] + tb_rt_values[j] +
                         tb_tt_values[j];
             }
@@ -401,7 +402,7 @@ namespace
             fill_geometry_phase_row(
                 i, runtime_profiles, tb_values, tb_r_values, tb_t_values, tb_rr_values, tb_rt_values, tb_tt_values);
             for (size_t j = 0; j < ProfileGrid::theta_rows; ++j)
-                geometry::detail::reduced_taylor_sincos(tb_values[j], sin_tb_values[j], cos_tb_values[j]);
+                math::relaxed_sincos(tb_values[j], sin_tb_values[j], cos_tb_values[j]);
 
             for (size_t j = 0; j < ProfileGrid::theta_rows; ++j)
             {
