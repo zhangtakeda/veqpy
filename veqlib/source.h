@@ -395,9 +395,12 @@ namespace source::detail
                 const double rho1     = GridType::nodes[anchor1];
                 const double x0       = rho0 * rho0;
                 const double x1       = rho1 * rho1;
-                const double slope0   = source_target_root_fields(root_psin_r, anchor0) / rho0;
-                const double slope1   = source_target_root_fields(root_psin_r, anchor1) / rho1;
-                const double gradient = (slope1 - slope0) / (x1 - x0);
+                const double inv_rho0 = 1.0 / rho0;
+                const double inv_rho1 = 1.0 / rho1;
+                const double inv_dx   = 1.0 / (x1 - x0);
+                const double slope0   = source_target_root_fields(root_psin_r, anchor0) * inv_rho0;
+                const double slope1   = source_target_root_fields(root_psin_r, anchor1) * inv_rho1;
+                const double gradient = (slope1 - slope0) * inv_dx;
 
                 for (size_t i = 0; i < n_axis_fix; ++i)
                 {
@@ -425,8 +428,9 @@ namespace source::detail
 
         constexpr void store_psin_coordinate(const RadialVector& integrated, double offset, double scale) noexcept
         {
+            const double inv_scale = 1.0 / scale;
             for (size_t i = 0; i < radial_nodes; ++i)
-                source_target_root_fields(root_psin, i) = (integrated[i] - offset) / scale;
+                source_target_root_fields(root_psin, i) = (integrated[i] - offset) * inv_scale;
             source_target_root_fields(root_psin, 0)                = 0.0;
             source_target_root_fields(root_psin, radial_nodes - 1) = 1.0;
         }
@@ -560,7 +564,8 @@ namespace source::detail
             const double x1       = GridType::nodes[anchor1] * GridType::nodes[anchor1];
             const double value0   = FFn_psin[anchor0];
             const double value1   = FFn_psin[anchor1];
-            const double gradient = (value1 - value0) / (x1 - x0);
+            const double inv_dx   = 1.0 / (x1 - x0);
+            const double gradient = (value1 - value0) * inv_dx;
 
             for (size_t i = 0; i < n_axis_fix; ++i)
             {
