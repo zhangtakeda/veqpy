@@ -88,6 +88,10 @@ namespace geometry::detail
 
             (void)Z0;
 
+            double* const surface_data = surface_fields.aligned_data();
+            constexpr size_t surface_row_stride    = theta_rows;
+            constexpr size_t surface_radial_stride = surface_field_count * theta_rows;
+
             for (size_t i = 0; i < radial_nodes; ++i)
             {
                 const double rho_i  = GridType::nodes[i];
@@ -105,6 +109,18 @@ namespace geometry::detail
                 double sum_gttdivJR   = 0.0;
                 double sum_gttdivJR_r = 0.0;
                 double sum_JdivR      = 0.0;
+                double* const surface_radial_base = surface_data + i * surface_radial_stride;
+                double* const surface_sin_tb_row = surface_radial_base + surface_sin_tb * surface_row_stride;
+                double* const surface_R_row = surface_radial_base + surface_R * surface_row_stride;
+                double* const surface_R_t_row = surface_radial_base + surface_R_t * surface_row_stride;
+                double* const surface_Z_t_row = surface_radial_base + surface_Z_t * surface_row_stride;
+                double* const surface_inv_J_row = surface_radial_base + surface_inv_J * surface_row_stride;
+                double* const surface_JdivR_row = surface_radial_base + surface_JdivR * surface_row_stride;
+                double* const surface_grtdivJR_t_row =
+                    surface_radial_base + surface_grtdivJR_t * surface_row_stride;
+                double* const surface_gttdivJR_row = surface_radial_base + surface_gttdivJR * surface_row_stride;
+                double* const surface_gttdivJR_r_row =
+                    surface_radial_base + surface_gttdivJR_r * surface_row_stride;
 
                 alignas(tensor::detail::simd_alignment) std::array<double, theta_rows> tb_values;
                 alignas(tensor::detail::simd_alignment) std::array<double, theta_rows> tb_r_values;
@@ -235,15 +251,15 @@ namespace geometry::detail
                     const double gttdivJR_ij   = gtt_ij * inv_JR;
                     const double gttdivJR_r_ij = gtt_r_ij * inv_JR - gtt_ij * JR_r_ij * inv_JR * inv_JR;
 
-                    surface_field(surface_sin_tb, i, j)     = sin_tb_ij;
-                    surface_field(surface_R, i, j)          = R_ij;
-                    surface_field(surface_R_t, i, j)        = R_t_ij;
-                    surface_field(surface_Z_t, i, j)        = Z_t_ij;
-                    surface_field(surface_inv_J, i, j)      = inv_J_ij;
-                    surface_field(surface_JdivR, i, j)      = JdivR_ij;
-                    surface_field(surface_grtdivJR_t, i, j) = grtdivJR_t_ij;
-                    surface_field(surface_gttdivJR, i, j)   = gttdivJR_ij;
-                    surface_field(surface_gttdivJR_r, i, j) = gttdivJR_r_ij;
+                    surface_sin_tb_row[j]     = sin_tb_ij;
+                    surface_R_row[j]          = R_ij;
+                    surface_R_t_row[j]        = R_t_ij;
+                    surface_Z_t_row[j]        = Z_t_ij;
+                    surface_inv_J_row[j]      = inv_J_ij;
+                    surface_JdivR_row[j]      = JdivR_ij;
+                    surface_grtdivJR_t_row[j] = grtdivJR_t_ij;
+                    surface_gttdivJR_row[j]   = gttdivJR_ij;
+                    surface_gttdivJR_r_row[j] = gttdivJR_r_ij;
 
                     sum_J += J_ij;
                     sum_JR += JR_ij;
