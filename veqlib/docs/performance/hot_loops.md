@@ -36,13 +36,21 @@ Use `clang-release`, `clang-release-fma`, or a paired release build for timing.
 
 ```bash
 cmake --preset clang-release
-cmake --build --preset clang-release --target veqlib_ext
+cmake --build --preset clang-release --target veqlib_ext veqlib_stage_benchmark
+taskset -c <core> build/release/veqlib_stage_benchmark \
+  --stage all \
+  --repeat 15 \
+  --warmup 5 \
+  --inner 10000 \
+  --ring-size 16 \
+  --output /tmp/veqlib-stage-baseline.json
 ../.venv/bin/python benchmark_pf_psin_uniform_compare.py   --module-dir build/release   --repeat 30   --warmup 5   --no-write
 ```
 
-The old executable-side stage benchmark has been retired; retained hot-loop
-evidence should use production nanobind/shared-library timings or explicitly
-archived experiment artifacts.
+The executable-side stage benchmark is benchmark-only and must be rebuilt from
+current source.  Use it for stage partitioning, then confirm retained changes
+with production nanobind/shared-library timings or explicitly archived
+experiment artifacts.
 
 Pinning to one core with `taskset -c <core>` is recommended for retained timing
 artifacts when the environment supports it.
