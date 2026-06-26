@@ -87,6 +87,27 @@ def test_route_matrix_tracks_pp_psin_parameterization() -> None:
     topology.validate_supported_for_veqlib_mvp()
 
 
+def test_route_matrix_builds_native_pi_profile_owned_topology() -> None:
+    benchmark = matrix._benchmark_module()
+    spec = benchmark.BenchmarkCaseSpec(
+        mode="PI",
+        coordinate="psin",
+        constraint="Ip_beta",
+        input_kind="uniform",
+    )
+
+    topology, warnings = matrix._topology_from_spec(benchmark, spec, build="fastmath")
+
+    assert warnings == ()
+    assert topology.route == "PI"
+    assert topology.source_active_family == "psin"
+    assert topology.psin_count > 0
+    assert topology.source_parameterization == "identity"
+    assert topology.source_uses_ip_constraint is True
+    assert topology.source_uses_beta_constraint is True
+    topology.validate_supported_for_veqlib_mvp()
+
+
 def test_route_matrix_tracks_pj2_active_f_ownership() -> None:
     benchmark = matrix._benchmark_module()
     spec = benchmark.BenchmarkCaseSpec(

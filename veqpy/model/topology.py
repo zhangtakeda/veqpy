@@ -56,6 +56,10 @@ _VEQLIB_MVP_ROUTE_CONSTRAINTS = {
     ("PP", "rho", "grid"): frozenset({"null", "Ip", "beta", "Ip_beta"}),
     ("PP", "psin", "uniform"): frozenset({"null", "Ip", "beta", "Ip_beta"}),
     ("PP", "psin", "grid"): frozenset({"null", "Ip", "beta", "Ip_beta"}),
+    ("PI", "rho", "uniform"): frozenset({"null", "Ip", "beta", "Ip_beta"}),
+    ("PI", "rho", "grid"): frozenset({"null", "Ip", "beta", "Ip_beta"}),
+    ("PI", "psin", "uniform"): frozenset({"null", "Ip", "beta", "Ip_beta"}),
+    ("PI", "psin", "grid"): frozenset({"null", "Ip", "beta", "Ip_beta"}),
 }
 _VEQLIB_MVP_ROUTE_KEYS = frozenset(_VEQLIB_MVP_ROUTE_CONSTRAINTS)
 _VEQLIB_MVP_ROUTES = frozenset(
@@ -487,7 +491,7 @@ class Topology:
             )
         if mismatches:
             raise TopologyError(
-                "VEQlib MVP backend currently supports PF and PP rho/psin "
+                "VEQlib MVP backend currently supports PF, PP, and PI rho/psin "
                 "uniform/grid source topology slices only; got "
                 + ", ".join(mismatches)
             )

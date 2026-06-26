@@ -41,6 +41,7 @@ namespace operators::detail
 
     inline constexpr int source_route_pf                  = 1;
     inline constexpr int source_route_pp                  = 2;
+    inline constexpr int source_route_pi                  = 3;
     inline constexpr int source_coordinate_rho            = 1;
     inline constexpr int source_coordinate_psin           = 2;
     inline constexpr int source_nodes_uniform             = 1;
@@ -64,13 +65,14 @@ namespace operators::detail
         static_assert(Shape::L_max == GridType::basis_rows, "operator/profile basis rows must match");
         static_assert(Shape::K_max == GridType::rho_power_rows, "operator/profile rho rows must match");
         static_assert(Shape::M_max + 1 == GridType::harmonic_rows, "operator/profile harmonics must match");
-        static_assert(SourceRouteCode == source_route_pf || SourceRouteCode == source_route_pp,
-                      "native source topology currently supports PF and PP routes");
+        static_assert(SourceRouteCode == source_route_pf || SourceRouteCode == source_route_pp ||
+                          SourceRouteCode == source_route_pi,
+                      "native source topology currently supports PF, PP, and PI routes");
         static_assert(!Shape::slot_for_profile_id(Shape::F_profile_id).optimized(),
-                      "native PF/PP source topology does not accept an active F profile");
+                      "native PF/PP/PI source topology does not accept an active F profile");
         static_assert((SourceRouteCode == source_route_pf &&
                        (SourceConstraintCode == 0 || SourceConstraintCode == 1 || SourceConstraintCode == 2)) ||
-                          (SourceRouteCode == source_route_pp &&
+                          ((SourceRouteCode == source_route_pp || SourceRouteCode == source_route_pi) &&
                            (SourceConstraintCode == 0 || SourceConstraintCode == 1 || SourceConstraintCode == 2 ||
                             SourceConstraintCode == 3)),
                       "source topology constraint is not implemented for this native route");
@@ -188,7 +190,7 @@ namespace operators::detail
                         solve_params.B0,
                         plan.n_axis_fix);
             }
-            else
+            else if constexpr (SourceRouteCode == source_route_pp)
             {
                 if constexpr (SourceCoordinateCode == source_coordinate_rho)
                     workspace.source_runtime.template update_pp_rho<SourceConstraintCode>(
@@ -199,6 +201,23 @@ namespace operators::detail
                         plan.n_axis_fix);
                 else
                     workspace.source_runtime.template update_pp_psin<SourceConstraintCode>(
+                        workspace.geometry,
+                        solve_params.Ip,
+                        solve_params.beta,
+                        solve_params.B0,
+                        plan.n_axis_fix);
+            }
+            else
+            {
+                if constexpr (SourceCoordinateCode == source_coordinate_rho)
+                    workspace.source_runtime.template update_pi_rho<SourceConstraintCode>(
+                        workspace.geometry,
+                        solve_params.Ip,
+                        solve_params.beta,
+                        solve_params.B0,
+                        plan.n_axis_fix);
+                else
+                    workspace.source_runtime.template update_pi_psin<SourceConstraintCode>(
                         workspace.geometry,
                         solve_params.Ip,
                         solve_params.beta,
