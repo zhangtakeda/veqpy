@@ -429,10 +429,17 @@ namespace source::detail
         constexpr void store_psin_coordinate(const RadialVector& integrated, double offset, double scale) noexcept
         {
             const double inv_scale = 1.0 / scale;
-            for (size_t i = 0; i < radial_nodes; ++i)
-                source_target_root_fields(root_psin, i) = (integrated[i] - offset) * inv_scale;
-            source_target_root_fields(root_psin, 0)                = 0.0;
-            source_target_root_fields(root_psin, radial_nodes - 1) = 1.0;
+            if constexpr (radial_nodes == 1)
+            {
+                source_target_root_fields(root_psin, 0) = 1.0;
+            }
+            else
+            {
+                source_target_root_fields(root_psin, 0) = 0.0;
+                for (size_t i = 1; i + 1 < radial_nodes; ++i)
+                    source_target_root_fields(root_psin, i) = (integrated[i] - offset) * inv_scale;
+                source_target_root_fields(root_psin, radial_nodes - 1) = 1.0;
+            }
         }
 
         static constexpr double clip_unit(double value) noexcept
