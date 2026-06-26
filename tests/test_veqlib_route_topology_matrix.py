@@ -226,3 +226,28 @@ def test_route_matrix_builds_native_pq_rho_topology() -> None:
         assert topology.psin_count == 0
         assert topology.F_count == 0
         topology.validate_supported_for_veqlib_mvp()
+
+
+def test_route_matrix_builds_native_pq_psin_topology() -> None:
+    benchmark = matrix._benchmark_module()
+    expected_active_family = {"uniform": "psin", "grid": "none"}
+    for input_kind in ("uniform", "grid"):
+        spec = benchmark.BenchmarkCaseSpec(
+            mode="PQ",
+            coordinate="psin",
+            constraint="Ip_beta",
+            input_kind=input_kind,
+        )
+
+        topology, warnings = matrix._topology_from_spec(benchmark, spec, build="fastmath")
+
+        assert warnings == ()
+        assert topology.route == "PQ"
+        assert topology.coordinate == "psin"
+        assert topology.source_active_family == expected_active_family[input_kind]
+        assert topology.F_count == 0
+        if input_kind == "uniform":
+            assert topology.psin_count > 0
+        else:
+            assert topology.psin_count == 0
+        topology.validate_supported_for_veqlib_mvp()

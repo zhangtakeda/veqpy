@@ -108,8 +108,6 @@ namespace operators::detail
                           !(SourceCoordinateCode == source_coordinate_psin &&
                             SourceNodesCode == source_nodes_uniform),
                       "PJ2/psin/uniform fixed-point source topology is not implemented natively");
-        static_assert(SourceRouteCode != source_route_pq || SourceCoordinateCode == source_coordinate_rho,
-                      "PQ/psin strict-q source topology is not implemented natively");
         static_assert(SourceActiveFamilyCode != source_active_F || SourceRouteCode == source_route_pj2,
                       "active F ownership is only implemented for PJ2 source topology");
         static_assert(SourceRouteCode != source_route_pj2 || SourceActiveFamilyCode == source_active_F,
@@ -286,13 +284,22 @@ namespace operators::detail
             }
             else
             {
-                workspace.source_runtime.template update_pq_rho<SourceConstraintCode>(
-                    workspace.geometry,
-                    solve_params.R0,
-                    solve_params.Ip,
-                    solve_params.beta,
-                    solve_params.B0,
-                    plan.n_axis_fix);
+                if constexpr (SourceCoordinateCode == source_coordinate_rho)
+                    workspace.source_runtime.template update_pq_rho<SourceConstraintCode>(
+                        workspace.geometry,
+                        solve_params.R0,
+                        solve_params.Ip,
+                        solve_params.beta,
+                        solve_params.B0,
+                        plan.n_axis_fix);
+                else
+                    workspace.source_runtime.template update_pq_psin<SourceConstraintCode>(
+                        workspace.geometry,
+                        solve_params.R0,
+                        solve_params.Ip,
+                        solve_params.beta,
+                        solve_params.B0,
+                        plan.n_axis_fix);
             }
 
             if constexpr (SourceActiveFamilyCode == source_active_none || SourceActiveFamilyCode == source_active_F)

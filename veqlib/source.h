@@ -7,6 +7,7 @@
 #include "tensor_kernels.h"
 #include "tensor_layout.h"
 #include <cstddef>
+#include <limits>
 #include <span>
 
 namespace source::detail
@@ -494,6 +495,17 @@ namespace source::detail
                                      size_t                 n_axis_fix) noexcept
         {
             update_pq_rho_impl<SourceConstraintCode>(geometry, R0, Ip, beta, B0, n_axis_fix);
+        }
+
+        template <int SourceConstraintCode, typename GeometryRuntime>
+        constexpr void update_pq_psin(const GeometryRuntime& geometry,
+                                      double                 R0,
+                                      double                 Ip,
+                                      double                 beta,
+                                      double                 B0,
+                                      size_t                 n_axis_fix) noexcept
+        {
+            update_pq_psin_impl<SourceConstraintCode>(geometry, R0, Ip, beta, B0, n_axis_fix);
         }
 
         template <size_t Row>
@@ -1467,6 +1479,143 @@ namespace source::detail
                 solution[i] = solved(i, 0);
         }
 
+        template <typename Differentiator>
+        static constexpr void solve_pq_linear_system_two_rhs(RadialVector&          solution0,
+                                                             RadialVector&          solution1,
+                                                             const Differentiator&  differentiator,
+                                                             const RadialVector&    coeff_d,
+                                                             const RadialVector&    coeff_y,
+                                                             const RadialVector&    forcing0,
+                                                             const RadialVector&    forcing1,
+                                                             double                 edge_value0,
+                                                             double                 edge_value1) noexcept
+        {
+            Matrix<double, radial_nodes, radial_nodes> matrix{uninitialized};
+            Matrix<double, radial_nodes, 2>            rhs{uninitialized};
+
+            for (size_t i = 0; i < radial_nodes; ++i)
+            {
+                for (size_t j = 0; j < radial_nodes; ++j)
+                    matrix(i, j) = coeff_d[i] * differentiator(i, j);
+                matrix(i, i) += coeff_y[i];
+                rhs(i, 0) = forcing0[i];
+                rhs(i, 1) = forcing1[i];
+            }
+
+            constexpr size_t edge = radial_nodes - 1;
+            for (size_t j = 0; j < radial_nodes; ++j)
+                matrix(edge, j) = 0.0;
+            matrix(edge, edge) = 1.0;
+            rhs(edge, 0)       = edge_value0;
+            rhs(edge, 1)       = edge_value1;
+
+            const auto solved = linalg::solve<linalg::Doolittle>(matrix, rhs);
+            for (size_t i = 0; i < radial_nodes; ++i)
+            {
+                solution0[i] = solved(i, 0);
+                solution1[i] = solved(i, 1);
+            }
+        }
+
+        template <typename GeometryRuntime>
+        constexpr double pq_psin_beta_residual(const GeometryRuntime& geometry,
+                                               double                 trial_alpha1,
+                                               const RadialVector&    F0,
+                                               const RadialVector&    F1,
+                                               const RadialVector&    q_prof,
+                                               RadialVector&          trial_psin_r,
+                                               RadialVector&          trial_Pn_r,
+                                               RadialVector&          trial_Pn,
+                                               double                 beta_target) const noexcept
+        {
+            double trial_alpha2 = 0.0;
+            for (size_t i = 0; i < radial_nodes; ++i)
+            {
+                const double F_value = F0[i] + trial_alpha1 * F1[i];
+                const double psi_r =
+                    F_value * geometry.radial_field(geometry::radial_Ln_r, i) / q_prof[i];
+                if (!math::is_finite(psi_r))
+                    return std::numeric_limits<double>::quiet_NaN();
+                trial_psin_r[i] = psi_r;
+                trial_alpha2 += psi_r * GridType::weights[i];
+            }
+            if (!math::is_finite(trial_alpha2) || math::abs(trial_alpha2) <= 1.0e-14)
+                return std::numeric_limits<double>::quiet_NaN();
+            const double inv_alpha2 = 1.0 / trial_alpha2;
+            for (size_t i = 0; i < radial_nodes; ++i)
+            {
+                trial_psin_r[i] *= inv_alpha2;
+                if (!math::is_finite(trial_psin_r[i]) || trial_psin_r[i] <= 0.0)
+                    return std::numeric_limits<double>::quiet_NaN();
+                trial_Pn_r[i] = materialized_heat_input[i] * trial_psin_r[i];
+            }
+            compute_Pn_out(trial_Pn, trial_Pn_r);
+            const double beta_den = weighted_dot(trial_Pn, geometry, geometry::radial_V_r);
+            if (!math::is_finite(beta_den))
+                return std::numeric_limits<double>::quiet_NaN();
+            return trial_alpha1 * trial_alpha2 * beta_den - beta_target;
+        }
+
+        template <typename GeometryRuntime>
+        constexpr double solve_pq_psin_beta_alpha1(const GeometryRuntime& geometry,
+                                                   const RadialVector&    F0,
+                                                   const RadialVector&    F1,
+                                                   const RadialVector&    q_prof,
+                                                   double                 beta_target) const noexcept
+        {
+            RadialVector trial_psin_r{uninitialized};
+            RadialVector trial_Pn_r{uninitialized};
+            RadialVector trial_Pn{uninitialized};
+
+            constexpr double base = 0.0;
+            const double     r_base =
+                pq_psin_beta_residual(geometry, base, F0, F1, q_prof, trial_psin_r, trial_Pn_r, trial_Pn, beta_target);
+
+            for (size_t direction_index = 0; direction_index < 2; ++direction_index)
+            {
+                const double direction = direction_index == 0 ? 1.0 : -1.0;
+                double upper  = direction;
+                double r_upper = pq_psin_beta_residual(
+                    geometry, upper, F0, F1, q_prof, trial_psin_r, trial_Pn_r, trial_Pn, beta_target);
+                for (size_t bracket_iter = 0; bracket_iter < 80; ++bracket_iter)
+                {
+                    if (math::is_finite(r_base) && math::is_finite(r_upper) && r_base * r_upper <= 0.0)
+                    {
+                        double lower   = base;
+                        double r_lower = r_base;
+                        for (size_t iter = 0; iter < 80; ++iter)
+                        {
+                            const double mid = 0.5 * (lower + upper);
+                            const double r_mid = pq_psin_beta_residual(
+                                geometry, mid, F0, F1, q_prof, trial_psin_r, trial_Pn_r, trial_Pn, beta_target);
+                            if (!math::is_finite(r_mid))
+                            {
+                                upper = mid;
+                                continue;
+                            }
+                            if (math::abs(r_mid) <= 1.0e-12 * (1.0 + math::abs(beta_target)))
+                                return mid;
+                            if (r_lower * r_mid <= 0.0)
+                            {
+                                upper  = mid;
+                                r_upper = r_mid;
+                            }
+                            else
+                            {
+                                lower   = mid;
+                                r_lower = r_mid;
+                            }
+                        }
+                        return 0.5 * (lower + upper);
+                    }
+                    upper *= 2.0;
+                    r_upper = pq_psin_beta_residual(
+                        geometry, upper, F0, F1, q_prof, trial_psin_r, trial_Pn_r, trial_Pn, beta_target);
+                }
+            }
+            return std::numeric_limits<double>::quiet_NaN();
+        }
+
         template <int SourceConstraintCode, typename GeometryRuntime>
         constexpr void update_pq_rho_impl(const GeometryRuntime& geometry,
                                           double                 R0,
@@ -1589,6 +1738,148 @@ namespace source::detail
             const double ffn_scale = 0.5 / (alpha1 * alpha2);
             for (size_t i = 0; i < radial_nodes; ++i)
                 FFn_psin[i] = Y_r[i] * ffn_scale / psin_r[i];
+            regularize_ffn_psin(n_axis_fix);
+        }
+
+        template <int SourceConstraintCode, typename GeometryRuntime>
+        constexpr void update_pq_psin_impl(const GeometryRuntime& geometry,
+                                           double                 R0,
+                                           double                 Ip,
+                                           double                 beta,
+                                           double                 B0,
+                                           size_t                 n_axis_fix) noexcept
+        {
+            static_assert(GeometryRuntime::radial_nodes == radial_nodes, "source/geometry radial grids must match");
+            static_assert(SourceConstraintCode == 0 || SourceConstraintCode == 1 || SourceConstraintCode == 2 ||
+                              SourceConstraintCode == 3,
+                          "PQ/psin source supports null, Ip, beta, or Ip_beta constraints");
+
+            const double edge_F = R0 * B0;
+
+            RadialVector q_prof{uninitialized};
+            if constexpr (SourceConstraintCode == 1 || SourceConstraintCode == 3)
+            {
+                constexpr double two_pi = 2.0 * geometry::detail::pi;
+                const double     edge_scale =
+                    two_pi * edge_F / Ip *
+                    geometry.radial_field(geometry::radial_Kn, radial_nodes - 1) *
+                    geometry.radial_field(geometry::radial_Ln_r, radial_nodes - 1) /
+                    materialized_current_input[radial_nodes - 1];
+                for (size_t i = 0; i < radial_nodes; ++i)
+                    q_prof[i] = materialized_current_input[i] * edge_scale;
+            }
+            else
+            {
+                for (size_t i = 0; i < radial_nodes; ++i)
+                    q_prof[i] = materialized_current_input[i];
+                (void)Ip;
+            }
+
+            RadialVector W{uninitialized};
+            for (size_t i = 0; i < radial_nodes; ++i)
+            {
+                W[i] = geometry.radial_field(geometry::radial_Kn, i) *
+                       geometry.radial_field(geometry::radial_Ln_r, i) / q_prof[i];
+            }
+
+            RadialVector W_r{uninitialized};
+            matvec_into(W_r, GridType::differentiator, W);
+
+            RadialVector coeff_d{uninitialized};
+            RadialVector coeff_y{uninitialized};
+            for (size_t i = 0; i < radial_nodes; ++i)
+            {
+                coeff_d[i] = W[i] + q_prof[i];
+                coeff_y[i] = W_r[i];
+            }
+
+            constexpr double pressure_factor =
+                1.0 / (4.0 * geometry::detail::pi * geometry::detail::pi);
+            RadialVector F_solved{uninitialized};
+            if constexpr (SourceConstraintCode == 2 || SourceConstraintCode == 3)
+            {
+                RadialVector F0_rhs{uninitialized};
+                RadialVector F1_rhs{uninitialized};
+                RadialVector F1{uninitialized};
+                for (size_t i = 0; i < radial_nodes; ++i)
+                {
+                    F0_rhs[i] = 0.0;
+                    F1_rhs[i] = -pressure_factor *
+                                geometry.radial_field(geometry::radial_V_r, i) *
+                                materialized_heat_input[i];
+                }
+                solve_pq_linear_system_two_rhs(
+                    F_solved,
+                    F1,
+                    GridType::differentiator,
+                    coeff_d,
+                    coeff_y,
+                    F0_rhs,
+                    F1_rhs,
+                    edge_F,
+                    0.0);
+
+                const double beta_target =
+                    0.5 * beta * B0 * B0 * dot_radial_moment(geometry, geometry::radial_V_r);
+                alpha1 = solve_pq_psin_beta_alpha1(geometry, F_solved, F1, q_prof, beta_target);
+                for (size_t i = 0; i < radial_nodes; ++i)
+                {
+                    F_solved[i] += alpha1 * F1[i];
+                    Pn_psin[i] = materialized_heat_input[i];
+                }
+            }
+            else
+            {
+                RadialVector rhs{uninitialized};
+                for (size_t i = 0; i < radial_nodes; ++i)
+                {
+                    rhs[i] = -pressure_factor *
+                             geometry.radial_field(geometry::radial_V_r, i) *
+                             materialized_heat_input[i];
+                }
+                solve_pq_linear_system(
+                    F_solved, GridType::differentiator, coeff_d, coeff_y, rhs, edge_F);
+                (void)beta;
+            }
+
+            RadialVector psin_r{uninitialized};
+            for (size_t i = 0; i < radial_nodes; ++i)
+            {
+                psin_r[i] = F_solved[i] * geometry.radial_field(geometry::radial_Ln_r, i) / q_prof[i];
+            }
+
+            alpha2 = dot(psin_r, GridType::weights);
+            const double inv_alpha2 = 1.0 / alpha2;
+            for (size_t i = 0; i < radial_nodes; ++i)
+                psin_r[i] *= inv_alpha2;
+            store_root_row<root_psin_r>(psin_r);
+            regularize_psin_r(n_axis_fix);
+            psin_r = const_root_row<root_psin_r>();
+
+            RadialVector psin_rr{uninitialized};
+            RadialVector integrated{uninitialized};
+            radial_grid_multi_matvec_into<GridType>(psin_rr, integrated, psin_r);
+            store_root_row<root_psin_rr>(psin_rr);
+            const double offset = integrated[0];
+            const double scale  = integrated[radial_nodes - 1] - offset;
+            store_psin_coordinate(integrated, offset, scale);
+
+            if constexpr (SourceConstraintCode == 0 || SourceConstraintCode == 1)
+            {
+                alpha1 = -weighted_dot(materialized_heat_input, psin_r, GridType::weights);
+                const double inv_alpha1 = 1.0 / alpha1;
+                for (size_t i = 0; i < radial_nodes; ++i)
+                    Pn_psin[i] = materialized_heat_input[i] * inv_alpha1;
+            }
+
+            RadialVector F_r{uninitialized};
+            matvec_into(F_r, GridType::differentiator, F_solved);
+            const double inv_alpha1 = 1.0 / alpha1;
+            for (size_t i = 0; i < radial_nodes; ++i)
+            {
+                FFn_psin[i] = q_prof[i] * F_r[i] /
+                              geometry.radial_field(geometry::radial_Ln_r, i) * inv_alpha1;
+            }
             regularize_ffn_psin(n_axis_fix);
         }
 
