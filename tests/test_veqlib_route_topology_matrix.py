@@ -45,6 +45,28 @@ def test_route_matrix_builds_mvp_topology_from_benchmark_case() -> None:
     topology.validate_supported_for_veqlib_mvp()
 
 
+def test_route_matrix_builds_source_owned_pf_grid_topology() -> None:
+    benchmark = matrix._benchmark_module()
+    spec = benchmark.BenchmarkCaseSpec(
+        mode="PF",
+        coordinate="rho",
+        constraint="beta",
+        input_kind="grid",
+    )
+
+    topology, warnings = matrix._topology_from_spec(benchmark, spec, build="fastmath")
+
+    assert warnings == ()
+    assert topology.route == "PF"
+    assert topology.coordinate == "rho"
+    assert topology.nodes == "grid"
+    assert topology.constraint == "beta"
+    assert topology.psin_count == 0
+    assert topology.source_active_family == "none"
+    assert topology.sample_count == benchmark.TEST_GRID.Nr
+    topology.validate_supported_for_veqlib_mvp()
+
+
 def test_route_matrix_tracks_pp_psin_parameterization() -> None:
     benchmark = matrix._benchmark_module()
     spec = benchmark.BenchmarkCaseSpec(

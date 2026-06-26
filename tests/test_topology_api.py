@@ -140,23 +140,27 @@ def test_key_mismatch_is_rejected() -> None:
 def test_mvp_gate_rejects_unsupported_route_shape() -> None:
     topology = make_topology(route="PQ")
 
-    with pytest.raises(TopologyError, match="PF/psin/uniform with null/Ip/beta"):
+    with pytest.raises(TopologyError, match="PF rho/psin uniform/grid"):
         topology.validate_supported_for_veqlib_mvp()
 
 
-def test_mvp_gate_accepts_pf_psin_uniform_constraint_slice() -> None:
+def test_mvp_gate_accepts_pf_route_constraint_slice() -> None:
+    route_overrides = (
+        {"coordinate": "psin", "nodes": "uniform", "psin_count": 6, "sample_count": 8},
+        {"coordinate": "rho", "nodes": "uniform", "psin_count": 0, "sample_count": 8},
+        {"coordinate": "rho", "nodes": "grid", "psin_count": 0, "sample_count": 32},
+        {"coordinate": "psin", "nodes": "grid", "psin_count": 0, "sample_count": 32},
+    )
     for constraint in ("null", "Ip", "beta"):
-        make_topology(constraint=constraint).validate_supported_for_veqlib_mvp()
+        for overrides in route_overrides:
+            make_topology(constraint=constraint, **overrides).validate_supported_for_veqlib_mvp()
 
 
-def test_mvp_gate_still_rejects_pf_rho_and_grid_sources() -> None:
-    for overrides in (
-        {"coordinate": "rho", "psin_count": 0},
-        {"nodes": "grid", "sample_count": 32, "psin_count": 0},
-    ):
-        topology = make_topology(**overrides)
-        with pytest.raises(TopologyError, match="PF/psin/uniform"):
-            topology.validate_supported_for_veqlib_mvp()
+def test_mvp_gate_rejects_source_owned_pf_with_active_psin_profile() -> None:
+    topology = make_topology(coordinate="rho", psin_count=3)
+
+    with pytest.raises(TopologyError, match="source-owned PF topology"):
+        topology.validate_supported_for_veqlib_mvp()
 
 
 def test_source_topology_rejects_unsupported_route_constraints() -> None:

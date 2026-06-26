@@ -47,6 +47,14 @@ _SOURCE_CONSTRAINTS_BY_ROUTE = {
     "PJ2": frozenset({"null", "Ip", "beta", "Ip_beta"}),
     "PQ": frozenset({"null", "Ip", "beta", "Ip_beta"}),
 }
+_VEQLIB_MVP_PF_ROUTE_KEYS = frozenset(
+    {
+        ("PF", "rho", "uniform"),
+        ("PF", "rho", "grid"),
+        ("PF", "psin", "uniform"),
+        ("PF", "psin", "grid"),
+    }
+)
 _LAYOUT_CODES = {
     "degree": 0,
     "family": 1,
@@ -436,16 +444,12 @@ class Topology:
 
         expected = {
             "route": "PF",
-            "coordinate": "psin",
-            "nodes": "uniform",
             "quadrature": "legendre",
             "calculus": "spectral",
             "layout": "degree",
         }
         actual = {
             "route": self.route,
-            "coordinate": self.coordinate,
-            "nodes": self.nodes,
             "quadrature": self.quadrature,
             "calculus": self.calculus,
             "layout": self.layout,
@@ -455,18 +459,29 @@ class Topology:
             for name, value in expected.items()
             if actual[name] != value
         ]
+        if self.source_route_key not in _VEQLIB_MVP_PF_ROUTE_KEYS:
+            supported = ", ".join(
+                "/".join(route_key) for route_key in sorted(_VEQLIB_MVP_PF_ROUTE_KEYS)
+            )
+            mismatches.append(
+                f"route_key={self.source_route_key!r} (expected one of {supported})"
+            )
         if self.constraint not in {"null", "Ip", "beta"}:
             mismatches.append(
                 f"constraint={self.constraint!r} (expected one of 'null', 'Ip', 'beta')"
             )
         if mismatches:
             raise TopologyError(
-                "VEQlib MVP backend currently supports PF/psin/uniform with null/Ip/beta "
-                "constraints only; got "
+                "VEQlib MVP backend currently supports PF rho/psin uniform/grid "
+                "with null/Ip/beta constraints only; got "
                 + ", ".join(mismatches)
             )
         if self.F_count > 0:
             raise TopologyError("VEQlib MVP backend does not accept F_count > 0")
+        if self.source_active_family == "none" and self.psin_count > 0:
+            raise TopologyError(
+                "VEQlib MVP source-owned PF topology does not accept psin_count > 0"
+            )
 
 
 def _normalize_token(value: str, name: str) -> str:

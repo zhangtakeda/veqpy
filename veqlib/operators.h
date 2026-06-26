@@ -39,19 +39,52 @@ namespace operators::detail
         double beta = 0.0;
     };
 
-    template <typename Shape, typename GridType, typename SourceShape, int SourceConstraintCode = 1>
+    inline constexpr int source_coordinate_rho  = 1;
+    inline constexpr int source_coordinate_psin = 2;
+    inline constexpr int source_nodes_uniform   = 1;
+    inline constexpr int source_nodes_grid      = 2;
+    inline constexpr int source_active_none     = 0;
+    inline constexpr int source_active_psin     = 1;
+
+    template <typename Shape,
+              typename GridType,
+              typename SourceShape,
+              int SourceConstraintCode     = 1,
+              int SourceCoordinateCode     = source_coordinate_psin,
+              int SourceNodesCode          = source_nodes_uniform,
+              int SourceActiveFamilyCode   = source_active_psin>
     struct PfPsinUniformIpOperator
     {
         static_assert(Shape::L_max == GridType::basis_rows, "operator/profile basis rows must match");
         static_assert(Shape::K_max == GridType::rho_power_rows, "operator/profile rho rows must match");
         static_assert(Shape::M_max + 1 == GridType::harmonic_rows, "operator/profile harmonics must match");
-        static_assert(Shape::slot_for_profile_id(Shape::psin_profile_id).optimized(),
-                      "PF/psin/uniform requires an active psin profile");
         static_assert(!Shape::slot_for_profile_id(Shape::F_profile_id).optimized(),
-                      "PF/psin/uniform does not accept an active F profile");
+                      "PF source topology does not accept an active F profile");
         static_assert(SourceConstraintCode == 0 || SourceConstraintCode == 1 || SourceConstraintCode == 2,
-                      "PF/psin/uniform supports null, Ip, or beta constraints");
-        static_assert(SourceShape::sample_count >= 1, "PF/psin/uniform source needs at least one sample");
+                      "PF source topology supports null, Ip, or beta constraints");
+        static_assert(SourceCoordinateCode == source_coordinate_rho || SourceCoordinateCode == source_coordinate_psin,
+                      "PF source topology supports rho or psin coordinates");
+        static_assert(SourceNodesCode == source_nodes_uniform || SourceNodesCode == source_nodes_grid,
+                      "PF source topology supports uniform or grid nodes");
+        static_assert(SourceActiveFamilyCode == source_active_none || SourceActiveFamilyCode == source_active_psin,
+                      "PF source topology supports no active source family or active psin ownership");
+        static_assert(
+            SourceActiveFamilyCode != source_active_psin ||
+                (SourceCoordinateCode == source_coordinate_psin && SourceNodesCode == source_nodes_uniform),
+            "active psin ownership is only implemented for PF/psin/uniform");
+        static_assert(
+            SourceActiveFamilyCode == source_active_psin ||
+                !(SourceCoordinateCode == source_coordinate_psin && SourceNodesCode == source_nodes_uniform),
+            "PF/psin/uniform requires active psin ownership");
+        static_assert(SourceActiveFamilyCode != source_active_psin ||
+                          Shape::slot_for_profile_id(Shape::psin_profile_id).optimized(),
+                      "profile-owned PF source topology requires an active psin profile");
+        static_assert(SourceActiveFamilyCode == source_active_psin ||
+                          !Shape::slot_for_profile_id(Shape::psin_profile_id).optimized(),
+                      "source-owned PF source topology does not accept an active psin profile");
+        static_assert(SourceNodesCode != source_nodes_grid || SourceShape::sample_count == GridType::radial_nodes,
+                      "grid source nodes require source samples to match radial nodes");
+        static_assert(SourceShape::sample_count >= 1, "PF source topology needs at least one sample");
 
         using shape        = Shape;
         using grid         = GridType;
@@ -105,13 +138,39 @@ namespace operators::detail
             workspace.profiles.refresh_active(x, plan.profile_params);
             workspace.geometry.update(solve_params.a, solve_params.R0, solve_params.Z0, workspace.profiles);
 
-            workspace.source_runtime.materialize_profile_owned_psin(workspace.profiles, plan.n_axis_fix);
-            workspace.source_runtime.template update_pf_psin_uniform<SourceConstraintCode>(
-                workspace.geometry,
-                solve_params.Ip,
-                solve_params.beta,
-                solve_params.B0,
-                plan.n_axis_fix);
+            if constexpr (SourceActiveFamilyCode == source_active_psin)
+            {
+                workspace.source_runtime.materialize_profile_owned_psin(workspace.profiles, plan.n_axis_fix);
+                workspace.source_runtime.template update_pf_psin_uniform<SourceConstraintCode>(
+                    workspace.geometry,
+                    solve_params.Ip,
+                    solve_params.beta,
+                    solve_params.B0,
+                    plan.n_axis_fix);
+            }
+            else
+            {
+                if constexpr (SourceNodesCode == source_nodes_grid)
+                    workspace.source_runtime.materialize_grid_sources();
+                else
+                    workspace.source_runtime.materialize_rho_uniform_sources();
+
+                if constexpr (SourceCoordinateCode == source_coordinate_rho)
+                    workspace.source_runtime.template update_pf_rho<SourceConstraintCode>(
+                        workspace.geometry,
+                        solve_params.Ip,
+                        solve_params.beta,
+                        solve_params.B0,
+                        plan.n_axis_fix);
+                else
+                    workspace.source_runtime.template update_pf_psin_uniform<SourceConstraintCode>(
+                        workspace.geometry,
+                        solve_params.Ip,
+                        solve_params.beta,
+                        solve_params.B0,
+                        plan.n_axis_fix);
+                workspace.source_runtime.publish_source_target_root_fields();
+            }
 
             workspace.residual.update_compact(workspace.source_runtime, workspace.geometry);
             workspace.residual.pack_into(out, solve_params.a, solve_params.R0, solve_params.B0);

@@ -116,6 +116,24 @@ namespace source::detail
             }
         }
 
+        constexpr void materialize_rho_uniform_sources() noexcept
+        {
+            for (size_t i = 0; i < radial_nodes; ++i)
+                source_parameter_query[i] = GridType::nodes[i];
+            local_barycentric_interpolate_pair();
+        }
+
+        constexpr void materialize_grid_sources() noexcept
+        {
+            static_assert(sample_count == radial_nodes, "grid source inputs must match radial node count");
+
+            for (size_t i = 0; i < radial_nodes; ++i)
+            {
+                materialized_heat_input[i]    = heat_input[i];
+                materialized_current_input[i] = current_input[i];
+            }
+        }
+
         template <typename ProfilesRuntime>
         constexpr void materialize_profile_owned_psin(const ProfilesRuntime& runtime_profiles,
                                                       size_t                 n_axis_fix) noexcept
@@ -150,6 +168,107 @@ namespace source::detail
             }
 
             local_barycentric_interpolate_pair();
+        }
+
+        constexpr void publish_source_target_root_fields() noexcept { copy_source_target_to_profile_root(); }
+
+        template <int SourceConstraintCode, typename GeometryRuntime>
+        constexpr void update_pf_rho(const GeometryRuntime& geometry,
+                                     double                 Ip,
+                                     double                 beta,
+                                     double                 B0,
+                                     size_t                 n_axis_fix) noexcept
+        {
+            static_assert(GeometryRuntime::radial_nodes == radial_nodes, "source/geometry radial grids must match");
+            static_assert(SourceConstraintCode == 0 || SourceConstraintCode == 1 || SourceConstraintCode == 2,
+                          "PF source supports null, Ip, or beta constraints");
+
+            RadialVector integrand{uninitialized};
+            fill_pf_rho_integrand(integrand, geometry);
+
+            RadialVector psin_r{uninitialized};
+            radial_grid_accumulator_matvec_into<GridType>(psin_r, integrand);
+            double psi_square_sign       = 1.0;
+            double psin_r_weighted_total = 0.0;
+            for (size_t i = 0; i < radial_nodes; ++i)
+            {
+                psin_r[i] *= -2.0;
+                psin_r_weighted_total += psin_r[i] * GridType::weights[i];
+            }
+
+            if (psin_r_weighted_total < 0.0)
+            {
+                psi_square_sign = -1.0;
+                for (size_t i = 0; i < radial_nodes; ++i)
+                    psin_r[i] *= -1.0;
+            }
+
+            for (size_t i = 0; i < radial_nodes; ++i)
+            {
+                if (psin_r[i] < 1.0e-6)
+                    psin_r[i] = 1.0e-6;
+                psin_r[i] = math::sqrt(psin_r[i]) / geometry.radial_field(geometry::radial_Kn, i);
+            }
+            store_root_row<root_psin_r>(psin_r);
+            regularize_psin_r(n_axis_fix);
+            psin_r = const_root_row<root_psin_r>();
+
+            const double integral_prof = dot(psin_r, GridType::weights);
+            for (size_t i = 0; i < radial_nodes; ++i)
+                psin_r[i] /= integral_prof;
+            store_root_row<root_psin_r>(psin_r);
+
+            RadialVector psin_rr{uninitialized};
+            RadialVector integrated{uninitialized};
+            radial_grid_multi_matvec_into<GridType>(psin_rr, integrated, psin_r);
+            store_root_row<root_psin_rr>(psin_rr);
+            const double offset = integrated[0];
+            const double scale  = integrated[radial_nodes - 1] - offset;
+            store_psin_coordinate(integrated, offset, scale);
+
+            if constexpr (SourceConstraintCode == 0)
+            {
+                alpha2                    = psi_square_sign * integral_prof;
+                alpha1                    = -dot(materialized_heat_input, GridType::weights) / integral_prof;
+                const double source_scale = psi_square_sign / (alpha1 * alpha2);
+                for (size_t i = 0; i < radial_nodes; ++i)
+                {
+                    Pn_psin[i]  = materialized_heat_input[i] * source_scale / psin_r[i];
+                    FFn_psin[i] = materialized_current_input[i] * source_scale / psin_r[i];
+                }
+                regularize_ffn_psin(n_axis_fix);
+                (void)Ip;
+                (void)beta;
+                (void)B0;
+                return;
+            }
+
+            const double c2 = integral_prof * integral_prof;
+            if constexpr (SourceConstraintCode == 1)
+            {
+                const double G1n_integral = g1n_rho_integral_from_radial_moments(geometry, psi_square_sign);
+                alpha1                    = -Ip / G1n_integral;
+                (void)beta;
+                (void)B0;
+            }
+            else
+            {
+                RadialVector Pn_out{uninitialized};
+                compute_Pn_out(Pn_out, materialized_heat_input);
+                const double numerator =
+                    0.5 * beta * B0 * B0 * dot_radial_moment(geometry, geometry::radial_V_r) /
+                    weighted_dot(Pn_out, geometry, geometry::radial_V_r);
+                alpha1 = signed_sqrt_ratio(numerator, c2);
+                (void)Ip;
+            }
+
+            alpha2 = c2 * alpha1;
+            for (size_t i = 0; i < radial_nodes; ++i)
+            {
+                Pn_psin[i]  = materialized_heat_input[i] * psi_square_sign / psin_r[i];
+                FFn_psin[i] = materialized_current_input[i] * psi_square_sign / psin_r[i];
+            }
+            regularize_ffn_psin(n_axis_fix);
         }
 
         template <int SourceConstraintCode, typename GeometryRuntime>
@@ -591,6 +710,22 @@ namespace source::detail
             }
         }
 
+        template <typename GeometryRuntime>
+        constexpr void fill_pf_rho_integrand(RadialVector& out, const GeometryRuntime& geometry) const noexcept
+        {
+            constexpr double pressure_factor = 1.0 / (4.0 * geometry::detail::pi * geometry::detail::pi);
+            const double* const geometry_radial = geometry.radial_fields.aligned_data();
+            const double* const radial_Kn = geometry_radial + geometry::radial_Kn * radial_nodes;
+            const double* const radial_Ln_r = geometry_radial + geometry::radial_Ln_r * radial_nodes;
+            const double* const radial_V_r = geometry_radial + geometry::radial_V_r * radial_nodes;
+            for (size_t i = 0; i < radial_nodes; ++i)
+            {
+                out[i] = radial_Kn[i] *
+                         (materialized_current_input[i] * radial_Ln_r[i] +
+                          radial_V_r[i] * materialized_heat_input[i] * pressure_factor);
+            }
+        }
+
         template <typename Weights>
         static constexpr double dot(const RadialVector& values, const Weights& weights) noexcept
         {
@@ -613,6 +748,26 @@ namespace source::detail
             {
                 total += GridType::weights[i] *
                          (two_pi * radial_Ln_r[i] * FFn_psin[i] + inv_two_pi * radial_V_r[i] * Pn_psin[i]);
+            }
+            return total;
+        }
+
+        template <typename GeometryRuntime>
+        constexpr double
+        g1n_rho_integral_from_radial_moments(const GeometryRuntime& geometry, double source_scale) const noexcept
+        {
+            constexpr double two_pi     = 2.0 * geometry::detail::pi;
+            constexpr double inv_two_pi = 1.0 / two_pi;
+            const RadialVector psin_r   = const_root_row<root_psin_r>();
+            double             total    = 0.0;
+            const double* const geometry_radial = geometry.radial_fields.aligned_data();
+            const double* const radial_Ln_r = geometry_radial + geometry::radial_Ln_r * radial_nodes;
+            const double* const radial_V_r = geometry_radial + geometry::radial_V_r * radial_nodes;
+            for (size_t i = 0; i < radial_nodes; ++i)
+            {
+                total += GridType::weights[i] * source_scale / psin_r[i] *
+                         (two_pi * radial_Ln_r[i] * materialized_current_input[i] +
+                          inv_two_pi * radial_V_r[i] * materialized_heat_input[i]);
             }
             return total;
         }
