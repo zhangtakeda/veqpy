@@ -97,7 +97,8 @@ namespace profiles
               ProfileSlot PsinSlot,
               ProfileSlot FSlot,
               auto        CFamilySlots,
-              auto        SFamilySlots>
+              auto        SFamilySlots,
+              bool        LayoutProfileFirst = false>
     struct ProfileShape
     {
         static_assert(Lmax >= 1, "ProfileShape requires at least one stored Chebyshev row");
@@ -236,6 +237,7 @@ namespace profiles
         static constexpr size_t active_count   = compute_active_count();
         static constexpr size_t max_active_len = compute_max_active_len();
         static constexpr size_t x_size         = compute_x_size();
+        static constexpr bool   layout_profile_first = LayoutProfileFirst;
 
         static consteval auto make_profile_L()
         {
@@ -316,12 +318,26 @@ namespace profiles
                 row.fill(-1);
 
             int x_pos = 0;
-            for (size_t degree = 0; degree < max_active_len; ++degree)
+            if constexpr (!layout_profile_first)
+            {
+                for (size_t degree = 0; degree < max_active_len; ++degree)
+                {
+                    for (size_t profile_id = 0; profile_id < profile_count; ++profile_id)
+                    {
+                        const ProfileSlot slot = slot_for_profile_id(profile_id);
+                        if (slot.optimized() && degree < slot.coefficient_count)
+                            out[profile_id][degree] = x_pos++;
+                    }
+                }
+            }
+            else
             {
                 for (size_t profile_id = 0; profile_id < profile_count; ++profile_id)
                 {
                     const ProfileSlot slot = slot_for_profile_id(profile_id);
-                    if (slot.optimized() && degree < slot.coefficient_count)
+                    if (!slot.optimized())
+                        continue;
+                    for (size_t degree = 0; degree < slot.coefficient_count; ++degree)
                         out[profile_id][degree] = x_pos++;
                 }
             }
@@ -332,14 +348,38 @@ namespace profiles
         {
             std::array<int, max_active_len + 1> out{};
             int                                 x_pos = 0;
-            for (size_t degree = 0; degree < max_active_len; ++degree)
+            if constexpr (!layout_profile_first)
             {
-                out[degree] = x_pos;
+                for (size_t degree = 0; degree < max_active_len; ++degree)
+                {
+                    out[degree] = x_pos;
+                    for (size_t profile_id = 0; profile_id < profile_count; ++profile_id)
+                    {
+                        const ProfileSlot slot = slot_for_profile_id(profile_id);
+                        if (slot.optimized() && degree < slot.coefficient_count)
+                            ++x_pos;
+                    }
+                }
+            }
+            else
+            {
+                out.fill(-1);
                 for (size_t profile_id = 0; profile_id < profile_count; ++profile_id)
                 {
                     const ProfileSlot slot = slot_for_profile_id(profile_id);
-                    if (slot.optimized() && degree < slot.coefficient_count)
+                    if (!slot.optimized())
+                        continue;
+                    for (size_t degree = 0; degree < slot.coefficient_count; ++degree)
+                    {
+                        if (out[degree] < 0)
+                            out[degree] = x_pos;
                         ++x_pos;
+                    }
+                }
+                for (size_t degree = 0; degree < max_active_len; ++degree)
+                {
+                    if (out[degree] < 0)
+                        out[degree] = x_pos;
                 }
             }
             out[max_active_len] = x_pos;
@@ -771,7 +811,8 @@ namespace profiles
               size_t PsinCount,
               size_t FCount,
               auto   CFamilyCounts,
-              auto   SFamilyCounts>
+              auto   SFamilyCounts,
+              bool   LayoutProfileFirst = false>
     struct OptimizedProfileShapeFromCountsWithMmax
     {
         static constexpr size_t Cmax        = CFamilyCounts.size() == 0 ? 0 : CFamilyCounts.size() - 1;
@@ -792,7 +833,8 @@ namespace profiles
                                   optimized_slot_from_count(PsinCount),
                                   optimized_slot_from_count(FCount),
                                   c_family_slots,
-                                  s_family_slots>;
+                                  s_family_slots,
+                                  LayoutProfileFirst>;
     };
 
     template <size_t Lmax,
@@ -803,7 +845,8 @@ namespace profiles
               size_t PsinCount,
               size_t FCount,
               auto   CFamilyCounts,
-              auto   SFamilyCounts>
+              auto   SFamilyCounts,
+              bool   LayoutProfileFirst = false>
     struct OptimizedProfileShapeFromCounts
     {
         static constexpr size_t Cmax = CFamilyCounts.size() == 0 ? 0 : CFamilyCounts.size() - 1;
@@ -819,7 +862,8 @@ namespace profiles
                                                                       PsinCount,
                                                                       FCount,
                                                                       CFamilyCounts,
-                                                                      SFamilyCounts>::type;
+                                                                      SFamilyCounts,
+                                                                      LayoutProfileFirst>::type;
     };
 
     template <size_t Lmax,
@@ -831,7 +875,8 @@ namespace profiles
               size_t PsinCount,
               size_t FCount,
               auto   CFamilyCounts,
-              auto   SFamilyCounts>
+              auto   SFamilyCounts,
+              bool   LayoutProfileFirst = false>
     using OptimizedProfileShapeFromCountsWithMmaxT =
         typename OptimizedProfileShapeFromCountsWithMmax<Lmax,
                                                          Kmax,
@@ -842,7 +887,8 @@ namespace profiles
                                                          PsinCount,
                                                          FCount,
                                                          CFamilyCounts,
-                                                         SFamilyCounts>::type;
+                                                         SFamilyCounts,
+                                                         LayoutProfileFirst>::type;
 
     template <size_t Lmax,
               size_t Kmax,
@@ -852,7 +898,8 @@ namespace profiles
               size_t PsinCount,
               size_t FCount,
               auto   CFamilyCounts,
-              auto   SFamilyCounts>
+              auto   SFamilyCounts,
+              bool   LayoutProfileFirst = false>
     using OptimizedProfileShapeFromCountsT = typename OptimizedProfileShapeFromCounts<Lmax,
                                                                                       Kmax,
                                                                                       HCount,
@@ -861,7 +908,8 @@ namespace profiles
                                                                                       PsinCount,
                                                                                       FCount,
                                                                                       CFamilyCounts,
-                                                                                      SFamilyCounts>::type;
+                                                                                      SFamilyCounts,
+                                                                                      LayoutProfileFirst>::type;
 
     template <size_t Lmax,
               size_t Kmax,

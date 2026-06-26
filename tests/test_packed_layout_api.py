@@ -167,6 +167,41 @@ def test_degree_first_layout_encode_decode_and_active_metadata() -> None:
     assert active_ids.tolist() == [profile_index["h"], profile_index["k"], profile_index["s1"]]
 
 
+def test_profile_first_layout_can_be_requested_without_global_switch() -> None:
+    profile_names = build_profile_names(2)
+    profile_index = build_profile_index(profile_names)
+    active_profiles = {"h": 2, "k": 3, "s1": 1}
+    coefficients = {
+        "h": np.array([1.0, 2.0], dtype=np.float64),
+        "k": np.array([3.0, 4.0, 5.0], dtype=np.float64),
+        "s1": np.array([6.0], dtype=np.float64),
+    }
+    profile_L, coeff_index, order_offsets = build_profile_layout(
+        active_profiles,
+        profile_names=profile_names,
+        profile_first=True,
+    )
+
+    assert profile_L[profile_index["h"]] == 1
+    assert profile_L[profile_index["k"]] == 2
+    assert profile_L[profile_index["s1"]] == 0
+    assert packed_size(coeff_index) == 6
+    assert order_offsets.tolist() == [0, 1, 4, 6]
+
+    x = encode_packed_state(
+        coefficients,
+        profile_L,
+        coeff_index,
+        profile_names=profile_names,
+    )
+    assert_allclose(x, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+
+    blocks = decode_packed_blocks(x, profile_L, coeff_index, profile_names=profile_names)
+    assert_allclose(blocks[profile_index["h"]], [1.0, 2.0])
+    assert_allclose(blocks[profile_index["k"]], [3.0, 4.0, 5.0])
+    assert_allclose(blocks[profile_index["s1"]], [6.0])
+
+
 def test_packed_layout_validation_errors() -> None:
     profile_names = build_profile_names(1)
     with pytest.raises(KeyError, match="Unknown profile names"):

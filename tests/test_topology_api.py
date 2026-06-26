@@ -137,11 +137,11 @@ def test_key_mismatch_is_rejected() -> None:
         make_topology(key="not-the-canonical-key")
 
 
-def test_mvp_gate_rejects_unsupported_layout() -> None:
+def test_mvp_gate_accepts_profile_first_layout() -> None:
     topology = make_topology(layout="family")
 
-    with pytest.raises(TopologyError, match="layout='family'"):
-        topology.validate_supported_for_veqlib_mvp()
+    assert topology.layout_profile_first is True
+    topology.validate_supported_for_veqlib_mvp()
 
 
 def test_mvp_gate_accepts_pf_route_constraint_slice() -> None:

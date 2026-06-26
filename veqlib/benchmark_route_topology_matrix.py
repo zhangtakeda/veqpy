@@ -56,6 +56,7 @@ from veqpy.cpp import (  # noqa: E402
 )
 from veqpy.model import Topology, TopologyError  # noqa: E402
 from veqpy.operator import Operator  # noqa: E402
+from veqpy.operator.packed_layout import build_profile_layout, build_profile_names  # noqa: E402
 from veqpy.solver import Solver  # noqa: E402
 
 
@@ -181,6 +182,55 @@ def _family_counts(profile_coeffs: dict[str, Any], prefix: str, first: int) -> t
 def _profile_count(profile_coeffs: dict[str, Any], name: str) -> int:
     values = profile_coeffs.get(name)
     return 0 if values is None else int(np.asarray(values, dtype=np.float64).size)
+
+
+def _active_profiles_from_topology(topology: Topology) -> dict[str, int]:
+    active: dict[str, int] = {}
+    if topology.h_count > 0:
+        active["h"] = topology.h_count
+    if topology.v_count > 0:
+        active["v"] = topology.v_count
+    if topology.kappa_count > 0:
+        active["k"] = topology.kappa_count
+    for order, count in enumerate(topology.c_counts):
+        if count > 0:
+            active[f"c{order}"] = count
+    for order, count in enumerate(topology.s_counts, start=1):
+        if count > 0:
+            active[f"s{order}"] = count
+    if topology.psin_count > 0:
+        active["psin"] = topology.psin_count
+    if topology.F_count > 0:
+        active["F"] = topology.F_count
+    return active
+
+
+def _coeff_index_for_layout(topology: Topology, *, layout: str) -> np.ndarray:
+    profile_names = build_profile_names(topology.M_max)
+    _, coeff_index, _ = build_profile_layout(
+        _active_profiles_from_topology(topology),
+        profile_names=profile_names,
+        profile_first=layout == "family",
+    )
+    return coeff_index
+
+
+def _packed_to_degree_layout(values: Any, topology: Topology) -> np.ndarray:
+    values_arr = np.asarray(values, dtype=np.float64)
+    if topology.layout == "degree":
+        return values_arr.copy()
+
+    source_index = _coeff_index_for_layout(topology, layout=topology.layout)
+    degree_index = _coeff_index_for_layout(topology, layout="degree")
+    out = np.empty_like(values_arr)
+    for profile_row in range(source_index.shape[0]):
+        for degree in range(source_index.shape[1]):
+            source_pos = int(source_index[profile_row, degree])
+            if source_pos < 0:
+                continue
+            degree_pos = int(degree_index[profile_row, degree])
+            out[degree_pos] = values_arr[source_pos]
+    return out
 
 
 def _boundary_m_max(boundary: Any) -> int:
@@ -433,8 +483,10 @@ def _measure_cxx(
 
     if final_result is None:
         raise RuntimeError(f"{_spec_label(case_data.spec)} VEQlib solve did not run")
-    x = np.asarray(final_result[11], dtype=np.float64).copy()
-    raw = np.asarray(final_result[12], dtype=np.float64).copy()
+    native_x = np.asarray(final_result[11], dtype=np.float64).copy()
+    native_raw = np.asarray(final_result[12], dtype=np.float64).copy()
+    x = _packed_to_degree_layout(native_x, case_data.topology)
+    raw = _packed_to_degree_layout(native_raw, case_data.topology)
     py_raw_at_cxx = np.asarray(case_data.py_operator.residual_var(x), dtype=np.float64)
     return {
         "artifact_id": artifact.artifact_id,
@@ -445,6 +497,7 @@ def _measure_cxx(
         "internal_elapsed": _stats(elapsed_values),
         "nfev": _int_stats(nfev_values),
         "success_all": all(success_values),
+        "native_layout": case_data.topology.layout,
         "x": x,
         "raw": raw,
         "raw_norm": float(statistics.median(raw_norms)),

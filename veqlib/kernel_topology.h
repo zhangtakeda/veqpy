@@ -85,7 +85,8 @@ namespace veqlib_kernel_api
                   auto   SFamilyCounts,
                   typename QuadratureScheme,
                   typename CalculusScheme,
-                  size_t BoundaryMmax = inferred_M_max<CFamilyCounts, SFamilyCounts>()>
+                  size_t BoundaryMmax = inferred_M_max<CFamilyCounts, SFamilyCounts>(),
+                  bool   LayoutProfileFirst = false>
         struct PfPsinUniformIpTopology
         {
             static constexpr size_t L_max =
@@ -103,7 +104,8 @@ namespace veqlib_kernel_api
                                                                              PsinCount,
                                                                              FCount,
                                                                              CFamilyCounts,
-                                                                             SFamilyCounts>;
+                                                                             SFamilyCounts,
+                                                                             LayoutProfileFirst>;
             using Grid = grid::Grid<Nr, Nt, Shape::L_max, Shape::M_max, Shape::K_max, QuadratureScheme, CalculusScheme>;
             using Source   = source::UniformSourceShape<SourceSamples>;
             using Operator = PfPsinUniformIpOperator<Shape,
@@ -132,7 +134,8 @@ namespace veqlib_kernel_api
                                                        kernel_s_counts,
                                                        Legendre,
                                                        Spectral,
-                                                       Topology::M_max>;
+                                                       Topology::M_max,
+                                                       Topology::layout_profile_first>;
         using KernelShape    = KernelTopology::Shape;
         using KernelGrid     = KernelTopology::Grid;
         using KernelSource   = KernelTopology::Source;

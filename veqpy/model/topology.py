@@ -469,12 +469,10 @@ class Topology:
         expected = {
             "quadrature": "legendre",
             "calculus": "spectral",
-            "layout": "degree",
         }
         actual = {
             "quadrature": self.quadrature,
             "calculus": self.calculus,
-            "layout": self.layout,
         }
         mismatches = [
             f"{name}={actual[name]!r} (expected {value!r})"

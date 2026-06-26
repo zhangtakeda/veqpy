@@ -219,12 +219,16 @@ def build_profile_layout(
     *,
     profile_names: tuple[str, ...],
     prefix_profile_names: tuple[str, ...] | None = None,
+    profile_first: bool | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Build the packed state layout from active profile coefficient counts."""
     profile_names = tuple(profile_names)
     if prefix_profile_names is None:
         prefix_profile_names = get_prefix_profile_names()
     prefix_profile_names = tuple(prefix_profile_names)
+    use_profile_first = (
+        PACKED_LAYOUT_PROFILE_FIRST if profile_first is None else bool(profile_first)
+    )
     profile_index = build_profile_index(profile_names)
     profile_count = len(profile_names)
     profile_L = np.full(profile_count, -1, dtype=np.int64)
@@ -249,7 +253,7 @@ def build_profile_layout(
     # Its -1 padding must never be dereferenced; active_lengths guards hot loops.
 
     x_pos = 0
-    if not PACKED_LAYOUT_PROFILE_FIRST:
+    if not use_profile_first:
         # Degree-first ordering keeps same-degree coefficients adjacent across
         # profile families, which improves the current fused residual workload.
         for k in range(max_L + 1):
