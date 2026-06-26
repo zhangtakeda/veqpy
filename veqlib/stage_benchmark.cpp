@@ -72,6 +72,9 @@ namespace
     {
         ProfilesActive,
         ProfilesAll,
+        GeometryPhase,
+        GeometryPhaseSincos,
+        GeometryMetricCompute,
         Geometry,
         SourceMaterialize,
         SourceUpdate,
@@ -95,7 +98,8 @@ namespace
     {
         throw std::runtime_error(
             message +
-            "\nusage: veqlib_stage_benchmark [--stage all|profiles_active|profiles_all|geometry|"
+            "\nusage: veqlib_stage_benchmark [--stage all|profiles_active|profiles_all|geometry_phase|"
+            "geometry_phase_sincos|geometry_metric_compute|geometry|"
             "source_materialize|source_update|residual_update|residual_pack|evaluate|evaluate_ring] "
             "[--repeat N] [--warmup N] [--inner N] [--ring-size N] [--output PATH]");
     }
@@ -126,7 +130,8 @@ namespace
             if (arg == "--help" || arg == "-h")
             {
                 std::cout
-                    << "usage: veqlib_stage_benchmark [--stage all|profiles_active|profiles_all|geometry|"
+                    << "usage: veqlib_stage_benchmark [--stage all|profiles_active|profiles_all|geometry_phase|"
+                       "geometry_phase_sincos|geometry_metric_compute|geometry|"
                        "source_materialize|source_update|residual_update|residual_pack|evaluate|evaluate_ring] "
                        "[--repeat N] [--warmup N] [--inner N] [--ring-size N] [--output PATH]\n";
                 std::exit(0);
@@ -152,9 +157,12 @@ namespace
         return options;
     }
 
-    constexpr std::array<std::pair<std::string_view, Stage>, 9> stage_table{{
+    constexpr std::array<std::pair<std::string_view, Stage>, 12> stage_table{{
         {"profiles_active", Stage::ProfilesActive},
         {"profiles_all", Stage::ProfilesAll},
+        {"geometry_phase", Stage::GeometryPhase},
+        {"geometry_phase_sincos", Stage::GeometryPhaseSincos},
+        {"geometry_metric_compute", Stage::GeometryMetricCompute},
         {"geometry", Stage::Geometry},
         {"source_materialize", Stage::SourceMaterialize},
         {"source_update", Stage::SourceUpdate},
@@ -188,6 +196,247 @@ namespace
         static double sink = 0.0;
         sink += value;
 #endif
+    }
+
+    template <typename ProfilesRuntime>
+    void fill_geometry_phase_row(size_t i,
+                                 const ProfilesRuntime& runtime_profiles,
+                                 std::array<double, ProfilesRuntime::grid::theta_rows>& tb_values,
+                                 std::array<double, ProfilesRuntime::grid::theta_rows>& tb_r_values,
+                                 std::array<double, ProfilesRuntime::grid::theta_rows>& tb_t_values,
+                                 std::array<double, ProfilesRuntime::grid::theta_rows>& tb_rr_values,
+                                 std::array<double, ProfilesRuntime::grid::theta_rows>& tb_rt_values,
+                                 std::array<double, ProfilesRuntime::grid::theta_rows>& tb_tt_values) noexcept
+    {
+        using Shape       = typename ProfilesRuntime::shape;
+        using ProfileGrid = typename ProfilesRuntime::grid;
+
+        for (size_t j = 0; j < ProfileGrid::theta_rows; ++j)
+        {
+            double tb_ij    = runtime_profiles.boundary_phase_base_field(i, j, ProfilesRuntime::phase_tb);
+            double tb_r_ij  = runtime_profiles.boundary_phase_base_field(i, j, ProfilesRuntime::phase_tb_r);
+            double tb_t_ij  = runtime_profiles.boundary_phase_base_field(i, j, ProfilesRuntime::phase_tb_t);
+            double tb_rr_ij = runtime_profiles.boundary_phase_base_field(i, j, ProfilesRuntime::phase_tb_rr);
+            double tb_rt_ij = runtime_profiles.boundary_phase_base_field(i, j, ProfilesRuntime::phase_tb_rt);
+            double tb_tt_ij = runtime_profiles.boundary_phase_base_field(i, j, ProfilesRuntime::phase_tb_tt);
+
+            for (size_t active_index = 0; active_index < Shape::active_c_order_count; ++active_index)
+            {
+                const size_t order  = Shape::active_c_orders[active_index];
+                const double c_i    = runtime_profiles.c_family_fields(order, i, geometry::detail::profile_value);
+                const double c_r_i  = runtime_profiles.c_family_fields(order, i, geometry::detail::profile_radial);
+                const double c_rr_i = runtime_profiles.c_family_fields(order, i, geometry::detail::profile_radial2);
+
+                if (order == 0)
+                {
+                    tb_ij += c_i;
+                    tb_r_ij += c_r_i;
+                    tb_rr_ij += c_rr_i;
+                    continue;
+                }
+
+                const double cos_kt    = ProfileGrid::cos_mtheta(order, j);
+                const double k_sin_kt  = ProfileGrid::m_sin_mtheta(order, j);
+                const double k2_cos_kt = ProfileGrid::m2_cos_mtheta(order, j);
+
+                tb_ij += c_i * cos_kt;
+                tb_r_ij += c_r_i * cos_kt;
+                tb_t_ij -= c_i * k_sin_kt;
+                tb_rr_ij += c_rr_i * cos_kt;
+                tb_rt_ij -= c_r_i * k_sin_kt;
+                tb_tt_ij -= c_i * k2_cos_kt;
+            }
+
+            for (size_t active_index = 0; active_index < Shape::active_s_order_count; ++active_index)
+            {
+                const size_t order     = Shape::active_s_orders[active_index];
+                const double s_i       = runtime_profiles.s_family_fields(order, i, geometry::detail::profile_value);
+                const double s_r_i     = runtime_profiles.s_family_fields(order, i, geometry::detail::profile_radial);
+                const double s_rr_i    = runtime_profiles.s_family_fields(order, i, geometry::detail::profile_radial2);
+                const double sin_kt    = ProfileGrid::sin_mtheta(order, j);
+                const double k_cos_kt  = ProfileGrid::m_cos_mtheta(order, j);
+                const double k2_sin_kt = ProfileGrid::m2_sin_mtheta(order, j);
+
+                tb_ij += s_i * sin_kt;
+                tb_r_ij += s_r_i * sin_kt;
+                tb_t_ij += s_i * k_cos_kt;
+                tb_rr_ij += s_rr_i * sin_kt;
+                tb_rt_ij += s_r_i * k_cos_kt;
+                tb_tt_ij -= s_i * k2_sin_kt;
+            }
+
+            tb_values[j]    = tb_ij;
+            tb_r_values[j]  = tb_r_ij;
+            tb_t_values[j]  = tb_t_ij;
+            tb_rr_values[j] = tb_rr_ij;
+            tb_rt_values[j] = tb_rt_ij;
+            tb_tt_values[j] = tb_tt_ij;
+        }
+    }
+
+    template <typename ProfilesRuntime>
+    double benchmark_geometry_phase(const ProfilesRuntime& runtime_profiles) noexcept
+    {
+        using ProfileGrid = typename ProfilesRuntime::grid;
+
+        double sink = 0.0;
+        alignas(tensor::detail::simd_alignment) std::array<double, ProfileGrid::theta_rows> tb_values;
+        alignas(tensor::detail::simd_alignment) std::array<double, ProfileGrid::theta_rows> tb_r_values;
+        alignas(tensor::detail::simd_alignment) std::array<double, ProfileGrid::theta_rows> tb_t_values;
+        alignas(tensor::detail::simd_alignment) std::array<double, ProfileGrid::theta_rows> tb_rr_values;
+        alignas(tensor::detail::simd_alignment) std::array<double, ProfileGrid::theta_rows> tb_rt_values;
+        alignas(tensor::detail::simd_alignment) std::array<double, ProfileGrid::theta_rows> tb_tt_values;
+
+        for (size_t i = 0; i < ProfileGrid::radial_nodes; ++i)
+        {
+            fill_geometry_phase_row(
+                i, runtime_profiles, tb_values, tb_r_values, tb_t_values, tb_rr_values, tb_rt_values, tb_tt_values);
+            for (size_t j = 0; j < ProfileGrid::theta_rows; ++j)
+                sink += tb_values[j] + tb_r_values[j] + tb_t_values[j] + tb_rr_values[j] + tb_rt_values[j] +
+                        tb_tt_values[j];
+        }
+        return sink;
+    }
+
+    template <typename ProfilesRuntime>
+    double benchmark_geometry_phase_sincos(const ProfilesRuntime& runtime_profiles) noexcept
+    {
+        using ProfileGrid = typename ProfilesRuntime::grid;
+
+        double sink = 0.0;
+        alignas(tensor::detail::simd_alignment) std::array<double, ProfileGrid::theta_rows> tb_values;
+        alignas(tensor::detail::simd_alignment) std::array<double, ProfileGrid::theta_rows> tb_r_values;
+        alignas(tensor::detail::simd_alignment) std::array<double, ProfileGrid::theta_rows> tb_t_values;
+        alignas(tensor::detail::simd_alignment) std::array<double, ProfileGrid::theta_rows> tb_rr_values;
+        alignas(tensor::detail::simd_alignment) std::array<double, ProfileGrid::theta_rows> tb_rt_values;
+        alignas(tensor::detail::simd_alignment) std::array<double, ProfileGrid::theta_rows> tb_tt_values;
+
+        for (size_t i = 0; i < ProfileGrid::radial_nodes; ++i)
+        {
+            fill_geometry_phase_row(
+                i, runtime_profiles, tb_values, tb_r_values, tb_t_values, tb_rr_values, tb_rt_values, tb_tt_values);
+            for (size_t j = 0; j < ProfileGrid::theta_rows; ++j)
+            {
+                double sin_tb = 0.0;
+                double cos_tb = 0.0;
+                geometry::detail::reduced_taylor_sincos(tb_values[j], sin_tb, cos_tb);
+                sink += sin_tb + cos_tb + tb_r_values[j] + tb_t_values[j] + tb_rr_values[j] + tb_rt_values[j] +
+                        tb_tt_values[j];
+            }
+        }
+        return sink;
+    }
+
+    template <typename ProfilesRuntime>
+    double benchmark_geometry_metric_compute(double a, double R0, const ProfilesRuntime& runtime_profiles) noexcept
+    {
+        using Shape       = typename ProfilesRuntime::shape;
+        using ProfileGrid = typename ProfilesRuntime::grid;
+
+        double sink = 0.0;
+        alignas(tensor::detail::simd_alignment) std::array<double, ProfileGrid::theta_rows> tb_values;
+        alignas(tensor::detail::simd_alignment) std::array<double, ProfileGrid::theta_rows> tb_r_values;
+        alignas(tensor::detail::simd_alignment) std::array<double, ProfileGrid::theta_rows> tb_t_values;
+        alignas(tensor::detail::simd_alignment) std::array<double, ProfileGrid::theta_rows> tb_rr_values;
+        alignas(tensor::detail::simd_alignment) std::array<double, ProfileGrid::theta_rows> tb_rt_values;
+        alignas(tensor::detail::simd_alignment) std::array<double, ProfileGrid::theta_rows> tb_tt_values;
+        alignas(tensor::detail::simd_alignment) std::array<double, ProfileGrid::theta_rows> sin_tb_values;
+        alignas(tensor::detail::simd_alignment) std::array<double, ProfileGrid::theta_rows> cos_tb_values;
+
+        for (size_t i = 0; i < ProfileGrid::radial_nodes; ++i)
+        {
+            const double rho_i  = ProfileGrid::nodes[i];
+            const double h_i    = runtime_profiles.profile_field(Shape::h_profile_id, i, geometry::detail::profile_value);
+            const double h_r_i  = runtime_profiles.profile_field(Shape::h_profile_id, i, geometry::detail::profile_radial);
+            const double h_rr_i = runtime_profiles.profile_field(Shape::h_profile_id, i, geometry::detail::profile_radial2);
+            const double v_r_i  = runtime_profiles.profile_field(Shape::v_profile_id, i, geometry::detail::profile_radial);
+            const double v_rr_i = runtime_profiles.profile_field(Shape::v_profile_id, i, geometry::detail::profile_radial2);
+            const double k_i =
+                runtime_profiles.profile_field(Shape::kappa_profile_id, i, geometry::detail::profile_value);
+            const double k_r_i =
+                runtime_profiles.profile_field(Shape::kappa_profile_id, i, geometry::detail::profile_radial);
+            const double k_rr_i =
+                runtime_profiles.profile_field(Shape::kappa_profile_id, i, geometry::detail::profile_radial2);
+
+            double sum_J          = 0.0;
+            double sum_JR         = 0.0;
+            double sum_gttdivJR   = 0.0;
+            double sum_gttdivJR_r = 0.0;
+            double sum_JdivR      = 0.0;
+
+            fill_geometry_phase_row(
+                i, runtime_profiles, tb_values, tb_r_values, tb_t_values, tb_rr_values, tb_rt_values, tb_tt_values);
+            for (size_t j = 0; j < ProfileGrid::theta_rows; ++j)
+                geometry::detail::reduced_taylor_sincos(tb_values[j], sin_tb_values[j], cos_tb_values[j]);
+
+            for (size_t j = 0; j < ProfileGrid::theta_rows; ++j)
+            {
+                const double sin_t = ProfileGrid::sin_mtheta(1, j);
+                const double cos_t = ProfileGrid::cos_mtheta(1, j);
+
+                const double tb_r_ij   = tb_r_values[j];
+                const double tb_t_ij   = tb_t_values[j];
+                const double tb_rr_ij  = tb_rr_values[j];
+                const double tb_rt_ij  = tb_rt_values[j];
+                const double tb_tt_ij  = tb_tt_values[j];
+                const double cos_tb_ij = cos_tb_values[j];
+                const double sin_tb_ij = sin_tb_values[j];
+
+                double R_ij = R0 + a * (h_i + rho_i * cos_tb_ij);
+                if (R_ij < 1.0e-6)
+                    R_ij = 1.0e-6;
+
+                const double R_r_ij  = a * (h_r_i + cos_tb_ij - rho_i * sin_tb_ij * tb_r_ij);
+                const double R_t_ij  = -a * rho_i * sin_tb_ij * tb_t_ij;
+                const double R_rr_ij = a * (h_rr_i - 2.0 * sin_tb_ij * tb_r_ij -
+                                            rho_i * (cos_tb_ij * tb_r_ij * tb_r_ij + sin_tb_ij * tb_rr_ij));
+                const double R_rt_ij =
+                    -a * (sin_tb_ij * tb_t_ij + rho_i * (cos_tb_ij * tb_r_ij * tb_t_ij + sin_tb_ij * tb_rt_ij));
+                const double R_tt_ij = -a * rho_i * (cos_tb_ij * tb_t_ij * tb_t_ij + sin_tb_ij * tb_tt_ij);
+
+                const double Z_r_ij  = a * (v_r_i - (k_i + rho_i * k_r_i) * sin_t);
+                const double Z_t_ij  = -a * rho_i * k_i * cos_t;
+                const double Z_rr_ij = a * (v_rr_i - (2.0 * k_r_i + rho_i * k_rr_i) * sin_t);
+                const double Z_rt_ij = -a * (k_i + rho_i * k_r_i) * cos_t;
+                const double Z_tt_ij = a * rho_i * k_i * sin_t;
+
+                double J_ij = R_t_ij * Z_r_ij - R_r_ij * Z_t_ij;
+                if (J_ij < 1.0e-6)
+                    J_ij = 1.0e-6;
+
+                const double J_r_ij = -(R_rr_ij * Z_t_ij - R_rt_ij * Z_r_ij + R_r_ij * Z_rt_ij -
+                                        R_t_ij * Z_rr_ij);
+                const double J_t_ij = -(R_rt_ij * Z_t_ij - R_tt_ij * Z_r_ij + R_r_ij * Z_tt_ij -
+                                        R_t_ij * Z_rt_ij);
+                const double JR_ij   = J_ij * R_ij;
+                const double JR_r_ij = J_r_ij * R_ij + J_ij * R_r_ij;
+                const double JR_t_ij = J_t_ij * R_ij + J_ij * R_t_ij;
+                const double JdivR_ij = J_ij / R_ij;
+                const double grt_ij   = R_r_ij * R_t_ij + Z_r_ij * Z_t_ij;
+                const double grt_t_ij =
+                    R_rt_ij * R_t_ij + R_r_ij * R_tt_ij + Z_rt_ij * Z_t_ij + Z_r_ij * Z_tt_ij;
+                const double gtt_ij   = R_t_ij * R_t_ij + Z_t_ij * Z_t_ij;
+                const double gtt_r_ij = 2.0 * (R_t_ij * R_rt_ij + Z_t_ij * Z_rt_ij);
+                const double inv_JR   = 1.0 / JR_ij;
+                const double grtdivJR_t_ij = (grt_t_ij - grt_ij * JR_t_ij * inv_JR) * inv_JR;
+                const double gttdivJR_ij   = gtt_ij * inv_JR;
+                const double gttdivJR_r_ij = gtt_r_ij * inv_JR - gtt_ij * JR_r_ij * inv_JR * inv_JR;
+
+                sink += sin_tb_ij + R_ij + R_t_ij + Z_t_ij + J_ij + JdivR_ij + grtdivJR_t_ij + gttdivJR_ij +
+                        gttdivJR_r_ij;
+                sum_J += J_ij;
+                sum_JR += JR_ij;
+                sum_gttdivJR += gttdivJR_ij;
+                sum_gttdivJR_r += gttdivJR_r_ij;
+                sum_JdivR += JdivR_ij;
+            }
+
+            constexpr double theta_scale = 2.0 * geometry::detail::pi / static_cast<double>(ProfileGrid::theta_rows);
+            constexpr double mean_scale  = 1.0 / static_cast<double>(ProfileGrid::theta_rows);
+            sink += sum_J * theta_scale + sum_JR * theta_scale * 2.0 * geometry::detail::pi +
+                    sum_gttdivJR * mean_scale + sum_gttdivJR_r * mean_scale + sum_JdivR * mean_scale;
+        }
+        return sink;
     }
 
     std::vector<std::array<double, KernelShape::x_size>> make_state_ring(const CaseInput& input, size_t ring_size)
@@ -309,6 +558,22 @@ namespace
                 state->op.workspace.profiles.load_fixed_from(state->op.plan.fixed_profiles);
                 state->op.workspace.profiles.refresh_active(state->x_span(), state->op.plan.profile_params);
                 return state->profile_sink();
+            });
+        case Stage::GeometryPhase:
+            state->prepare_profiles();
+            return time_stage_calls(inner, [&](size_t) noexcept {
+                return benchmark_geometry_phase(state->op.workspace.profiles);
+            });
+        case Stage::GeometryPhaseSincos:
+            state->prepare_profiles();
+            return time_stage_calls(inner, [&](size_t) noexcept {
+                return benchmark_geometry_phase_sincos(state->op.workspace.profiles);
+            });
+        case Stage::GeometryMetricCompute:
+            state->prepare_profiles();
+            return time_stage_calls(inner, [&](size_t) noexcept {
+                return benchmark_geometry_metric_compute(
+                    state->op.solve_params().a, state->op.solve_params().R0, state->op.workspace.profiles);
             });
         case Stage::Geometry:
             state->prepare_profiles();
