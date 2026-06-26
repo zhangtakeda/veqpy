@@ -491,6 +491,9 @@ function(veqlib_configure_target target)
     veqlib_link_dependencies("${target}")
 endfunction()
 
+add_executable(veqlib_stage_benchmark stage_benchmark.cpp ${VEQLIB_COMMON_SOURCES})
+veqlib_configure_target(veqlib_stage_benchmark)
+
 if(VEQLIB_ENABLE_PYTHON_BINDINGS)
     if(NOT Python_EXECUTABLE AND EXISTS "${PROJECT_SOURCE_DIR}/../.venv/bin/python")
         set(Python_EXECUTABLE "${PROJECT_SOURCE_DIR}/../.venv/bin/python" CACHE FILEPATH "Python interpreter")
@@ -568,6 +571,21 @@ if(VEQLIB_ENABLE_PYTHON_BINDINGS)
 endif()
 
 enable_testing()
+add_test(
+    NAME veqlib_stage_benchmark_smoke
+    COMMAND
+        veqlib_stage_benchmark
+        --stage
+        all
+        --repeat
+        1
+        --warmup
+        1
+        --inner
+        1
+        --ring-size
+        2
+)
 if(VEQLIB_ENABLE_PYTHON_BINDINGS)
     add_test(
         NAME veqlib_python_binding
