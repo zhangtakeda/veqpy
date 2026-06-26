@@ -109,10 +109,12 @@ namespace veqlib_kernel_api
             using Operator = PfPsinUniformIpOperator<Shape,
                                                      Grid,
                                                      Source,
+                                                     Topology::source_route_code,
                                                      Topology::source_constraint_code,
                                                      Topology::source_coordinate_code,
                                                      Topology::source_nodes_code,
-                                                     Topology::source_active_family_code>;
+                                                     Topology::source_active_family_code,
+                                                     Topology::source_parameterization_code>;
         };
 
         constexpr auto kernel_c_counts = Topology::c_family_counts;

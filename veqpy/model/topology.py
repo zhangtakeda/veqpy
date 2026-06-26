@@ -47,12 +47,20 @@ _SOURCE_CONSTRAINTS_BY_ROUTE = {
     "PJ2": frozenset({"null", "Ip", "beta", "Ip_beta"}),
     "PQ": frozenset({"null", "Ip", "beta", "Ip_beta"}),
 }
-_VEQLIB_MVP_PF_ROUTE_KEYS = frozenset(
+_VEQLIB_MVP_ROUTE_CONSTRAINTS = {
+    ("PF", "rho", "uniform"): frozenset({"null", "Ip", "beta"}),
+    ("PF", "rho", "grid"): frozenset({"null", "Ip", "beta"}),
+    ("PF", "psin", "uniform"): frozenset({"null", "Ip", "beta"}),
+    ("PF", "psin", "grid"): frozenset({"null", "Ip", "beta"}),
+    ("PP", "rho", "uniform"): frozenset({"null", "Ip", "beta", "Ip_beta"}),
+    ("PP", "rho", "grid"): frozenset({"null", "Ip", "beta", "Ip_beta"}),
+    ("PP", "psin", "uniform"): frozenset({"null", "Ip", "beta", "Ip_beta"}),
+    ("PP", "psin", "grid"): frozenset({"null", "Ip", "beta", "Ip_beta"}),
+}
+_VEQLIB_MVP_ROUTE_KEYS = frozenset(_VEQLIB_MVP_ROUTE_CONSTRAINTS)
+_VEQLIB_MVP_ROUTES = frozenset(
     {
-        ("PF", "rho", "uniform"),
-        ("PF", "rho", "grid"),
-        ("PF", "psin", "uniform"),
-        ("PF", "psin", "grid"),
+        route_key[0] for route_key in _VEQLIB_MVP_ROUTE_KEYS
     }
 )
 _LAYOUT_CODES = {
@@ -443,13 +451,11 @@ class Topology:
         """Reject topology combinations not yet implemented by the VEQlib MVP backend."""
 
         expected = {
-            "route": "PF",
             "quadrature": "legendre",
             "calculus": "spectral",
             "layout": "degree",
         }
         actual = {
-            "route": self.route,
             "quadrature": self.quadrature,
             "calculus": self.calculus,
             "layout": self.layout,
@@ -459,28 +465,37 @@ class Topology:
             for name, value in expected.items()
             if actual[name] != value
         ]
-        if self.source_route_key not in _VEQLIB_MVP_PF_ROUTE_KEYS:
+        if self.route not in _VEQLIB_MVP_ROUTES:
+            supported = ", ".join(sorted(_VEQLIB_MVP_ROUTES))
+            mismatches.append(f"route={self.route!r} (expected one of {supported})")
+        if self.source_route_key not in _VEQLIB_MVP_ROUTE_KEYS:
             supported = ", ".join(
-                "/".join(route_key) for route_key in sorted(_VEQLIB_MVP_PF_ROUTE_KEYS)
+                "/".join(route_key) for route_key in sorted(_VEQLIB_MVP_ROUTE_KEYS)
             )
             mismatches.append(
                 f"route_key={self.source_route_key!r} (expected one of {supported})"
             )
-        if self.constraint not in {"null", "Ip", "beta"}:
+        supported_constraints = _VEQLIB_MVP_ROUTE_CONSTRAINTS.get(self.source_route_key)
+        if supported_constraints is None or self.constraint not in supported_constraints:
+            supported = (
+                "unavailable"
+                if supported_constraints is None
+                else ", ".join(sorted(supported_constraints))
+            )
             mismatches.append(
-                f"constraint={self.constraint!r} (expected one of 'null', 'Ip', 'beta')"
+                f"constraint={self.constraint!r} (expected one of {supported})"
             )
         if mismatches:
             raise TopologyError(
-                "VEQlib MVP backend currently supports PF rho/psin uniform/grid "
-                "with null/Ip/beta constraints only; got "
+                "VEQlib MVP backend currently supports PF and PP rho/psin "
+                "uniform/grid source topology slices only; got "
                 + ", ".join(mismatches)
             )
         if self.F_count > 0:
             raise TopologyError("VEQlib MVP backend does not accept F_count > 0")
         if self.source_active_family == "none" and self.psin_count > 0:
             raise TopologyError(
-                "VEQlib MVP source-owned PF topology does not accept psin_count > 0"
+                "VEQlib MVP source-owned topology does not accept psin_count > 0"
             )
 
 

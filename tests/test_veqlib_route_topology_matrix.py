@@ -84,6 +84,7 @@ def test_route_matrix_tracks_pp_psin_parameterization() -> None:
     assert topology.source_parameterization == "sqrt_psin"
     assert topology.source_uses_ip_constraint is True
     assert topology.source_uses_beta_constraint is True
+    topology.validate_supported_for_veqlib_mvp()
 
 
 def test_route_matrix_tracks_pj2_active_f_ownership() -> None:
