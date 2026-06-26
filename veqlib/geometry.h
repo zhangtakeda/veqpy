@@ -17,7 +17,7 @@ namespace geometry::detail
     inline constexpr size_t surface_R           = 1;
     inline constexpr size_t surface_R_t         = 2;
     inline constexpr size_t surface_Z_t         = 3;
-    inline constexpr size_t surface_J           = 4;
+    inline constexpr size_t surface_inv_J       = 4;
     inline constexpr size_t surface_JdivR       = 5;
     inline constexpr size_t surface_grtdivJR_t  = 6;
     inline constexpr size_t surface_gttdivJR    = 7;
@@ -230,6 +230,7 @@ namespace geometry::detail
                     const double gtt_ij   = R_t_ij * R_t_ij + Z_t_ij * Z_t_ij;
                     const double gtt_r_ij = 2.0 * (R_t_ij * R_rt_ij + Z_t_ij * Z_rt_ij);
                     const double inv_JR   = 1.0 / JR_ij;
+                    const double inv_J_ij = R_ij * inv_JR;
                     const double grtdivJR_t_ij = (grt_t_ij - grt_ij * JR_t_ij * inv_JR) * inv_JR;
                     const double gttdivJR_ij   = gtt_ij * inv_JR;
                     const double gttdivJR_r_ij = gtt_r_ij * inv_JR - gtt_ij * JR_r_ij * inv_JR * inv_JR;
@@ -238,7 +239,7 @@ namespace geometry::detail
                     surface_field(surface_R, i, j)          = R_ij;
                     surface_field(surface_R_t, i, j)        = R_t_ij;
                     surface_field(surface_Z_t, i, j)        = Z_t_ij;
-                    surface_field(surface_J, i, j)          = J_ij;
+                    surface_field(surface_inv_J, i, j)      = inv_J_ij;
                     surface_field(surface_JdivR, i, j)      = JdivR_ij;
                     surface_field(surface_grtdivJR_t, i, j) = grtdivJR_t_ij;
                     surface_field(surface_gttdivJR, i, j)   = gttdivJR_ij;
@@ -277,7 +278,7 @@ namespace geometry
     using detail::surface_grtdivJR_t;
     using detail::surface_gttdivJR;
     using detail::surface_gttdivJR_r;
-    using detail::surface_J;
+    using detail::surface_inv_J;
     using detail::surface_JdivR;
     using detail::surface_R;
     using detail::surface_R_t;

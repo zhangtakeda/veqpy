@@ -106,7 +106,8 @@ namespace residual::detail
                         geometry_surface[geometry_base + geometry::surface_R_t * geometry_row_stride];
                     const double Z_t_ij =
                         geometry_surface[geometry_base + geometry::surface_Z_t * geometry_row_stride];
-                    const double J_ij = geometry_surface[geometry_base + geometry::surface_J * geometry_row_stride];
+                    const double inv_J =
+                        geometry_surface[geometry_base + geometry::surface_inv_J * geometry_row_stride];
                     const double JdivR_ij =
                         geometry_surface[geometry_base + geometry::surface_JdivR * geometry_row_stride];
                     const double grtdivJR_t_ij =
@@ -116,7 +117,6 @@ namespace residual::detail
                     const double gttdivJR_r_ij =
                         geometry_surface[geometry_base + geometry::surface_gttdivJR_r * geometry_row_stride];
 
-                    const double inv_J  = 1.0 / J_ij;
                     const double psin_R = -Z_t_ij * inv_J * psin_r_i;
                     const double psin_Z = R_t_ij * inv_J * psin_r_i;
 
