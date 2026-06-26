@@ -31,14 +31,15 @@ namespace operators::detail
 
     struct PfPsinUniformIpSolveParams
     {
-        double a  = 1.0;
-        double R0 = 1.0;
-        double Z0 = 0.0;
-        double B0 = 1.0;
-        double Ip = 0.0;
+        double a    = 1.0;
+        double R0   = 1.0;
+        double Z0   = 0.0;
+        double B0   = 1.0;
+        double Ip   = 0.0;
+        double beta = 0.0;
     };
 
-    template <typename Shape, typename GridType, typename SourceShape>
+    template <typename Shape, typename GridType, typename SourceShape, int SourceConstraintCode = 1>
     struct PfPsinUniformIpOperator
     {
         static_assert(Shape::L_max == GridType::basis_rows, "operator/profile basis rows must match");
@@ -48,6 +49,8 @@ namespace operators::detail
                       "PF/psin/uniform requires an active psin profile");
         static_assert(!Shape::slot_for_profile_id(Shape::F_profile_id).optimized(),
                       "PF/psin/uniform does not accept an active F profile");
+        static_assert(SourceConstraintCode == 0 || SourceConstraintCode == 1 || SourceConstraintCode == 2,
+                      "PF/psin/uniform supports null, Ip, or beta constraints");
         static_assert(SourceShape::sample_count >= 1, "PF/psin/uniform source needs at least one sample");
 
         using shape        = Shape;
@@ -103,7 +106,12 @@ namespace operators::detail
             workspace.geometry.update(solve_params.a, solve_params.R0, solve_params.Z0, workspace.profiles);
 
             workspace.source_runtime.materialize_profile_owned_psin(workspace.profiles, plan.n_axis_fix);
-            workspace.source_runtime.update_pf_psin_uniform_ip(workspace.geometry, solve_params.Ip, plan.n_axis_fix);
+            workspace.source_runtime.template update_pf_psin_uniform<SourceConstraintCode>(
+                workspace.geometry,
+                solve_params.Ip,
+                solve_params.beta,
+                solve_params.B0,
+                plan.n_axis_fix);
 
             workspace.residual.update_compact(workspace.source_runtime, workspace.geometry);
             workspace.residual.pack_into(out, solve_params.a, solve_params.R0, solve_params.B0);

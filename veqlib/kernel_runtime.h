@@ -76,6 +76,7 @@ namespace veqlib_kernel_api
             params.Z0 = input.Z0;
             params.B0 = input.B0;
             params.Ip = input.Ip;
+            params.beta = input.beta;
             return params;
         }
 

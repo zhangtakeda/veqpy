@@ -262,6 +262,7 @@ namespace veqlib_python
         const nlohmann::json& constraints = object_or_root(data, "constraints");
         input.Ip =
             optional_finite_number(constraints, "scaled_Ip", optional_finite_number(data, "scaled_Ip", input.Ip));
+        input.beta = optional_finite_number(constraints, "beta", optional_finite_number(data, "beta", input.beta));
         input.fix_rho =
             optional_finite_number(constraints, "fix_rho", optional_finite_number(data, "fix_rho", input.fix_rho));
 
@@ -458,19 +459,89 @@ namespace veqlib_python
         };
     }
 
+    constexpr const char* source_route_name() noexcept
+    {
+        switch (Topology::source_route_code)
+        {
+        case Topology::SourceRoutePF:
+            return "PF";
+        case Topology::SourceRoutePP:
+            return "PP";
+        case Topology::SourceRoutePI:
+            return "PI";
+        case Topology::SourceRoutePJ1:
+            return "PJ1";
+        case Topology::SourceRoutePJ2:
+            return "PJ2";
+        case Topology::SourceRoutePQ:
+            return "PQ";
+        default:
+            return "unknown";
+        }
+    }
+
+    constexpr const char* source_coordinate_name() noexcept
+    {
+        switch (Topology::source_coordinate_code)
+        {
+        case Topology::SourceCoordinateRho:
+            return "rho";
+        case Topology::SourceCoordinatePsin:
+            return "psin";
+        default:
+            return "unknown";
+        }
+    }
+
+    constexpr const char* source_constraint_name() noexcept
+    {
+        switch (Topology::source_constraint_code)
+        {
+        case Topology::SourceConstraintNull:
+            return "null";
+        case Topology::SourceConstraintIp:
+            return "Ip";
+        case Topology::SourceConstraintBeta:
+            return "beta";
+        case Topology::SourceConstraintIpBeta:
+            return "Ip_beta";
+        default:
+            return "unknown";
+        }
+    }
+
+    constexpr const char* source_nodes_name() noexcept
+    {
+        switch (Topology::source_nodes_code)
+        {
+        case Topology::SourceNodesUniform:
+            return "uniform";
+        case Topology::SourceNodesGrid:
+            return "grid";
+        default:
+            return "unknown";
+        }
+    }
+
+    inline std::string source_route_label()
+    {
+        return std::string{source_route_name()} + "/" + source_coordinate_name() + "/" + source_nodes_name() + "/" +
+               source_constraint_name();
+    }
+
     inline nlohmann::json case_prefix_json(SolveContext& context)
     {
         const CaseInput& input = context.input;
 
         return {
             {"case_name", input.case_name},
-            {"route", "PF/psin/uniform/Ip"},
+            {"route", source_route_label()},
             {"source_topology",
              {
-                 {"route", "PF"},
-                 {"coordinate", "psin"},
-                 {"nodes", "uniform"},
-                 {"constraint", "Ip"},
+                 {"route", source_route_name()},
+                 {"coordinate", source_coordinate_name()},
+                 {"nodes", source_nodes_name()},
+                 {"constraint", source_constraint_name()},
              }},
             {"x_size", KernelShape::x_size},
             {"grid",
@@ -501,7 +572,7 @@ namespace veqlib_python
                  {"scaled_heat", json_array(input.heat)},
                  {"scaled_current", json_array(input.current)},
              }},
-            {"constraints", {{"scaled_Ip", input.Ip}, {"fix_rho", input.fix_rho}}},
+            {"constraints", {{"scaled_Ip", input.Ip}, {"beta", input.beta}, {"fix_rho", input.fix_rho}}},
             {"fix_rho", input.fix_rho},
         };
     }
@@ -525,13 +596,13 @@ namespace veqlib_python
     inline nb::dict topology_metadata_dict(const CaseInput& input)
     {
         nb::dict source;
-        source["route"]        = "PF";
+        source["route"]        = source_route_name();
         source["route_code"]   = Topology::source_route_code;
-        source["coordinate"]   = "psin";
+        source["coordinate"]   = source_coordinate_name();
         source["coordinate_code"] = Topology::source_coordinate_code;
-        source["constraint"]   = "Ip";
+        source["constraint"]   = source_constraint_name();
         source["constraint_code"] = Topology::source_constraint_code;
-        source["nodes"]        = "uniform";
+        source["nodes"]        = source_nodes_name();
         source["nodes_code"]   = Topology::source_nodes_code;
         source["sample_count"] = KernelSource::sample_count;
         source["active_family_code"] = Topology::source_active_family_code;
@@ -573,7 +644,7 @@ namespace veqlib_python
         nb::dict out;
         out["schema"]        = "veqlib.kernel.metadata.v1";
         out["backend"]       = "veqlib.nanobind";
-        out["route"]         = "PF/psin/uniform/Ip";
+        out["route"]         = source_route_label();
         out["x_size"]        = KernelShape::x_size;
         out["active_count"]  = KernelShape::active_count;
         out["source"]        = source;
@@ -583,7 +654,7 @@ namespace veqlib_python
         layout["profile_first"] = Topology::layout_profile_first;
         out["layout"]        = layout;
         out["solver"]        = solver;
-        out["case_mutation"] = "json_payload_pf_psin_uniform_ip_mvp";
+        out["case_mutation"] = "json_payload_from_topology";
         return out;
     }
 
@@ -665,7 +736,7 @@ namespace veqlib_python
 
             const nlohmann::json report = {
                 {"schema", "veqlib.kernel.solve_result.v1"},
-                {"route", "PF/psin/uniform/Ip"},
+                {"route", source_route_label()},
                 {"x_size", KernelShape::x_size},
                 {"solver", solver_json(context_->input)},
                 {"elapsed_ms", last_elapsed_ms_},

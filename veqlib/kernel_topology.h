@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <span>
 #include <string>
 
@@ -105,7 +106,7 @@ namespace veqlib_kernel_api
                                                                              SFamilyCounts>;
             using Grid = grid::Grid<Nr, Nt, Shape::L_max, Shape::M_max, Shape::K_max, QuadratureScheme, CalculusScheme>;
             using Source   = source::UniformSourceShape<SourceSamples>;
-            using Operator = PfPsinUniformIpOperator<Shape, Grid, Source>;
+            using Operator = PfPsinUniformIpOperator<Shape, Grid, Source, Topology::source_constraint_code>;
         };
 
         constexpr auto kernel_c_counts = Topology::c_family_counts;
@@ -203,6 +204,7 @@ namespace veqlib_kernel_api
             std::array<double, KernelShape::M_max + 1>     c_offsets{};
             std::array<double, KernelShape::M_max + 1>     s_offsets{};
             double                                         Ip                       = 3.7699111867885415;
+            double                                         beta                     = std::numeric_limits<double>::quiet_NaN();
             double                                         fix_rho                  = 0.05;
             double                                         max_residual             = veqpy_max_residual;
             double                                         accepted_residual_factor = veqpy_accepted_residual_factor;

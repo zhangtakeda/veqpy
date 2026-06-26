@@ -437,7 +437,6 @@ class Topology:
         expected = {
             "route": "PF",
             "coordinate": "psin",
-            "constraint": "Ip",
             "nodes": "uniform",
             "quadrature": "legendre",
             "calculus": "spectral",
@@ -446,7 +445,6 @@ class Topology:
         actual = {
             "route": self.route,
             "coordinate": self.coordinate,
-            "constraint": self.constraint,
             "nodes": self.nodes,
             "quadrature": self.quadrature,
             "calculus": self.calculus,
@@ -457,9 +455,14 @@ class Topology:
             for name, value in expected.items()
             if actual[name] != value
         ]
+        if self.constraint not in {"null", "Ip", "beta"}:
+            mismatches.append(
+                f"constraint={self.constraint!r} (expected one of 'null', 'Ip', 'beta')"
+            )
         if mismatches:
             raise TopologyError(
-                "VEQlib MVP backend currently supports PF/psin/uniform/Ip only; got "
+                "VEQlib MVP backend currently supports PF/psin/uniform with null/Ip/beta "
+                "constraints only; got "
                 + ", ".join(mismatches)
             )
         if self.F_count > 0:

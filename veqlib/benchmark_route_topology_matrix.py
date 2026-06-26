@@ -266,6 +266,12 @@ def _runtime_case_data(benchmark: ModuleType, spec: Any, topology: Topology) -> 
     x0 = operator.pack_coefficients(benchmark._coefficients_from_coeffs(coeffs))
     boundary = case.boundary
     source_plan = operator.plan.source_plan
+    constraints = {"fix_rho": float(operator.fix_rho)}
+    if np.isfinite(float(source_plan.scaled_Ip)):
+        constraints["scaled_Ip"] = float(source_plan.scaled_Ip)
+    if np.isfinite(float(source_plan.beta)):
+        constraints["beta"] = float(source_plan.beta)
+
     payload = {
         "case_name": _spec_label(spec),
         "boundary": {
@@ -281,10 +287,7 @@ def _runtime_case_data(benchmark: ModuleType, spec: Any, topology: Topology) -> 
             "scaled_heat": source_plan.scaled_heat.tolist(),
             "scaled_current": source_plan.scaled_current.tolist(),
         },
-        "constraints": {
-            "scaled_Ip": float(source_plan.scaled_Ip),
-            "fix_rho": float(operator.fix_rho),
-        },
+        "constraints": constraints,
         "solver": {
             "method_code": SOLVER_METHOD_POWELL,
             "max_residual": float(benchmark.CONFIG.max_residual),
