@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import json
 import os
+import sys
+import threading
 from dataclasses import dataclass
 from pathlib import Path
+from time import perf_counter, sleep
 from typing import Any
 
 import numpy as np
@@ -23,12 +26,86 @@ from veqpy.operator import Operator
 MU0 = 4.0e-7 * np.pi
 
 
+class Spinner:
+    """Tiny terminal spinner that also reports elapsed wall time."""
+
+    _FRAMES = "|/-\\"
+
+    def __init__(self, message: str, *, min_visible_s: float = 0.6) -> None:
+        self.message = message
+        self.min_visible_s = min_visible_s
+        self.elapsed_ms = 0.0
+        self._started = 0.0
+        self._finished_elapsed_s: float | None = None
+        self._last_width = 0
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def __enter__(self) -> Spinner:
+        self._started = perf_counter()
+        self._thread = threading.Thread(target=self._spin, daemon=True)
+        self._thread.start()
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        elapsed_s = perf_counter() - self._started
+        self._finished_elapsed_s = elapsed_s
+        self.elapsed_ms = elapsed_s * 1000.0
+        if elapsed_s < self.min_visible_s:
+            sleep(self.min_visible_s - elapsed_s)
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join()
+        if exc_type is not None:
+            self.replace(f"{self.message} failed {self.elapsed_ms / 1000.0:.3f}s")
+
+    def _spin(self) -> None:
+        index = 0
+        while not self._stop.is_set():
+            elapsed = self._finished_elapsed_s
+            if elapsed is None:
+                elapsed = perf_counter() - self._started
+            frame = self._FRAMES[index % len(self._FRAMES)]
+            line = f"{self.message} {frame} {elapsed:.1f}s"
+            self._last_width = max(self._last_width, len(line))
+            self._write(f"\r{line}")
+            index += 1
+            sleep(0.08)
+
+    def replace(self, line: str) -> None:
+        padding = " " * max(0, self._last_width - len(line))
+        self._write(f"\r{line}{padding}\n")
+
+    @staticmethod
+    def _write(text: str) -> None:
+        sys.stderr.write(text)
+        sys.stderr.flush()
+
+
+@dataclass(frozen=True, slots=True)
+class BuildReport:
+    """Small summary for the artifact build/cache step."""
+
+    artifact_id: str
+    elapsed_ms: float
+    reused: bool
+
+
+@dataclass(frozen=True, slots=True)
+class PinReport:
+    """Describe best-effort CPU affinity applied by this demo."""
+
+    requested: int
+    actual: int
+
+
 @dataclass(frozen=True, slots=True)
 class Result:
     """Small Python owner for the C++ solve output and VEQPy snapshot rebuild."""
 
     operator: Operator
     x: np.ndarray
+    build: BuildReport
     success: bool
     elapsed_ms: float
     nfev: int
@@ -69,12 +146,14 @@ class Solver:
         )
         operator = Operator(grid, problem)
         kernel = VEQlibSolver(_kernel_topology(topo, problem, grid, active_profiles))
+        build = _build_kernel(kernel)
         kernel.set_case_json(_payload_json(problem, operator))
         solve = kernel.solve_direct()
 
         return Result(
             operator=operator,
             x=np.asarray(solve[11], dtype=np.float64).copy(),
+            build=build,
             success=bool(solve[1]),
             elapsed_ms=float(solve[0]),
             nfev=int(solve[3]),
@@ -201,6 +280,19 @@ def _payload_json(problem: Problem, operator: Operator) -> str:
     return json.dumps(payload, separators=(",", ":"), sort_keys=True)
 
 
+def _build_kernel(kernel: VEQlibSolver) -> BuildReport:
+    with Spinner("kernel   : building") as spinner:
+        artifact = kernel.build()
+    elapsed_ms = spinner.elapsed_ms
+    state = "reused" if artifact.reused else "built"
+    spinner.replace(f"kernel   : {state} {artifact.artifact_id}")
+    return BuildReport(
+        artifact_id=artifact.artifact_id,
+        elapsed_ms=elapsed_ms,
+        reused=bool(artifact.reused),
+    )
+
+
 def demo_source_profiles() -> dict[str, np.ndarray]:
     psin = np.linspace(0.0, 1.0, 51, dtype=np.float64)
     beta0, alpha_p, alpha_f = 0.75, 5.0, 3.32
@@ -217,7 +309,29 @@ def output_path() -> Path:
     return outdir / "cpp_equilibrium.png"
 
 
+def pin_cpu() -> PinReport | None:
+    token = os.environ.get("VEQPY_PIN_CPU", "2").strip().lower()
+    if token in {"", "off", "false", "no", "none"}:
+        return None
+    try:
+        requested = int(token)
+    except ValueError as exc:
+        raise ValueError("VEQPY_PIN_CPU must be an integer CPU id or 'off'") from exc
+    if not hasattr(os, "sched_setaffinity"):
+        return None
+
+    allowed = os.sched_getaffinity(0)
+    actual = requested if requested in allowed else min(allowed)
+    os.sched_setaffinity(0, {actual})
+    return PinReport(requested=requested, actual=actual)
+
+
 def main() -> None:
+    pin = pin_cpu()
+    if pin is not None:
+        suffix = "" if pin.actual == pin.requested else f" (requested {pin.requested})"
+        print(f"cpu      : pinned {pin.actual}{suffix}", flush=True)
+
     topo = {
         "route": "PF",
         "coordinate": "psin",
@@ -246,11 +360,12 @@ def main() -> None:
     png = output_path()
     equilibrium.plot(str(png))
 
-    print(f"success    : {results.success}")
-    print(f"elapsed_ms : {results.elapsed_ms:.3f}")
-    print(f"nfev       : {results.nfev}")
-    print(f"raw_norm   : {results.raw_norm:.6e}")
-    print(f"png        : {png}")
+    print(f"success  : {results.success}", flush=True)
+    print(f"build    : {results.build.elapsed_ms:.3f} [ms]", flush=True)
+    print(f"solve    : {results.elapsed_ms:.3f} [ms]", flush=True)
+    print(f"nfev     : {results.nfev}", flush=True)
+    print(f"raw_norm : {results.raw_norm:.6e}", flush=True)
+    print(f"png      : {png}", flush=True)
 
 
 if __name__ == "__main__":

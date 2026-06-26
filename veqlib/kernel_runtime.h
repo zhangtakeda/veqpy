@@ -233,25 +233,18 @@ namespace veqlib_kernel_api
         using KernelSolveParams = KernelOperator::SolveParams;
         using KernelWorkspace   = KernelOperator::KernelWorkspace;
 
-        KernelWorkspace enzyme_workspace_for_context(const SolveContext& context) noexcept { return context.op.workspace; }
-
-        double scaled_residual_vector_for_enzyme(double*                    z,
-                                                 double*                    fvec,
-                                                 KernelWorkspace*           workspace,
-                                                 const KernelPlan*          plan,
-                                                 const KernelSolveParams*   solve_params,
-                                                 const double*              x_scale,
-                                                 const double*              residual_scale) noexcept
+        double scaled_residual_raw_x_for_enzyme(double*                  x,
+                                                double*                  fvec,
+                                                KernelWorkspace*         workspace,
+                                                const KernelPlan*        plan,
+                                                const KernelSolveParams* solve_params,
+                                                const double*            residual_scale) noexcept
         {
-            const auto x =
-                decode_z_to_x(std::span<const double, KernelShape::x_size>{z, KernelShape::x_size},
-                              std::span<const double, KernelShape::x_size>{x_scale, KernelShape::x_size});
-
             PackedVector raw{uninitialized};
             KernelOperator::evaluate_with(*plan,
                                           *solve_params,
                                           *workspace,
-                                          std::span<const double, KernelShape::x_size>{x.data(), KernelShape::x_size},
+                                          std::span<const double, KernelShape::x_size>{x, KernelShape::x_size},
                                           raw);
             for (size_t i = 0; i < KernelShape::x_size; ++i)
                 fvec[i] = raw[i] / residual_scale[i];
@@ -279,27 +272,26 @@ namespace veqlib_kernel_api
 #ifdef ENABLE_ENZYME
         void fill_enzyme_jvp_z(SolveContext& context, const double* z, const double* v, double* jv)
         {
-            std::array<double, KernelShape::x_size> z_primal;
-            std::array<double, KernelShape::x_size> z_dot;
-            std::array<double, KernelShape::x_size> f_primal{};
+            std::array<double, KernelShape::x_size> x_primal;
+            std::array<double, KernelShape::x_size> x_dot;
+            std::array<double, KernelShape::x_size> f_primal;
+            const auto&                             x_scale = context.input.x_scale;
             for (size_t i = 0; i < KernelShape::x_size; ++i)
             {
-                z_primal[i] = z[i];
-                z_dot[i]    = v[i];
+                x_primal[i] = z[i] * x_scale[i];
+                x_dot[i]    = v[i] * x_scale[i];
             }
 
-            KernelWorkspace jvp_workspace = enzyme_workspace_for_context(context);
             KernelWorkspace jvp_workspace_dot{};
             const KernelPlan&        plan         = context.op.plan;
             const KernelSolveParams& solve_params = context.op.solve_params();
             (void)enzyme::autodiff<enzyme::Forward, enzyme::Const<double>>(
-                scaled_residual_vector_for_enzyme,
-                enzyme::Duplicated<double*>{z_primal.data(), z_dot.data()},
+                scaled_residual_raw_x_for_enzyme,
+                enzyme::Duplicated<double*>{x_primal.data(), x_dot.data()},
                 enzyme::Duplicated<double*>{f_primal.data(), jv},
-                enzyme::Duplicated<KernelWorkspace*>{&jvp_workspace, &jvp_workspace_dot},
+                enzyme::Duplicated<KernelWorkspace*>{&context.op.workspace, &jvp_workspace_dot},
                 enzyme::Const<const KernelPlan*>{&plan},
                 enzyme::Const<const KernelSolveParams*>{&solve_params},
-                enzyme::Const<const double*>{context.input.x_scale.data()},
                 enzyme::Const<const double*>{context.input.residual_scale.data()});
         }
 
@@ -318,45 +310,44 @@ namespace veqlib_kernel_api
             constexpr size_t n                 = KernelShape::x_size;
             constexpr size_t lane_stride_bytes = n * sizeof(double);
 
-            std::array<double, n> z_primal;
+            std::array<double, n> x_primal;
+            const auto&           x_scale = context.input.x_scale;
             for (size_t i = 0; i < n; ++i)
-                z_primal[i] = z[i];
+                x_primal[i] = z[i] * x_scale[i];
+
+            const KernelPlan&        plan         = context.op.plan;
+            const KernelSolveParams& solve_params = context.op.solve_params();
 
             for (size_t first_col = 0; first_col < n; first_col += Width)
             {
-                std::array<double, Width * n>     z_dot{};
-                std::array<double, n>             f_primal{};
-                std::array<double, Width * n>     f_dot{};
-                KernelWorkspace                   chunk_workspace = enzyme_workspace_for_context(context);
+                std::array<double, Width * n>     x_dot{};
+                std::array<double, n>             f_primal;
+                std::array<double, Width * n>     f_dot;
                 std::array<KernelWorkspace, Width> chunk_workspace_dot{};
-                const KernelPlan&                 plan         = context.op.plan;
-                const KernelSolveParams&          solve_params = context.op.solve_params();
 
                 const size_t lane_count = std::min(Width, n - first_col);
                 for (size_t lane = 0; lane < lane_count; ++lane)
-                    z_dot[lane * n + first_col + lane] = 1.0;
+                    x_dot[lane * n + first_col + lane] = x_scale[first_col + lane];
 
-                __enzyme_fwddiff<void>(reinterpret_cast<void*>(scaled_residual_vector_for_enzyme),
+                __enzyme_fwddiff<void>(reinterpret_cast<void*>(scaled_residual_raw_x_for_enzyme),
                                        enzyme_width,
                                        static_cast<int>(Width),
                                        enzyme_dupv,
                                        static_cast<int>(lane_stride_bytes),
-                                       z_primal.data(),
-                                       z_dot.data(),
+                                       x_primal.data(),
+                                       x_dot.data(),
                                        enzyme_dupv,
                                        static_cast<int>(lane_stride_bytes),
                                        f_primal.data(),
                                        f_dot.data(),
                                        enzyme_dupv,
                                        static_cast<int>(sizeof(KernelWorkspace)),
-                                       &chunk_workspace,
+                                       &context.op.workspace,
                                        chunk_workspace_dot.data(),
                                        enzyme_const,
                                        &plan,
                                        enzyme_const,
                                        &solve_params,
-                                       enzyme_const,
-                                       context.input.x_scale.data(),
                                        enzyme_const,
                                        context.input.residual_scale.data());
 
@@ -372,28 +363,28 @@ namespace veqlib_kernel_api
 
         void fill_enzyme_jacobian_z_scalar(SolveContext& context, const double* z, double* fjac, int ldfjac)
         {
-            std::array<double, KernelShape::x_size> z_primal;
+            std::array<double, KernelShape::x_size> x_primal;
+            const auto&                             x_scale = context.input.x_scale;
             for (size_t i = 0; i < KernelShape::x_size; ++i)
-                z_primal[i] = z[i];
+                x_primal[i] = z[i] * x_scale[i];
+
+            const KernelPlan&        plan         = context.op.plan;
+            const KernelSolveParams& solve_params = context.op.solve_params();
 
             for (size_t col = 0; col < KernelShape::x_size; ++col)
             {
-                std::array<double, KernelShape::x_size> z_dot{};
-                std::array<double, KernelShape::x_size> f_primal{};
-                std::array<double, KernelShape::x_size> f_dot{};
-                KernelWorkspace                         column_workspace = enzyme_workspace_for_context(context);
+                std::array<double, KernelShape::x_size> x_dot{};
+                std::array<double, KernelShape::x_size> f_primal;
+                std::array<double, KernelShape::x_size> f_dot;
                 KernelWorkspace                         column_workspace_dot{};
-                const KernelPlan&                       plan         = context.op.plan;
-                const KernelSolveParams&                solve_params = context.op.solve_params();
-                z_dot[col] = 1.0;
+                x_dot[col] = x_scale[col];
                 (void)enzyme::autodiff<enzyme::Forward, enzyme::Const<double>>(
-                    scaled_residual_vector_for_enzyme,
-                    enzyme::Duplicated<double*>{z_primal.data(), z_dot.data()},
+                    scaled_residual_raw_x_for_enzyme,
+                    enzyme::Duplicated<double*>{x_primal.data(), x_dot.data()},
                     enzyme::Duplicated<double*>{f_primal.data(), f_dot.data()},
-                    enzyme::Duplicated<KernelWorkspace*>{&column_workspace, &column_workspace_dot},
+                    enzyme::Duplicated<KernelWorkspace*>{&context.op.workspace, &column_workspace_dot},
                     enzyme::Const<const KernelPlan*>{&plan},
                     enzyme::Const<const KernelSolveParams*>{&solve_params},
-                    enzyme::Const<const double*>{context.input.x_scale.data()},
                     enzyme::Const<const double*>{context.input.residual_scale.data()});
                 for (size_t row = 0; row < KernelShape::x_size; ++row)
                     fjac[row + static_cast<size_t>(ldfjac) * col] = f_dot[row];

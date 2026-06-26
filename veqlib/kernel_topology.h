@@ -112,23 +112,23 @@ namespace veqlib_kernel_api
         constexpr auto kernel_s_counts = Topology::s_family_counts;
 
         using KernelTopology = PfPsinUniformIpTopology<Topology::Nr,
-                                                      Topology::Nt,
-                                                      Topology::source_sample_count,
-                                                      Topology::h_count,
-                                                      Topology::v_count,
-                                                      Topology::kappa_count,
-                                                      Topology::psin_count,
-                                                      Topology::F_count,
-                                                      kernel_c_counts,
-                                                      kernel_s_counts,
-                                                      Legendre,
-                                                      Spectral,
-                                                      Topology::M_max>;
+                                                       Topology::Nt,
+                                                       Topology::source_sample_count,
+                                                       Topology::h_count,
+                                                       Topology::v_count,
+                                                       Topology::kappa_count,
+                                                       Topology::psin_count,
+                                                       Topology::F_count,
+                                                       kernel_c_counts,
+                                                       kernel_s_counts,
+                                                       Legendre,
+                                                       Spectral,
+                                                       Topology::M_max>;
         using KernelShape    = KernelTopology::Shape;
         using KernelGrid     = KernelTopology::Grid;
         using KernelSource   = KernelTopology::Source;
         using KernelOperator = KernelTopology::Operator;
-        using PackedVector  = KernelOperator::PackedVector;
+        using PackedVector   = KernelOperator::PackedVector;
 
         static_assert(KernelShape::L_max == Topology::L_max);
         static_assert(KernelShape::M_max == Topology::M_max);
@@ -187,63 +187,63 @@ namespace veqlib_kernel_api
 
         struct CaseInput
         {
-            std::string                                   case_name = "PF_psin_uniform_Ip";
+            std::string                                    case_name = "PF_psin_uniform_Ip";
             std::array<double, KernelSource::sample_count> heat{};
             std::array<double, KernelSource::sample_count> current{};
             std::array<double, KernelShape::x_size>        x0{};
             std::array<double, KernelShape::x_size>        x_scale{};
             std::array<double, KernelShape::x_size>        residual_scale{};
-            double                                        a         = 1.05 / 1.85;
-            double                                        R0        = 1.05;
-            double                                        Z0        = 0.0;
-            double                                        B0        = 3.0;
-            double                                        ka        = 2.2;
-            double                                        c0_offset = 0.0;
-            double                                        s1_offset = 0.52359877559829887308;
+            double                                         a         = 1.05 / 1.85;
+            double                                         R0        = 1.05;
+            double                                         Z0        = 0.0;
+            double                                         B0        = 3.0;
+            double                                         ka        = 2.2;
+            double                                         c0_offset = 0.0;
+            double                                         s1_offset = 0.52359877559829887308;
             std::array<double, KernelShape::M_max + 1>     c_offsets{};
             std::array<double, KernelShape::M_max + 1>     s_offsets{};
-            double                                        Ip                           = 3.7699111867885415;
-            double                                        fix_rho                      = 0.05;
-            double                                        max_residual                 = veqpy_max_residual;
-            double                                        accepted_residual_factor     = veqpy_accepted_residual_factor;
-            double                                        accepted_residual_floor      = veqpy_accepted_residual_floor;
-            double                                        residual_normalization_floor = 1.0;
-            double                                        residual_normalization_max_ratio          = 1.0e6;
-            double                                        residual_normalization_huber_tau          = 3.0;
-            double                                        residual_normalization_probe_step         = 1.0e-6;
-            double                                        residual_normalization_sensitivity_lambda = 0.5;
-            int                                           max_evaluations = veqpy_requested_max_evaluations;
-            int                                           residual_normalization_probe_count = 4;
-            int                                           repeat                             = 10;
-            int                                           warmup                             = 1;
-            SolverKind                                    solver                             = SolverKind::Powell;
-            int                                           initial_policy_code                = InitialPolicyCold;
-            int                                           residual_normalization_code         = ResidualNormalizationFast;
+            double                                         Ip                       = 3.7699111867885415;
+            double                                         fix_rho                  = 0.05;
+            double                                         max_residual             = veqpy_max_residual;
+            double                                         accepted_residual_factor = veqpy_accepted_residual_factor;
+            double                                         accepted_residual_floor  = veqpy_accepted_residual_floor;
+            double                                         residual_normalization_floor              = 1.0;
+            double                                         residual_normalization_max_ratio          = 1.0e6;
+            double                                         residual_normalization_huber_tau          = 3.0;
+            double                                         residual_normalization_probe_step         = 1.0e-6;
+            double                                         residual_normalization_sensitivity_lambda = 0.5;
+            int                                            max_evaluations = veqpy_requested_max_evaluations;
+            int                                            residual_normalization_probe_count = 4;
+            int                                            repeat                             = 10;
+            int                                            warmup                             = 1;
+            SolverKind                                     solver                             = SolverKind::Powell;
+            int                                            initial_policy_code                = InitialPolicyCold;
+            int                                            residual_normalization_code = ResidualNormalizationFast;
         };
 
         struct SolveResult
         {
             std::array<double, KernelShape::x_size> x{};
-            PackedVector                           raw{};
-            PackedVector                           scaled{};
-            std::array<double, 2>                  alpha{};
-            double                                 raw_norm                       = 0.0;
-            double                                 scaled_norm                    = 0.0;
-            int                                    info                           = 0;
-            int                                    nfev                           = 0;
-            int                                    njev                           = 0;
-            int                                    callbacks                      = 0;
-            int                                    jacobian_component_evaluations = 0;
-            int                                    jvp_evaluations                = 0;
-            int                                    linear_iterations              = 0;
-            double                                 residual_callback_ms           = 0.0;
-            double                                 residual_kernel_ms             = 0.0;
-            double                                 residual_scale_ms              = 0.0;
-            double                                 final_residual_ms              = 0.0;
-            double                                 jacobian_callback_ms           = 0.0;
-            double                                 jvp_callback_ms                = 0.0;
-            double                                 linear_solve_ms                = 0.0;
-            bool                                   accepted                       = false;
+            PackedVector                            raw{};
+            PackedVector                            scaled{};
+            std::array<double, 2>                   alpha{};
+            double                                  raw_norm                       = 0.0;
+            double                                  scaled_norm                    = 0.0;
+            int                                     info                           = 0;
+            int                                     nfev                           = 0;
+            int                                     njev                           = 0;
+            int                                     callbacks                      = 0;
+            int                                     jacobian_component_evaluations = 0;
+            int                                     jvp_evaluations                = 0;
+            int                                     linear_iterations              = 0;
+            double                                  residual_callback_ms           = 0.0;
+            double                                  residual_kernel_ms             = 0.0;
+            double                                  residual_scale_ms              = 0.0;
+            double                                  final_residual_ms              = 0.0;
+            double                                  jacobian_callback_ms           = 0.0;
+            double                                  jvp_callback_ms                = 0.0;
+            double                                  linear_solve_ms                = 0.0;
+            bool                                    accepted                       = false;
         };
 
         double norm2(std::span<const double, KernelShape::x_size> values) noexcept

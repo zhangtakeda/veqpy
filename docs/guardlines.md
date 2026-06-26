@@ -30,7 +30,7 @@
 - **topology.orders**: `L_max`(默认从 dofs 推断), `M_max`(默认从 dofs 推断; 显式设置时用于保留更高阶的边界影响), `K_max`(约束 c/s_family 的计算阶数).
 - **topology.source**: 包含 `route`(PF)、`coordinate`(rho/psin)、`sampling`(grid/uniform 及具体采样点数)、`constraint`(null/Ip/beta/Ip_beta).
 - **topology.layout**: 定义如何将 dofs 字典映射为展平后的向量 `x`.
-- **topology.build**: 编译配置, 提供三种预设: 默认的 fastmath(全开优化), debug(便于定位错误), release(遇错直接退出而非报错). 也支持在任一预设基础上对具体编译选项单独调整.
+- **topology.build**: 编译配置, 提供4种预设: 默认的 fastmath(全开优化), fastmath-enzyme(全开优化), debug(便于定位错误), release(遇错直接退出而非报错). 也支持在任一预设基础上对具体编译选项单独调整, 包括 enzyme 的 block 大小.
 
 ## case (runtime 阶段逐次输入)
 
