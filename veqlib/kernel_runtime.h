@@ -297,6 +297,8 @@ namespace veqlib_kernel_api
 
         constexpr size_t enzyme_dense_jacobian_batch_width() noexcept
         {
+            if constexpr (Topology::enzyme_jacobian_batch_width > 0)
+                return Topology::enzyme_jacobian_batch_width;
             if constexpr (KernelShape::x_size >= 8)
                 return 4;
             else

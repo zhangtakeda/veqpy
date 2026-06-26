@@ -27,6 +27,7 @@ namespace veqlib_python
 {
     using std::size_t;
 
+    using config::Topology;
     using veqlib_kernel_api::KernelGrid;
     using veqlib_kernel_api::KernelShape;
     using veqlib_kernel_api::KernelSource;
@@ -525,10 +526,15 @@ namespace veqlib_python
     {
         nb::dict source;
         source["route"]        = "PF";
+        source["route_code"]   = Topology::source_route_code;
         source["coordinate"]   = "psin";
+        source["coordinate_code"] = Topology::source_coordinate_code;
         source["constraint"]   = "Ip";
+        source["constraint_code"] = Topology::source_constraint_code;
         source["nodes"]        = "uniform";
+        source["nodes_code"]   = Topology::source_nodes_code;
         source["sample_count"] = KernelSource::sample_count;
+        source["active_family_code"] = Topology::source_active_family_code;
 
         nb::dict grid;
         grid["Nr"]         = KernelGrid::radial_nodes;
@@ -572,6 +578,9 @@ namespace veqlib_python
         out["source"]        = source;
         out["grid"]          = grid;
         out["profiles"]      = profiles;
+        nb::dict layout;
+        layout["profile_first"] = Topology::layout_profile_first;
+        out["layout"]        = layout;
         out["solver"]        = solver;
         out["case_mutation"] = "json_payload_pf_psin_uniform_ip_mvp";
         return out;

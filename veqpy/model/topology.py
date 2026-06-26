@@ -3,10 +3,77 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import warnings
 from dataclasses import dataclass
 from typing import Any
 
 _TOPOLOGY_KEY_LENGTH = 32
+_SOURCE_ROUTE_CODES = {
+    "PF": 1,
+    "PP": 2,
+    "PI": 3,
+    "PJ1": 4,
+    "PJ2": 5,
+    "PQ": 6,
+}
+_SOURCE_COORDINATE_CODES = {
+    "rho": 1,
+    "psin": 2,
+}
+_SOURCE_CONSTRAINT_CODES = {
+    "null": 0,
+    "Ip": 1,
+    "beta": 2,
+    "Ip_beta": 3,
+}
+_SOURCE_NODES_CODES = {
+    "uniform": 1,
+    "grid": 2,
+}
+_SOURCE_ACTIVE_FAMILY_CODES = {
+    "none": 0,
+    "psin": 1,
+    "F": 2,
+}
+_LAYOUT_CODES = {
+    "degree": 0,
+    "family": 1,
+}
+_BUILD_PRESET_KWARGS: dict[str, dict[str, object]] = {
+    "fastmath": {
+        "cmake_build_type": "Release",
+        "fp_mode": "RELAXED",
+        "enable_enzyme": False,
+        "enable_native_optimizations": True,
+        "enable_thin_lto": True,
+        "analysis": False,
+    },
+    "fastmath-enzyme": {
+        "cmake_build_type": "Release",
+        "fp_mode": "RELAXED",
+        "enable_enzyme": True,
+        "enable_native_optimizations": True,
+        "enable_thin_lto": True,
+        "analysis": False,
+    },
+    "release": {
+        "cmake_build_type": "Release",
+        "fp_mode": "STRICT",
+        "enable_enzyme": False,
+        "enable_native_optimizations": True,
+        "enable_thin_lto": True,
+        "analysis": False,
+    },
+    "debug": {
+        "cmake_build_type": "Debug",
+        "fp_mode": "STRICT",
+        "enable_enzyme": False,
+        "enable_native_optimizations": False,
+        "enable_thin_lto": False,
+        "analysis": False,
+    },
+}
+_DEFAULT_ENZYME_JACOBIAN_BATCH_WIDTH = 0
 
 
 class TopologyError(ValueError):
@@ -46,6 +113,14 @@ class Topology:
 
     # artifact/cache metadata
     build: str = "fastmath"  # fastmath, fastmath-enzyme, release, debug
+    layout: str = "degree"  # degree or family/profile-first
+    cmake_build_type: str | None = None
+    fp_mode: str | None = None
+    enable_enzyme: bool | None = None
+    enable_native_optimizations: bool | None = None
+    enable_thin_lto: bool | None = None
+    analysis: bool | None = None
+    enzyme_jacobian_batch_width: int | None = None  # 0 lets C++ choose from x_size
     key: str | None = None
 
     def __post_init__(self) -> None:
@@ -86,16 +161,58 @@ class Topology:
         if calculus != "spectral":
             raise TopologyError("only spectral calculus is supported by the topology schema v1")
         build = _normalize_token(self.build, "build")
-        if build not in {"fastmath", "fastmath-enzyme", "release", "debug"}:
+        if build not in _BUILD_PRESET_KWARGS:
             raise TopologyError(
                 "build must be one of fastmath, fastmath-enzyme, release, or debug"
             )
+        layout = _normalize_layout(self.layout)
         sample_count = self._canonical_sample_count(nodes, nr)
         inferred_l = _infer_l_max((*profile_counts.values(), *c_counts, *s_counts))
         l_max = _canonical_exact_or_inferred(self.L_max, inferred_l, "L_max")
         inferred_m = _infer_m_max(c_counts, s_counts)
         m_max = _canonical_at_least(self.M_max, inferred_m, "M_max")
         k_max = _canonical_at_least(self.K_max, max(2, m_max), "K_max")
+        source_active_family = _source_active_family(route, coordinate, nodes)
+        _validate_source_active_family(
+            source_active_family,
+            psin_count=profile_counts["psin_count"],
+            f_count=profile_counts["F_count"],
+        )
+        _warn_source_profile_ownership(
+            route,
+            source_active_family=source_active_family,
+            psin_count=profile_counts["psin_count"],
+            f_count=profile_counts["F_count"],
+        )
+        build_preset = _BUILD_PRESET_KWARGS[build]
+        cmake_build_type = _normalize_cmake_build_type(
+            self.cmake_build_type,
+            default=str(build_preset["cmake_build_type"]),
+        )
+        fp_mode = _normalize_fp_mode(self.fp_mode, default=str(build_preset["fp_mode"]))
+        enable_enzyme = _canonical_bool(
+            self.enable_enzyme,
+            default=bool(build_preset["enable_enzyme"]),
+            name="enable_enzyme",
+        )
+        enable_native_optimizations = _canonical_bool(
+            self.enable_native_optimizations,
+            default=bool(build_preset["enable_native_optimizations"]),
+            name="enable_native_optimizations",
+        )
+        enable_thin_lto = _canonical_bool(
+            self.enable_thin_lto,
+            default=bool(build_preset["enable_thin_lto"]),
+            name="enable_thin_lto",
+        )
+        analysis = _canonical_bool(
+            self.analysis,
+            default=bool(build_preset["analysis"]),
+            name="analysis",
+        )
+        enzyme_jacobian_batch_width = _canonical_enzyme_jacobian_batch_width(
+            self.enzyme_jacobian_batch_width
+        )
 
         normalized_values: dict[str, Any] = {
             **profile_counts,
@@ -114,6 +231,14 @@ class Topology:
             "M_max": m_max,
             "K_max": k_max,
             "build": build,
+            "layout": layout,
+            "cmake_build_type": cmake_build_type,
+            "fp_mode": fp_mode,
+            "enable_enzyme": enable_enzyme,
+            "enable_native_optimizations": enable_native_optimizations,
+            "enable_thin_lto": enable_thin_lto,
+            "analysis": analysis,
+            "enzyme_jacobian_batch_width": enzyme_jacobian_batch_width,
         }
         for key, value in normalized_values.items():
             object.__setattr__(self, key, value)
@@ -143,6 +268,7 @@ class Topology:
 
         return {
             "build": self.build,
+            "build_options": self.build_options_dict(),
             "profiles": {
                 "h_count": self.h_count,
                 "v_count": self.v_count,
@@ -163,10 +289,21 @@ class Topology:
             },
             "source": {
                 "route": self.route,
+                "route_code": self.source_route_code,
                 "coordinate": self.coordinate,
+                "coordinate_code": self.source_coordinate_code,
                 "constraint": self.constraint,
+                "constraint_code": self.source_constraint_code,
                 "nodes": self.nodes,
+                "nodes_code": self.source_nodes_code,
                 "sample_count": self.sample_count,
+                "active_family": self.source_active_family,
+                "active_family_code": self.source_active_family_code,
+            },
+            "layout": {
+                "packed": self.layout,
+                "profile_first": self.layout_profile_first,
+                "code": self.layout_code,
             },
         }
 
@@ -187,6 +324,52 @@ class Topology:
         encoded = base64.b32encode(digest).decode("ascii").lower().rstrip("=")
         return encoded[:_TOPOLOGY_KEY_LENGTH]
 
+    @property
+    def source_route_code(self) -> int:
+        return _SOURCE_ROUTE_CODES[self.route]
+
+    @property
+    def source_coordinate_code(self) -> int:
+        return _SOURCE_COORDINATE_CODES[self.coordinate]
+
+    @property
+    def source_constraint_code(self) -> int:
+        return _SOURCE_CONSTRAINT_CODES[self.constraint]
+
+    @property
+    def source_nodes_code(self) -> int:
+        return _SOURCE_NODES_CODES[self.nodes]
+
+    @property
+    def source_active_family(self) -> str:
+        return _source_active_family(self.route, self.coordinate, self.nodes)
+
+    @property
+    def source_active_family_code(self) -> int:
+        return _SOURCE_ACTIVE_FAMILY_CODES[self.source_active_family]
+
+    @property
+    def layout_code(self) -> int:
+        return _LAYOUT_CODES[self.layout]
+
+    @property
+    def layout_profile_first(self) -> bool:
+        return self.layout == "family"
+
+    def build_options_dict(self) -> dict[str, object]:
+        """Return preset-expanded CMake/kernel build options."""
+
+        return {
+            "preset": self.build,
+            "cmake_build_type": self.cmake_build_type,
+            "fp_mode": self.fp_mode,
+            "enable_enzyme": self.enable_enzyme,
+            "enable_native_optimizations": self.enable_native_optimizations,
+            "enable_thin_lto": self.enable_thin_lto,
+            "analysis": self.analysis,
+            "enzyme_jacobian_batch_width": self.enzyme_jacobian_batch_width,
+        }
+
     def validate_supported_for_veqlib_mvp(self) -> None:
         """Reject topology combinations not yet implemented by the VEQlib MVP backend."""
 
@@ -197,6 +380,7 @@ class Topology:
             "nodes": "uniform",
             "quadrature": "legendre",
             "calculus": "spectral",
+            "layout": "degree",
         }
         actual = {
             "route": self.route,
@@ -205,6 +389,7 @@ class Topology:
             "nodes": self.nodes,
             "quadrature": self.quadrature,
             "calculus": self.calculus,
+            "layout": self.layout,
         }
         mismatches = [
             f"{name}={actual[name]!r} (expected {value!r})"
@@ -216,6 +401,8 @@ class Topology:
                 "VEQlib MVP backend currently supports PF/psin/uniform/Ip only; got "
                 + ", ".join(mismatches)
             )
+        if self.F_count > 0:
+            raise TopologyError("VEQlib MVP backend does not accept F_count > 0")
 
 
 def _normalize_token(value: str, name: str) -> str:
@@ -243,6 +430,102 @@ def _normalize_constraint(value: str | None) -> str:
         return mapping[normalized]
     except KeyError as exc:
         raise TopologyError(f"unsupported constraint {value!r}") from exc
+
+
+def _normalize_layout(value: str) -> str:
+    normalized = _normalize_token(value, "layout").lower().replace("-", "_")
+    mapping = {
+        "degree": "degree",
+        "degree_first": "degree",
+        "family": "family",
+        "family_first": "family",
+        "profile": "family",
+        "profile_first": "family",
+    }
+    try:
+        return mapping[normalized]
+    except KeyError as exc:
+        raise TopologyError("layout must be degree or family") from exc
+
+
+def _source_active_family(route: str, coordinate: str, nodes: str) -> str:
+    if route == "PJ2":
+        return "F"
+    if coordinate == "psin" and nodes == "uniform":
+        return "psin"
+    return "none"
+
+
+def _validate_source_active_family(
+    source_active_family: str,
+    *,
+    psin_count: int,
+    f_count: int,
+) -> None:
+    if source_active_family == "psin" and psin_count <= 0:
+        raise TopologyError("psin/uniform source topology requires psin_count > 0")
+    if source_active_family == "F" and f_count <= 0:
+        raise TopologyError("PJ2 source topology requires F_count > 0")
+
+
+def _warn_source_profile_ownership(
+    route: str,
+    *,
+    source_active_family: str,
+    psin_count: int,
+    f_count: int,
+) -> None:
+    if source_active_family == "F" and psin_count > 0:
+        warnings.warn(
+            "PJ2 source topology uses active F ownership; psin_count is ignored by "
+            "the source kernel and should normally be 0",
+            UserWarning,
+            stacklevel=3,
+        )
+    if route != "PJ2" and f_count > 0:
+        warnings.warn(
+            "Only PJ2 source topology uses active F ownership; F_count is ignored by "
+            f"{route} source kernels and should normally be 0",
+            UserWarning,
+            stacklevel=3,
+        )
+
+
+def _normalize_cmake_build_type(value: str | None, *, default: str) -> str:
+    if value is None:
+        return default
+    normalized = _normalize_token(value, "cmake_build_type").lower()
+    mapping = {
+        "debug": "Debug",
+        "release": "Release",
+    }
+    try:
+        return mapping[normalized]
+    except KeyError as exc:
+        raise TopologyError("cmake_build_type must be Debug or Release") from exc
+
+
+def _normalize_fp_mode(value: str | None, *, default: str) -> str:
+    if value is None:
+        return default
+    normalized = _normalize_token(value, "fp_mode").upper()
+    if normalized not in {"STRICT", "FMA", "RELAXED"}:
+        raise TopologyError("fp_mode must be STRICT, FMA, or RELAXED")
+    return normalized
+
+
+def _canonical_bool(value: bool | None, *, default: bool, name: str) -> bool:
+    if value is None:
+        return default
+    if not isinstance(value, bool):
+        raise TopologyError(f"{name} must be a bool")
+    return value
+
+
+def _canonical_enzyme_jacobian_batch_width(value: int | None) -> int:
+    if value is None:
+        return _DEFAULT_ENZYME_JACOBIAN_BATCH_WIDTH
+    return _nonnegative_int(value, "enzyme_jacobian_batch_width")
 
 
 def _nonnegative_int(value: int, name: str) -> int:

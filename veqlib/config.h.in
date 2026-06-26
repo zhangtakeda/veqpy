@@ -7,9 +7,53 @@ namespace config
 {
     struct Topology
     {
+        enum SourceRouteCode : int
+        {
+            SourceRoutePF  = 1,
+            SourceRoutePP  = 2,
+            SourceRoutePI  = 3,
+            SourceRoutePJ1 = 4,
+            SourceRoutePJ2 = 5,
+            SourceRoutePQ  = 6,
+        };
+
+        enum SourceCoordinateCode : int
+        {
+            SourceCoordinateRho  = 1,
+            SourceCoordinatePsin = 2,
+        };
+
+        enum SourceConstraintCode : int
+        {
+            SourceConstraintNull   = 0,
+            SourceConstraintIp     = 1,
+            SourceConstraintBeta   = 2,
+            SourceConstraintIpBeta = 3,
+        };
+
+        enum SourceNodesCode : int
+        {
+            SourceNodesUniform = 1,
+            SourceNodesGrid    = 2,
+        };
+
+        enum SourceActiveFamilyCode : int
+        {
+            SourceActiveFamilyNone = 0,
+            SourceActiveFamilyPsin = 1,
+            SourceActiveFamilyF    = 2,
+        };
+
         static constexpr std::size_t Nr = @VEQ_NR@;
         static constexpr std::size_t Nt = @VEQ_NT@;
         static constexpr std::size_t source_sample_count = @VEQ_SOURCE_SAMPLE_COUNT@;
+        static constexpr int source_route_code = @VEQ_SOURCE_ROUTE_CODE@;
+        static constexpr int source_coordinate_code = @VEQ_SOURCE_COORDINATE_CODE@;
+        static constexpr int source_constraint_code = @VEQ_SOURCE_CONSTRAINT_CODE@;
+        static constexpr int source_nodes_code = @VEQ_SOURCE_NODES_CODE@;
+        static constexpr int source_active_family_code = @VEQ_SOURCE_ACTIVE_FAMILY_CODE@;
+        static constexpr bool layout_profile_first = @VEQ_LAYOUT_PROFILE_FIRST@ != 0;
+        static constexpr std::size_t enzyme_jacobian_batch_width = @VEQ_ENZYME_JACOBIAN_BATCH_WIDTH@;
 
         static constexpr std::size_t h_count     = @VEQ_H_PROFILE_COUNT@;
         static constexpr std::size_t v_count     = @VEQ_V_PROFILE_COUNT@;

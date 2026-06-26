@@ -18,7 +18,7 @@ from typing import Any, Iterator
 
 from veqpy.model import Topology
 
-GENERATOR_VERSION = "veqpy.cpp.kernel_builder.v1"
+GENERATOR_VERSION = "veqpy.cpp.kernel_builder.v2"
 ARTIFACT_SCHEMA = "veqpy.kernel_artifact.v1"
 SOURCE_DIGEST_SCHEMA = "veqlib.source_digest.v1"
 PYTHON_SOURCE_DIGEST_SCHEMA = "veqpy.cpp_python_source_digest.v1"
@@ -71,7 +71,8 @@ def build_kernel(
     CMake. It is the fast validation path used before the nanobind production API is finalized.
     """
 
-    topology.validate_supported_for_veqlib_mvp()
+    if not dry_run:
+        topology.validate_supported_for_veqlib_mvp()
     source_dir = _default_source_dir() if source_dir is None else source_dir.resolve()
     if not source_dir.exists():
         raise KernelBuildError(f"VEQlib source directory does not exist: {source_dir}")
@@ -83,6 +84,7 @@ def build_kernel(
         root,
         cxx=cxx,
         build=topology.build,
+        cmake_build_type=topology.cmake_build_type,
         dry_run=dry_run,
     )
     root_dir = root / topology.build / artifact_id
@@ -261,18 +263,6 @@ def load():
     path.write_text(text)
 
 
-def _cmake_build_type(build: str) -> str:
-    return "Debug" if build == "debug" else "Release"
-
-
-def _fp_mode(build: str) -> str:
-    return "RELAXED" if build.startswith("fastmath") else "STRICT"
-
-
-def _enable_enzyme(build: str) -> str:
-    return "ON" if build.endswith("-enzyme") else "OFF"
-
-
 def _cmake_configure_args(
     topology: Topology,
     source_dir: Path,
@@ -282,9 +272,6 @@ def _cmake_configure_args(
     artifact_id: str,
     prebuilt_nanobind_static: str | None,
 ) -> list[str]:
-    build_type = _cmake_build_type(topology.build)
-    fp_mode = _fp_mode(topology.build)
-    enable_enzyme = _enable_enzyme(topology.build)
     kmax_limit = max(2, topology.K_max or 2)
     return [
         "cmake",
@@ -292,20 +279,26 @@ def _cmake_configure_args(
         str(source_dir),
         "-B",
         str(build_dir),
-        f"-DCMAKE_BUILD_TYPE={build_type}",
+        f"-DCMAKE_BUILD_TYPE={topology.cmake_build_type}",
         f"-DCMAKE_CXX_COMPILER={cxx}",
         f"-DPython_EXECUTABLE={sys.executable}",
         "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
-        f"-DENABLE_ENZYME={enable_enzyme}",
+        f"-DENABLE_ENZYME={_cmake_bool(topology.enable_enzyme)}",
         "-DVEQLIB_ENABLE_PYTHON_BINDINGS=ON",
-        "-DVEQLIB_ENABLE_NATIVE_OPTIMIZATIONS=ON",
-        f"-DVEQLIB_FP_MODE={fp_mode}",
+        f"-DVEQLIB_ENABLE_NATIVE_OPTIMIZATIONS={_cmake_bool(topology.enable_native_optimizations)}",
+        f"-DVEQLIB_FP_MODE={topology.fp_mode}",
         f"-DVEQLIB_NB_DOMAIN=veqpy_kernel_{artifact_id}",
         f"-DVEQLIB_PREBUILT_NANOBIND_STATIC={prebuilt_nanobind_static or ''}",
-        "-DVEQLIB_ENABLE_THIN_LTO=ON",
+        f"-DVEQLIB_ENABLE_THIN_LTO={_cmake_bool(topology.enable_thin_lto)}",
+        f"-DVEQLIB_ANALYSIS_BUILD={_cmake_bool(topology.analysis)}",
         f"-DVEQ_NR={topology.Nr}",
         f"-DVEQ_NT={topology.Nt}",
         f"-DVEQ_SOURCE_SAMPLE_COUNT={topology.sample_count}",
+        f"-DVEQ_SOURCE_ROUTE_CODE={topology.source_route_code}",
+        f"-DVEQ_SOURCE_COORDINATE_CODE={topology.source_coordinate_code}",
+        f"-DVEQ_SOURCE_CONSTRAINT_CODE={topology.source_constraint_code}",
+        f"-DVEQ_SOURCE_NODES_CODE={topology.source_nodes_code}",
+        f"-DVEQ_SOURCE_ACTIVE_FAMILY_CODE={topology.source_active_family_code}",
         f"-DVEQ_H_PROFILE_COUNT={topology.h_count}",
         f"-DVEQ_V_PROFILE_COUNT={topology.v_count}",
         f"-DVEQ_KAPPA_PROFILE_COUNT={topology.kappa_count}",
@@ -315,6 +308,8 @@ def _cmake_configure_args(
         f"-DVEQ_SIN_PROFILE_COUNTS={_cmake_list(topology.s_counts)}",
         f"-DVEQ_BOUNDARY_M_MAX={topology.M_max}",
         f"-DVEQ_PROFILE_KMAX_LIMIT={kmax_limit}",
+        f"-DVEQ_LAYOUT_PROFILE_FIRST={1 if topology.layout_profile_first else 0}",
+        f"-DVEQ_ENZYME_JACOBIAN_BATCH_WIDTH={topology.enzyme_jacobian_batch_width}",
     ]
 
 
@@ -323,9 +318,10 @@ def _get_or_build_nanobind_static(
     *,
     cxx: str,
     build: str,
+    cmake_build_type: str,
     dry_run: bool,
 ) -> dict[str, Any]:
-    identity = _nanobind_static_identity(cxx=cxx, build=build)
+    identity = _nanobind_static_identity(cxx=cxx, cmake_build_type=cmake_build_type)
     artifact_id = _compute_nanobind_static_id(identity)
     root_dir = cache_root / "_common" / "nanobind-static" / build / artifact_id
     archive_path = root_dir / "cmake-build" / "libnanobind-static.a"
@@ -360,7 +356,7 @@ def _get_or_build_nanobind_static(
             str(root_dir),
             "-B",
             str(build_dir),
-            f"-DCMAKE_BUILD_TYPE={_cmake_build_type(build)}",
+            f"-DCMAKE_BUILD_TYPE={cmake_build_type}",
             f"-DCMAKE_CXX_COMPILER={cxx}",
             f"-DPython_EXECUTABLE={sys.executable}",
         ]
@@ -390,10 +386,10 @@ def _get_or_build_nanobind_static(
         return metadata
 
 
-def _nanobind_static_identity(*, cxx: str, build: str) -> dict[str, Any]:
+def _nanobind_static_identity(*, cxx: str, cmake_build_type: str) -> dict[str, Any]:
     return {
         "schema": "veqpy.nanobind_static_identity.v1",
-        "build_type": "Debug" if build == "debug" else "Release",
+        "build_type": cmake_build_type,
         "python": {
             "version": platform.python_version(),
             "implementation": platform.python_implementation(),
@@ -463,23 +459,28 @@ def _native_build_contract(topology: Topology, *, cxx: str) -> dict[str, Any]:
     concrete CMake definitions that select generated native code.
     """
 
-    build_type = _cmake_build_type(topology.build)
-    fp_mode = _fp_mode(topology.build)
-    enable_enzyme = _enable_enzyme(topology.build)
     kmax_limit = max(2, topology.K_max or 2)
     return {
         "schema": "veqpy.native_build_contract.v1",
-        "cmake_build_type": build_type,
+        "cmake_build_type": topology.cmake_build_type,
         "cxx": cxx,
         "defines": {
-            "ENABLE_ENZYME": enable_enzyme,
+            "ENABLE_ENZYME": _cmake_bool(topology.enable_enzyme),
             "VEQLIB_ENABLE_PYTHON_BINDINGS": "ON",
-            "VEQLIB_ENABLE_NATIVE_OPTIMIZATIONS": "ON",
-            "VEQLIB_FP_MODE": fp_mode,
-            "VEQLIB_ENABLE_THIN_LTO": "ON",
+            "VEQLIB_ENABLE_NATIVE_OPTIMIZATIONS": _cmake_bool(
+                topology.enable_native_optimizations
+            ),
+            "VEQLIB_FP_MODE": topology.fp_mode,
+            "VEQLIB_ENABLE_THIN_LTO": _cmake_bool(topology.enable_thin_lto),
+            "VEQLIB_ANALYSIS_BUILD": _cmake_bool(topology.analysis),
             "VEQ_NR": topology.Nr,
             "VEQ_NT": topology.Nt,
             "VEQ_SOURCE_SAMPLE_COUNT": topology.sample_count,
+            "VEQ_SOURCE_ROUTE_CODE": topology.source_route_code,
+            "VEQ_SOURCE_COORDINATE_CODE": topology.source_coordinate_code,
+            "VEQ_SOURCE_CONSTRAINT_CODE": topology.source_constraint_code,
+            "VEQ_SOURCE_NODES_CODE": topology.source_nodes_code,
+            "VEQ_SOURCE_ACTIVE_FAMILY_CODE": topology.source_active_family_code,
             "VEQ_H_PROFILE_COUNT": topology.h_count,
             "VEQ_V_PROFILE_COUNT": topology.v_count,
             "VEQ_KAPPA_PROFILE_COUNT": topology.kappa_count,
@@ -489,6 +490,8 @@ def _native_build_contract(topology: Topology, *, cxx: str) -> dict[str, Any]:
             "VEQ_SIN_PROFILE_COUNTS": topology.s_counts,
             "VEQ_BOUNDARY_M_MAX": topology.M_max,
             "VEQ_PROFILE_KMAX_LIMIT": kmax_limit,
+            "VEQ_LAYOUT_PROFILE_FIRST": 1 if topology.layout_profile_first else 0,
+            "VEQ_ENZYME_JACOBIAN_BATCH_WIDTH": topology.enzyme_jacobian_batch_width,
         },
     }
 
@@ -647,6 +650,10 @@ def _package_version(name: str) -> str | None:
 
 def _cmake_list(values: tuple[int, ...]) -> str:
     return ";".join(str(value) for value in values) if values else "0"
+
+
+def _cmake_bool(value: bool) -> str:
+    return "ON" if value else "OFF"
 
 
 def _default_source_dir() -> Path:

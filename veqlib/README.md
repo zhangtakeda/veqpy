@@ -68,6 +68,11 @@ such as `grid.h` and `profiles.h` do not include the generated config.
 The main topology variables are:
 
 - `VEQ_NR`, `VEQ_NT` for radial and poloidal grid sizes;
+- `VEQ_SOURCE_ROUTE_CODE`, `VEQ_SOURCE_COORDINATE_CODE`,
+  `VEQ_SOURCE_CONSTRAINT_CODE`, `VEQ_SOURCE_NODES_CODE`, and
+  `VEQ_SOURCE_ACTIVE_FAMILY_CODE` for the Python-canonicalized source
+  topology. Legal codes are validated by CMake, while route/profile ownership
+  policy is intentionally checked in the Python topology layer;
 - `VEQ_H_PROFILE_COUNT`, `VEQ_V_PROFILE_COUNT`, `VEQ_KAPPA_PROFILE_COUNT`,
   `VEQ_PSIN_PROFILE_COUNT`, and `VEQ_F_PROFILE_COUNT`;
 - `VEQ_COS_PROFILE_COUNTS` and `VEQ_SIN_PROFILE_COUNTS` for Fourier-family
@@ -76,7 +81,12 @@ The main topology variables are:
   `AUTO` keeps the historical behavior by deriving it from active c/s counts;
   an explicit value lets boundary `ca`/`sa` orders exceed the optimized profile
   topology;
-- `VEQ_PROFILE_KMAX_LIMIT` for the upper bound used when deriving `K_max`.
+- `VEQ_PROFILE_KMAX_LIMIT` for the upper bound used when deriving `K_max`;
+- `VEQ_LAYOUT_PROFILE_FIRST` for the packed-layout switch (`0` keeps the
+  current degree-first production layout, `1` reserves the family/profile-first
+  topology);
+- `VEQ_ENZYME_JACOBIAN_BATCH_WIDTH` for an optional compile-time Enzyme dense
+  Jacobian width override (`0` keeps the generated default).
 
 Configure-time validation requires `VEQ_NR >= 4`, `VEQ_NT >= 4`, derived active
 `M >= 1`, boundary `M_max >= active M`, derived `K_max >= 2`, and
