@@ -31,6 +31,9 @@ namespace source::detail
     inline constexpr size_t profile_radial  = 1;
     inline constexpr size_t profile_radial2 = 2;
 
+    inline constexpr size_t pj2_psin_uniform_fixed_point_max_iter = 16;
+    inline constexpr double pj2_psin_uniform_fixed_point_max_residual = 1.0e-10;
+
     constexpr size_t clipped_stencil_size(size_t sample_count) noexcept
     {
         return sample_count < default_barycentric_stencil ? sample_count : default_barycentric_stencil;
@@ -109,6 +112,7 @@ namespace source::detail
         RadialVector Pn_psin{};
         double       alpha1 = 0.0;
         double       alpha2 = 0.0;
+        bool         pj2_psin_uniform_query_initialized = false;
 
         constexpr void set_uniform_sources(std::span<const double, sample_count> heat,
                                            std::span<const double, sample_count> current) noexcept
@@ -118,6 +122,7 @@ namespace source::detail
                 heat_input[i]    = heat[i];
                 current_input[i] = current[i];
             }
+            pj2_psin_uniform_query_initialized = false;
         }
 
         constexpr void materialize_rho_uniform_sources() noexcept
@@ -484,6 +489,39 @@ namespace source::detail
                                        size_t                 n_axis_fix) noexcept
         {
             update_pj2<SourceConstraintCode, false>(geometry, R0, Ip, beta, B0, n_axis_fix);
+        }
+
+        template <int SourceConstraintCode, typename GeometryRuntime>
+        constexpr void update_pj2_psin_uniform_fixed_point(const GeometryRuntime& geometry,
+                                                           double                 R0,
+                                                           double                 Ip,
+                                                           double                 beta,
+                                                           double                 B0,
+                                                           size_t                 n_axis_fix) noexcept
+        {
+            static_assert(GeometryRuntime::radial_nodes == radial_nodes, "source/geometry radial grids must match");
+
+            if (!pj2_psin_uniform_query_initialized)
+            {
+                seed_psin_query_from_passive_psin_profile();
+                pj2_psin_uniform_query_initialized = true;
+            }
+            for (size_t iter = 0; iter < pj2_psin_uniform_fixed_point_max_iter; ++iter)
+            {
+                for (size_t i = 0; i < radial_nodes; ++i)
+                    source_parameter_query[i] = source_psin_query[i];
+                if constexpr (SourceConstraintCode == 1 || SourceConstraintCode == 3)
+                    local_barycentric_interpolate_pair();
+                else
+                    local_polynomial_interpolate_pair();
+
+                update_pj2_psin<SourceConstraintCode>(geometry, R0, Ip, beta, B0, n_axis_fix);
+                if (update_fixed_point_psin_query())
+                    break;
+            }
+
+            for (size_t i = 0; i < radial_nodes; ++i)
+                source_psin_query[i] = source_target_root_fields(root_psin, i);
         }
 
         template <int SourceConstraintCode, typename GeometryRuntime>
@@ -881,6 +919,156 @@ namespace source::detail
                     materialized_current_input[i] = numerator_current / denominator;
                 }
             }
+        }
+
+        constexpr void local_polynomial_interpolate_pair() noexcept
+        {
+            if constexpr (sample_count == 1)
+            {
+                for (size_t i = 0; i < radial_nodes; ++i)
+                {
+                    materialized_heat_input[i]    = heat_input[0];
+                    materialized_current_input[i] = current_input[0];
+                }
+            }
+            else
+            {
+                constexpr double interval_count = static_cast<double>(sample_count - 1);
+                constexpr size_t last_interval  = sample_count - 2;
+                for (size_t i = 0; i < radial_nodes; ++i)
+                {
+                    const double q = clip_unit(source_parameter_query[i]);
+                    double       t = 0.0;
+                    size_t       interval = static_cast<size_t>(q * interval_count);
+                    if (interval > last_interval)
+                    {
+                        interval = last_interval;
+                        t        = 1.0;
+                    }
+                    else
+                    {
+                        t = q * interval_count - static_cast<double>(interval);
+                    }
+                    materialized_heat_input[i] =
+                        evaluate_local_polynomial_value(heat_input, interval, t);
+                    materialized_current_input[i] =
+                        evaluate_local_polynomial_value(current_input, interval, t);
+                }
+            }
+        }
+
+        static constexpr double evaluate_local_polynomial_value(const SourceVector& samples,
+                                                                size_t              interval,
+                                                                double              t) noexcept
+        {
+            if constexpr (sample_count == 1)
+            {
+                (void)interval;
+                (void)t;
+                return samples[0];
+            }
+            else if constexpr (sample_count == 2)
+            {
+                (void)interval;
+                const double y0 = samples[0];
+                const double y1 = samples[1];
+                return y0 + t * (y1 - y0);
+            }
+            else if constexpr (sample_count == 3)
+            {
+                double c0 = 0.0;
+                double c1 = 0.0;
+                double c2 = 0.0;
+                if (interval == 0)
+                {
+                    const double y0 = samples[0];
+                    const double y1 = samples[1];
+                    const double y2 = samples[2];
+                    c0              = y0;
+                    c1              = -1.5 * y0 + 2.0 * y1 - 0.5 * y2;
+                    c2              = 0.5 * y0 - y1 + 0.5 * y2;
+                }
+                else
+                {
+                    const double y0 = samples[interval - 1];
+                    const double y1 = samples[interval];
+                    const double y2 = samples[interval + 1];
+                    c0              = y1;
+                    c1              = -0.5 * y0 + 0.5 * y2;
+                    c2              = 0.5 * y0 - y1 + 0.5 * y2;
+                }
+                return (c2 * t + c1) * t + c0;
+            }
+            else
+            {
+                double c0 = 0.0;
+                double c1 = 0.0;
+                double c2 = 0.0;
+                double c3 = 0.0;
+                if (interval == 0)
+                {
+                    const double y0 = samples[0];
+                    const double y1 = samples[1];
+                    const double y2 = samples[2];
+                    const double y3 = samples[3];
+                    c0              = y0;
+                    c1              = (-11.0 * y0 + 18.0 * y1 - 9.0 * y2 + 2.0 * y3) / 6.0;
+                    c2              = y0 - 2.5 * y1 + 2.0 * y2 - 0.5 * y3;
+                    c3              = (-y0 + 3.0 * y1 - 3.0 * y2 + y3) / 6.0;
+                }
+                else if (interval == sample_count - 2)
+                {
+                    const double y0 = samples[interval - 2];
+                    const double y1 = samples[interval - 1];
+                    const double y2 = samples[interval];
+                    const double y3 = samples[interval + 1];
+                    c0              = y2;
+                    c1              = (y0 - 6.0 * y1 + 3.0 * y2 + 2.0 * y3) / 6.0;
+                    c2              = 0.5 * y1 - y2 + 0.5 * y3;
+                    c3              = (-y0 + 3.0 * y1 - 3.0 * y2 + y3) / 6.0;
+                }
+                else
+                {
+                    const double y0 = samples[interval - 1];
+                    const double y1 = samples[interval];
+                    const double y2 = samples[interval + 1];
+                    const double y3 = samples[interval + 2];
+                    c0              = y1;
+                    c1              = (-2.0 * y0 - 3.0 * y1 + 6.0 * y2 - y3) / 6.0;
+                    c2              = 0.5 * y0 - y1 + 0.5 * y2;
+                    c3              = (-y0 + 3.0 * y1 - 3.0 * y2 + y3) / 6.0;
+                }
+                return ((c3 * t + c2) * t + c1) * t + c0;
+            }
+        }
+
+        constexpr void seed_psin_query_from_passive_psin_profile() noexcept
+        {
+            if constexpr (radial_nodes == 1)
+            {
+                source_psin_query[0] = 1.0;
+            }
+            else
+            {
+                for (size_t i = 0; i < radial_nodes; ++i)
+                    source_psin_query[i] = GridType::nodes[i] * GridType::nodes[i];
+                source_psin_query[0] = 0.0;
+                source_psin_query[radial_nodes - 1] = 1.0;
+            }
+        }
+
+        constexpr bool update_fixed_point_psin_query() noexcept
+        {
+            double max_abs_diff = 0.0;
+            for (size_t i = 0; i < radial_nodes; ++i)
+            {
+                const double psin = source_target_root_fields(root_psin, i);
+                const double diff = math::abs(psin - source_psin_query[i]);
+                if (diff > max_abs_diff)
+                    max_abs_diff = diff;
+                source_psin_query[i] = psin;
+            }
+            return max_abs_diff <= pj2_psin_uniform_fixed_point_max_residual;
         }
 
         constexpr void copy_source_target_to_profile_root() noexcept

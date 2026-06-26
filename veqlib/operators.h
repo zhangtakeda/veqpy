@@ -104,10 +104,6 @@ namespace operators::detail
             SourceActiveFamilyCode == source_active_psin || SourceRouteCode == source_route_pj2 ||
                 !(SourceCoordinateCode == source_coordinate_psin && SourceNodesCode == source_nodes_uniform),
             "psin/uniform source routes require active psin ownership");
-        static_assert(SourceRouteCode != source_route_pj2 ||
-                          !(SourceCoordinateCode == source_coordinate_psin &&
-                            SourceNodesCode == source_nodes_uniform),
-                      "PJ2/psin/uniform fixed-point source topology is not implemented natively");
         static_assert(SourceActiveFamilyCode != source_active_F || SourceRouteCode == source_route_pj2,
                       "active F ownership is only implemented for PJ2 source topology");
         static_assert(SourceRouteCode != source_route_pj2 || SourceActiveFamilyCode == source_active_F,
@@ -187,7 +183,13 @@ namespace operators::detail
             }
             else
             {
-                if constexpr (SourceNodesCode == source_nodes_grid)
+                if constexpr (SourceRouteCode == source_route_pj2 &&
+                              SourceCoordinateCode == source_coordinate_psin &&
+                              SourceNodesCode == source_nodes_uniform)
+                {
+                    // PJ2/psin/uniform remaps source samples inside its fixed-point source loop.
+                }
+                else if constexpr (SourceNodesCode == source_nodes_grid)
                     workspace.source_runtime.materialize_grid_sources();
                 else
                     workspace.source_runtime.materialize_rho_uniform_sources();
@@ -267,6 +269,14 @@ namespace operators::detail
             {
                 if constexpr (SourceCoordinateCode == source_coordinate_rho)
                     workspace.source_runtime.template update_pj2_rho<SourceConstraintCode>(
+                        workspace.geometry,
+                        solve_params.R0,
+                        solve_params.Ip,
+                        solve_params.beta,
+                        solve_params.B0,
+                        plan.n_axis_fix);
+                else if constexpr (SourceNodesCode == source_nodes_uniform)
+                    workspace.source_runtime.template update_pj2_psin_uniform_fixed_point<SourceConstraintCode>(
                         workspace.geometry,
                         solve_params.R0,
                         solve_params.Ip,

@@ -137,17 +137,10 @@ def test_key_mismatch_is_rejected() -> None:
         make_topology(key="not-the-canonical-key")
 
 
-def test_mvp_gate_rejects_unsupported_route_shape() -> None:
-    topology = make_topology(
-        route="PJ2",
-        coordinate="psin",
-        nodes="uniform",
-        sample_count=8,
-        psin_count=0,
-        F_count=6,
-    )
+def test_mvp_gate_rejects_unsupported_layout() -> None:
+    topology = make_topology(layout="family")
 
-    with pytest.raises(TopologyError, match="PJ2/rho/uniform"):
+    with pytest.raises(TopologyError, match="layout='family'"):
         topology.validate_supported_for_veqlib_mvp()
 
 
@@ -202,10 +195,11 @@ def test_mvp_gate_accepts_pj1_route_constraint_slice() -> None:
             topology.validate_supported_for_veqlib_mvp()
 
 
-def test_mvp_gate_accepts_pj2_one_pass_route_constraint_slice() -> None:
+def test_mvp_gate_accepts_pj2_route_constraint_slice() -> None:
     route_overrides = (
         {"coordinate": "rho", "nodes": "uniform", "sample_count": 8},
         {"coordinate": "rho", "nodes": "grid", "sample_count": 32},
+        {"coordinate": "psin", "nodes": "uniform", "sample_count": 8},
         {"coordinate": "psin", "nodes": "grid", "sample_count": 32},
     )
     for constraint in ("null", "Ip", "beta", "Ip_beta"):
@@ -220,7 +214,7 @@ def test_mvp_gate_accepts_pj2_one_pass_route_constraint_slice() -> None:
             topology.validate_supported_for_veqlib_mvp()
 
 
-def test_mvp_gate_keeps_pj2_psin_uniform_blocked() -> None:
+def test_mvp_gate_accepts_pj2_psin_uniform_fixed_point_route() -> None:
     topology = make_topology(
         route="PJ2",
         coordinate="psin",
@@ -230,8 +224,9 @@ def test_mvp_gate_keeps_pj2_psin_uniform_blocked() -> None:
         sample_count=8,
     )
 
-    with pytest.raises(TopologyError, match="PJ2/rho/uniform"):
-        topology.validate_supported_for_veqlib_mvp()
+    assert topology.source_active_family == "F"
+    assert topology.source_parameterization == "identity"
+    topology.validate_supported_for_veqlib_mvp()
 
 
 def test_mvp_gate_accepts_pq_rho_route_constraint_slice() -> None:

@@ -66,6 +66,7 @@ _VEQLIB_MVP_ROUTE_CONSTRAINTS = {
     ("PJ1", "psin", "grid"): frozenset({"null", "Ip", "beta", "Ip_beta"}),
     ("PJ2", "rho", "uniform"): frozenset({"null", "Ip", "beta", "Ip_beta"}),
     ("PJ2", "rho", "grid"): frozenset({"null", "Ip", "beta", "Ip_beta"}),
+    ("PJ2", "psin", "uniform"): frozenset({"null", "Ip", "beta", "Ip_beta"}),
     ("PJ2", "psin", "grid"): frozenset({"null", "Ip", "beta", "Ip_beta"}),
     ("PQ", "rho", "uniform"): frozenset({"null", "Ip", "beta", "Ip_beta"}),
     ("PQ", "rho", "grid"): frozenset({"null", "Ip", "beta", "Ip_beta"}),
@@ -502,9 +503,9 @@ class Topology:
             )
         if mismatches:
             raise TopologyError(
-                "VEQlib MVP backend currently supports PF, PP, PI, PJ1, and the "
-                "one-pass PJ2 rho/uniform, rho/grid, and psin/grid plus PQ "
-                "source topology slices only; got "
+                "VEQlib MVP backend currently supports PF, PP, PI, PJ1, PJ2, "
+                "and PQ source topology slices for the implemented constraint "
+                "sets only; got "
                 + ", ".join(mismatches)
             )
         if self.source_active_family != "F" and self.F_count > 0:

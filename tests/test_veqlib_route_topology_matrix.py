@@ -146,6 +146,7 @@ def test_route_matrix_tracks_pj2_active_f_ownership() -> None:
     assert topology.psin_count == 0
     assert topology.F_count > 0
     assert topology.source_parameterization == "identity"
+    topology.validate_supported_for_veqlib_mvp()
 
 
 def test_route_matrix_builds_native_pj2_one_pass_topology() -> None:
