@@ -273,6 +273,31 @@ namespace source::detail
             }
         }
 
+        constexpr double benchmark_query_sink(size_t radial_node) const noexcept
+        {
+            return source_psin_query[radial_node] + source_parameter_query[radial_node];
+        }
+
+        constexpr double benchmark_root_field(size_t row, size_t radial_node) const noexcept
+        {
+            return source_target_root_fields(row, radial_node);
+        }
+
+        constexpr const double* benchmark_root_data() const noexcept { return source_target_root_fields.data(); }
+
+        constexpr const double* benchmark_profile_root_data() const noexcept { return profile_root_fields.data(); }
+
+        constexpr const double* benchmark_query_data() const noexcept { return source_psin_query.data(); }
+
+        constexpr void benchmark_store_psin_coordinate(const RadialVector& integrated) noexcept
+        {
+            const double offset = integrated[0];
+            const double scale  = integrated[radial_nodes - 1] - offset;
+            store_psin_coordinate(integrated, offset, scale);
+        }
+
+        constexpr void benchmark_copy_source_target_to_profile_root() noexcept { copy_source_target_to_profile_root(); }
+
         constexpr void benchmark_interpolate_pair() noexcept { local_barycentric_interpolate_pair(); }
 
         template <typename GeometryRuntime>
@@ -329,6 +354,17 @@ namespace source::detail
             matvec_into(psin_rr, GridType::differentiator, psin_r);
             store_root_row<root_psin_rr>(psin_rr);
         }
+
+        constexpr void benchmark_copy_materialized_sources() noexcept
+        {
+            for (size_t i = 0; i < radial_nodes; ++i)
+            {
+                Pn_psin[i]  = materialized_heat_input[i];
+                FFn_psin[i] = materialized_current_input[i];
+            }
+        }
+
+        constexpr void benchmark_regularize_ffn_psin(size_t n_axis_fix) noexcept { regularize_ffn_psin(n_axis_fix); }
 
         template <typename GeometryRuntime>
         constexpr void

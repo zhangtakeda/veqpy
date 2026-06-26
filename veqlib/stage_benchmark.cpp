@@ -77,7 +77,21 @@ namespace
         GeometryMetricCompute,
         Geometry,
         SourceMaterialize,
+        SourceMatCopyPsinR,
+        SourceMatRegularizePsinR,
+        SourceMatDerivAccum,
+        SourceMatStoreCoordinate,
+        SourceMatCopyProfileRoot,
+        SourceMatPrepareQueries,
+        SourceMatInterpolate,
         SourceUpdate,
+        SourceUpdateFillIntegrand,
+        SourceUpdateAccumIntegrand,
+        SourceUpdateNormalizePsinR,
+        SourceUpdateDerivAccum,
+        SourceUpdateCopySources,
+        SourceUpdateRegularizeFfn,
+        SourceUpdateAlpha,
         ResidualUpdate,
         ResidualPack,
         Evaluate,
@@ -98,9 +112,7 @@ namespace
     {
         throw std::runtime_error(
             message +
-            "\nusage: veqlib_stage_benchmark [--stage all|profiles_active|profiles_all|geometry_phase|"
-            "geometry_phase_sincos|geometry_metric_compute|geometry|"
-            "source_materialize|source_update|residual_update|residual_pack|evaluate|evaluate_ring] "
+            "\nusage: veqlib_stage_benchmark [--stage all|<stage-name>] "
             "[--repeat N] [--warmup N] [--inner N] [--ring-size N] [--output PATH]");
     }
 
@@ -130,9 +142,7 @@ namespace
             if (arg == "--help" || arg == "-h")
             {
                 std::cout
-                    << "usage: veqlib_stage_benchmark [--stage all|profiles_active|profiles_all|geometry_phase|"
-                       "geometry_phase_sincos|geometry_metric_compute|geometry|"
-                       "source_materialize|source_update|residual_update|residual_pack|evaluate|evaluate_ring] "
+                    << "usage: veqlib_stage_benchmark [--stage all|<stage-name>] "
                        "[--repeat N] [--warmup N] [--inner N] [--ring-size N] [--output PATH]\n";
                 std::exit(0);
             }
@@ -157,7 +167,7 @@ namespace
         return options;
     }
 
-    constexpr std::array<std::pair<std::string_view, Stage>, 12> stage_table{{
+    constexpr std::array<std::pair<std::string_view, Stage>, 26> stage_table{{
         {"profiles_active", Stage::ProfilesActive},
         {"profiles_all", Stage::ProfilesAll},
         {"geometry_phase", Stage::GeometryPhase},
@@ -165,7 +175,21 @@ namespace
         {"geometry_metric_compute", Stage::GeometryMetricCompute},
         {"geometry", Stage::Geometry},
         {"source_materialize", Stage::SourceMaterialize},
+        {"source_mat_copy_psin_r", Stage::SourceMatCopyPsinR},
+        {"source_mat_regularize_psin_r", Stage::SourceMatRegularizePsinR},
+        {"source_mat_deriv_accum", Stage::SourceMatDerivAccum},
+        {"source_mat_store_coordinate", Stage::SourceMatStoreCoordinate},
+        {"source_mat_copy_profile_root", Stage::SourceMatCopyProfileRoot},
+        {"source_mat_prepare_queries", Stage::SourceMatPrepareQueries},
+        {"source_mat_interpolate", Stage::SourceMatInterpolate},
         {"source_update", Stage::SourceUpdate},
+        {"source_update_fill_integrand", Stage::SourceUpdateFillIntegrand},
+        {"source_update_accum_integrand", Stage::SourceUpdateAccumIntegrand},
+        {"source_update_normalize_psin_r", Stage::SourceUpdateNormalizePsinR},
+        {"source_update_deriv_accum", Stage::SourceUpdateDerivAccum},
+        {"source_update_copy_sources", Stage::SourceUpdateCopySources},
+        {"source_update_regularize_ffn", Stage::SourceUpdateRegularizeFfn},
+        {"source_update_alpha", Stage::SourceUpdateAlpha},
         {"residual_update", Stage::ResidualUpdate},
         {"residual_pack", Stage::ResidualPack},
         {"evaluate", Stage::Evaluate},
@@ -195,6 +219,16 @@ namespace
 #else
         static double sink = 0.0;
         sink += value;
+#endif
+    }
+
+    template <typename T>
+    void do_not_optimize_address(const T* ptr) noexcept
+    {
+#if defined(__GNUC__) || defined(__clang__)
+        asm volatile("" : : "g"(ptr) : "memory");
+#else
+        (void)ptr;
 #endif
     }
 
@@ -460,10 +494,15 @@ namespace
 
     struct BenchState
     {
+        using SourceRuntime     = KernelOperator::Source;
+        using SourceRadialVector = SourceRuntime::RadialVector;
+
         CaseInput                                      input;
         KernelOperator                                 op;
         PackedVector                                   out;
         std::vector<std::array<double, KernelShape::x_size>> ring;
+        SourceRadialVector                             source_scratch0{uninitialized};
+        SourceRadialVector                             source_scratch1{uninitialized};
 
         explicit BenchState(size_t ring_size)
             : input(build_inline_case(0, 0, SolverKind::Powell)),
@@ -525,6 +564,24 @@ namespace
             return op.workspace.source_runtime.materialized_heat_input[0] +
                    op.workspace.source_runtime.materialized_current_input[0] +
                    op.workspace.source_runtime.alpha1 + op.workspace.source_runtime.alpha2;
+        }
+
+        double source_root_sink() const noexcept
+        {
+            return op.workspace.source_runtime.benchmark_root_field(source::root_psin, 0) +
+                   op.workspace.source_runtime.benchmark_root_field(source::root_psin_r, 0) +
+                   op.workspace.source_runtime.benchmark_root_field(source::root_psin_rr, 0);
+        }
+
+        double source_query_sink() const noexcept
+        {
+            return op.workspace.source_runtime.benchmark_query_sink(0);
+        }
+
+        double source_scratch_sink() const noexcept
+        {
+            return source_scratch0[0] + source_scratch0[SourceRuntime::radial_nodes - 1] + source_scratch1[0] +
+                   source_scratch1[SourceRuntime::radial_nodes - 1];
         }
 
         double residual_sink() const noexcept { return out[0]; }
@@ -591,12 +648,151 @@ namespace
                                                                                  state->op.plan.n_axis_fix);
                 return state->source_sink();
             });
+        case Stage::SourceMatCopyPsinR:
+            state->prepare_geometry();
+            return time_stage_calls(inner, [&](size_t) noexcept {
+                state->op.workspace.source_runtime.benchmark_copy_profile_psin_r(state->op.workspace.profiles);
+                do_not_optimize_address(state->op.workspace.source_runtime.benchmark_root_data());
+                return state->source_root_sink();
+            });
+        case Stage::SourceMatRegularizePsinR:
+            state->prepare_geometry();
+            state->op.workspace.source_runtime.benchmark_copy_profile_psin_r(state->op.workspace.profiles);
+            return time_stage_calls(inner, [&](size_t) noexcept {
+                state->op.workspace.source_runtime.benchmark_regularize_psin_r(state->op.plan.n_axis_fix);
+                do_not_optimize_address(state->op.workspace.source_runtime.benchmark_root_data());
+                return state->source_root_sink();
+            });
+        case Stage::SourceMatDerivAccum:
+            state->prepare_geometry();
+            state->op.workspace.source_runtime.benchmark_copy_profile_psin_r(state->op.workspace.profiles);
+            state->op.workspace.source_runtime.benchmark_regularize_psin_r(state->op.plan.n_axis_fix);
+            return time_stage_calls(inner, [&](size_t) noexcept {
+                state->op.workspace.source_runtime.benchmark_DA_psin_packed_into(state->source_scratch0,
+                                                                                 state->source_scratch1);
+                do_not_optimize_address(state->source_scratch0.data());
+                do_not_optimize_address(state->source_scratch1.data());
+                return state->source_scratch_sink();
+            });
+        case Stage::SourceMatStoreCoordinate:
+            state->prepare_geometry();
+            state->op.workspace.source_runtime.benchmark_copy_profile_psin_r(state->op.workspace.profiles);
+            state->op.workspace.source_runtime.benchmark_regularize_psin_r(state->op.plan.n_axis_fix);
+            state->op.workspace.source_runtime.benchmark_DA_psin_packed_into(state->source_scratch0,
+                                                                             state->source_scratch1);
+            return time_stage_calls(inner, [&](size_t) noexcept {
+                state->op.workspace.source_runtime.benchmark_store_psin_coordinate(state->source_scratch1);
+                do_not_optimize_address(state->op.workspace.source_runtime.benchmark_root_data());
+                return state->source_root_sink();
+            });
+        case Stage::SourceMatCopyProfileRoot:
+            state->prepare_geometry();
+            state->op.workspace.source_runtime.benchmark_copy_profile_psin_r(state->op.workspace.profiles);
+            state->op.workspace.source_runtime.benchmark_regularize_psin_r(state->op.plan.n_axis_fix);
+            state->op.workspace.source_runtime.benchmark_DA_psin_packed_into(state->source_scratch0,
+                                                                             state->source_scratch1);
+            state->op.workspace.source_runtime.benchmark_store_psin_coordinate(state->source_scratch1);
+            return time_stage_calls(inner, [&](size_t) noexcept {
+                state->op.workspace.source_runtime.benchmark_copy_source_target_to_profile_root();
+                do_not_optimize_address(state->op.workspace.source_runtime.benchmark_profile_root_data());
+                return state->source_root_sink();
+            });
+        case Stage::SourceMatPrepareQueries:
+            state->prepare_source_materialize();
+            return time_stage_calls(inner, [&](size_t) noexcept {
+                state->op.workspace.source_runtime.benchmark_prepare_psin_queries();
+                do_not_optimize_address(state->op.workspace.source_runtime.benchmark_query_data());
+                return state->source_query_sink();
+            });
+        case Stage::SourceMatInterpolate:
+            state->prepare_source_materialize();
+            return time_stage_calls(inner, [&](size_t) noexcept {
+                state->op.workspace.source_runtime.benchmark_interpolate_pair();
+                do_not_optimize_address(state->op.workspace.source_runtime.materialized_heat_input.data());
+                do_not_optimize_address(state->op.workspace.source_runtime.materialized_current_input.data());
+                return state->source_sink();
+            });
         case Stage::SourceUpdate:
             state->prepare_source_materialize();
             return time_stage_calls(inner, [&](size_t) noexcept {
                 state->op.workspace.source_runtime.update_pf_psin_uniform_ip(state->op.workspace.geometry,
                                                                             state->op.solve_params().Ip,
                                                                             state->op.plan.n_axis_fix);
+                return state->source_sink();
+            });
+        case Stage::SourceUpdateFillIntegrand:
+            state->prepare_source_materialize();
+            return time_stage_calls(inner, [&](size_t) noexcept {
+                state->op.workspace.source_runtime.benchmark_fill_pf_psin_integrand(state->source_scratch0,
+                                                                                   state->op.workspace.geometry);
+                do_not_optimize_address(state->source_scratch0.data());
+                return state->source_scratch_sink();
+            });
+        case Stage::SourceUpdateAccumIntegrand:
+            state->prepare_source_materialize();
+            state->op.workspace.source_runtime.benchmark_fill_pf_psin_integrand(state->source_scratch0,
+                                                                               state->op.workspace.geometry);
+            return time_stage_calls(inner, [&](size_t) noexcept {
+                state->op.workspace.source_runtime.benchmark_A_integrand_into(state->source_scratch1,
+                                                                              state->source_scratch0);
+                do_not_optimize_address(state->source_scratch1.data());
+                return state->source_scratch_sink();
+            });
+        case Stage::SourceUpdateNormalizePsinR:
+            state->prepare_source_materialize();
+            state->op.workspace.source_runtime.benchmark_fill_pf_psin_integrand(state->source_scratch0,
+                                                                               state->op.workspace.geometry);
+            state->op.workspace.source_runtime.benchmark_A_integrand_into(state->source_scratch1,
+                                                                          state->source_scratch0);
+            return time_stage_calls(inner, [&](size_t) noexcept {
+                const double integral_prof =
+                    state->op.workspace.source_runtime.benchmark_normalize_psin_r_into(state->source_scratch0,
+                                                                                       state->source_scratch1,
+                                                                                       state->op.workspace.geometry,
+                                                                                       state->op.plan.n_axis_fix);
+                do_not_optimize_address(state->source_scratch0.data());
+                do_not_optimize_address(state->op.workspace.source_runtime.benchmark_root_data());
+                return integral_prof + state->source_scratch_sink();
+            });
+        case Stage::SourceUpdateDerivAccum:
+            state->prepare_source_materialize();
+            state->op.workspace.source_runtime.benchmark_fill_pf_psin_integrand(state->source_scratch0,
+                                                                               state->op.workspace.geometry);
+            state->op.workspace.source_runtime.benchmark_A_integrand_into(state->source_scratch1,
+                                                                          state->source_scratch0);
+            state->op.workspace.source_runtime.benchmark_normalize_psin_r_into(state->source_scratch0,
+                                                                               state->source_scratch1,
+                                                                               state->op.workspace.geometry,
+                                                                               state->op.plan.n_axis_fix);
+            return time_stage_calls(inner, [&](size_t) noexcept {
+                state->op.workspace.source_runtime.benchmark_DA_psin_packed_into(state->source_scratch0,
+                                                                                 state->source_scratch1);
+                do_not_optimize_address(state->source_scratch0.data());
+                do_not_optimize_address(state->source_scratch1.data());
+                return state->source_scratch_sink();
+            });
+        case Stage::SourceUpdateCopySources:
+            state->prepare_source_update();
+            return time_stage_calls(inner, [&](size_t) noexcept {
+                state->op.workspace.source_runtime.benchmark_copy_materialized_sources();
+                do_not_optimize_address(state->op.workspace.source_runtime.Pn_psin.data());
+                do_not_optimize_address(state->op.workspace.source_runtime.FFn_psin.data());
+                return state->source_sink();
+            });
+        case Stage::SourceUpdateRegularizeFfn:
+            state->prepare_source_update();
+            state->op.workspace.source_runtime.benchmark_copy_materialized_sources();
+            return time_stage_calls(inner, [&](size_t) noexcept {
+                state->op.workspace.source_runtime.benchmark_regularize_ffn_psin(state->op.plan.n_axis_fix);
+                do_not_optimize_address(state->op.workspace.source_runtime.FFn_psin.data());
+                return state->source_sink();
+            });
+        case Stage::SourceUpdateAlpha:
+            state->prepare_source_update();
+            return time_stage_calls(inner, [&](size_t) noexcept {
+                state->op.workspace.source_runtime.benchmark_update_alpha_from_integral(state->op.workspace.geometry,
+                                                                                       state->op.solve_params().Ip,
+                                                                                       1.0);
                 return state->source_sink();
             });
         case Stage::ResidualUpdate:
