@@ -529,10 +529,13 @@ namespace source::detail
         constexpr void fill_pf_psin_integrand(RadialVector& out, const GeometryRuntime& geometry) const noexcept
         {
             constexpr double pressure_factor = 1.0 / (4.0 * geometry::detail::pi * geometry::detail::pi);
+            const double* const geometry_radial = geometry.radial_fields.aligned_data();
+            const double* const radial_Ln_r = geometry_radial + geometry::radial_Ln_r * radial_nodes;
+            const double* const radial_V_r = geometry_radial + geometry::radial_V_r * radial_nodes;
             for (size_t i = 0; i < radial_nodes; ++i)
             {
-                out[i] = materialized_current_input[i] * geometry.radial_field(geometry::radial_Ln_r, i) +
-                         geometry.radial_field(geometry::radial_V_r, i) * materialized_heat_input[i] * pressure_factor;
+                out[i] = materialized_current_input[i] * radial_Ln_r[i] +
+                         radial_V_r[i] * materialized_heat_input[i] * pressure_factor;
             }
         }
 
@@ -551,11 +554,13 @@ namespace source::detail
             constexpr double two_pi     = 2.0 * geometry::detail::pi;
             constexpr double inv_two_pi = 1.0 / two_pi;
             double           total      = 0.0;
+            const double* const geometry_radial = geometry.radial_fields.aligned_data();
+            const double* const radial_Ln_r = geometry_radial + geometry::radial_Ln_r * radial_nodes;
+            const double* const radial_V_r = geometry_radial + geometry::radial_V_r * radial_nodes;
             for (size_t i = 0; i < radial_nodes; ++i)
             {
-                total +=
-                    GridType::weights[i] * (two_pi * geometry.radial_field(geometry::radial_Ln_r, i) * FFn_psin[i] +
-                                            inv_two_pi * geometry.radial_field(geometry::radial_V_r, i) * Pn_psin[i]);
+                total += GridType::weights[i] *
+                         (two_pi * radial_Ln_r[i] * FFn_psin[i] + inv_two_pi * radial_V_r[i] * Pn_psin[i]);
             }
             return total;
         }
