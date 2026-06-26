@@ -255,32 +255,36 @@ def _topology_from_spec(
     *,
     build: str,
     layout: str = "degree",
+    build_options: dict[str, object] | None = None,
 ) -> tuple[Topology, tuple[str, ...]]:
     coeffs = benchmark._case_profile_coeffs(spec)
     grid = benchmark.TEST_GRID
     m_max = _boundary_m_max(benchmark.BOUNDARY)
+    topology_kwargs: dict[str, object] = {
+        "h_count": _profile_count(coeffs, "h"),
+        "v_count": _profile_count(coeffs, "v"),
+        "kappa_count": _profile_count(coeffs, "k"),
+        "psin_count": _profile_count(coeffs, "psin"),
+        "F_count": _profile_count(coeffs, "F"),
+        "c_counts": _family_counts(coeffs, "c", 0),
+        "s_counts": _family_counts(coeffs, "s", 1),
+        "Nr": int(grid.Nr),
+        "Nt": int(grid.Nt),
+        "route": str(spec.mode),
+        "coordinate": str(spec.coordinate),
+        "constraint": str(spec.constraint),
+        "nodes": str(spec.input_kind),
+        "sample_count": _sample_count_for_spec(benchmark, spec),
+        "M_max": m_max,
+        "K_max": max(2, m_max),
+        "build": build,
+        "layout": layout,
+    }
+    if build_options:
+        topology_kwargs.update(build_options)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always", UserWarning)
-        topology = Topology(
-            h_count=_profile_count(coeffs, "h"),
-            v_count=_profile_count(coeffs, "v"),
-            kappa_count=_profile_count(coeffs, "k"),
-            psin_count=_profile_count(coeffs, "psin"),
-            F_count=_profile_count(coeffs, "F"),
-            c_counts=_family_counts(coeffs, "c", 0),
-            s_counts=_family_counts(coeffs, "s", 1),
-            Nr=int(grid.Nr),
-            Nt=int(grid.Nt),
-            route=str(spec.mode),
-            coordinate=str(spec.coordinate),
-            constraint=str(spec.constraint),
-            nodes=str(spec.input_kind),
-            sample_count=_sample_count_for_spec(benchmark, spec),
-            M_max=m_max,
-            K_max=max(2, m_max),
-            build=build,
-            layout=layout,
-        )
+        topology = Topology(**topology_kwargs)
     warning_messages = tuple(str(item.message) for item in caught)
     return topology, warning_messages
 
@@ -541,6 +545,7 @@ def _plan_row(
     *,
     build: str,
     layout: str,
+    build_options: dict[str, object] | None,
     cache_root: Path,
     source_dir: Path,
     skip_artifact_dry_run: bool,
@@ -551,6 +556,7 @@ def _plan_row(
             spec,
             build=build,
             layout=layout,
+            build_options=build_options,
         )
     except Exception as exc:
         return (
@@ -693,6 +699,36 @@ def _summarize(rows: list[dict[str, Any]]) -> dict[str, int]:
     return summary
 
 
+def _build_option_overrides(args: argparse.Namespace) -> dict[str, object]:
+    overrides: dict[str, object] = {}
+    for attr in (
+        "cmake_build_type",
+        "fp_mode",
+        "enable_enzyme",
+        "enable_native_optimizations",
+        "enable_thin_lto",
+        "analysis",
+        "enzyme_jacobian_batch_width",
+    ):
+        value = getattr(args, attr)
+        if value is not None:
+            overrides[attr] = value
+    return overrides
+
+
+def _add_bool_override(
+    parser: argparse.ArgumentParser,
+    *,
+    positive: str,
+    negative: str,
+    dest: str,
+    help_text: str,
+) -> None:
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(positive, dest=dest, action="store_true", default=None, help=help_text)
+    group.add_argument(negative, dest=dest, action="store_false", help=argparse.SUPPRESS)
+
+
 def _write_report(payload: dict[str, Any], output: Path) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -704,6 +740,37 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--case", action="append", help="Case name or route:coord:nodes:constraint")
     parser.add_argument("--build", default="fastmath")
     parser.add_argument("--layout", default="degree")
+    parser.add_argument("--cmake-build-type", default=None)
+    parser.add_argument("--fp-mode", default=None)
+    parser.add_argument("--enzyme-jacobian-batch-width", type=int, default=None)
+    _add_bool_override(
+        parser,
+        positive="--enable-enzyme",
+        negative="--disable-enzyme",
+        dest="enable_enzyme",
+        help_text="Override the selected build preset to enable Enzyme.",
+    )
+    _add_bool_override(
+        parser,
+        positive="--enable-native-optimizations",
+        negative="--disable-native-optimizations",
+        dest="enable_native_optimizations",
+        help_text="Override native CPU optimization flags for generated kernels.",
+    )
+    _add_bool_override(
+        parser,
+        positive="--enable-thin-lto",
+        negative="--disable-thin-lto",
+        dest="enable_thin_lto",
+        help_text="Override ThinLTO for generated kernels.",
+    )
+    _add_bool_override(
+        parser,
+        positive="--analysis",
+        negative="--no-analysis",
+        dest="analysis",
+        help_text="Override analysis-build diagnostics for generated kernels.",
+    )
     parser.add_argument("--repeat", type=int, default=3)
     parser.add_argument("--warmup", type=int, default=1)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
@@ -722,6 +789,7 @@ def main(argv: list[str] | None = None) -> int:
     cache_root = args.cache_root or Path(tempfile.mkdtemp(prefix="veqlib-route-matrix-"))
     source_dir = args.source_dir.resolve()
     registry = KernelRegistry(cache_root=cache_root, source_dir=source_dir)
+    build_options = _build_option_overrides(args)
 
     rows: list[dict[str, Any]] = []
     for spec in specs:
@@ -730,6 +798,7 @@ def main(argv: list[str] | None = None) -> int:
             spec,
             build=args.build,
             layout=args.layout,
+            build_options=build_options,
             cache_root=cache_root,
             source_dir=source_dir,
             skip_artifact_dry_run=args.skip_artifact_dry_run,
@@ -759,6 +828,7 @@ def main(argv: list[str] | None = None) -> int:
         "schema": "veqlib.route_topology_matrix.v1",
         "include_grid": bool(args.include_grid),
         "build": str(args.build),
+        "build_options_overrides": build_options,
         "layout": str(args.layout),
         "repeat": int(args.repeat),
         "warmup": int(args.warmup),

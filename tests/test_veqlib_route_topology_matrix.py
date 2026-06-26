@@ -45,6 +45,41 @@ def test_route_matrix_builds_mvp_topology_from_benchmark_case() -> None:
     topology.validate_supported_for_veqlib_mvp()
 
 
+def test_route_matrix_applies_build_option_overrides_to_topology() -> None:
+    benchmark = matrix._benchmark_module()
+    spec = benchmark.BenchmarkCaseSpec(
+        mode="PF",
+        coordinate="psin",
+        constraint="Ip",
+        input_kind="uniform",
+    )
+
+    topology, warnings = matrix._topology_from_spec(
+        benchmark,
+        spec,
+        build="fastmath",
+        build_options={
+            "fp_mode": "FMA",
+            "enable_enzyme": True,
+            "enable_thin_lto": False,
+            "analysis": True,
+            "enzyme_jacobian_batch_width": 8,
+        },
+    )
+
+    assert warnings == ()
+    assert topology.build_options_dict() == {
+        "preset": "fastmath",
+        "cmake_build_type": "Release",
+        "fp_mode": "FMA",
+        "enable_enzyme": True,
+        "enable_native_optimizations": True,
+        "enable_thin_lto": False,
+        "analysis": True,
+        "enzyme_jacobian_batch_width": 8,
+    }
+
+
 def test_route_matrix_builds_source_owned_pf_grid_topology() -> None:
     benchmark = matrix._benchmark_module()
     spec = benchmark.BenchmarkCaseSpec(
