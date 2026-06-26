@@ -64,6 +64,9 @@ _VEQLIB_MVP_ROUTE_CONSTRAINTS = {
     ("PJ1", "rho", "grid"): frozenset({"null", "Ip", "beta", "Ip_beta"}),
     ("PJ1", "psin", "uniform"): frozenset({"null", "Ip", "beta", "Ip_beta"}),
     ("PJ1", "psin", "grid"): frozenset({"null", "Ip", "beta", "Ip_beta"}),
+    ("PJ2", "rho", "uniform"): frozenset({"null", "Ip", "beta", "Ip_beta"}),
+    ("PJ2", "rho", "grid"): frozenset({"null", "Ip", "beta", "Ip_beta"}),
+    ("PJ2", "psin", "grid"): frozenset({"null", "Ip", "beta", "Ip_beta"}),
 }
 _VEQLIB_MVP_ROUTE_KEYS = frozenset(_VEQLIB_MVP_ROUTE_CONSTRAINTS)
 _VEQLIB_MVP_ROUTES = frozenset(
@@ -495,13 +498,16 @@ class Topology:
             )
         if mismatches:
             raise TopologyError(
-                "VEQlib MVP backend currently supports PF, PP, PI, and PJ1 rho/psin "
-                "uniform/grid source topology slices only; got "
+                "VEQlib MVP backend currently supports PF, PP, PI, PJ1, and the "
+                "one-pass PJ2 rho/uniform, rho/grid, and psin/grid source topology "
+                "slices only; got "
                 + ", ".join(mismatches)
             )
-        if self.F_count > 0:
-            raise TopologyError("VEQlib MVP backend does not accept F_count > 0")
-        if self.source_active_family == "none" and self.psin_count > 0:
+        if self.source_active_family != "F" and self.F_count > 0:
+            raise TopologyError("VEQlib MVP backend only accepts F_count > 0 for PJ2")
+        if self.source_active_family == "F" and self.F_count <= 0:
+            raise TopologyError("VEQlib MVP PJ2 topology requires F_count > 0")
+        if self.source_active_family != "psin" and self.psin_count > 0:
             raise TopologyError(
                 "VEQlib MVP source-owned topology does not accept psin_count > 0"
             )

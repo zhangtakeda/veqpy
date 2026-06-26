@@ -54,10 +54,19 @@ namespace veqlib_kernel_api
                    profile_id == Shape::psin_profile_id;
         }
 
+        template <typename Shape>
+        constexpr double coefficient_space_profile_scale(size_t profile_id, double physical_scale) noexcept
+        {
+            if (profile_id == Shape::F_profile_id && physical_scale != 0.0)
+                return physical_scale * physical_scale;
+            return physical_scale;
+        }
+
         profiles::ProfileRuntimeParams<KernelShape> profile_params_for_case(const CaseInput& input) noexcept
         {
             profiles::ProfileRuntimeParams<KernelShape> params{};
             params.offsets[KernelShape::kappa_profile_id] = input.ka;
+            params.scales[KernelShape::F_profile_id]      = input.R0 * input.B0;
             for (size_t order = 0; order <= KernelShape::M_max; ++order)
                 params.offsets[KernelShape::c_profile_id(order)] = input.c_offsets[order];
             for (size_t order = 1; order <= KernelShape::M_max; ++order)
@@ -91,6 +100,7 @@ namespace veqlib_kernel_api
                 const double offset_scale =
                     x_scale_offsetless<Shape>(profile_id) ? 0.0 : std::abs(profile_params.offsets[profile_id]);
                 double profile_scale = std::abs(profile_params.scales[profile_id]);
+                profile_scale        = coefficient_space_profile_scale<Shape>(profile_id, profile_scale);
                 if (std::abs(profile_scale - 1.0) <= 1.0e-12)
                     profile_scale = prior;
                 const double block_scale =

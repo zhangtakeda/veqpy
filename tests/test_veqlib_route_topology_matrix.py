@@ -148,6 +148,47 @@ def test_route_matrix_tracks_pj2_active_f_ownership() -> None:
     assert topology.source_parameterization == "identity"
 
 
+def test_route_matrix_builds_native_pj2_one_pass_topology() -> None:
+    benchmark = matrix._benchmark_module()
+    spec = benchmark.BenchmarkCaseSpec(
+        mode="PJ2",
+        coordinate="psin",
+        constraint="Ip_beta",
+        input_kind="grid",
+    )
+
+    topology, warnings = matrix._topology_from_spec(benchmark, spec, build="fastmath")
+
+    assert warnings == ()
+    assert topology.route == "PJ2"
+    assert topology.source_active_family == "F"
+    assert topology.psin_count == 0
+    assert topology.F_count > 0
+    assert topology.source_uses_ip_constraint is True
+    assert topology.source_uses_beta_constraint is True
+    assert topology.sample_count == benchmark.TEST_GRID.Nr
+    topology.validate_supported_for_veqlib_mvp()
+
+
+def test_route_matrix_uses_lm_for_pj2_psin_grid_ip_runtime() -> None:
+    benchmark = matrix._benchmark_module()
+    spec = benchmark.BenchmarkCaseSpec(
+        mode="PJ2",
+        coordinate="psin",
+        constraint="Ip",
+        input_kind="grid",
+    )
+    nearby_spec = benchmark.BenchmarkCaseSpec(
+        mode="PJ2",
+        coordinate="psin",
+        constraint="Ip_beta",
+        input_kind="grid",
+    )
+
+    assert matrix._cxx_solver_method_for_spec(spec) == matrix.SOLVER_METHOD_LEVENBERG_MARQUARDT
+    assert matrix._cxx_solver_method_for_spec(nearby_spec) == matrix.SOLVER_METHOD_POWELL
+
+
 def test_route_matrix_grid_cases_use_grid_sample_count() -> None:
     benchmark = matrix._benchmark_module()
     spec = benchmark.BenchmarkCaseSpec(

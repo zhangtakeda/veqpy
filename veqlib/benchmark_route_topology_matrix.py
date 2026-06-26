@@ -48,6 +48,7 @@ if str(REPO_ROOT) not in sys.path:
 from veqpy.cpp import (  # noqa: E402
     INITIAL_POLICY_COLD,
     RESIDUAL_NORMALIZATION_FAST,
+    SOLVER_METHOD_LEVENBERG_MARQUARDT,
     SOLVER_METHOD_POWELL,
     KernelRegistry,
     VEQlibSolver,
@@ -65,7 +66,15 @@ class RuntimeCaseData:
     payload_json: str
     py_operator: Any
     py_measure: Any
+    solver_method_code: int
+    solver_engine_label: str
     x_size: int
+
+
+_VEQLIB_SOLVER_ENGINE_LABELS = {
+    SOLVER_METHOD_POWELL: "veqlib-fastmath-powell",
+    SOLVER_METHOD_LEVENBERG_MARQUARDT: "veqlib-fastmath-lm",
+}
 
 
 def _load_module(name: str, path: Path) -> ModuleType:
@@ -97,6 +106,17 @@ def _spec_label(spec: Any) -> str:
 
 def _spec_selector(spec: Any) -> str:
     return f"{spec.mode}:{spec.coordinate}:{spec.input_kind}:{spec.constraint}"
+
+
+def _cxx_solver_method_for_spec(spec: Any) -> int:
+    if (
+        str(spec.mode) == "PJ2"
+        and str(spec.coordinate) == "psin"
+        and str(spec.input_kind) == "grid"
+        and str(spec.constraint) == "Ip"
+    ):
+        return SOLVER_METHOD_LEVENBERG_MARQUARDT
+    return SOLVER_METHOD_POWELL
 
 
 def _iter_route_specs(benchmark: ModuleType, *, include_grid: bool) -> tuple[Any, ...]:
@@ -272,6 +292,7 @@ def _runtime_case_data(benchmark: ModuleType, spec: Any, topology: Topology) -> 
     if np.isfinite(float(source_plan.beta)):
         constraints["beta"] = float(source_plan.beta)
 
+    solver_method_code = _cxx_solver_method_for_spec(spec)
     payload = {
         "case_name": _spec_label(spec),
         "boundary": {
@@ -289,7 +310,7 @@ def _runtime_case_data(benchmark: ModuleType, spec: Any, topology: Topology) -> 
         },
         "constraints": constraints,
         "solver": {
-            "method_code": SOLVER_METHOD_POWELL,
+            "method_code": solver_method_code,
             "max_residual": float(benchmark.CONFIG.max_residual),
             "max_evaluations": int(x0.size) ** 2,
             "accepted_residual_factor": 10.0,
@@ -369,6 +390,8 @@ def _runtime_case_data(benchmark: ModuleType, spec: Any, topology: Topology) -> 
         payload_json=json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
         py_operator=operator,
         py_measure=measure_py,
+        solver_method_code=solver_method_code,
+        solver_engine_label=_VEQLIB_SOLVER_ENGINE_LABELS[solver_method_code],
         x_size=int(x0.size),
     )
 
@@ -380,7 +403,11 @@ def _measure_cxx(
     warmup: int,
     repeat: int,
 ) -> dict[str, Any]:
-    solver = VEQlibSolver(case_data.topology, registry=registry, solver="powell")
+    solver = VEQlibSolver(
+        case_data.topology,
+        registry=registry,
+        solver=case_data.solver_method_code,
+    )
     build_start = time.perf_counter()
     artifact = solver.build(force=False, dry_run=False)
     build_wall_ms = (time.perf_counter() - build_start) * 1000.0
@@ -572,7 +599,7 @@ def _run_supported_row(
         "status": status,
         "x_size": case_data.x_size,
         "engines": {
-            "veqlib-fastmath-powell": _compact(cxx),
+            case_data.solver_engine_label: _compact(cxx),
             "veqpy-numba-hybr": _compact(py),
         },
         "closeness_to_numba": compare,

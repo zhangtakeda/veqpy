@@ -43,12 +43,14 @@ namespace operators::detail
     inline constexpr int source_route_pp                  = 2;
     inline constexpr int source_route_pi                  = 3;
     inline constexpr int source_route_pj1                 = 4;
+    inline constexpr int source_route_pj2                 = 5;
     inline constexpr int source_coordinate_rho            = 1;
     inline constexpr int source_coordinate_psin           = 2;
     inline constexpr int source_nodes_uniform             = 1;
     inline constexpr int source_nodes_grid                = 2;
     inline constexpr int source_active_none               = 0;
     inline constexpr int source_active_psin               = 1;
+    inline constexpr int source_active_F                  = 2;
     inline constexpr int source_parameterization_identity = 0;
     inline constexpr int source_parameterization_sqrt_psin = 1;
 
@@ -67,14 +69,13 @@ namespace operators::detail
         static_assert(Shape::K_max == GridType::rho_power_rows, "operator/profile rho rows must match");
         static_assert(Shape::M_max + 1 == GridType::harmonic_rows, "operator/profile harmonics must match");
         static_assert(SourceRouteCode == source_route_pf || SourceRouteCode == source_route_pp ||
-                          SourceRouteCode == source_route_pi || SourceRouteCode == source_route_pj1,
-                      "native source topology currently supports PF, PP, PI, and PJ1 routes");
-        static_assert(!Shape::slot_for_profile_id(Shape::F_profile_id).optimized(),
-                      "native PF/PP/PI/PJ1 source topology does not accept an active F profile");
+                          SourceRouteCode == source_route_pi || SourceRouteCode == source_route_pj1 ||
+                          SourceRouteCode == source_route_pj2,
+                      "native source topology currently supports PF, PP, PI, PJ1, and PJ2 routes");
         static_assert((SourceRouteCode == source_route_pf &&
                        (SourceConstraintCode == 0 || SourceConstraintCode == 1 || SourceConstraintCode == 2)) ||
                           ((SourceRouteCode == source_route_pp || SourceRouteCode == source_route_pi ||
-                            SourceRouteCode == source_route_pj1) &&
+                            SourceRouteCode == source_route_pj1 || SourceRouteCode == source_route_pj2) &&
                            (SourceConstraintCode == 0 || SourceConstraintCode == 1 || SourceConstraintCode == 2 ||
                             SourceConstraintCode == 3)),
                       "source topology constraint is not implemented for this native route");
@@ -82,8 +83,9 @@ namespace operators::detail
                       "native source topology supports rho or psin coordinates");
         static_assert(SourceNodesCode == source_nodes_uniform || SourceNodesCode == source_nodes_grid,
                       "native source topology supports uniform or grid nodes");
-        static_assert(SourceActiveFamilyCode == source_active_none || SourceActiveFamilyCode == source_active_psin,
-                      "native source topology supports no active source family or active psin ownership");
+        static_assert(SourceActiveFamilyCode == source_active_none || SourceActiveFamilyCode == source_active_psin ||
+                          SourceActiveFamilyCode == source_active_F,
+                      "native source topology supports no active source family, active psin, or active F ownership");
         static_assert(SourceParameterizationCode == source_parameterization_identity ||
                           SourceParameterizationCode == source_parameterization_sqrt_psin,
                       "native source topology received an unsupported source parameterization");
@@ -97,15 +99,29 @@ namespace operators::detail
                 (SourceCoordinateCode == source_coordinate_psin && SourceNodesCode == source_nodes_uniform),
             "active psin ownership is only implemented for psin/uniform source routes");
         static_assert(
-            SourceActiveFamilyCode == source_active_psin ||
+            SourceActiveFamilyCode == source_active_psin || SourceRouteCode == source_route_pj2 ||
                 !(SourceCoordinateCode == source_coordinate_psin && SourceNodesCode == source_nodes_uniform),
             "psin/uniform source routes require active psin ownership");
+        static_assert(SourceRouteCode != source_route_pj2 ||
+                          !(SourceCoordinateCode == source_coordinate_psin &&
+                            SourceNodesCode == source_nodes_uniform),
+                      "PJ2/psin/uniform fixed-point source topology is not implemented natively");
+        static_assert(SourceActiveFamilyCode != source_active_F || SourceRouteCode == source_route_pj2,
+                      "active F ownership is only implemented for PJ2 source topology");
+        static_assert(SourceRouteCode != source_route_pj2 || SourceActiveFamilyCode == source_active_F,
+                      "PJ2 source topology requires active F ownership");
         static_assert(SourceActiveFamilyCode != source_active_psin ||
                           Shape::slot_for_profile_id(Shape::psin_profile_id).optimized(),
                       "profile-owned source topology requires an active psin profile");
         static_assert(SourceActiveFamilyCode == source_active_psin ||
                           !Shape::slot_for_profile_id(Shape::psin_profile_id).optimized(),
                       "source-owned source topology does not accept an active psin profile");
+        static_assert(SourceActiveFamilyCode != source_active_F ||
+                          Shape::slot_for_profile_id(Shape::F_profile_id).optimized(),
+                      "PJ2 source topology requires an active F profile");
+        static_assert(SourceActiveFamilyCode == source_active_F ||
+                          !Shape::slot_for_profile_id(Shape::F_profile_id).optimized(),
+                      "non-PJ2 source topology does not accept an active F profile");
         static_assert(SourceNodesCode != source_nodes_grid || SourceShape::sample_count == GridType::radial_nodes,
                       "grid source nodes require source samples to match radial nodes");
         static_assert(SourceShape::sample_count >= 1, "source topology needs at least one sample");
@@ -174,6 +190,8 @@ namespace operators::detail
                 else
                     workspace.source_runtime.materialize_rho_uniform_sources();
             }
+            if constexpr (SourceActiveFamilyCode == source_active_F)
+                workspace.source_runtime.materialize_active_F(workspace.profiles);
 
             if constexpr (SourceRouteCode == source_route_pf)
             {
@@ -226,7 +244,7 @@ namespace operators::detail
                         solve_params.B0,
                         plan.n_axis_fix);
             }
-            else
+            else if constexpr (SourceRouteCode == source_route_pj1)
             {
                 if constexpr (SourceCoordinateCode == source_coordinate_rho)
                     workspace.source_runtime.template update_pj1_rho<SourceConstraintCode>(
@@ -243,8 +261,27 @@ namespace operators::detail
                         solve_params.B0,
                         plan.n_axis_fix);
             }
+            else
+            {
+                if constexpr (SourceCoordinateCode == source_coordinate_rho)
+                    workspace.source_runtime.template update_pj2_rho<SourceConstraintCode>(
+                        workspace.geometry,
+                        solve_params.R0,
+                        solve_params.Ip,
+                        solve_params.beta,
+                        solve_params.B0,
+                        plan.n_axis_fix);
+                else
+                    workspace.source_runtime.template update_pj2_psin<SourceConstraintCode>(
+                        workspace.geometry,
+                        solve_params.R0,
+                        solve_params.Ip,
+                        solve_params.beta,
+                        solve_params.B0,
+                        plan.n_axis_fix);
+            }
 
-            if constexpr (SourceActiveFamilyCode == source_active_none)
+            if constexpr (SourceActiveFamilyCode == source_active_none || SourceActiveFamilyCode == source_active_F)
                 workspace.source_runtime.publish_source_target_root_fields();
 
             workspace.residual.update_compact(workspace.source_runtime, workspace.geometry);
