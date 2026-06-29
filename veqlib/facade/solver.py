@@ -4,7 +4,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from ..affinity import CpuPinning
+from .affinity import CpuPinning
 from .builder import KernelArtifact
 from .options import solver_method_code
 from .registry import KernelRegistry, SolverThreadError, ThreadOwnedKernelSolver

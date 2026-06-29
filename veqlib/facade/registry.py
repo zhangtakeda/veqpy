@@ -8,7 +8,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-from ..affinity import CpuPinning, cpu_pin_scope_active, pinned_cpu
+from .affinity import CpuPinning, cpu_pin_scope_active, pinned_cpu
 from .builder import KernelArtifact, build_kernel
 from .options import solver_method_code
 from .types import KernelTopology as Topology

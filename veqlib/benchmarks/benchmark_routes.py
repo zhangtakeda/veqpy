@@ -5,13 +5,19 @@ The default scope enumerates the 46 historical uniform source cases from
 ``tests/benchmark.py``.  ``--scope full`` adds grid-sampled variants for the 92
 route/topology matrix.  Topology planning is always performed; supported native
 rows can be executed through the typed ``veqlib.facade`` runtime unless
-``--no-run`` is passed.
+``--no-run`` is passed. Native rows are isolated in one subprocess per row by
+default so a full matrix does not load dozens of nanobind domains into one
+interpreter; ``--run-native-in-process`` keeps the old single-process path for
+debugging.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import subprocess
+import sys
+import tempfile
 import time
 import warnings
 from dataclasses import dataclass
@@ -34,7 +40,6 @@ from veqlib.benchmarks._common import (
     measure_native_solver,
     profile_count,
     runtime_env,
-    temp_cache,
     write_json,
 )
 from veqlib.facade import (
@@ -49,6 +54,7 @@ from veqlib.facade import (
     TopologyError,
     VEQlibSolver,
     build_kernel,
+    default_kernel_cache_root,
 )
 from veqpy.operator import Operator
 from veqpy.operator.packed_layout import build_profile_layout, build_profile_names
@@ -537,6 +543,106 @@ def _run_supported_row(
     }
 
 
+def _run_supported_row_subprocess(
+    spec: Any,
+    *,
+    args: argparse.Namespace,
+    cache_root: Path,
+    source_dir: Path,
+) -> dict[str, Any]:
+    with tempfile.NamedTemporaryFile(
+        prefix="veqlib-route-row-",
+        suffix=".json",
+        delete=False,
+    ) as handle:
+        output_path = Path(handle.name)
+    command = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "--scope",
+        str(args.scope),
+        "--case",
+        _spec_selector(spec),
+        "--build",
+        str(args.build),
+        "--layout",
+        str(args.layout),
+        "--repeat",
+        str(args.repeat),
+        "--warmup",
+        str(args.warmup),
+        "--output",
+        str(output_path),
+        "--cache-root",
+        str(cache_root),
+        "--source-dir",
+        str(source_dir),
+        "--skip-artifact-dry-run",
+        "--run-native-in-process",
+    ]
+    _append_optional_arg(command, "--cmake-build-type", args.cmake_build_type)
+    _append_optional_arg(command, "--fp-mode", args.fp_mode)
+    _append_optional_arg(command, "--enzyme-jacobian-batch-width", args.enzyme_jacobian_batch_width)
+    _append_bool_override_arg(command, "--enable-enzyme", "--disable-enzyme", args.enable_enzyme)
+    _append_bool_override_arg(
+        command,
+        "--enable-native-optimizations",
+        "--disable-native-optimizations",
+        args.enable_native_optimizations,
+    )
+    _append_bool_override_arg(
+        command,
+        "--enable-thin-lto",
+        "--disable-thin-lto",
+        args.enable_thin_lto,
+    )
+    _append_bool_override_arg(command, "--analysis", "--no-analysis", args.analysis)
+    try:
+        completed = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if completed.returncode != 0:
+            return {
+                "status": "failed",
+                "error": "subprocess_failed",
+                "returncode": int(completed.returncode),
+                "stdout": completed.stdout,
+                "stderr": completed.stderr,
+            }
+        payload = json.loads(output_path.read_text(encoding="utf-8"))
+        rows = payload.get("rows")
+        if not isinstance(rows, list) or len(rows) != 1:
+            return {
+                "status": "failed",
+                "error": "subprocess_returned_unexpected_row_count",
+                "stdout": completed.stdout,
+                "stderr": completed.stderr,
+            }
+        return dict(rows[0]["runtime"])
+    finally:
+        output_path.unlink(missing_ok=True)
+
+
+def _append_optional_arg(command: list[str], name: str, value: object | None) -> None:
+    if value is not None:
+        command.extend([name, str(value)])
+
+
+def _append_bool_override_arg(
+    command: list[str],
+    positive: str,
+    negative: str,
+    value: bool | None,
+) -> None:
+    if value is True:
+        command.append(positive)
+    elif value is False:
+        command.append(negative)
+
+
 def _summarize(rows: list[dict[str, Any]]) -> dict[str, int]:
     summary = {
         "total": len(rows),
@@ -634,12 +740,13 @@ def main(argv: list[str] | None = None) -> int:
         dest="analysis",
         help_text="Override analysis build.",
     )
-    parser.add_argument("--repeat", type=int, default=3)
-    parser.add_argument("--warmup", type=int, default=1)
+    parser.add_argument("--repeat", type=int, default=100)
+    parser.add_argument("--warmup", type=int, default=5)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--cache-root", type=Path, default=None)
     parser.add_argument("--source-dir", type=Path, default=CORE_DIR)
     parser.add_argument("--no-run", action="store_true")
+    parser.add_argument("--run-native-in-process", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--skip-artifact-dry-run", action="store_true")
     parser.add_argument("--no-write", action="store_true")
     args = parser.parse_args(argv)
@@ -651,7 +758,7 @@ def main(argv: list[str] | None = None) -> int:
         _iter_route_specs(benchmark, include_grid=args.scope == "full"),
         set(args.case) if args.case else None,
     )
-    cache_root = args.cache_root or temp_cache("veqlib-routes-")
+    cache_root = args.cache_root or default_kernel_cache_root()
     source_dir = args.source_dir.resolve()
     registry = KernelRegistry(cache_root=cache_root, source_dir=source_dir)
     build_options = _build_option_overrides(args)
@@ -674,14 +781,22 @@ def main(argv: list[str] | None = None) -> int:
             elif topology is not None:
                 print(f"[routes] running {_spec_label(spec)}", flush=True)
                 try:
-                    row["runtime"] = _run_supported_row(
-                        benchmark,
-                        spec,
-                        topology,
-                        registry=registry,
-                        warmup=args.warmup,
-                        repeat=args.repeat,
-                    )
+                    if args.run_native_in_process:
+                        row["runtime"] = _run_supported_row(
+                            benchmark,
+                            spec,
+                            topology,
+                            registry=registry,
+                            warmup=args.warmup,
+                            repeat=args.repeat,
+                        )
+                    else:
+                        row["runtime"] = _run_supported_row_subprocess(
+                            spec,
+                            args=args,
+                            cache_root=cache_root,
+                            source_dir=source_dir,
+                        )
                 except Exception as exc:
                     row["runtime"] = {"status": "failed", "error": f"{type(exc).__name__}: {exc}"}
         rows.append(row)
@@ -695,6 +810,7 @@ def main(argv: list[str] | None = None) -> int:
         "layout": str(args.layout),
         "repeat": int(args.repeat),
         "warmup": int(args.warmup),
+        "native_isolation": "in_process" if args.run_native_in_process else "subprocess_per_row",
         "validation_atol": VALIDATION_ATOL,
         "cache_root": str(cache_root),
         "source_dir": str(source_dir),

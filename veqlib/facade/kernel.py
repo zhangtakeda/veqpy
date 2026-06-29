@@ -5,7 +5,7 @@ from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import Any
 
-from ..affinity import CpuPinning, pinned_cpu
+from .affinity import CpuPinning, pinned_cpu
 from .builder import KernelArtifact
 from .registry import KernelRegistry
 from .solver import VEQlibSolver

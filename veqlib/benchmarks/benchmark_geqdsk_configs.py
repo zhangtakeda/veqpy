@@ -30,7 +30,6 @@ from veqlib.benchmarks._common import (
     measure_native_solver,
     profile_count,
     runtime_env,
-    temp_cache,
     write_json,
 )
 from veqlib.facade import (
@@ -41,6 +40,7 @@ from veqlib.facade import (
     KernelSolve,
     KernelTopology,
     VEQlibSolver,
+    default_kernel_cache_root,
 )
 
 if str(SCRIPTS_DIR) not in sys.path:
@@ -160,7 +160,9 @@ def _kernel_solve_from_config(config: Any, *, x_size: int) -> KernelSolve:
         residual_normalization_huber_tau=float(config.residual_normalization_huber_tau),
         residual_normalization_probe_count=int(config.residual_normalization_probe_count),
         residual_normalization_probe_step=float(config.residual_normalization_probe_step),
-        residual_normalization_sensitivity_lambda=float(config.residual_normalization_sensitivity_lambda),
+        residual_normalization_sensitivity_lambda=float(
+            config.residual_normalization_sensitivity_lambda
+        ),
     )
 
 
@@ -419,8 +421,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--build", default="fastmath")
     parser.add_argument("--case", action="append", choices=CASE_KEYS)
     parser.add_argument("--config", action="append", choices=CONFIG_LABELS)
-    parser.add_argument("--repeat", type=int, default=11)
-    parser.add_argument("--warmup", type=int, default=3)
+    parser.add_argument("--repeat", type=int, default=100)
+    parser.add_argument("--warmup", type=int, default=5)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--cache-root", type=Path, default=None)
     parser.add_argument("--source-dir", type=Path, default=CORE_DIR)
@@ -436,7 +438,7 @@ def main(argv: list[str] | None = None) -> int:
         selected_cases=selected_cases,
         selected_configs=selected_configs,
     )
-    cache_root = args.cache_root or temp_cache("veqlib-geqdsk-configs-")
+    cache_root = args.cache_root or default_kernel_cache_root()
     registry = KernelRegistry(cache_root=cache_root, source_dir=args.source_dir.resolve())
     rows = [_row(case, registry=registry, warmup=args.warmup, repeat=args.repeat) for case in cases]
     payload = {

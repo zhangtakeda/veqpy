@@ -24,7 +24,7 @@ from veqlib.facade import (
     KernelTopology,
 )
 from veqlib.facade.affinity import pinned_cpu
-from veqlib.facade.kernel.registry import ThreadOwnedKernelSolver
+from veqlib.facade.registry import ThreadOwnedKernelSolver
 
 MU0 = 4.0e-7 * np.pi
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -543,7 +543,7 @@ def test_kernel_pinned_uses_handle_policy(monkeypatch) -> None:
         def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
             events.append(("exit", self.policy))
 
-    monkeypatch.setattr("veqlib.facade.kernel.kernel.pinned_cpu", FakePin)
+    monkeypatch.setattr("veqlib.facade.kernel.pinned_cpu", FakePin)
 
     handle = Kernel(make_kernel_topology(), pin_cpu=9)
     with handle.pinned():
@@ -570,7 +570,7 @@ def test_thread_owned_solver_wraps_native_calls_in_pin_context(monkeypatch) -> N
             events.append(("solve", None))
             return "ok"
 
-    monkeypatch.setattr("veqlib.facade.kernel.registry.pinned_cpu", FakePin)
+    monkeypatch.setattr("veqlib.facade.registry.pinned_cpu", FakePin)
 
     solver = ThreadOwnedKernelSolver(RawSolver(), pin_cpu=4)
 
@@ -589,8 +589,8 @@ def test_thread_owned_solver_skips_pin_context_inside_outer_scope(monkeypatch) -
     def fail_pin(policy: object) -> object:
         raise AssertionError(f"unexpected inner pin context: {policy!r}")
 
-    monkeypatch.setattr("veqlib.facade.kernel.registry.cpu_pin_scope_active", lambda: True)
-    monkeypatch.setattr("veqlib.facade.kernel.registry.pinned_cpu", fail_pin)
+    monkeypatch.setattr("veqlib.facade.registry.cpu_pin_scope_active", lambda: True)
+    monkeypatch.setattr("veqlib.facade.registry.pinned_cpu", fail_pin)
 
     solver = ThreadOwnedKernelSolver(RawSolver(), pin_cpu=4)
 

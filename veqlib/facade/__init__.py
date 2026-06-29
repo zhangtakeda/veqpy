@@ -7,7 +7,9 @@ helpers for the C++/CMake core under :mod:`veqlib.core`.
 from __future__ import annotations
 
 from .affinity import current_cpu_affinity, pinned_cpu
-from .kernel import (
+from .builder import KernelArtifact, KernelBuildError, build_kernel, default_kernel_cache_root
+from .kernel import Kernel, build
+from .options import (
     INITIAL_POLICY_COLD,
     INITIAL_POLICY_COLD_GEOMETRIC,
     INITIAL_POLICY_COLD_ZEROS,
@@ -20,30 +22,21 @@ from .kernel import (
     SOLVER_METHOD_NEWTON_KRYLOV,
     SOLVER_METHOD_NEWTON_RAPHSON,
     SOLVER_METHOD_POWELL,
-    Kernel,
-    KernelArtifact,
+    initial_policy_code,
+    residual_normalization_code,
+    solver_method_code,
+)
+from .registry import KernelLoadError, KernelRegistry, LoadedKernel, SolverThreadError
+from .scan import PayloadSequenceStep, payload_json_with_initial_policy, solve_payload_sequence
+from .solver import VEQlibSolver
+from .types import (
     KernelBoundary,
     KernelBuild,
-    KernelBuildError,
     KernelInput,
-    KernelLoadError,
-    KernelRegistry,
     KernelResult,
     KernelSolve,
     KernelTopology,
-    LoadedKernel,
-    PayloadSequenceStep,
-    SolverThreadError,
     TopologyError,
-    VEQlibSolver,
-    build,
-    build_kernel,
-    default_kernel_cache_root,
-    initial_policy_code,
-    payload_json_with_initial_policy,
-    residual_normalization_code,
-    solve_payload_sequence,
-    solver_method_code,
 )
 
 __all__ = [

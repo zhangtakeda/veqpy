@@ -290,25 +290,31 @@ benchmark gates use Powell hybrid unless a script or payload says otherwise.
 Run the route/topology benchmark from the repository root when checking route
 coverage and speed. The default scope is the historical 46 uniform-source cases;
 `--scope full` adds grid-sampled variants for the 92-case matrix. Runtime rows use
-typed `KernelInput + KernelSolve` calls through `set_kernel_runtime(...)`.
+typed `KernelInput + KernelSolve` calls through `set_kernel_runtime(...)`. Native
+rows run in isolated subprocesses by default so a full 92-row matrix does not load
+dozens of nanobind domains into one Python interpreter. By default, artifacts are
+cached under `veqlib/artifact`; pass `--cache-root /tmp/<tag>` for a clean
+throwaway run.
 
 ```bash
 .venv/bin/python veqlib/benchmarks/benchmark_routes.py \
   --scope full \
   --build fastmath \
-  --repeat 11 \
-  --warmup 3 \
+  --repeat 100 \
+  --warmup 5 \
   --output /tmp/veqlib_routes.json
 ```
 
 Run the GEQDSK configuration benchmark when comparing VEQlib and VEQPy on the
-three reference GEQDSK cases across Low/Medium/High/Ref configurations:
+three reference GEQDSK cases across Low/Medium/High/Ref configurations. It uses
+the same default artifact cache under `veqlib/artifact` unless `--cache-root` is
+provided:
 
 ```bash
 .venv/bin/python veqlib/benchmarks/benchmark_geqdsk_configs.py \
   --build fastmath \
-  --repeat 11 \
-  --warmup 3 \
+  --repeat 100 \
+  --warmup 5 \
   --output /tmp/veqlib_geqdsk_configs.json
 ```
 
