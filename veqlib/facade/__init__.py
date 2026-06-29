@@ -7,7 +7,14 @@ helpers for the C++/CMake core under :mod:`veqlib.core`.
 from __future__ import annotations
 
 from .affinity import current_cpu_affinity, pinned_cpu
-from .builder import KernelArtifact, KernelBuildError, build_kernel, default_kernel_cache_root
+from .builder import (
+    KernelArtifact,
+    KernelBuildError,
+    KernelCleanResult,
+    build_kernel,
+    clean,
+    default_kernel_cache_root,
+)
 from .kernel import Kernel, build, solve
 from .options import (
     INITIAL_POLICY_COLD,
@@ -49,6 +56,7 @@ __all__ = [
     "KernelBoundary",
     "KernelBuild",
     "KernelBuildError",
+    "KernelCleanResult",
     "KernelInput",
     "KernelLoadError",
     "KernelRegistry",
@@ -70,6 +78,7 @@ __all__ = [
     "VEQlibSolver",
     "build",
     "build_kernel",
+    "clean",
     "current_cpu_affinity",
     "default_kernel_cache_root",
     "initial_policy_code",

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import errno
 import fcntl
 import hashlib
 import importlib.metadata
@@ -13,6 +14,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -46,6 +48,18 @@ class KernelArtifact:
     metadata: dict[str, Any]
     reused: bool
     built: bool
+
+
+@dataclass(frozen=True, slots=True)
+class KernelCleanResult:
+    """Summary returned by :func:`clean` for kernel artifact cache cleanup."""
+
+    removed: tuple[Path, ...]
+    skipped_recent: tuple[Path, ...]
+    skipped_locked: tuple[Path, ...]
+    errors: tuple[str, ...]
+    bytes_removed: int
+    dry_run: bool
 
 
 def default_kernel_cache_root() -> Path:
@@ -98,6 +112,8 @@ def build_kernel(
         reusable = _artifact_is_reusable(paths["metadata_path"], paths["shared_library_path"])
         if not force and reusable:
             metadata = _read_json(paths["metadata_path"])
+            _stamp_artifact_metadata(metadata, "last_reused_at")
+            _write_json(paths["metadata_path"], metadata)
             return KernelArtifact(
                 topology=topology,
                 artifact_id=artifact_id,
@@ -155,6 +171,7 @@ def build_kernel(
             _copy_extension(paths["cmake_build_dir"], paths["shared_library_path"])
             metadata["build"]["elapsed_ms"] = _elapsed_ms(started)
             metadata["artifact"]["status"] = "built"
+            metadata["artifact"]["built_at"] = _utc_now_iso()
             metadata["artifact"]["shared_library_sha256"] = _file_sha256(
                 paths["shared_library_path"]
             )
@@ -175,6 +192,94 @@ def build_kernel(
             reused=False,
             built=built,
         )
+
+
+def clean(
+    *,
+    cache_root: Path | None = None,
+    build: str | None = None,
+    older_than: datetime | str | None = None,
+    by: str = "last_used_at",
+    dry_run: bool = False,
+) -> KernelCleanResult:
+    """Remove built kernel artifact directories from the on-disk cache.
+
+    ``by`` selects the advisory timestamp used for filtering. Supported values are
+    ``"last_used_at"`` and ``"built_at"``; ``"last_reused_at"`` is accepted for diagnostics.
+    If ``older_than`` is omitted, every built kernel artifact in the selected build preset(s)
+    is eligible. Artifacts whose per-artifact lock cannot be acquired immediately are skipped.
+    """
+
+    if by not in {"last_used_at", "last_reused_at", "built_at"}:
+        raise ValueError("by must be 'last_used_at', 'last_reused_at', or 'built_at'")
+
+    root = (cache_root or default_kernel_cache_root()).expanduser()
+    threshold = _parse_utc_datetime(older_than) if older_than is not None else None
+    removed: list[Path] = []
+    skipped_recent: list[Path] = []
+    skipped_locked: list[Path] = []
+    errors: list[str] = []
+    bytes_removed = 0
+
+    for root_dir in _iter_kernel_artifact_dirs(root, build=build):
+        metadata_path = root_dir / "metadata.json"
+        try:
+            metadata = _read_json(metadata_path)
+            if metadata.get("schema") != ARTIFACT_SCHEMA:
+                continue
+            artifact = metadata.get("artifact", {})
+            if not isinstance(artifact, dict) or artifact.get("status") != "built":
+                continue
+            artifact_id = artifact.get("artifact_id")
+            if not isinstance(artifact_id, str) or not artifact_id:
+                errors.append(f"{metadata_path}: missing artifact.artifact_id")
+                continue
+            stamp = _artifact_filter_timestamp(metadata, metadata_path=metadata_path, by=by)
+            if threshold is not None and stamp >= threshold:
+                skipped_recent.append(root_dir)
+                continue
+            lock_path = _artifact_lock_path(root_dir, artifact_id)
+            with _try_exclusive_lock(lock_path) as locked:
+                if not locked:
+                    skipped_locked.append(root_dir)
+                    continue
+                size = _directory_size(root_dir)
+                if not dry_run:
+                    shutil.rmtree(root_dir)
+                bytes_removed += size
+                removed.append(root_dir)
+        except Exception as exc:  # pragma: no cover - exercised through concrete errors.
+            errors.append(f"{root_dir}: {exc}")
+
+    return KernelCleanResult(
+        removed=tuple(removed),
+        skipped_recent=tuple(skipped_recent),
+        skipped_locked=tuple(skipped_locked),
+        errors=tuple(errors),
+        bytes_removed=bytes_removed,
+        dry_run=dry_run,
+    )
+
+
+def touch_artifact_used(artifact: KernelArtifact) -> None:
+    """Update the advisory ``last_used_at`` timestamp for a built artifact."""
+
+    lock_path = _artifact_lock_path(artifact.root_dir, artifact.artifact_id)
+    with _exclusive_lock(lock_path):
+        if not artifact.metadata_path.exists():
+            return
+        metadata = _read_json(artifact.metadata_path)
+        if metadata.get("schema") != ARTIFACT_SCHEMA:
+            return
+        artifact_metadata = metadata.get("artifact", {})
+        if not isinstance(artifact_metadata, dict):
+            return
+        if artifact_metadata.get("artifact_id") != artifact.artifact_id:
+            return
+        _stamp_artifact_metadata(metadata, "last_used_at")
+        _write_json(artifact.metadata_path, metadata)
+        artifact.metadata.clear()
+        artifact.metadata.update(metadata)
 
 
 def _artifact_paths(root_dir: Path) -> dict[str, Path]:
@@ -202,6 +307,80 @@ def _artifact_is_reusable(metadata_path: Path, shared_library_path: Path) -> boo
     return isinstance(expected, str) and _file_sha256(shared_library_path) == expected
 
 
+def _iter_kernel_artifact_dirs(root: Path, *, build: str | None) -> Iterator[Path]:
+    if build is not None:
+        build_roots = [root / build]
+    elif root.exists():
+        build_roots = [path for path in sorted(root.iterdir()) if path.is_dir()]
+    else:
+        build_roots = []
+
+    for build_root in build_roots:
+        if not build_root.is_dir():
+            continue
+        for child in sorted(build_root.iterdir()):
+            if child.name == "common" or not child.is_dir():
+                continue
+            if (child / "metadata.json").exists():
+                yield child
+
+
+def _artifact_lock_path(root_dir: Path, artifact_id: str) -> Path:
+    return root_dir.parent / f"{artifact_id}.lock"
+
+
+def _stamp_artifact_metadata(metadata: dict[str, Any], field: str) -> None:
+    artifact = metadata.setdefault("artifact", {})
+    if not isinstance(artifact, dict):
+        raise KernelBuildError("artifact metadata must be a JSON object")
+    artifact[field] = _utc_now_iso()
+
+
+def _artifact_filter_timestamp(
+    metadata: dict[str, Any], *, metadata_path: Path, by: str
+) -> datetime:
+    artifact = metadata.get("artifact", {})
+    if isinstance(artifact, dict):
+        candidates = [by]
+        if by == "last_used_at":
+            candidates.extend(["last_reused_at", "built_at"])
+        elif by == "last_reused_at":
+            candidates.append("built_at")
+        for field in candidates:
+            value = artifact.get(field)
+            if isinstance(value, str) and value:
+                return _parse_utc_datetime(value)
+    return datetime.fromtimestamp(metadata_path.stat().st_mtime, tz=timezone.utc)
+
+
+def _parse_utc_datetime(value: datetime | str) -> datetime:
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        text = value.strip()
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        parsed = datetime.fromisoformat(text)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
+
+
+def _directory_size(path: Path) -> int:
+    total = 0
+    for child in path.rglob("*"):
+        try:
+            if child.is_file() or child.is_symlink():
+                total += child.stat().st_size
+        except FileNotFoundError:
+            continue
+    return total
+
+
 def _metadata_payload(
     *,
     topology: Topology,
@@ -223,6 +402,9 @@ def _metadata_payload(
             "module_name": module_name,
             "shared_library": "veqlib.so",
             "shared_library_sha256": None,
+            "built_at": None,
+            "last_reused_at": None,
+            "last_used_at": None,
         },
         "topology": topology.to_canonical_dict(),
         "build_identity": build_identity,
@@ -617,10 +799,27 @@ def _run_logged(command: list[str], log_path: Path, *, cwd: Path) -> None:
 @contextlib.contextmanager
 def _exclusive_lock(path: Path) -> Iterator[None]:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w") as handle:
+    with path.open("a+") as handle:
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
         try:
             yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+@contextlib.contextmanager
+def _try_exclusive_lock(path: Path) -> Iterator[bool]:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a+") as handle:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            if exc.errno not in {errno.EACCES, errno.EAGAIN}:
+                raise
+            yield False
+            return
+        try:
+            yield True
         finally:
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 

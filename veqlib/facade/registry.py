@@ -9,7 +9,7 @@ from types import ModuleType
 from typing import Any
 
 from .affinity import cpu_pin_scope_active, pinned_cpu
-from .builder import KernelArtifact, build_kernel
+from .builder import KernelArtifact, build_kernel, touch_artifact_used
 from .options import solver_method_code
 from .types import KernelTopology as Topology
 
@@ -173,6 +173,7 @@ class KernelRegistry:
         with self._lock:
             cached_by_topology = self._topology_modules.get(topology_key)
             if cached_by_topology is not None and not force:
+                touch_artifact_used(cached_by_topology.artifact)
                 return cached_by_topology
 
         artifact = self.get_or_build(topology, force=force, dry_run=False)
@@ -180,8 +181,10 @@ class KernelRegistry:
             cached = self._modules.get(artifact.artifact_id)
             if cached is not None and not force:
                 self._topology_modules[topology_key] = cached
+                touch_artifact_used(cached.artifact)
                 return cached
             module = _load_artifact_module(artifact)
+            touch_artifact_used(artifact)
             loaded = LoadedKernel(artifact=artifact, module=module)
             self._modules[artifact.artifact_id] = loaded
             self._topology_modules[topology_key] = loaded
