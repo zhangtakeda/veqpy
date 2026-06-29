@@ -1,20 +1,21 @@
 # VEQPy 与 VEQlib 的职责边界
 
-**核心原则**: VEQPy 负责建模与用户接口, VEQlib 负责具体的计算语义, 包括完整的求解流程与算子内核.
+**核心原则**: VEQPy 与 VEQlib 是两条互不拥有的实现线. VEQPy 继续作为 Python/Numba-engine 求解器; VEQlib 是后续发展的 C++/nanobind kernel runtime, 除结果对照、benchmark、迁移实验外不依赖 VEQPy.
 
-- **VEQPy**: 承担所有建模、可视化、API 语义的实现, 例如 `Equilibrium` 等高层抽象.
-- **VEQPy/adapter**: 如果需要从 `Problem`、`Operator`、GEQDSK 等高层对象转换到 kernel 输入, 转换只能发生在 `veqlib.kernel` 之外的 adapter、benchmark 或 legacy compatibility 层.
-- **VEQPy**: numba-kernel 仅作为参考实现与 VEQlib 的对照基线, 待 VEQlib 成熟后将被弃用.
+- **VEQPy**: 保留现有 `Grid + OperatorCase -> Operator -> Solver -> Equilibrium` 的 Numba 求解引擎、模型对象、可视化和序列化语义. 这些 API 不再承载 VEQlib compile-time topology 或 runtime bridge.
+- **VEQPy/adapter**: 如果需要从 `Problem`、`Operator`、GEQDSK 等高层对象转换到 VEQlib kernel 输入, 转换只能发生在 `veqlib.kernel` 之外的 adapter、example 或 benchmark 层. adapter 是边界外壳, 不是 VEQPy 公共 model/operator API.
+- **VEQPy 与 VEQlib 的交集**: 只允许 result comparison、benchmark、reference data translation 和迁移实验. VEQlib 不从 VEQPy 复用 `source_plan`、`packed_layout`、`Problem`、`Operator` 等内部语义.
 - **`veqlib.kernel`**: 是与 C++/nanobind ABI 对齐的 Python bridge, 不是 VEQPy model adapter. 它只拥有 `KernelTopology`、`KernelBuild`、`KernelBoundary`、`KernelInput`、`KernelSolve`、`KernelResult`、artifact registry 和 handle lifecycle.
 - **`veqlib.kernel` 禁止依赖**: `veqpy.model.Problem`、`veqpy.operator.Operator`、`source_plan`、`packed_layout` 等 VEQPy 内部语义. `Problem` 兼容若保留, 必须放在 `veqlib.kernel` 之外的独立 adapter/benchmark 层, 不得回流到 kernel package 或 VEQPy 公共 model 层.
 - **VEQlib**: 以计算性能与 HPC 为唯一设计准则. 所产出的 kernel 在 kernel.solve 时, C++ 端必须做到零内存分配, 且除 index 操作与 double 运算外尽可能消除一切额外开销.
 - **VEQlib**: 不面向用户, 无需考虑任何安全性兜底策略, 包括非理想边缘情况下的行为.
+- **测试定位**: pytest 是 commit-local regression/verification 工具, 不是程序 API 或架构边界的定义来源. API 与边界以本文档、源码模块边界和显式设计决策为准; 测试只证明当前提交保持了期望行为.
 
 ---
 
 # 核心概念说明
 
-1. **setup**: 在当前版本的 VEQPy 中, 指预热阶段产生的开销, 包括网格预计算等. 在 VEQlib 完全体实现后, VEQPy 层面将不再存在此类预计算开销, 而 VEQlib 的 setup 阶段几乎全部在编译期完成.
+1. **setup**: 在 VEQlib 语境中, 指 topology/artifact 构建和 kernel 私有工作区初始化等 runtime 前置成本. VEQPy 自身仍有 Numba/Operator 的预热与缓存成本, 但这不定义 VEQlib 的 setup 语义.
 2. **runtime**: 指对一个已编译好的 kernel, 持续输入成千上万个 case 进行求解的阶段. runtime 的单次求解耗时是我们优先关注的性能指标.
 3. **topology**: 编译 VEQlib kernel 时所依赖的全部模板元参数的集合. 每个 kernel 与其 topology 一一对应. cache 的 key 至少包含"VEQlib 源码 + topology + build options + toolchain/native ABI"的 hash.
 4. **case**: 在 runtime 阶段输入的待求解问题数据, 由接口层转化为 C++ ABI 可直接消费的标量和 `float64` 数组后传入 VEQlib.
@@ -23,7 +24,7 @@
 
 ---
 
-# VEQPy 建模语义
+# VEQlib Kernel 数据语义
 
 ## topology (setup 阶段固定)
 
@@ -59,7 +60,7 @@
 
 ## Kernel 对象设计原则
 
-VEQPy 的 kernel 应以对象为粒度进行管理: 同一时刻可以存在多个 kernel handle, 它们可以共享同一个编译产物(artifact/native module/dict, 内部包含元数据), 但每个 handle 私有一份 C++ 层的 solver、context、workspace、result.
+VEQlib 的 kernel 应以对象为粒度进行管理: 同一时刻可以存在多个 kernel handle, 它们可以共享同一个编译产物(artifact/native module/dict, 内部包含元数据), 但每个 handle 私有一份 C++ 层的 solver、context、workspace、result.
 
 Kernel 对 C++ 接口采用**惰性加载(lazy-load)**: 默认不立即挂载 native module, 也可通过参数配置为 eager 加载. 若调用者未保存 kernel 的返回值, 则 handle 立即析构, lazy 行为保证此时几乎零开销. 此外, close 释放 handle 私有 C++ workspace, 在 handle 不再被引用时(析构)释放对应 C++ 端的栈内存占用. 同一个 handle 实例, 不允许被多线程同时调用 solve. artifact 的并发安全由 per-artifact 文件锁保证. last_used_at 作为 advisory timestamp, 在 native module 挂载时于文件锁内一并写入; clean() 拿不到独占锁的 artifact 直接跳过.
 
@@ -94,9 +95,9 @@ VEQlib 的 ABI 只接受以下类型: `double`, 1D C-contiguous `float64` ndarra
 必须区分 **ABI 校验** 与 **安全兜底**:
 
 - **ABI 校验必须做**: nanobind/C++ 与 Python `Kernel` 边界必须检查 ndarray ndim、dtype、C-contiguous、source length 是否等于 `sample_count`、offset length 是否适配 `M_max + 1`、x/out shape 是否等于 `x_size`、enum code 是否合法、topology 是否支持当前 route/source ownership.
-- **安全兜底不做**: VEQlib 不做 silent clipping、自动重采样、route fallback、profile ownership 自动修正、物理参数猜测、失败后自动切换 solver 等用户体验型容错. 这些如果需要, 应发生在 VEQPy 高层 adapter, 不进入 VEQlib hot path.
+- **安全兜底不做**: VEQlib 不做 silent clipping、自动重采样、route fallback、profile ownership 自动修正、物理参数猜测、失败后自动切换 solver 等用户体验型容错. 这些如果需要, 应发生在 `veqlib.kernel` 边界之外的 adapter/example/benchmark 层, 不进入 VEQlib hot path.
 - **错误策略**: ABI contract violation 应立即抛出明确错误; 不能在 hot path 中静默修补输入.
 
 ---
 
-> **注意**: 以下约束描述的是最终代码的成熟形态, 当前实现很可能尚未完全达到. 由于代码仍在开发/重构中, 现有 pytest 测试不应作为重构基线. 配点法相关内容暂不纳入迁移范围. 此外, 当前代码存在电流/压强的 scale 操作, 但未来 Python 与 C++ 层面均应去除, C++ 层面将 mu0 作为编译期常数编译期应该可以自动化简, 同时使内核实现的语义更加明确.
+> **注意**: 以下约束描述的是最终代码的成熟形态, 当前实现很可能尚未完全达到. 由于代码仍在开发/重构中, 现有 pytest 测试只作为当前提交的局部回归证据, 不应作为架构/API 的设计基线. 配点法相关内容暂不纳入迁移范围. 此外, 当前代码存在电流/压强的 scale 操作, 但未来 Python 与 C++ 层面均应去除, C++ 层面将 mu0 作为编译期常数编译期应该可以自动化简, 同时使内核实现的语义更加明确.
