@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -26,7 +27,7 @@ from veqlib.facade import (
     KernelTopology,
 )
 from veqlib.facade.affinity import pinned_cpu
-from veqlib.facade.registry import ThreadOwnedKernelSolver
+from veqlib.facade.registry import KernelRegistry, ThreadOwnedKernelSolver
 
 MU0 = 4.0e-7 * np.pi
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -359,6 +360,7 @@ class _FakeVEQlibSolver:
         self._raw = np.zeros(x_size, dtype=np.float64)
         self._scaled = np.zeros(x_size, dtype=np.float64)
         self._alpha = np.zeros(2, dtype=np.float64)
+        self.closed = False
 
     def build(self, *, force: bool = False, dry_run: bool = False):  # pragma: no cover - not used
         raise AssertionError("build should not be called")
@@ -368,6 +370,9 @@ class _FakeVEQlibSolver:
 
     def set_case_json(self, payload: str) -> None:
         self.json_payloads.append(payload)
+
+    def close(self) -> None:
+        self.closed = True
 
     def solve_direct(self):
         self.solve_count += 1
@@ -465,6 +470,7 @@ def test_kernel_clear_and_close_lifecycle() -> None:
     assert handle._solver is fake
 
     handle.close()
+    assert fake.closed is True
     assert handle._solver is None
 
 
@@ -611,3 +617,71 @@ def test_thread_owned_solver_skips_pin_context_inside_outer_scope(monkeypatch) -
 
     assert solver.solve_direct() == "ok"
     assert events == ["solve"]
+
+
+def test_thread_owned_solver_close_releases_native_reference() -> None:
+    class RawSolver:
+        def solve_direct(self) -> str:
+            return "ok"
+
+    solver = ThreadOwnedKernelSolver(RawSolver(), pin_cpu=False)
+
+    assert solver.solve_direct() == "ok"
+    solver.close()
+
+    assert solver.closed is True
+    with pytest.raises(RuntimeError, match="closed"):
+        solver.solve_direct()
+
+
+def test_kernel_registry_create_solver_returns_handle_private_wrappers(monkeypatch) -> None:
+    topology = make_kernel_topology()
+    created: list[int] = []
+
+    class RawSolver:
+        def __init__(self, *, solver_code: int) -> None:
+            self.solver_code = solver_code
+            self.identifier = len(created) + 1
+            created.append(self.identifier)
+
+        def metadata(self) -> dict[str, int]:
+            return {"identifier": self.identifier, "solver_code": self.solver_code}
+
+    loaded = SimpleNamespace(module=SimpleNamespace(KernelSolver=RawSolver))
+    registry = KernelRegistry(pin_cpu=False)
+    monkeypatch.setattr(registry, "load_kernel", lambda topology, force=False: loaded)
+
+    first = registry.create_solver(topology)
+    second = registry.create_solver(topology)
+
+    assert first.metadata()["identifier"] == 1
+    assert second.metadata()["identifier"] == 2
+    assert created == [1, 2]
+
+
+def test_kernel_registry_thread_solver_replaces_closed_cached_wrapper(monkeypatch) -> None:
+    topology = make_kernel_topology()
+    created: list[int] = []
+
+    class RawSolver:
+        def __init__(self, *, solver_code: int) -> None:
+            self.identifier = len(created) + 1
+            created.append(self.identifier)
+
+        def metadata(self) -> dict[str, int]:
+            return {"identifier": self.identifier}
+
+    loaded = SimpleNamespace(
+        artifact=SimpleNamespace(artifact_id="artifact"),
+        module=SimpleNamespace(KernelSolver=RawSolver),
+    )
+    registry = KernelRegistry(pin_cpu=False)
+    monkeypatch.setattr(registry, "load_kernel", lambda topology, force=False: loaded)
+
+    first = registry.get_thread_solver(topology)
+    assert first.metadata()["identifier"] == 1
+    first.close()
+    second = registry.get_thread_solver(topology)
+
+    assert second.metadata()["identifier"] == 2
+    assert created == [1, 2]

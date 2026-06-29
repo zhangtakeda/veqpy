@@ -55,7 +55,7 @@ class VEQlibSolver:
     def _solver(self) -> ThreadOwnedKernelSolver:
         self.check_thread()
         if self._cpp_solver is None:
-            self._cpp_solver = self.registry.get_thread_solver(
+            self._cpp_solver = self.registry.create_solver(
                 self.topology,
                 solver=self.solver_code,
                 pin_cpu=self.pin_cpu,
@@ -88,6 +88,12 @@ class VEQlibSolver:
 
     def residual_var_into(self, x: Any, out: Any) -> None:
         self._solver().residual_var_into(x, out)
+
+    def close(self) -> None:
+        self.check_thread()
+        if self._cpp_solver is not None:
+            self._cpp_solver.close()
+            self._cpp_solver = None
 
     @property
     def last_elapsed_ms(self) -> float:

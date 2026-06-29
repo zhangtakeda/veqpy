@@ -86,7 +86,9 @@ class Kernel:
         self.result = None
 
     def close(self) -> None:
-        self._solver = None
+        if self._solver is not None:
+            self._solver.close()
+            self._solver = None
 
     def pinned(self) -> AbstractContextManager[None, bool | None]:
         """Return a scoped CPU pinning context for high-volume solve loops."""

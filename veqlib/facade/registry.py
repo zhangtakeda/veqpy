@@ -22,6 +22,10 @@ class SolverThreadError(RuntimeError):
     """Raised when a thread-owned VEQlib solver is used from another thread."""
 
 
+class SolverClosedError(RuntimeError):
+    """Raised when a closed VEQlib solver wrapper is used again."""
+
+
 @dataclass(frozen=True, slots=True)
 class LoadedKernel:
     """A process-cached nanobind module and its artifact metadata."""
@@ -34,13 +38,17 @@ class ThreadOwnedKernelSolver:
     """Small Python guard around the mutable C++ KernelSolver workspace."""
 
     def __init__(self, solver: Any, *, pin_cpu: bool | int | None = None) -> None:
-        self._solver = solver
+        self._solver: Any | None = solver
         self._pin_cpu = pin_cpu
         self._owner_thread_id = threading.get_ident()
 
     @property
     def owner_thread_id(self) -> int:
         return self._owner_thread_id
+
+    @property
+    def closed(self) -> bool:
+        return self._solver is None
 
     def check_thread(self) -> None:
         current = threading.get_ident()
@@ -52,44 +60,63 @@ class ThreadOwnedKernelSolver:
 
     def metadata(self) -> Any:
         self.check_thread()
-        return self._call_native(self._solver.metadata)
+        solver = self._require_solver()
+        return self._call_native(solver.metadata)
 
     def metadata_json(self) -> str:
         self.check_thread()
-        return self._call_native(self._solver.metadata_json)
+        solver = self._require_solver()
+        return self._call_native(solver.metadata_json)
 
     def set_case_json(self, payload: str) -> None:
         self.check_thread()
-        self._call_native(self._solver.set_case_json, payload)
+        solver = self._require_solver()
+        self._call_native(solver.set_case_json, payload)
 
     def set_kernel_runtime(self, *args: Any) -> None:
         self.check_thread()
-        self._call_native(self._solver.set_kernel_runtime, *args)
+        solver = self._require_solver()
+        self._call_native(solver.set_kernel_runtime, *args)
 
     def warmup(self, count: int) -> None:
         self.check_thread()
-        self._call_native(self._solver.warmup, count)
+        solver = self._require_solver()
+        self._call_native(solver.warmup, count)
 
     def solve_json(self) -> str:
         self.check_thread()
-        return self._call_native(self._solver.solve_json)
+        solver = self._require_solver()
+        return self._call_native(solver.solve_json)
 
     def solve_direct(self) -> Any:
         self.check_thread()
-        return self._call_native(self._solver.solve_direct)
+        solver = self._require_solver()
+        return self._call_native(solver.solve_direct)
 
     def adopt_last_solution_as_initial(self) -> None:
         self.check_thread()
-        self._call_native(self._solver.adopt_last_solution_as_initial)
+        solver = self._require_solver()
+        self._call_native(solver.adopt_last_solution_as_initial)
 
     def residual_var_into(self, x: Any, out: Any) -> None:
         self.check_thread()
-        self._call_native(self._solver.residual_var_into, x, out)
+        solver = self._require_solver()
+        self._call_native(solver.residual_var_into, x, out)
+
+    def close(self) -> None:
+        self.check_thread()
+        self._solver = None
 
     @property
     def last_elapsed_ms(self) -> float:
         self.check_thread()
-        return float(self._call_native(lambda: self._solver.last_elapsed_ms))
+        solver = self._require_solver()
+        return float(self._call_native(lambda: solver.last_elapsed_ms))
+
+    def _require_solver(self) -> Any:
+        if self._solver is None:
+            raise SolverClosedError("VEQlib KernelSolver wrapper is closed")
+        return self._solver
 
     def _call_native(self, method: Any, *args: Any) -> Any:
         if self._pin_cpu is False or cpu_pin_scope_active():
@@ -150,6 +177,22 @@ class KernelRegistry:
             self._topology_modules[topology_key] = loaded
             return loaded
 
+    def create_solver(
+        self,
+        topology: Topology,
+        *,
+        solver: str | int = "powell",
+        force: bool = False,
+        pin_cpu: bool | int | None = None,
+    ) -> ThreadOwnedKernelSolver:
+        loaded = self.load_kernel(topology, force=force)
+        solver_code = solver_method_code(solver)
+        pin_policy = self.pin_cpu if pin_cpu is None else pin_cpu
+        cpp_solver = loaded.module.KernelSolver(
+            solver_code=solver_code,
+        )
+        return ThreadOwnedKernelSolver(cpp_solver, pin_cpu=pin_policy)
+
     def get_thread_solver(
         self,
         topology: Topology,
@@ -164,7 +207,7 @@ class KernelRegistry:
         pin_policy = self.pin_cpu if pin_cpu is None else pin_cpu
         key = (loaded.artifact.artifact_id, solver_code, _pinning_cache_key(pin_policy))
         cached = solvers.get(key)
-        if cached is not None:
+        if cached is not None and not cached.closed:
             return cached
         cpp_solver = loaded.module.KernelSolver(
             solver_code=solver_code,
