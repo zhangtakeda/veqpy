@@ -1,8 +1,10 @@
 # VEQlib
 
-VEQlib is the experimental C++ kernel layer for VEQPy. The Python package
-remains the owner of high-level model semantics, serialization, and test
-orchestration. Setup-time numerical constants are being moved into C++20
+VEQlib is the experimental C++ kernel layer for VEQPy. The tree is split into
+`facade/` for the Python-facing typed API and benchmark adapters, and `core/` for
+the C++/CMake implementation. The Python package remains the owner of facade
+lifecycle, artifact loading, and test orchestration; C++ remains the owner of
+core kernel semantics and hot-path execution. Setup-time numerical constants are being moved into C++20
 `constexpr` generation so the runtime kernel can consume fixed-layout arrays
 without Python-side numerical setup. This directory is for the gradually
 introduced C++20 pieces:
@@ -263,10 +265,10 @@ To compare VEQPy's Python solve latency against a direct VEQlib nanobind call,
 build the Release module and run the Python comparison script:
 
 ```bash
-cd veqlib
+cd veqlib/core
 cmake --preset clang-release
 cmake --build --preset clang-release --target veqlib_ext
-../.venv/bin/python benchmark_pf_psin_uniform_compare.py \
+../../.venv/bin/python ../facade/veqlib/benchmarks/benchmark_pf_psin_uniform_compare.py \
   --module-dir build/release \
   --repeat 30 \
   --warmup 5 \
@@ -284,7 +286,7 @@ root. It covers the 18-parameter PF case plus the solovev, chease, and efit
 GEQDSK cases through the Python `Topology` / nanobind-artifact path:
 
 ```bash
-taskset -c 0 .venv/bin/python veqlib/benchmark_4case_compare.py \
+taskset -c 0 .venv/bin/python veqlib/facade/veqlib/benchmarks/benchmark_4case_compare.py \
   --repeat 11 \
   --warmup 3 \
   --output /tmp/veqlib_4case_compare.json
@@ -302,7 +304,7 @@ before the next warm-clone point, so a cold first point can seed the continuatio
 sequence without changing the residual definition:
 
 ```bash
-taskset -c 0 .venv/bin/python veqlib/benchmark_4case_ip_scan.py \
+taskset -c 0 .venv/bin/python veqlib/facade/veqlib/benchmarks/benchmark_4case_ip_scan.py \
   --points 11 \
   --relative-span 0.20 \
   --repeat 11 \
@@ -315,10 +317,10 @@ needed.
 
 ## Build Presets
 
-Use CMake presets from this directory:
+Use CMake presets from `veqlib/core`:
 
 ```bash
-cd ~/veqpy/veqlib
+cd ~/veqpy/veqlib/core
 cmake --preset clang-release
 cmake --build --preset clang-release --target veqlib_ext
 ctest --test-dir build/release -R veqlib_python_binding --output-on-failure
@@ -360,7 +362,7 @@ cmake --preset clang-enzyme-release \
 
 ## Editor Setup
 
-VS Code is configured to treat `veqlib` as the CMake source directory and to use
+VS Code should treat `veqlib/core` as the CMake source directory and to use
 the `clang-enzyme-release` preset. The preset exports
 `compile_commands.json`, which clangd uses for correct C++20 parsing and system
 include discovery.
@@ -368,8 +370,8 @@ include discovery.
 Useful local checks:
 
 ```bash
-clangd --compile-commands-dir=~/veqpy/veqlib/build/enzyme-release \
-  --check=~/veqpy/veqlib/bindings.cpp
+clangd --compile-commands-dir=~/veqpy/veqlib/core/build/enzyme-release \
+  --check=~/veqpy/veqlib/core/bindings.cpp
 
 clang-format --version
 ```

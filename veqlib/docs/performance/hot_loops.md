@@ -35,6 +35,7 @@ Use `clang-release`, `clang-release-fma`, or a paired release build for timing.
 ## Standard commands
 
 ```bash
+cd veqlib/core
 cmake --preset clang-release
 cmake --build --preset clang-release --target veqlib_ext veqlib_stage_benchmark
 taskset -c <core> build/release/veqlib_stage_benchmark \

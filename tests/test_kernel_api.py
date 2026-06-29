@@ -8,9 +8,8 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from numpy.testing import assert_allclose
-
 import veqlib.kernel as kernel
+from numpy.testing import assert_allclose
 from veqlib.kernel import (
     INITIAL_POLICY_COLD,
     RESIDUAL_NORMALIZATION_FAST,
@@ -129,10 +128,12 @@ def test_kernel_public_exports_are_stable() -> None:
 def test_veqlib_kernel_import_does_not_import_veqpy() -> None:
     env = os.environ.copy()
     existing_pythonpath = env.get("PYTHONPATH")
+    facade_root = PROJECT_ROOT / "veqlib" / "facade"
+    source_paths = os.pathsep.join((str(facade_root), str(PROJECT_ROOT)))
     env["PYTHONPATH"] = (
-        str(PROJECT_ROOT)
+        source_paths
         if not existing_pythonpath
-        else os.pathsep.join((str(PROJECT_ROOT), existing_pythonpath))
+        else os.pathsep.join((source_paths, existing_pythonpath))
     )
     completed = subprocess.run(
         [

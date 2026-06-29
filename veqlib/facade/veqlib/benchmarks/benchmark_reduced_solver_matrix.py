@@ -19,7 +19,11 @@ from typing import Any
 
 import numpy as np
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+THIS_FILE = Path(__file__).resolve()
+VEQLIB_ROOT = THIS_FILE.parents[3]
+REPO_ROOT = THIS_FILE.parents[4]
+FACADE_ROOT = VEQLIB_ROOT / "facade"
+CORE_DIR = VEQLIB_ROOT / "core"
 SCRIPT_DIR = REPO_ROOT / "scripts"
 FIG07_PATH = SCRIPT_DIR / "07-pareto-analysis.py"
 DEFAULT_OUTPUT = Path("/tmp/veqlib_reduced_solver_matrix.json")
@@ -31,8 +35,9 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("MKL_NUM_THREADS", "1")
 os.environ.setdefault("MPLCONFIGDIR", str(DEFAULT_MPLCONFIG))
 
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+for path in (FACADE_ROOT, REPO_ROOT):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
@@ -495,7 +500,7 @@ def _case_rows(
     warmup: int,
     repeat: int,
 ) -> list[dict[str, Any]]:
-    registry = KernelRegistry(cache_root=cache_root, source_dir=REPO_ROOT / "veqlib")
+    registry = KernelRegistry(cache_root=cache_root, source_dir=CORE_DIR)
     rows: list[dict[str, Any]] = []
     for case in cases:
         print(f"[matrix] {case.row_label}: VEQPy hybr baseline", flush=True)

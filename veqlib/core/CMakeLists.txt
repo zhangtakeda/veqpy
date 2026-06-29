@@ -583,8 +583,8 @@ target_compile_definitions(
 )
 
 if(VEQLIB_ENABLE_PYTHON_BINDINGS)
-    if(NOT Python_EXECUTABLE AND EXISTS "${PROJECT_SOURCE_DIR}/../.venv/bin/python")
-        set(Python_EXECUTABLE "${PROJECT_SOURCE_DIR}/../.venv/bin/python" CACHE FILEPATH "Python interpreter")
+    if(NOT Python_EXECUTABLE AND EXISTS "${PROJECT_SOURCE_DIR}/../../.venv/bin/python")
+        set(Python_EXECUTABLE "${PROJECT_SOURCE_DIR}/../../.venv/bin/python" CACHE FILEPATH "Python interpreter")
     endif()
     find_package(Python 3.12 COMPONENTS Interpreter Development.Module REQUIRED)
 

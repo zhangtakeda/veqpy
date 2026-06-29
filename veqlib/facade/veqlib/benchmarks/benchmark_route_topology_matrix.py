@@ -32,7 +32,11 @@ from typing import Any
 
 import numpy as np
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+THIS_FILE = Path(__file__).resolve()
+VEQLIB_ROOT = THIS_FILE.parents[3]
+REPO_ROOT = THIS_FILE.parents[4]
+FACADE_ROOT = VEQLIB_ROOT / "facade"
+CORE_DIR = VEQLIB_ROOT / "core"
 DEFAULT_OUTPUT = Path("/tmp/veqlib_route_topology_matrix.json")
 DEFAULT_MPLCONFIG = Path("/tmp/veqpy-mpl")
 VALIDATION_ATOL = 1.0e-6
@@ -43,8 +47,9 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("MKL_NUM_THREADS", "1")
 os.environ.setdefault("MPLCONFIGDIR", str(DEFAULT_MPLCONFIG))
 
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+for path in (FACADE_ROOT, REPO_ROOT):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
 
 from veqlib.kernel import (  # noqa: E402
     SOLVER_METHOD_LEVENBERG_MARQUARDT,
@@ -816,7 +821,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--warmup", type=int, default=1)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--cache-root", type=Path, default=None)
-    parser.add_argument("--source-dir", type=Path, default=REPO_ROOT / "veqlib")
+    parser.add_argument("--source-dir", type=Path, default=CORE_DIR)
     parser.add_argument("--no-run", action="store_true", help="Do not execute supported kernels")
     parser.add_argument("--skip-artifact-dry-run", action="store_true")
     parser.add_argument("--no-write", action="store_true")

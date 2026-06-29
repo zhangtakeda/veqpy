@@ -53,7 +53,7 @@ def default_kernel_cache_root() -> Path:
     override = os.environ.get("VEQLIB_KERNEL_CACHE") or os.environ.get("VEQPY_KERNEL_CACHE")
     if override:
         return Path(override).expanduser()
-    return _default_source_dir() / "artifact"
+    return _veqlib_root() / "artifact"
 
 
 def build_kernel(
@@ -656,8 +656,12 @@ def _cmake_bool(value: bool) -> str:
     return "ON" if value else "OFF"
 
 
+def _veqlib_root() -> Path:
+    return Path(__file__).resolve().parents[3]
+
+
 def _default_source_dir() -> Path:
-    return Path(__file__).resolve().parents[1]
+    return _veqlib_root() / "core"
 
 
 def _write_json(path: Path, payload: Any) -> None:
