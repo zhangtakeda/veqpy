@@ -46,11 +46,17 @@ taskset -c <core> build/release/veqlib_stage_benchmark \
   --ring-size 16 \
   --output /tmp/veqlib-stage-baseline.json
 cd ../..
-.venv/bin/python veqlib/benchmarks/benchmark_pf_psin_uniform_compare.py \
-  --module-dir veqlib/core/build/release \
-  --repeat 30 \
-  --warmup 5 \
-  --no-write
+.venv/bin/python veqlib/benchmarks/benchmark_routes.py \
+  --scope full \
+  --build fastmath \
+  --repeat 11 \
+  --warmup 3 \
+  --output /tmp/veqlib-routes-baseline.json
+.venv/bin/python veqlib/benchmarks/benchmark_geqdsk_configs.py \
+  --build fastmath \
+  --repeat 11 \
+  --warmup 3 \
+  --output /tmp/veqlib-geqdsk-configs-baseline.json
 ```
 
 The executable-side stage benchmark is benchmark-only and must be rebuilt from

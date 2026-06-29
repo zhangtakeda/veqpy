@@ -287,60 +287,34 @@ Python are intentionally limited to explicit runtime method codes: Powell
 hybrid, Levenberg-Marquardt, Newton-Krylov, and Newton-Raphson. The current
 benchmark gates use Powell hybrid unless a script or payload says otherwise.
 
-To compare VEQPy's Python solve latency against a direct VEQlib nanobind call,
-build the Release module and run the Python comparison script:
+Run the route/topology benchmark from the repository root when checking route
+coverage and speed. The default scope is the historical 46 uniform-source cases;
+`--scope full` adds grid-sampled variants for the 92-case matrix. Runtime rows use
+typed `KernelInput + KernelSolve` calls through `set_kernel_runtime(...)`.
 
 ```bash
-cd veqlib/core
-cmake --preset clang-release
-cmake --build --preset clang-release --target veqlib_ext
-cd ../..
-.venv/bin/python veqlib/benchmarks/benchmark_pf_psin_uniform_compare.py \
-  --module-dir veqlib/core/build/release \
-  --repeat 30 \
-  --warmup 5 \
-  --no-write
-```
-
-This benchmark times `Solver.solve()` and `KernelSolver.solve_direct()` from
-Python with `time.perf_counter_ns()`. The direct method returns scalar solver
-metadata plus read-only NumPy views for `x`, raw residual, scaled residual, and
-`alpha`; the report also records the C++ internal solve time so the interface
-overhead can be estimated as Python outer time minus C++ inner time.
-
-For optimization gates, run the four-case artifact benchmark from the repository
-root. It covers the 18-parameter PF case plus the solovev, chease, and efit
-GEQDSK cases through the Python `KernelTopology` / nanobind-artifact path:
-
-```bash
-.venv/bin/python veqlib/benchmarks/benchmark_4case_compare.py \
+.venv/bin/python veqlib/benchmarks/benchmark_routes.py \
+  --scope full \
+  --build fastmath \
   --repeat 11 \
   --warmup 3 \
-  --output /tmp/veqlib_4case_compare.json
+  --output /tmp/veqlib_routes.json
 ```
 
-Executable-side C++ validation/stage diagnostics are intentionally retired. New
-performance evidence should use the production nanobind/shared-library path or a
-Python-level lifecycle benchmark.
-
-For workload-level continuation evidence, run the four-case Ip scan benchmark.
-It keeps one mutable `VEQlibSolver` alive per topology and compares cold restarts
-against the `warm-clone` initial policy over an ordered Ip scan. The Python scan
-helper explicitly calls `adopt_last_solution_as_initial()` after accepted solves
-before the next warm-clone point, so a cold first point can seed the continuation
-sequence without changing the residual definition:
+Run the GEQDSK configuration benchmark when comparing VEQlib and VEQPy on the
+three reference GEQDSK cases across Low/Medium/High/Ref configurations:
 
 ```bash
-.venv/bin/python veqlib/benchmarks/benchmark_4case_ip_scan.py \
-  --points 11 \
-  --relative-span 0.20 \
+.venv/bin/python veqlib/benchmarks/benchmark_geqdsk_configs.py \
+  --build fastmath \
   --repeat 11 \
   --warmup 3 \
-  --output /tmp/veqlib_4case_ip_scan.json
+  --output /tmp/veqlib_geqdsk_configs.json
 ```
 
-Add `--case PF_psin_uniform_Ip` when only the simple 18-parameter case is
-needed.
+Executable-side C++ validation/stage diagnostics are intentionally secondary.
+New retained performance evidence should use the production nanobind/shared-library
+path through `veqlib.facade`, paired with VEQPy correctness comparison.
 
 ## Build Presets
 

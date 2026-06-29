@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from veqlib.benchmarks import benchmark_route_topology_matrix as matrix
+from veqlib.benchmarks import benchmark_routes as matrix
 
 
 def test_route_matrix_enumerates_benchmark_uniform_cases() -> None:

@@ -1,3 +1,3 @@
-"""VEQlib benchmark and migration scripts."""
+"""VEQlib benchmark entrypoints."""
 
 from __future__ import annotations
