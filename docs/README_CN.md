@@ -63,7 +63,7 @@ python3.12 -m venv .venv
 .venv/bin/python -m pip install .
 ```
 
-`veqlib/` 下的可选 VEQlib C++ kernel 层不是普通 Python/Numba 使用的必要依赖。它由 `veqlib.kernel` 按需构建（旧的 `veqpy.cpp` 兼容面仍供旧工具使用）。构建它需要本地 C++20 工具链和原生库，例如 CMake 3.24+、`clang++`、nanobind、GCEM、nlohmann-json、CMINPACK、LAPACKE/LAPACK 和 OpenBLAS；当前构建边界与支持 topology 见 [`veqlib/README.md`](../veqlib/README.md)。
+`veqlib/` 下的可选 VEQlib C++ kernel 层不是普通 Python/Numba 使用的必要依赖。它由 `veqlib.kernel` 按需构建，并且刻意与 VEQPy 内部语义分离。构建它需要本地 C++20 工具链和原生库，例如 CMake 3.24+、`clang++`、nanobind、GCEM、nlohmann-json、CMINPACK、LAPACKE/LAPACK 和 OpenBLAS；当前构建边界与支持 topology 见 [`veqlib/README.md`](../veqlib/README.md)。
 
 下面的命令都显式使用 `.venv`；是否执行 `source .venv/bin/activate` 只是个人习惯。
 

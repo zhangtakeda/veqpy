@@ -93,12 +93,11 @@ For a runtime-only install from a local source checkout, omit the `dev` extra:
 ```
 
 The optional VEQlib C++ kernel layer under `veqlib/` is not required for normal
-Python/Numba use. It is built on demand through `veqlib.kernel` (with legacy
-`veqpy.cpp` compatibility still available for older tools). Building it requires a
-local C++20 toolchain and native libraries such as CMake 3.24+, `clang++`, nanobind,
-GCEM, nlohmann-json, CMINPACK, LAPACKE/LAPACK, and OpenBLAS; see
-[`veqlib/README.md`](veqlib/README.md) for the current build boundary and supported
-topology.
+Python/Numba use. It is built on demand through `veqlib.kernel`, which is intentionally
+separate from VEQPy internals. Building it requires a local C++20 toolchain and native
+libraries such as CMake 3.24+, `clang++`, nanobind, GCEM, nlohmann-json, CMINPACK,
+LAPACKE/LAPACK, and OpenBLAS; see [`veqlib/README.md`](veqlib/README.md) for the
+current build boundary and supported topology.
 
 All commands below use `.venv` explicitly; activating the environment is optional.
 
