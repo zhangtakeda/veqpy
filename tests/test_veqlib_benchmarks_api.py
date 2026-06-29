@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from veqlib.benchmarks import benchmark_geqdsks, benchmark_routes
+from veqlib.benchmarks import benchmark_continuation, benchmark_geqdsks, benchmark_routes
 
 
 def test_retained_benchmark_defaults_write_under_outputs() -> None:
@@ -10,6 +10,12 @@ def test_retained_benchmark_defaults_write_under_outputs() -> None:
     assert benchmark_geqdsks.DEFAULT_OUTPUT.parts[-2:] == (
         "outputs",
         "veqlib_geqdsk_configs.json",
+    )
+    assert benchmark_continuation.DEFAULT_OUTPUT_DIR.parts[-4:] == (
+        "veqlib",
+        "benchmarks",
+        "results",
+        "continuation_nfev",
     )
 
 
@@ -63,3 +69,57 @@ def test_geqdsk_config_case_plan_smoke() -> None:
     assert case.topology.coordinate == "psin"
     assert case.topology.nodes == "uniform"
     assert case.topology.build == "fastmath"
+
+
+def test_continuation_offsets_center_on_zero() -> None:
+    assert benchmark_continuation._scan_offsets(points=1, relative_span=0.2) == [0.0]
+    assert benchmark_continuation._scan_offsets(points=3, relative_span=0.2) == [
+        -0.1,
+        0.0,
+        0.1,
+    ]
+
+
+def test_continuation_comparison_rows_use_effective_nfev() -> None:
+    def policy(mean: float) -> dict[str, object]:
+        return {"effective_nfev": {"mean": mean}, "success_all": True}
+
+    payload = {
+        "policies": ["cold", "warm-predict", "warm"],
+        "rows": [
+            {
+                "experiment": "C1 Ip",
+                "update": "ip",
+                "relative_span": 0.005,
+                "case": "solovev",
+                "config": "Ref",
+                "x_size": 10,
+                "policies": {
+                    "cold": policy(20.0),
+                    "warm-predict": policy(8.0),
+                    "warm": policy(8.0),
+                },
+            }
+        ],
+    }
+
+    rows = benchmark_continuation._comparison_rows(payload)
+
+    assert rows == [
+        {
+            "experiment": "C1 Ip",
+            "update": "ip",
+            "span": 0.005,
+            "case": "solovev",
+            "config": "Ref",
+            "x_size": 10,
+            "best": "warm-predict",
+            "best_nfev": 8.0,
+            "vs_cold": 2.5,
+            "vs_warm": 1.0,
+            "success_all": True,
+            "cold": 20.0,
+            "warm-predict": 8.0,
+            "warm": 8.0,
+        }
+    ]
