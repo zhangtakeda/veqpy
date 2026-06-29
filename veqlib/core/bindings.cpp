@@ -52,5 +52,16 @@ NB_MODULE(veqlib_ext, module)
              nb::arg("x"),
              nb::arg("out"),
              "Evaluate the raw variational residual into a caller-owned packed output array.")
+        .def("jvp_into",
+             &veqlib_python::KernelSolver::jvp_into,
+             nb::arg("x"),
+             nb::arg("v"),
+             nb::arg("out"),
+             "Evaluate a raw-residual Jacobian-vector product into a caller-owned packed output array.")
+        .def("jacobian_into",
+             &veqlib_python::KernelSolver::jacobian_into,
+             nb::arg("x"),
+             nb::arg("out"),
+             "Evaluate the dense raw-residual Jacobian into a caller-owned row-major matrix.")
         .def_prop_ro("last_elapsed_ms", &veqlib_python::KernelSolver::last_elapsed_ms);
 }

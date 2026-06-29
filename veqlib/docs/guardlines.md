@@ -76,9 +76,9 @@ Kernel 对 C++ 接口采用**惰性加载(lazy-load)**: 默认不立即挂载 na
 - [x] **CPU pinning**: 普通 `veqlib.facade` 调用默认在 Python bridge 内部做 scoped CPU pinning, 即在 native runtime setter、`solve_direct()`、warmup/residual probe 等调用前临时把当前 affinity 缩到一个 CPU, 调用后恢复原 affinity. 默认 CPU 是当前 allowed affinity set 中的最小值; 外层 `taskset`/cgroup/调度器仍是硬边界. `VEQLIB_PIN_CPU=0` 关闭, `VEQLIB_PIN_CPU_ID=<cpu>` 指定 CPU. 对 build 后重复大量 solve 的 Python 体感路径, 应使用 `with kernel.pinned(): ...` 或 `with veqlib.facade.pinned_cpu(): ...` 包住整段循环; 内部 nested pin scope 只做 Python 级 no-op, 不做每次 solve 的 affinity syscall. 这属于 benchmark/runtime invocation contract, 不是 C++ 数值 ABI 的一部分.
 - [x] **`kernel.clear()`**: 清除该 kernel handle 缓存的全部 history. kernel.clear() 清的是 Python 侧的 history, 不影响 C++ 工作区, 所以 reuse 的语义不受 clear() 影响.
 - [x] **`kernel.close()`**: 释放该 handle 私有的 C++ solver、context、workspace、result. 不保证卸载已加载的 native module.
-- [ ] **`kernel.residual(x)` / planned**: 传入与 dofs 长度一致的向量 `x`, 在当前 runtime case/context 下直接返回对应 residual 的 Python-owned copy. `kernel.residual_into(x, out)` 是面向 benchmark/debug 的 no-allocation 变体.
-- [ ] **`kernel.jvp(x, v)` / planned**: 在当前 runtime case/context 下计算 Jacobian-vector product. AD/Enzyme 或 FD 选择是 topology/build policy, 不能在 runtime 临时改变.
-- [ ] **`kernel.jacobian(x)` / planned**: 在当前 runtime case/context 下返回 dense Jacobian 的 Python-owned copy. 若后续支持 no-allocation 版本, 应命名为 `jacobian_into(x, out)`.
+- [x] **`kernel.residual(x)` / `kernel.residual_into(x, out)`**: 传入与 dofs 长度一致的向量 `x`, 在当前 runtime case/context 下直接返回对应 raw variational residual 的 Python-owned copy. `kernel.residual_into(x, out)` 是面向 benchmark/debug 的 no-allocation 变体.
+- [x] **`kernel.jvp(x, v)` / `kernel.jvp_into(x, v, out)`**: 在当前 runtime case/context 下计算 raw residual Jacobian-vector product. AD/Enzyme 或 FD 选择是 topology/build policy, 不能在 runtime 临时改变.
+- [x] **`kernel.jacobian(x)` / `kernel.jacobian_into(x, out)`**: 在当前 runtime case/context 下返回 row-major dense raw residual Jacobian 的 Python-owned copy. `jacobian_into(x, out)` 是 no-allocation 版本.
 - [ ] **`result = solve(topo, case)`**: 临时求解一次, 完成后立即释放 kernel. 等价于 `return build(topo).solve(case)`. 它返回的 result 是 owned/copy-out Result snapshot, 因此不依赖临时 kernel 的生命周期.
 - [ ] **`clean()`**: clean() 清理的是磁盘 artifact cache. 支持按最晚编译日期或最晚调用日期筛选清理范围. 拿不到独占锁的 artifact 直接跳过; 已被当前进程 import 的 native module 在 POSIX 上仍可被 unlink(当前进程不受影响, 但磁盘文件消失), Windows 上通常会删除失败.
 

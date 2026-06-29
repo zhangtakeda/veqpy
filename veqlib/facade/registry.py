@@ -103,6 +103,16 @@ class ThreadOwnedKernelSolver:
         solver = self._require_solver()
         self._call_native(solver.residual_var_into, x, out)
 
+    def jvp_into(self, x: Any, v: Any, out: Any) -> None:
+        self.check_thread()
+        solver = self._require_solver()
+        self._call_native(solver.jvp_into, x, v, out)
+
+    def jacobian_into(self, x: Any, out: Any) -> None:
+        self.check_thread()
+        solver = self._require_solver()
+        self._call_native(solver.jacobian_into, x, out)
+
     def close(self) -> None:
         self.check_thread()
         self._solver = None

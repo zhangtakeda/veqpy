@@ -89,6 +89,12 @@ class VEQlibSolver:
     def residual_var_into(self, x: Any, out: Any) -> None:
         self._solver().residual_var_into(x, out)
 
+    def jvp_into(self, x: Any, v: Any, out: Any) -> None:
+        self._solver().jvp_into(x, v, out)
+
+    def jacobian_into(self, x: Any, out: Any) -> None:
+        self._solver().jacobian_into(x, out)
+
     def close(self) -> None:
         self.check_thread()
         if self._cpp_solver is not None:

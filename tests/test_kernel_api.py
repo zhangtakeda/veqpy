@@ -319,6 +319,9 @@ def test_kernel_python_build_and_solve_native_flow(tmp_path) -> None:
     assert handle.result is result
     assert handle.history == [result]
     assert "python-build-solve-flow" in handle.metadata_json()
+    assert_allclose(handle.residual(result.x), result.raw)
+    assert handle.jvp(result.x, np.ones(handle.x_size, dtype=np.float64)).shape == (handle.x_size,)
+    assert handle.jacobian(result.x).shape == (handle.x_size, handle.x_size)
 
     bad_source = KernelInput(
         boundary=tiny_kernel_boundary(),
@@ -373,6 +376,15 @@ class _FakeVEQlibSolver:
 
     def close(self) -> None:
         self.closed = True
+
+    def residual_var_into(self, x: np.ndarray, out: np.ndarray) -> None:
+        out[:] = x + 1.0
+
+    def jvp_into(self, x: np.ndarray, v: np.ndarray, out: np.ndarray) -> None:
+        out[:] = x + 2.0 * v
+
+    def jacobian_into(self, x: np.ndarray, out: np.ndarray) -> None:
+        out[:] = np.eye(x.size, dtype=np.float64) * 3.0
 
     def solve_direct(self):
         self.solve_count += 1
@@ -456,6 +468,47 @@ def test_kernel_solve_falls_back_to_json_for_legacy_solver() -> None:
     assert payload["case_name"] == "legacy"
     assert payload["solver"]["max_evaluations"] == handle.x_size * handle.x_size
 
+
+
+
+def test_kernel_residual_jvp_jacobian_public_apis() -> None:
+    topology = make_kernel_topology()
+    handle = Kernel(topology)
+    fake = _FakeVEQlibSolver(x_size=handle.x_size)
+    handle._solver = fake
+    x = np.arange(handle.x_size, dtype=np.float64)
+    v = np.ones(handle.x_size, dtype=np.float64)
+
+    assert_allclose(handle.residual(x), x + 1.0)
+    residual_out = np.empty(handle.x_size, dtype=np.float64)
+    handle.residual_into(x, residual_out)
+    assert_allclose(residual_out, x + 1.0)
+
+    assert_allclose(handle.jvp(x, v), x + 2.0 * v)
+    jvp_out = np.empty(handle.x_size, dtype=np.float64)
+    handle.jvp_into(x, v, jvp_out)
+    assert_allclose(jvp_out, x + 2.0 * v)
+
+    expected_jacobian = np.eye(handle.x_size, dtype=np.float64) * 3.0
+    assert_allclose(handle.jacobian(x), expected_jacobian)
+    jacobian_out = np.empty((handle.x_size, handle.x_size), dtype=np.float64)
+    handle.jacobian_into(x, jacobian_out)
+    assert_allclose(jacobian_out, expected_jacobian)
+
+
+def test_kernel_into_outputs_reject_copies_and_bad_shapes() -> None:
+    handle = Kernel(make_kernel_topology())
+    handle._solver = _FakeVEQlibSolver(x_size=handle.x_size)
+    x = np.arange(handle.x_size, dtype=np.float64)
+
+    with pytest.raises(TypeError, match="numpy.ndarray"):
+        handle.residual_into(x, [0.0] * handle.x_size)  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="dtype float64"):
+        handle.residual_into(x, np.empty(handle.x_size, dtype=np.float32))
+    with pytest.raises(ValueError, match="shape"):
+        handle.residual_into(x[:-1], np.empty(handle.x_size, dtype=np.float64))
+    with pytest.raises(ValueError, match="C-contiguous"):
+        handle.jacobian_into(x, np.empty((handle.x_size, handle.x_size), dtype=np.float64).T)
 
 def test_kernel_clear_and_close_lifecycle() -> None:
     topology = make_kernel_topology()

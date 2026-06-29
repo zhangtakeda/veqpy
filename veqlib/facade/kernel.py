@@ -5,6 +5,8 @@ from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from .affinity import pinned_cpu
 from .builder import KernelArtifact
 from .registry import KernelRegistry
@@ -81,6 +83,37 @@ class Kernel:
         self.history.append(self.result)
         return self.result
 
+    def residual(self, x: Any) -> np.ndarray:
+        out = np.empty(self.x_size, dtype=np.float64)
+        self.residual_into(x, out)
+        return out
+
+    def residual_into(self, x: Any, out: np.ndarray) -> None:
+        packed_x = self._packed_input(x, "x")
+        packed_out = self._packed_output(out, (self.x_size,), "out")
+        self._veqlib_solver().residual_var_into(packed_x, packed_out)
+
+    def jvp(self, x: Any, v: Any) -> np.ndarray:
+        out = np.empty(self.x_size, dtype=np.float64)
+        self.jvp_into(x, v, out)
+        return out
+
+    def jvp_into(self, x: Any, v: Any, out: np.ndarray) -> None:
+        packed_x = self._packed_input(x, "x")
+        packed_v = self._packed_input(v, "v")
+        packed_out = self._packed_output(out, (self.x_size,), "out")
+        self._veqlib_solver().jvp_into(packed_x, packed_v, packed_out)
+
+    def jacobian(self, x: Any) -> np.ndarray:
+        out = np.empty((self.x_size, self.x_size), dtype=np.float64)
+        self.jacobian_into(x, out)
+        return out
+
+    def jacobian_into(self, x: Any, out: np.ndarray) -> None:
+        packed_x = self._packed_input(x, "x")
+        matrix_out = self._packed_output(out, (self.x_size, self.x_size), "out")
+        self._veqlib_solver().jacobian_into(packed_x, matrix_out)
+
     def clear(self) -> None:
         self.history.clear()
         self.result = None
@@ -109,6 +142,24 @@ class Kernel:
                 pin_cpu=self.pin_cpu,
             )
         return self._solver
+
+    def _packed_input(self, value: Any, name: str) -> np.ndarray:
+        array = np.asarray(value, dtype=np.float64)
+        if array.shape != (self.x_size,):
+            raise ValueError(f"{name} must have shape ({self.x_size},), got {array.shape}")
+        return np.ascontiguousarray(array, dtype=np.float64)
+
+    @staticmethod
+    def _packed_output(out: np.ndarray, shape: tuple[int, ...], name: str) -> np.ndarray:
+        if not isinstance(out, np.ndarray):
+            raise TypeError(f"{name} must be a numpy.ndarray")
+        if out.dtype != np.float64:
+            raise TypeError(f"{name} must have dtype float64")
+        if out.shape != shape:
+            raise ValueError(f"{name} must have shape {shape}, got {out.shape}")
+        if not out.flags.c_contiguous:
+            raise ValueError(f"{name} must be C-contiguous")
+        return out
 
     @staticmethod
     def _kernel_input(input: KernelInput, *, case_name: str | None) -> KernelInput:

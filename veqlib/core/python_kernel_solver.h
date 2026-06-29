@@ -2,8 +2,10 @@
 
 // Nanobind-facing KernelSolver implementation for VEQlib production kernels.
 
+#include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <memory>
 #include <span>
@@ -68,10 +70,14 @@ namespace veqlib_python
 
     using tensor::uninitialized;
 
-    using PackedArrayView        = nb::ndarray<nb::numpy, const double, nb::shape<KernelShape::x_size>, nb::c_contig>;
-    using MutablePackedArrayView = nb::ndarray<nb::numpy, double, nb::shape<KernelShape::x_size>, nb::c_contig>;
-    using AlphaArrayView         = nb::ndarray<nb::numpy, const double, nb::shape<2>, nb::c_contig>;
-    using RuntimeArrayView       = nb::ndarray<nb::numpy, const double, nb::ndim<1>, nb::c_contig>;
+    using PackedArrayView          = nb::ndarray<nb::numpy, const double, nb::shape<KernelShape::x_size>, nb::c_contig>;
+    using MutablePackedArrayView   = nb::ndarray<nb::numpy, double, nb::shape<KernelShape::x_size>, nb::c_contig>;
+    using MutableJacobianArrayView = nb::ndarray<nb::numpy,
+                                                double,
+                                                nb::shape<KernelShape::x_size, KernelShape::x_size>,
+                                                nb::c_contig>;
+    using AlphaArrayView           = nb::ndarray<nb::numpy, const double, nb::shape<2>, nb::c_contig>;
+    using RuntimeArrayView         = nb::ndarray<nb::numpy, const double, nb::ndim<1>, nb::c_contig>;
 
     inline std::unique_ptr<SolveContext> make_context(SolverKind solver)
     {
@@ -938,6 +944,59 @@ namespace veqlib_python
         {
             context_->raw_residual(std::span<const double, KernelShape::x_size>{x.data(), KernelShape::x_size},
                                    std::span<double, KernelShape::x_size>{out.data(), KernelShape::x_size});
+        }
+
+        void jvp_into(PackedArrayView x, PackedArrayView v, MutablePackedArrayView out)
+        {
+            constexpr size_t n = KernelShape::x_size;
+            double           v_norm_sq = 0.0;
+            double           x_norm_sq = 0.0;
+            for (size_t i = 0; i < n; ++i)
+            {
+                v_norm_sq += v.data()[i] * v.data()[i];
+                x_norm_sq += x.data()[i] * x.data()[i];
+            }
+            const double v_norm = std::sqrt(v_norm_sq);
+            if (v_norm <= 0.0)
+            {
+                std::fill(out.data(), out.data() + n, 0.0);
+                return;
+            }
+
+            const double eps = std::sqrt(1.0e-12) * (1.0 + std::sqrt(x_norm_sq)) / v_norm;
+            PackedVector x_plus{uninitialized};
+            PackedVector f_base{uninitialized};
+            PackedVector f_plus{uninitialized};
+            for (size_t i = 0; i < n; ++i)
+                x_plus[i] = x.data()[i] + eps * v.data()[i];
+
+            context_->raw_residual(std::span<const double, n>{x.data(), n}, std::span<double, n>{f_base.data(), n});
+            context_->raw_residual(std::span<const double, n>{x_plus.data(), n},
+                                   std::span<double, n>{f_plus.data(), n});
+            for (size_t i = 0; i < n; ++i)
+                out.data()[i] = (f_plus[i] - f_base[i]) / eps;
+        }
+
+        void jacobian_into(PackedArrayView x, MutableJacobianArrayView out)
+        {
+            constexpr size_t n = KernelShape::x_size;
+            PackedVector     x_plus{uninitialized};
+            PackedVector     f_base{uninitialized};
+            PackedVector     f_plus{uninitialized};
+            std::copy(x.data(), x.data() + n, x_plus.begin());
+            context_->raw_residual(std::span<const double, n>{x.data(), n}, std::span<double, n>{f_base.data(), n});
+
+            for (size_t col = 0; col < n; ++col)
+            {
+                const double saved = x_plus[col];
+                const double step  = 1.0e-7 * std::max(1.0, std::abs(saved));
+                x_plus[col]        = saved + step;
+                context_->raw_residual(std::span<const double, n>{x_plus.data(), n},
+                                       std::span<double, n>{f_plus.data(), n});
+                x_plus[col] = saved;
+                for (size_t row = 0; row < n; ++row)
+                    out.data()[row * n + col] = (f_plus[row] - f_base[row]) / step;
+            }
         }
 
         double last_elapsed_ms() const noexcept { return last_elapsed_ms_; }
