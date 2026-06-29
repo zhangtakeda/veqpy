@@ -79,7 +79,7 @@ Kernel 对 C++ 接口采用**惰性加载(lazy-load)**: 默认不立即挂载 na
 - [x] **`kernel.residual(x)` / `kernel.residual_into(x, out)`**: 传入与 dofs 长度一致的向量 `x`, 在当前 runtime case/context 下直接返回对应 raw variational residual 的 Python-owned copy. `kernel.residual_into(x, out)` 是面向 benchmark/debug 的 no-allocation 变体.
 - [x] **`kernel.jvp(x, v)` / `kernel.jvp_into(x, v, out)`**: 在当前 runtime case/context 下计算 raw residual Jacobian-vector product. AD/Enzyme 或 FD 选择是 topology/build policy, 不能在 runtime 临时改变.
 - [x] **`kernel.jacobian(x)` / `kernel.jacobian_into(x, out)`**: 在当前 runtime case/context 下返回 row-major dense raw residual Jacobian 的 Python-owned copy. `jacobian_into(x, out)` 是 no-allocation 版本.
-- [ ] **`result = solve(topo, case)`**: 临时求解一次, 完成后立即释放 kernel. 等价于 `return build(topo).solve(case)`. 它返回的 result 是 owned/copy-out Result snapshot, 因此不依赖临时 kernel 的生命周期.
+- [x] **`result = solve(topo, case)`**: 临时求解一次, 完成后立即释放 kernel. 等价于 `return build(topo).solve(case)`. 它返回的 result 是 owned/copy-out Result snapshot, 因此不依赖临时 kernel 的生命周期.
 - [ ] **`clean()`**: clean() 清理的是磁盘 artifact cache. 支持按最晚编译日期或最晚调用日期筛选清理范围. 拿不到独占锁的 artifact 直接跳过; 已被当前进程 import 的 native module 在 POSIX 上仍可被 unlink(当前进程不受影响, 但磁盘文件消失), Windows 上通常会删除失败.
 
 ## Result 与 lifecycle

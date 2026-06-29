@@ -201,3 +201,33 @@ def build(
     )
     kernel.build(force=force, dry_run=dry_run)
     return kernel
+
+
+def solve(
+    topology: KernelTopology,
+    input: KernelInput,
+    *,
+    solve: KernelSolve | None = None,
+    build: KernelBuild | None = None,
+    registry: KernelRegistry | None = None,
+    cache_root: Path | None = None,
+    source_dir: Path | None = None,
+    pin_cpu: bool | int | None = None,
+    force: bool = False,
+    case_name: str | None = None,
+) -> KernelResult:
+    """Build a short-lived kernel, solve one case, and close its private workspace."""
+
+    kernel = Kernel(
+        topology,
+        build=build,
+        registry=registry,
+        cache_root=cache_root,
+        source_dir=source_dir,
+        pin_cpu=pin_cpu,
+    )
+    try:
+        kernel.build(force=force, dry_run=False)
+        return kernel.solve(input, solve=solve, case_name=case_name)
+    finally:
+        kernel.close()

@@ -128,6 +128,7 @@ def test_facade_public_exports_are_stable() -> None:
         "payload_json_with_initial_policy",
         "pinned_cpu",
         "residual_normalization_code",
+        "solve",
         "solve_payload_sequence",
         "solver_method_code",
     ]
@@ -140,6 +141,7 @@ def test_facade_user_signatures_hide_compiler_and_type_alias() -> None:
         facade.build_kernel,
         facade.KernelRegistry,
         facade.VEQlibSolver,
+        facade.solve,
     ):
         assert "cxx" not in inspect.signature(api).parameters
     assert not hasattr(facade, "CpuPinning")
@@ -509,6 +511,57 @@ def test_kernel_into_outputs_reject_copies_and_bad_shapes() -> None:
         handle.residual_into(x[:-1], np.empty(handle.x_size, dtype=np.float64))
     with pytest.raises(ValueError, match="C-contiguous"):
         handle.jacobian_into(x, np.empty((handle.x_size, handle.x_size), dtype=np.float64).T)
+
+
+
+def test_facade_solve_uses_short_lived_kernel_and_closes(monkeypatch) -> None:
+    topology = make_kernel_topology()
+    runtime_input = tiny_kernel_input()
+    solve_config = KernelSolve(method="powell")
+    result = KernelResult.from_solve_direct(
+        _FakeVEQlibSolver(x_size=topology.packed_size()).solve_direct()
+    )
+    events: list[tuple[str, object]] = []
+
+    class FakeKernel:
+        def __init__(self, passed_topology: KernelTopology, **kwargs: object) -> None:
+            events.append(("init", passed_topology))
+            events.append(("kwargs", kwargs))
+
+        def build(self, *, force: bool = False, dry_run: bool = False) -> None:
+            events.append(("build", (force, dry_run)))
+
+        def solve(
+            self,
+            passed_input: KernelInput,
+            *,
+            solve: KernelSolve | None = None,
+            case_name: str | None = None,
+        ) -> KernelResult:
+            events.append(("solve", (passed_input, solve, case_name)))
+            return result
+
+        def close(self) -> None:
+            events.append(("close", None))
+
+    monkeypatch.setattr("veqlib.facade.kernel.Kernel", FakeKernel)
+
+    returned = facade.solve(
+        topology,
+        runtime_input,
+        solve=solve_config,
+        pin_cpu=False,
+        force=True,
+        case_name="one-shot",
+    )
+
+    assert returned is result
+    assert events[0] == ("init", topology)
+    assert events[1][0] == "kwargs"
+    assert events[1][1]["pin_cpu"] is False
+    assert events[2] == ("build", (True, False))
+    assert events[3] == ("solve", (runtime_input, solve_config, "one-shot"))
+    assert events[4] == ("close", None)
 
 def test_kernel_clear_and_close_lifecycle() -> None:
     topology = make_kernel_topology()

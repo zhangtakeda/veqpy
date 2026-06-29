@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from .affinity import current_cpu_affinity, pinned_cpu
 from .builder import KernelArtifact, KernelBuildError, build_kernel, default_kernel_cache_root
-from .kernel import Kernel, build
+from .kernel import Kernel, build, solve
 from .options import (
     INITIAL_POLICY_COLD,
     INITIAL_POLICY_COLD_GEOMETRIC,
@@ -76,6 +76,7 @@ __all__ = [
     "payload_json_with_initial_policy",
     "pinned_cpu",
     "residual_normalization_code",
+    "solve",
     "solve_payload_sequence",
     "solver_method_code",
 ]
