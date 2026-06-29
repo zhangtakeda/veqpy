@@ -326,7 +326,10 @@ def _run_cxx_binding_case(
         "return_schema": (
             "elapsed_ms, success, info, nfev, njev, callbacks, jacobian_component_evaluations, "
             "jvp_evaluations, linear_iterations, raw_norm, scaled_norm, x_view, raw_view, "
-            "scaled_view, alpha_view"
+            "scaled_view, alpha_view, accepted_by, fast_path, fallback_used, fallback_reason, "
+            "cert_threshold, initial_raw_norm, fast_path_raw_norm, solver_nfev, "
+            "initial_residual_evaluations, certification_residual_evaluations, "
+            "total_raw_residual_evaluations"
         ),
         "cxx_inner_timing": _stats(inner_samples_ms),
         "interface_overhead_timing": _stats(interface_samples_ms),

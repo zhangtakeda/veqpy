@@ -280,24 +280,19 @@ Executable-side C++ validation/stage diagnostics are intentionally retired. New
 performance evidence should use the production nanobind/shared-library path or a
 Python-level lifecycle benchmark.
 
-For workload-level continuation evidence, run the four-case Ip scan benchmark.
-It keeps one mutable `VEQlibSolver` alive per topology and compares cold restarts
-against the `warm-clone` initial policy over an ordered Ip scan. The Python scan
-helper explicitly calls `adopt_last_solution_as_initial()` after accepted solves
-before the next warm-clone point, so a cold first point can seed the continuation
-sequence without changing the residual definition:
+For workload-level continuation evidence, run the certified-continuation suite.
+It keeps one mutable `VEQlibSolver` alive per topology and solves ordered
+small-update sequences for the three GEQDSK cases used by the paper examples
+(`solovev`, `chease`, and `efit`). The suite compares cold solves, warm-clone
+solves, and the production `certified-continuation` policy:
 
 ```bash
-taskset -c 0 .venv/bin/python veqlib/benchmark_4case_ip_scan.py \
-  --points 11 \
-  --relative-span 0.20 \
-  --repeat 11 \
-  --warmup 3 \
-  --output /tmp/veqlib_4case_ip_scan.json
+taskset -c 0 .venv/bin/python veqlib/benchmark_continuation_suite.py
 ```
 
-Add `--case PF_psin_uniform_Ip` when only the simple 18-parameter case is
-needed.
+The command writes `raw_results.json`, `summary.csv`, and `summary.md` under
+`veqlib/artifact/continuation/`. The default suite covers four update families
+(`ip`, `boundary`, `source`, and `mixed`) and five relative spans.
 
 ## Build Presets
 

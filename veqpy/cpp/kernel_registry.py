@@ -77,6 +77,10 @@ class ThreadOwnedKernelSolver:
         self.check_thread()
         self._solver.adopt_last_solution_as_initial()
 
+    def record_last_solution_for_continuation(self) -> None:
+        self.check_thread()
+        self._solver.record_last_solution_for_continuation()
+
     def residual_var_into(self, x: Any, out: Any) -> None:
         self.check_thread()
         self._solver.residual_var_into(x, out)

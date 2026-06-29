@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import base64
 import contextlib
-import fcntl
 import hashlib
 import importlib.metadata
 import json
@@ -17,6 +16,16 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from veqpy.model import Topology
+
+try:
+    import fcntl
+except ModuleNotFoundError:  # pragma: no cover - exercised on Windows.
+    fcntl = None
+
+if os.name == "nt":  # pragma: no cover - exercised on Windows.
+    import msvcrt
+else:  # pragma: no cover - exercised on POSIX.
+    msvcrt = None
 
 GENERATOR_VERSION = "veqpy.cpp.kernel_builder.v1"
 ARTIFACT_SCHEMA = "veqpy.kernel_artifact.v1"
@@ -78,7 +87,7 @@ def build_kernel(
 
     build_identity = _build_identity(topology, source_dir=source_dir, cxx=cxx)
     artifact_id = _compute_artifact_id(topology, build_identity)
-    root = (cache_root or default_kernel_cache_root()).expanduser()
+    root = (cache_root or default_kernel_cache_root()).expanduser().resolve()
     nanobind_static = _get_or_build_nanobind_static(
         root,
         cxx=cxx,
@@ -120,7 +129,7 @@ def build_kernel(
             prebuilt_nanobind_static=nanobind_static["archive_path"],
         )
         build_command = [
-            "cmake",
+            _cmake_executable(),
             "--build",
             str(paths["cmake_build_dir"]),
             "--target",
@@ -181,10 +190,14 @@ def _artifact_paths(root_dir: Path) -> dict[str, Path]:
         "topology_path": root_dir / "topology.json",
         "build_path": root_dir / "build.json",
         "kernel_py_path": root_dir / "kernel.py",
-        "shared_library_path": root_dir / "veqlib.so",
+        "shared_library_path": root_dir / _artifact_shared_library_name(),
         "configure_log_path": root_dir / "configure.log",
         "build_log_path": root_dir / "build.log",
     }
+
+
+def _artifact_shared_library_name() -> str:
+    return "veqlib.pyd" if os.name == "nt" else "veqlib.so"
 
 
 def _artifact_is_reusable(metadata_path: Path, shared_library_path: Path) -> bool:
@@ -218,7 +231,7 @@ def _metadata_payload(
             "artifact_id": artifact_id,
             "status": "planned" if dry_run else "building",
             "module_name": module_name,
-            "shared_library": "veqlib.so",
+            "shared_library": _artifact_shared_library_name(),
             "shared_library_sha256": None,
         },
         "topology": topology.to_canonical_dict(),
@@ -240,6 +253,7 @@ def _metadata_payload(
 
 def _write_kernel_py(path: Path, metadata: dict[str, Any]) -> None:
     module_name = metadata["artifact"]["module_name"]
+    shared_library = metadata["artifact"]["shared_library"]
     text = f"""from __future__ import annotations
 
 import importlib.util
@@ -247,7 +261,7 @@ from pathlib import Path
 
 ARTIFACT_ID = {metadata["artifact"]["artifact_id"]!r}
 MODULE_NAME = {module_name!r}
-SHARED_LIBRARY = Path(__file__).with_name("veqlib.so")
+SHARED_LIBRARY = Path(__file__).with_name({shared_library!r})
 
 
 def load():
@@ -287,7 +301,8 @@ def _cmake_configure_args(
     enable_enzyme = _enable_enzyme(topology.build)
     kmax_limit = max(2, topology.K_max or 2)
     return [
-        "cmake",
+        _cmake_executable(),
+        *_cmake_generator_args(),
         "-S",
         str(source_dir),
         "-B",
@@ -295,6 +310,7 @@ def _cmake_configure_args(
         f"-DCMAKE_BUILD_TYPE={build_type}",
         f"-DCMAKE_CXX_COMPILER={cxx}",
         f"-DPython_EXECUTABLE={sys.executable}",
+        *_cmake_prefix_path_args(),
         "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
         f"-DENABLE_ENZYME={enable_enzyme}",
         "-DVEQLIB_ENABLE_PYTHON_BINDINGS=ON",
@@ -328,7 +344,7 @@ def _get_or_build_nanobind_static(
     identity = _nanobind_static_identity(cxx=cxx, build=build)
     artifact_id = _compute_nanobind_static_id(identity)
     root_dir = cache_root / "_common" / "nanobind-static" / build / artifact_id
-    archive_path = root_dir / "cmake-build" / "libnanobind-static.a"
+    archive_path = _nanobind_static_default_archive_path(root_dir)
     metadata_path = root_dir / "metadata.json"
     lock_path = root_dir.with_suffix(".lock")
     payload: dict[str, Any] = {
@@ -344,6 +360,7 @@ def _get_or_build_nanobind_static(
 
     root_dir.mkdir(parents=True, exist_ok=True)
     with _exclusive_lock(lock_path):
+        archive_path = _existing_nanobind_static_archive_path(root_dir) or archive_path
         if _nanobind_static_is_reusable(metadata_path, archive_path, identity):
             metadata = _read_json(metadata_path)
             return {**metadata, "reused": True}
@@ -355,7 +372,8 @@ def _get_or_build_nanobind_static(
         build_log_path = root_dir / "build.log"
         source_path.write_text(_nanobind_static_cmake_project())
         configure = [
-            "cmake",
+            _cmake_executable(),
+            *_cmake_generator_args(),
             "-S",
             str(root_dir),
             "-B",
@@ -363,9 +381,10 @@ def _get_or_build_nanobind_static(
             f"-DCMAKE_BUILD_TYPE={_cmake_build_type(build)}",
             f"-DCMAKE_CXX_COMPILER={cxx}",
             f"-DPython_EXECUTABLE={sys.executable}",
+            *_cmake_prefix_path_args(),
         ]
         build_command = [
-            "cmake",
+            _cmake_executable(),
             "--build",
             str(build_dir),
             "--target",
@@ -375,10 +394,12 @@ def _get_or_build_nanobind_static(
         ]
         _run_logged(configure, configure_log_path, cwd=root_dir)
         _run_logged(build_command, build_log_path, cwd=root_dir)
+        archive_path = _existing_nanobind_static_archive_path(root_dir) or archive_path
         if not archive_path.exists():
             raise KernelBuildError(f"nanobind static build did not produce {archive_path}")
         metadata = {
             **payload,
+            "archive_path": str(archive_path),
             "status": "built",
             "archive_sha256": _file_sha256(archive_path),
             "configure": configure,
@@ -388,6 +409,37 @@ def _get_or_build_nanobind_static(
         }
         _write_json(metadata_path, metadata)
         return metadata
+
+
+def _cmake_generator_args() -> list[str]:
+    return ["-G", "Ninja"] if os.name == "nt" else []
+
+
+def _cmake_prefix_path_args() -> list[str]:
+    prefixes: list[str] = []
+    existing = os.environ.get("CMAKE_PREFIX_PATH")
+    if existing:
+        prefixes.extend(value for value in existing.split(";") if value)
+    for candidate in (Path(sys.prefix) / "Library", Path(sys.prefix)):
+        if candidate.exists():
+            prefixes.append(str(candidate))
+    if not prefixes:
+        return []
+    return [f"-DCMAKE_PREFIX_PATH={';'.join(dict.fromkeys(prefixes))}"]
+
+
+def _nanobind_static_default_archive_path(root_dir: Path) -> Path:
+    name = "nanobind-static.lib" if os.name == "nt" else "libnanobind-static.a"
+    return root_dir / "cmake-build" / name
+
+
+def _existing_nanobind_static_archive_path(root_dir: Path) -> Path | None:
+    build_dir = root_dir / "cmake-build"
+    for name in ("libnanobind-static.a", "nanobind-static.lib"):
+        candidate = build_dir / name
+        if candidate.exists():
+            return candidate
+    return None
 
 
 def _nanobind_static_identity(*, cxx: str, build: str) -> dict[str, Any]:
@@ -401,7 +453,7 @@ def _nanobind_static_identity(*, cxx: str, build: str) -> dict[str, Any]:
             "abi_flags": getattr(sys, "abiflags", ""),
         },
         "tools": {
-            "cmake": _command_version(["cmake", "--version"]),
+            "cmake": _command_version([_cmake_executable(), "--version"]),
             "cxx": cxx,
             "cxx_version": _command_version([cxx, "--version"]),
             "nanobind": _package_version("nanobind"),
@@ -584,9 +636,13 @@ def _default_build_parallel_jobs() -> int:
 
 
 def _copy_extension(build_dir: Path, destination: Path) -> None:
-    candidates = sorted(build_dir.glob("veqlib_ext*.so"))
+    candidates = sorted(
+        candidate
+        for pattern in ("veqlib_ext*.so", "veqlib_ext*.pyd", "veqlib_ext*.dll")
+        for candidate in build_dir.glob(pattern)
+    )
     if not candidates:
-        raise KernelBuildError(f"CMake build did not produce veqlib_ext*.so in {build_dir}")
+        raise KernelBuildError(f"CMake build did not produce veqlib_ext extension in {build_dir}")
     shutil.copy2(candidates[0], destination)
 
 
@@ -595,6 +651,7 @@ def _run_logged(command: list[str], log_path: Path, *, cwd: Path) -> None:
     completed = subprocess.run(
         command,
         cwd=cwd,
+        env=_subprocess_env(),
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -610,15 +667,71 @@ def _run_logged(command: list[str], log_path: Path, *, cwd: Path) -> None:
         )
 
 
+def _subprocess_env() -> dict[str, str]:
+    env = os.environ.copy()
+    if os.name == "nt":
+        extra_paths = [
+            *_common_windows_tool_paths(),
+            Path(sys.prefix) / "Library" / "bin",
+            Path(sys.prefix) / "Library" / "usr" / "bin",
+            Path(sys.prefix) / "Scripts",
+        ]
+        prefix = ";".join(str(path) for path in extra_paths if path.exists())
+        if prefix:
+            env["PATH"] = prefix + ";" + env.get("PATH", "")
+    return env
+
+
+def _cmake_executable() -> str:
+    candidate = shutil.which("cmake", path=_subprocess_env().get("PATH"))
+    if candidate:
+        return candidate
+    return "cmake"
+
+
+def _common_windows_tool_paths() -> list[Path]:
+    if os.name != "nt":
+        return []
+    candidates = [Path(os.environ.get("ProgramFiles", "C:\\Program Files")) / "LLVM" / "bin"]
+    vs_root = Path(os.environ.get("ProgramFiles(x86)", "C:\\Program Files (x86)")) / "Microsoft Visual Studio"
+    if vs_root.exists():
+        for version_dir in sorted(vs_root.glob("*"), reverse=True):
+            for edition in ("BuildTools", "Community", "Professional", "Enterprise"):
+                base = version_dir / edition / "Common7" / "IDE" / "CommonExtensions" / "Microsoft" / "CMake"
+                candidates.append(base / "CMake" / "bin")
+                candidates.append(base / "Ninja")
+    return [path for path in candidates if path.exists()]
+
+
 @contextlib.contextmanager
 def _exclusive_lock(path: Path) -> Iterator[None]:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w") as handle:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        _lock_file(handle)
         try:
             yield
         finally:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            _unlock_file(handle)
+
+
+def _lock_file(handle: Any) -> None:
+    if fcntl is not None:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        return
+    if msvcrt is not None:
+        handle.write("0")
+        handle.flush()
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+
+
+def _unlock_file(handle: Any) -> None:
+    if fcntl is not None:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        return
+    if msvcrt is not None:
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
 
 
 def _command_version(command: list[str]) -> str | None:

@@ -261,10 +261,16 @@ function(veqlib_link_dependencies target)
     target_include_directories("${target}" PRIVATE "${CMINPACK_INCLUDE_DIR}")
     target_link_libraries("${target}" PRIVATE "${CMINPACK_LIBRARY}")
 
-    find_path(LAPACKE_INCLUDE_DIR NAMES lapacke.h REQUIRED)
-    find_library(LAPACKE_LIBRARY NAMES lapacke REQUIRED)
-    find_library(LAPACK_LIBRARY NAMES lapack REQUIRED)
+    find_path(LAPACKE_INCLUDE_DIR NAMES lapacke.h PATH_SUFFIXES openblas REQUIRED)
     find_library(BLAS_LIBRARY NAMES openblas REQUIRED)
+    find_library(LAPACKE_LIBRARY NAMES lapacke)
+    find_library(LAPACK_LIBRARY NAMES lapack)
+    if(NOT LAPACKE_LIBRARY)
+        set(LAPACKE_LIBRARY "${BLAS_LIBRARY}")
+    endif()
+    if(NOT LAPACK_LIBRARY)
+        set(LAPACK_LIBRARY "${BLAS_LIBRARY}")
+    endif()
     target_include_directories("${target}" PRIVATE "${LAPACKE_INCLUDE_DIR}")
     target_link_libraries(
         "${target}"
@@ -475,7 +481,6 @@ function(veqlib_configure_target target)
         "${target}"
         PRIVATE
             "${VEQLIB_GENERATED_INCLUDE_DIR}"
-            "${PROJECT_SOURCE_DIR}"
     )
     set_target_properties(
         "${target}"

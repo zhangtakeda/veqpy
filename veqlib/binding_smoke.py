@@ -32,7 +32,13 @@ def main() -> int:
     lm_result = veqlib_ext.KernelSolver(LEVENBERG_MARQUARDT).solve_direct()
 
     _require(meta["route"] == "PF/psin/uniform/Ip", f"unexpected route: {meta['route']!r}")
-    _require(len(powell_result) == 15, f"unexpected solve tuple length: {len(powell_result)}")
+    _require(len(powell_result) >= 15, f"unexpected solve tuple length: {len(powell_result)}")
+    if len(powell_result) >= 26:
+        _require(int(powell_result[22]) == int(powell_result[3]), "solver_nfev mismatch")
+        _require(
+            int(powell_result[25]) >= int(powell_result[22]),
+            "total raw eval counter mismatch",
+        )
     _require(bool(powell_result[1]), f"Powell solve failed: info={powell_result[2]}")
     _require(bool(lm_result[1]), f"LM solve failed: info={lm_result[2]}")
     _require(powell_result[11].shape == (x_size,), "packed solution view has wrong shape")

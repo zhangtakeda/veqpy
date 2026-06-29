@@ -6,7 +6,13 @@ from collections.abc import Iterable, Mapping, MutableMapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from .options import INITIAL_POLICY_WARM_CLONE, initial_policy_code
+from .options import (
+    INITIAL_POLICY_CONTINUATION_V1,
+    INITIAL_POLICY_CONTINUATION_V2,
+    INITIAL_POLICY_CONTINUATION_V3,
+    INITIAL_POLICY_WARM_CLONE,
+    initial_policy_code,
+)
 
 PayloadLike = str | Mapping[str, Any]
 
@@ -17,6 +23,8 @@ class PayloadSequenceSolver(Protocol):
     def solve_direct(self) -> Any: ...
 
     def adopt_last_solution_as_initial(self) -> None: ...
+
+    def record_last_solution_for_continuation(self) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +49,17 @@ class PayloadSequenceStep:
     linear_iterations: int
     raw_norm: float
     scaled_norm: float
+    accepted_by: str = "solver"
+    fast_path: str = "none"
+    fallback_used: bool = False
+    fallback_reason: str = ""
+    cert_threshold: float = float("nan")
+    initial_raw_norm: float = float("nan")
+    fast_path_raw_norm: float = float("nan")
+    solver_nfev: int = 0
+    initial_residual_evaluations: int = 0
+    certification_residual_evaluations: int = 0
+    total_raw_residual_evaluations: int = 0
 
 
 def payload_json_with_initial_policy(payload: PayloadLike, policy: str | int) -> str:
@@ -48,7 +67,7 @@ def payload_json_with_initial_policy(payload: PayloadLike, policy: str | int) ->
 
     The input mapping is deep-copied before modification. This keeps scan setup
     side-effect-free while allowing callers to reuse a case payload template for
-    cold and warm-clone runs.
+    repeated continuation runs.
     """
 
     data = _payload_object(payload)
@@ -64,17 +83,17 @@ def solve_payload_sequence(
     payloads: Iterable[PayloadLike],
     *,
     first_policy: str | int | None = "cold",
-    continuation_policy: str | int | None = "warm-clone",
+    continuation_policy: str | int | None = "certified-continuation",
     adopt_solution_for_continuation: bool = True,
 ) -> list[PayloadSequenceStep]:
     """Solve an ordered same-topology payload sequence with one mutable solver.
 
     By default, the first payload is solved from the canonical cold policy and
-    subsequent payloads use VEQlib's warm-clone policy, which copies the previous
-    accepted solution into the next runtime case. The helper explicitly adopts
-    each accepted result before a following warm-clone point so a cold first
-    point can still seed the continuation path. Passing ``None`` for either
-    policy preserves that payload's existing ``solver.initial_policy_code``.
+    subsequent payloads use VEQlib's certified-continuation policy. The helper
+    records the first accepted result before the following continuation point so
+    a cold first point can still seed the sequence without changing the residual
+    definition. Passing ``None`` for either policy preserves that payload's
+    existing ``solver.initial_policy_code``.
     """
 
     payload_items = list(payloads)
@@ -88,14 +107,15 @@ def solve_payload_sequence(
         if (
             adopt_solution_for_continuation
             and step.success
-            and _next_payload_uses_warm_clone(
+            and not _policy_uses_continuation_clone(step.initial_policy_code)
+            and _next_payload_uses_continuation_clone(
                 payload_items,
                 index + 1,
                 first_policy=first_policy,
                 continuation_policy=continuation_policy,
             )
         ):
-            solver.adopt_last_solution_as_initial()
+            solver.record_last_solution_for_continuation()
     return steps
 
 
@@ -118,7 +138,7 @@ def _payload_json_and_policy(
     return _payload_json(data), policy_code
 
 
-def _next_payload_uses_warm_clone(
+def _next_payload_uses_continuation_clone(
     payloads: list[PayloadLike],
     index: int,
     *,
@@ -129,7 +149,16 @@ def _next_payload_uses_warm_clone(
         return False
     requested_policy = first_policy if index == 0 else continuation_policy
     _payload_json, policy_code = _payload_json_and_policy(payloads[index], requested_policy)
-    return policy_code == INITIAL_POLICY_WARM_CLONE
+    return _policy_uses_continuation_clone(policy_code)
+
+
+def _policy_uses_continuation_clone(policy_code: int) -> bool:
+    return int(policy_code) in (
+        INITIAL_POLICY_WARM_CLONE,
+        INITIAL_POLICY_CONTINUATION_V1,
+        INITIAL_POLICY_CONTINUATION_V2,
+        INITIAL_POLICY_CONTINUATION_V3,
+    )
 
 
 def _payload_object(payload: PayloadLike) -> dict[str, Any]:
@@ -149,6 +178,8 @@ def _payload_json(data: Mapping[str, Any]) -> str:
 
 
 def _step_from_result(index: int, policy_code: int, result: Any) -> PayloadSequenceStep:
+    total_raw = _optional_int(result, 25, int(result[3]))
+    solver_nfev = _optional_int(result, 22, int(result[3]))
     return PayloadSequenceStep(
         index=index,
         initial_policy_code=policy_code,
@@ -163,4 +194,31 @@ def _step_from_result(index: int, policy_code: int, result: Any) -> PayloadSeque
         linear_iterations=int(result[8]),
         raw_norm=float(result[9]),
         scaled_norm=float(result[10]),
+        accepted_by=_optional_str(result, 15, "solver"),
+        fast_path=_optional_str(result, 16, "none"),
+        fallback_used=_optional_bool(result, 17, False),
+        fallback_reason=_optional_str(result, 18, ""),
+        cert_threshold=_optional_float(result, 19, float("nan")),
+        initial_raw_norm=_optional_float(result, 20, float("nan")),
+        fast_path_raw_norm=_optional_float(result, 21, float("nan")),
+        solver_nfev=solver_nfev,
+        initial_residual_evaluations=_optional_int(result, 23, 0),
+        certification_residual_evaluations=_optional_int(result, 24, 0),
+        total_raw_residual_evaluations=total_raw,
     )
+
+
+def _optional_str(result: Any, index: int, default: str) -> str:
+    return str(result[index]) if len(result) > index else default
+
+
+def _optional_bool(result: Any, index: int, default: bool) -> bool:
+    return bool(result[index]) if len(result) > index else default
+
+
+def _optional_float(result: Any, index: int, default: float) -> float:
+    return float(result[index]) if len(result) > index else default
+
+
+def _optional_int(result: Any, index: int, default: int) -> int:
+    return int(result[index]) if len(result) > index else default

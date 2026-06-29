@@ -82,6 +82,9 @@ class VEQlibSolver:
     def adopt_last_solution_as_initial(self) -> None:
         self._solver().adopt_last_solution_as_initial()
 
+    def record_last_solution_for_continuation(self) -> None:
+        self._solver().record_last_solution_for_continuation()
+
     def residual_var_into(self, x: Any, out: Any) -> None:
         self._solver().residual_var_into(x, out)
 

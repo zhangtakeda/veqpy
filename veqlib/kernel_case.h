@@ -456,6 +456,12 @@ namespace veqlib_kernel_api
                 return;
             case InitialPolicyWarmClone:
                 return;
+            case InitialPolicyContinuationV1:
+                return;
+            case InitialPolicyContinuationV2:
+                return;
+            case InitialPolicyContinuationV3:
+                return;
             default:
                 throw std::runtime_error("invalid initial policy code");
             }
@@ -540,12 +546,44 @@ namespace veqlib_kernel_api
                 return "cold";
             case InitialPolicyWarmClone:
                 return "warm-clone";
+            case InitialPolicyContinuationV1:
+                return "continuation-v1";
+            case InitialPolicyContinuationV2:
+                return "continuation-v2";
+            case InitialPolicyContinuationV3:
+                return "certified-continuation";
             default:
                 return "unknown";
             }
         }
 
         constexpr bool initial_policy_is_warm_clone(int code) noexcept { return code == InitialPolicyWarmClone; }
+
+        constexpr bool initial_policy_is_continuation_v1(int code) noexcept
+        {
+            return code == InitialPolicyContinuationV1;
+        }
+
+        constexpr bool initial_policy_is_continuation_v2(int code) noexcept
+        {
+            return code == InitialPolicyContinuationV2;
+        }
+
+        constexpr bool initial_policy_is_continuation_v3(int code) noexcept
+        {
+            return code == InitialPolicyContinuationV3;
+        }
+
+        constexpr bool initial_policy_uses_certified_continuation(int code) noexcept
+        {
+            return initial_policy_is_continuation_v1(code) || initial_policy_is_continuation_v2(code) ||
+                   initial_policy_is_continuation_v3(code);
+        }
+
+        constexpr bool initial_policy_uses_continuation_clone(int code) noexcept
+        {
+            return initial_policy_is_warm_clone(code) || initial_policy_uses_certified_continuation(code);
+        }
 
         inline void validate_initial_policy_code(int code)
         {
@@ -555,10 +593,14 @@ namespace veqlib_kernel_api
             case InitialPolicyColdGeometric:
             case InitialPolicyCold:
             case InitialPolicyWarmClone:
+            case InitialPolicyContinuationV1:
+            case InitialPolicyContinuationV2:
+            case InitialPolicyContinuationV3:
                 return;
             default:
                 throw std::runtime_error("solver.initial_policy_code must be 1 (cold-zeros), 2 (cold-geometric), "
-                                         "3 (cold), or 4 (warm-clone)");
+                                         "3 (cold), 4 (warm-clone), 5 (continuation-v1), "
+                                         "6 (continuation-v2), or 7 (certified-continuation)");
             }
         }
 

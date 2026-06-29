@@ -18,6 +18,9 @@ NB_MODULE(veqlib_ext, module)
         .def("adopt_last_solution_as_initial",
              &veqlib_python::KernelSolver::adopt_last_solution_as_initial,
              "Use the last accepted solve result as the current initial state.")
+        .def("record_last_solution_for_continuation",
+             &veqlib_python::KernelSolver::record_last_solution_for_continuation,
+             "Record the last accepted solve result for a following continuation case without refreshing this case.")
         .def("residual_var_into",
              &veqlib_python::KernelSolver::residual_var_into,
              nb::arg("x"),

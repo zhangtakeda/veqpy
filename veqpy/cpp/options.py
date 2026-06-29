@@ -11,6 +11,10 @@ INITIAL_POLICY_COLD_ZEROS: Final[int] = 1
 INITIAL_POLICY_COLD_GEOMETRIC: Final[int] = 2
 INITIAL_POLICY_COLD: Final[int] = 3
 INITIAL_POLICY_WARM_CLONE: Final[int] = 4
+INITIAL_POLICY_CONTINUATION_V1: Final[int] = 5
+INITIAL_POLICY_CONTINUATION_V2: Final[int] = 6
+INITIAL_POLICY_CONTINUATION_V3: Final[int] = 7
+INITIAL_POLICY_CERTIFIED_CONTINUATION: Final[int] = INITIAL_POLICY_CONTINUATION_V3
 
 RESIDUAL_NORMALIZATION_NONE: Final[int] = 0
 RESIDUAL_NORMALIZATION_FAST: Final[int] = 1
@@ -29,6 +33,10 @@ INITIAL_POLICY_CODES: Final[dict[str, int]] = {
     "cold-geometric": INITIAL_POLICY_COLD_GEOMETRIC,
     "cold": INITIAL_POLICY_COLD,
     "warm-clone": INITIAL_POLICY_WARM_CLONE,
+    "continuation-v1": INITIAL_POLICY_CONTINUATION_V1,
+    "continuation-v2": INITIAL_POLICY_CONTINUATION_V2,
+    "continuation-v3": INITIAL_POLICY_CONTINUATION_V3,
+    "certified-continuation": INITIAL_POLICY_CERTIFIED_CONTINUATION,
 }
 
 RESIDUAL_NORMALIZATION_CODES: Final[dict[str, int]] = {
@@ -58,6 +66,9 @@ def initial_policy_code(value: str | int) -> int:
         INITIAL_POLICY_COLD_GEOMETRIC,
         INITIAL_POLICY_COLD,
         INITIAL_POLICY_WARM_CLONE,
+        INITIAL_POLICY_CONTINUATION_V1,
+        INITIAL_POLICY_CONTINUATION_V2,
+        INITIAL_POLICY_CONTINUATION_V3,
     ):
         raise ValueError(f"Unsupported initial policy code {code!r}")
     return code
@@ -87,4 +98,4 @@ def _option_code(value: str | int, table: dict[str, int], label: str) -> int:
 
 
 def _normalize_option_token(value: str) -> str:
-    return value.strip()
+    return value.strip().lower()

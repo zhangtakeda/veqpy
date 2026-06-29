@@ -175,6 +175,9 @@ namespace veqlib_kernel_api
             InitialPolicyColdGeometric = 2,
             InitialPolicyCold          = 3,
             InitialPolicyWarmClone     = 4,
+            InitialPolicyContinuationV1 = 5,
+            InitialPolicyContinuationV2 = 6,
+            InitialPolicyContinuationV3 = 7,
         };
 
         enum ResidualNormalizationCode : int
@@ -233,9 +236,13 @@ namespace veqlib_kernel_api
             int                                     nfev                           = 0;
             int                                     njev                           = 0;
             int                                     callbacks                      = 0;
+            int                                     solver_nfev                    = 0;
             int                                     jacobian_component_evaluations = 0;
             int                                     jvp_evaluations                = 0;
             int                                     linear_iterations              = 0;
+            int                                     initial_residual_evaluations   = 0;
+            int                                     certification_residual_evaluations = 0;
+            int                                     total_raw_residual_evaluations = 0;
             double                                  residual_callback_ms           = 0.0;
             double                                  residual_kernel_ms             = 0.0;
             double                                  residual_scale_ms              = 0.0;
@@ -243,6 +250,13 @@ namespace veqlib_kernel_api
             double                                  jacobian_callback_ms           = 0.0;
             double                                  jvp_callback_ms                = 0.0;
             double                                  linear_solve_ms                = 0.0;
+            double                                  cert_threshold                 = 0.0;
+            double                                  initial_raw_norm               = 0.0;
+            double                                  fast_path_raw_norm             = 0.0;
+            std::string                             accepted_by                    = "solver";
+            std::string                             fast_path                      = "none";
+            std::string                             fallback_reason                = "";
+            bool                                    fallback_used                  = false;
             bool                                    accepted                       = false;
         };
 
