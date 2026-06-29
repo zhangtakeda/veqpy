@@ -46,14 +46,13 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from veqpy.cpp import (  # noqa: E402
-    INITIAL_POLICY_COLD,
-    RESIDUAL_NORMALIZATION_FAST,
     SOLVER_METHOD_LEVENBERG_MARQUARDT,
     SOLVER_METHOD_POWELL,
     KernelRegistry,
     VEQlibSolver,
     build_kernel,
 )
+from veqpy.kernel import KernelBuild, KernelInput, KernelSolve, KernelTopology  # noqa: E402
 from veqpy.model import Topology, TopologyError  # noqa: E402
 from veqpy.operator import Operator  # noqa: E402
 from veqpy.operator.packed_layout import build_profile_layout, build_profile_names  # noqa: E402
@@ -277,14 +276,15 @@ def _topology_from_spec(
         "sample_count": _sample_count_for_spec(benchmark, spec),
         "M_max": m_max,
         "K_max": max(2, m_max),
-        "build": build,
-        "layout": layout,
     }
+    build_kwargs: dict[str, object] = {"build": build, "layout": layout}
     if build_options:
-        topology_kwargs.update(build_options)
+        build_kwargs.update(build_options)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always", UserWarning)
-        topology = Topology(**topology_kwargs)
+        kernel_topology = KernelTopology(**topology_kwargs)
+        kernel_build = KernelBuild(**build_kwargs)
+        topology = kernel_topology.to_legacy_topology(kernel_build)
     warning_messages = tuple(str(item.message) for item in caught)
     return topology, warning_messages
 
@@ -338,57 +338,37 @@ def _runtime_case_data(benchmark: ModuleType, spec: Any, topology: Topology) -> 
     grid = benchmark.TEST_GRID
     operator = Operator(grid, case)
     x0 = operator.pack_coefficients(benchmark._coefficients_from_coeffs(coeffs))
-    boundary = case.boundary
-    source_plan = operator.plan.source_plan
-    constraints = {"fix_rho": float(operator.fix_rho)}
-    if np.isfinite(float(source_plan.scaled_Ip)):
-        constraints["scaled_Ip"] = float(source_plan.scaled_Ip)
-    if np.isfinite(float(source_plan.beta)):
-        constraints["beta"] = float(source_plan.beta)
-
     solver_method_code = _cxx_solver_method_for_spec(spec)
-    payload = {
-        "case_name": _spec_label(spec),
-        "boundary": {
-            "a": float(boundary.a),
-            "R0": float(boundary.R0),
-            "Z0": float(boundary.Z0),
-            "B0": float(boundary.B0),
-            "ka": float(boundary.ka),
-            "c_offsets": np.asarray(boundary.c_offsets, dtype=np.float64).tolist(),
-            "s_offsets": np.asarray(boundary.s_offsets, dtype=np.float64).tolist(),
-        },
-        "source": {
-            "scaled_heat": source_plan.scaled_heat.tolist(),
-            "scaled_current": source_plan.scaled_current.tolist(),
-        },
-        "constraints": constraints,
-        "solver": {
-            "method_code": solver_method_code,
-            "max_residual": float(benchmark.CONFIG.max_residual),
-            "max_evaluations": int(x0.size) ** 2,
-            "accepted_residual_factor": 10.0,
-            "accepted_residual_floor": 1.0e-5,
-            "initial_policy_code": INITIAL_POLICY_COLD,
-            "residual_normalization_code": RESIDUAL_NORMALIZATION_FAST,
-            "residual_normalization_floor": float(benchmark.CONFIG.residual_normalization_floor),
-            "residual_normalization_max_ratio": float(
-                benchmark.CONFIG.residual_normalization_max_ratio
-            ),
-            "residual_normalization_huber_tau": float(
-                benchmark.CONFIG.residual_normalization_huber_tau
-            ),
-            "residual_normalization_probe_count": int(
-                benchmark.CONFIG.residual_normalization_probe_count
-            ),
-            "residual_normalization_probe_step": float(
-                benchmark.CONFIG.residual_normalization_probe_step
-            ),
-            "residual_normalization_sensitivity_lambda": float(
-                benchmark.CONFIG.residual_normalization_sensitivity_lambda
-            ),
-        },
-    }
+    kernel_input = KernelInput.from_problem(
+        case,
+        fix_rho=float(operator.fix_rho),
+        case_name=_spec_label(spec),
+    )
+    kernel_solve = KernelSolve(
+        method=solver_method_code,
+        max_residual=float(benchmark.CONFIG.max_residual),
+        max_evaluations=int(x0.size) ** 2,
+        initial="cold",
+        norm="fast",
+        residual_normalization_floor=float(benchmark.CONFIG.residual_normalization_floor),
+        residual_normalization_max_ratio=float(
+            benchmark.CONFIG.residual_normalization_max_ratio
+        ),
+        residual_normalization_huber_tau=float(
+            benchmark.CONFIG.residual_normalization_huber_tau
+        ),
+        residual_normalization_probe_count=int(
+            benchmark.CONFIG.residual_normalization_probe_count
+        ),
+        residual_normalization_probe_step=float(
+            benchmark.CONFIG.residual_normalization_probe_step
+        ),
+        residual_normalization_sensitivity_lambda=float(
+            benchmark.CONFIG.residual_normalization_sensitivity_lambda
+        ),
+    )
+    payload = kernel_input.to_payload_dict()
+    payload["solver"] = kernel_solve.to_payload_dict(x_size=int(x0.size))
 
     def measure_py(*, warmup: int, repeat: int) -> dict[str, Any]:
         for _ in range(max(1, warmup)):
