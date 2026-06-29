@@ -10,6 +10,35 @@ NB_MODULE(veqlib_ext, module)
         .def("metadata", &veqlib_python::KernelSolver::metadata)
         .def("metadata_json", &veqlib_python::KernelSolver::metadata_json)
         .def("set_case_json", &veqlib_python::KernelSolver::set_case_json, nb::arg("payload"))
+        .def("set_kernel_runtime",
+             &veqlib_python::KernelSolver::set_kernel_runtime,
+             nb::arg("case_name"),
+             nb::arg("a"),
+             nb::arg("R0"),
+             nb::arg("Z0"),
+             nb::arg("B0"),
+             nb::arg("ka"),
+             nb::arg("c_offsets"),
+             nb::arg("s_offsets"),
+             nb::arg("scaled_heat"),
+             nb::arg("scaled_current"),
+             nb::arg("scaled_Ip"),
+             nb::arg("beta"),
+             nb::arg("fix_rho"),
+             nb::arg("method_code"),
+             nb::arg("max_residual"),
+             nb::arg("max_evaluations"),
+             nb::arg("accepted_residual_factor"),
+             nb::arg("accepted_residual_floor"),
+             nb::arg("initial_policy_code"),
+             nb::arg("residual_normalization_code"),
+             nb::arg("residual_normalization_floor"),
+             nb::arg("residual_normalization_max_ratio"),
+             nb::arg("residual_normalization_huber_tau"),
+             nb::arg("residual_normalization_probe_count"),
+             nb::arg("residual_normalization_probe_step"),
+             nb::arg("residual_normalization_sensitivity_lambda"),
+             "Set the full runtime case and solve policy without JSON serialization.")
         .def("warmup", &veqlib_python::KernelSolver::warmup, nb::arg("count"))
         .def("solve_json", &veqlib_python::KernelSolver::solve_json)
         .def("solve_direct",

@@ -71,6 +71,7 @@ namespace veqlib_python
     using PackedArrayView        = nb::ndarray<nb::numpy, const double, nb::shape<KernelShape::x_size>, nb::c_contig>;
     using MutablePackedArrayView = nb::ndarray<nb::numpy, double, nb::shape<KernelShape::x_size>, nb::c_contig>;
     using AlphaArrayView         = nb::ndarray<nb::numpy, const double, nb::shape<2>, nb::c_contig>;
+    using RuntimeArrayView       = nb::ndarray<nb::numpy, const double, nb::ndim<1>, nb::c_contig>;
 
     inline std::unique_ptr<SolveContext> make_context(SolverKind solver)
     {
@@ -206,6 +207,39 @@ namespace veqlib_python
         return object == nullptr ? data : *object;
     }
 
+    inline void read_exact_runtime_array(RuntimeArrayView values,
+                                         const char*      name,
+                                         std::array<double, KernelSource::sample_count>& out)
+    {
+        const size_t length = values.shape(0);
+        if (length != KernelSource::sample_count)
+            throw std::runtime_error(std::string{name} + " length mismatch: expected " +
+                                     std::to_string(KernelSource::sample_count) + ", got " +
+                                     std::to_string(length));
+        for (size_t i = 0; i < KernelSource::sample_count; ++i)
+            out[i] = values.data()[i];
+    }
+
+    template <size_t N>
+    void read_runtime_offset_array(RuntimeArrayView       values,
+                                   const char*            name,
+                                   std::array<double, N>& out,
+                                   bool                   sine_family)
+    {
+        const size_t length = values.shape(0);
+        if (length > N)
+            throw std::runtime_error(std::string{name} + " length mismatch: expected at most " + std::to_string(N) +
+                                     ", got " + std::to_string(length));
+        if (sine_family && length == N - 1)
+        {
+            for (size_t i = 0; i < length; ++i)
+                out[i + 1] = values.data()[i];
+            return;
+        }
+        for (size_t i = 0; i < length; ++i)
+            out[i] = values.data()[i];
+    }
+
     inline CaseInput case_input_from_json(const nlohmann::json& data, SolverKind solver)
     {
         CaseInput input = build_inline_case(0, 0, solver);
@@ -274,6 +308,85 @@ namespace veqlib_python
         input.x_scale = build_x_block_scale_vector<KernelShape>(input.x0, profile_params_for_case(input));
         input.residual_scale.fill(1.0);
 
+        return input;
+    }
+
+    inline CaseInput case_input_from_runtime(const std::string& case_name,
+                                             double             a,
+                                             double             R0,
+                                             double             Z0,
+                                             double             B0,
+                                             double             ka,
+                                             RuntimeArrayView   c_offsets,
+                                             RuntimeArrayView   s_offsets,
+                                             RuntimeArrayView   scaled_heat,
+                                             RuntimeArrayView   scaled_current,
+                                             double             scaled_Ip,
+                                             double             beta,
+                                             double             fix_rho,
+                                             int                method_code,
+                                             double             max_residual,
+                                             int                max_evaluations,
+                                             double             accepted_residual_factor,
+                                             double             accepted_residual_floor,
+                                             int                initial_policy_code,
+                                             int                residual_normalization_code,
+                                             double             residual_normalization_floor,
+                                             double             residual_normalization_max_ratio,
+                                             double             residual_normalization_huber_tau,
+                                             int                residual_normalization_probe_count,
+                                             double             residual_normalization_probe_step,
+                                             double             residual_normalization_sensitivity_lambda)
+    {
+        CaseInput input = build_inline_case(0, 0, solver_kind_from_runtime_method_code(method_code));
+        if (!case_name.empty())
+            input.case_name = case_name;
+
+        input.a  = a;
+        input.R0 = R0;
+        input.Z0 = Z0;
+        input.B0 = B0;
+        input.ka = ka;
+        input.c_offsets.fill(0.0);
+        input.s_offsets.fill(0.0);
+        read_runtime_offset_array(c_offsets, "c_offsets", input.c_offsets, false);
+        read_runtime_offset_array(s_offsets, "s_offsets", input.s_offsets, true);
+        input.c0_offset = input.c_offsets[0];
+        if constexpr (KernelShape::M_max >= 1)
+            input.s1_offset = input.s_offsets[1];
+
+        read_exact_runtime_array(scaled_heat, "scaled_heat", input.heat);
+        read_exact_runtime_array(scaled_current, "scaled_current", input.current);
+
+        input.Ip      = scaled_Ip;
+        input.beta    = beta;
+        input.fix_rho = fix_rho;
+
+        input.solver                   = solver_kind_from_runtime_method_code(method_code);
+        input.max_residual             = max_residual;
+        input.max_evaluations          = max_evaluations;
+        if (input.max_evaluations < 0)
+            throw std::runtime_error("max_evaluations must be non-negative");
+        input.accepted_residual_factor = accepted_residual_factor;
+        input.accepted_residual_floor  = accepted_residual_floor;
+        input.initial_policy_code      = initial_policy_code;
+        validate_initial_policy_code(input.initial_policy_code);
+        input.residual_normalization_code = residual_normalization_code;
+        validate_residual_normalization_code(input.residual_normalization_code);
+        input.residual_normalization_floor              = residual_normalization_floor;
+        input.residual_normalization_max_ratio          = residual_normalization_max_ratio;
+        input.residual_normalization_huber_tau          = residual_normalization_huber_tau;
+        input.residual_normalization_probe_count        = residual_normalization_probe_count;
+        input.residual_normalization_probe_step         = residual_normalization_probe_step;
+        input.residual_normalization_sensitivity_lambda = residual_normalization_sensitivity_lambda;
+
+        if (input.initial_policy_code == InitialPolicyWarmClone)
+            input.x0.fill(0.0);
+        else
+            apply_initial_policy(input);
+
+        input.x_scale = build_x_block_scale_vector<KernelShape>(input.x0, profile_params_for_case(input));
+        input.residual_scale.fill(1.0);
         return input;
     }
 
@@ -687,17 +800,63 @@ namespace veqlib_python
             }
 
             CaseInput next_input = case_input_from_json(data, solver_);
-            if (initial_policy_is_warm_clone(next_input.initial_policy_code))
-            {
-                next_input.x0 = context_->input.x0;
-                next_input.x_scale =
-                    build_x_block_scale_vector<KernelShape>(next_input.x0, profile_params_for_case(next_input));
-            }
-            auto next_context = std::make_unique<SolveContext>(next_input);
-            refine_cold_initial_state(*next_context);
-            refresh_initial_residual_scale(*next_context);
-            context_        = std::move(next_context);
-            last_case_json_ = data.dump();
+            apply_runtime_case(std::move(next_input), data.dump());
+        }
+
+        void set_kernel_runtime(const std::string& case_name,
+                                double             a,
+                                double             R0,
+                                double             Z0,
+                                double             B0,
+                                double             ka,
+                                RuntimeArrayView   c_offsets,
+                                RuntimeArrayView   s_offsets,
+                                RuntimeArrayView   scaled_heat,
+                                RuntimeArrayView   scaled_current,
+                                double             scaled_Ip,
+                                double             beta,
+                                double             fix_rho,
+                                int                method_code,
+                                double             max_residual,
+                                int                max_evaluations,
+                                double             accepted_residual_factor,
+                                double             accepted_residual_floor,
+                                int                initial_policy_code,
+                                int                residual_normalization_code,
+                                double             residual_normalization_floor,
+                                double             residual_normalization_max_ratio,
+                                double             residual_normalization_huber_tau,
+                                int                residual_normalization_probe_count,
+                                double             residual_normalization_probe_step,
+                                double             residual_normalization_sensitivity_lambda)
+        {
+            CaseInput next_input = case_input_from_runtime(case_name,
+                                                           a,
+                                                           R0,
+                                                           Z0,
+                                                           B0,
+                                                           ka,
+                                                           c_offsets,
+                                                           s_offsets,
+                                                           scaled_heat,
+                                                           scaled_current,
+                                                           scaled_Ip,
+                                                           beta,
+                                                           fix_rho,
+                                                           method_code,
+                                                           max_residual,
+                                                           max_evaluations,
+                                                           accepted_residual_factor,
+                                                           accepted_residual_floor,
+                                                           initial_policy_code,
+                                                           residual_normalization_code,
+                                                           residual_normalization_floor,
+                                                           residual_normalization_max_ratio,
+                                                           residual_normalization_huber_tau,
+                                                           residual_normalization_probe_count,
+                                                           residual_normalization_probe_step,
+                                                           residual_normalization_sensitivity_lambda);
+            apply_runtime_case(std::move(next_input), "{}");
         }
 
         void warmup(size_t count)
@@ -784,6 +943,22 @@ namespace veqlib_python
         double last_elapsed_ms() const noexcept { return last_elapsed_ms_; }
 
     private:
+        void apply_runtime_case(CaseInput next_input, std::string last_case_json)
+        {
+            if (initial_policy_is_warm_clone(next_input.initial_policy_code))
+            {
+                next_input.x0      = context_->input.x0;
+                next_input.x_scale = build_x_block_scale_vector<KernelShape>(
+                    next_input.x0,
+                    profile_params_for_case(next_input));
+            }
+            auto next_context = std::make_unique<SolveContext>(next_input);
+            refine_cold_initial_state(*next_context);
+            refresh_initial_residual_scale(*next_context);
+            context_        = std::move(next_context);
+            last_case_json_ = std::move(last_case_json);
+        }
+
         SolverKind                    solver_;
         std::unique_ptr<SolveContext> context_;
         SolveResult                   last_result_{};

@@ -61,6 +61,10 @@ class ThreadOwnedKernelSolver:
         self.check_thread()
         self._solver.set_case_json(payload)
 
+    def set_kernel_runtime(self, *args: Any) -> None:
+        self.check_thread()
+        self._solver.set_kernel_runtime(*args)
+
     def warmup(self, count: int) -> None:
         self.check_thread()
         self._solver.warmup(count)

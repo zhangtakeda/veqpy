@@ -73,6 +73,9 @@ class VEQlibSolver:
     def set_case_json(self, payload: str) -> None:
         self._solver().set_case_json(payload)
 
+    def set_kernel_runtime(self, *args: Any) -> None:
+        self._solver().set_kernel_runtime(*args)
+
     def solve_json(self) -> str:
         return self._solver().solve_json()
 
