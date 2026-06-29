@@ -1,21 +1,27 @@
-"""
-Public VEQlib kernel bridge types.
-
-``KernelTopology`` and ``KernelBuild`` describe compile/artifact identity;
-``KernelInput`` and ``KernelSolve`` describe one runtime solve; ``Kernel`` owns
-stateful native execution.
-"""
+"""Compatibility import surface for the pure ``veqlib.kernel`` API."""
 
 from __future__ import annotations
 
-from .kernel import Kernel, build
-from .types import KernelBuild, KernelInput, KernelSolve, KernelTopology
+from veqlib.kernel import (
+    Kernel,
+    KernelBoundary,
+    KernelBuild,
+    KernelInput,
+    KernelResult,
+    KernelSolve,
+    KernelTopology,
+    TopologyError,
+    build,
+)
 
 __all__ = [
     "Kernel",
+    "KernelBoundary",
     "KernelBuild",
     "KernelInput",
+    "KernelResult",
     "KernelSolve",
     "KernelTopology",
+    "TopologyError",
     "build",
 ]

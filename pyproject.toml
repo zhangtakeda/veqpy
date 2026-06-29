@@ -57,7 +57,7 @@ Issues = "https://github.com/zhangtakeda/veqpy/issues"
 include-package-data = false
 
 [tool.setuptools.packages.find]
-include = ["veqpy*"]
+include = ["veqpy*", "veqlib*"]
 
 [tool.ruff]
 line-length = 100
