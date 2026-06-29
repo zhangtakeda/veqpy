@@ -6,6 +6,7 @@ helpers for the C++/CMake core under :mod:`veqlib.core`.
 
 from __future__ import annotations
 
+from .affinity import current_cpu_affinity, pinned_cpu
 from .kernel import (
     INITIAL_POLICY_COLD,
     INITIAL_POLICY_COLD_GEOMETRIC,
@@ -76,9 +77,11 @@ __all__ = [
     "VEQlibSolver",
     "build",
     "build_kernel",
+    "current_cpu_affinity",
     "default_kernel_cache_root",
     "initial_policy_code",
     "payload_json_with_initial_policy",
+    "pinned_cpu",
     "residual_normalization_code",
     "solve_payload_sequence",
     "solver_method_code",

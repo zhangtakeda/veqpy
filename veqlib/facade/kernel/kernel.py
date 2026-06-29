@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
+from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import Any
 
-from ..affinity import CpuPinning
+from ..affinity import CpuPinning, pinned_cpu
 from .builder import KernelArtifact
 from .registry import KernelRegistry
 from .solver import VEQlibSolver
@@ -86,6 +87,11 @@ class Kernel:
 
     def close(self) -> None:
         self._solver = None
+
+    def pinned(self) -> AbstractContextManager[None, bool | None]:
+        """Return a scoped CPU pinning context for high-volume solve loops."""
+
+        return pinned_cpu(self.pin_cpu)
 
     def metadata(self) -> Any:
         return self._veqlib_solver().metadata()

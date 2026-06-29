@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import TypeAlias
@@ -9,6 +10,7 @@ CpuPinning: TypeAlias = bool | int | None
 
 _DISABLE_TOKENS = {"0", "false", "no", "off", "none", "disable", "disabled"}
 _ENABLE_TOKENS = {"1", "true", "yes", "on", "auto", "pin", "enable", "enabled"}
+_PIN_STATE = threading.local()
 
 
 def current_cpu_affinity() -> tuple[int, ...] | None:
@@ -22,37 +24,61 @@ def current_cpu_affinity() -> tuple[int, ...] | None:
         return None
 
 
+def cpu_pin_scope_active() -> bool:
+    """Return whether this thread is already inside a VEQlib pinning scope."""
+
+    return int(getattr(_PIN_STATE, "depth", 0)) > 0
+
+
 @contextmanager
 def pinned_cpu(policy: CpuPinning = None) -> Iterator[None]:
-    """Temporarily pin the current thread/process to one CPU for a VEQlib call.
+    """Temporarily pin the current thread/process to one CPU for VEQlib calls.
 
     ``policy=None`` reads the environment and defaults to enabled auto pinning.
     Auto pinning chooses the smallest CPU from the current affinity set so an
     outer ``taskset``/cgroup/SLURM allocation remains authoritative.  The
-    previous affinity is restored after the call.
+    previous affinity is restored after the outermost pin scope exits. Nested
+    calls are Python-only no-ops so a batch can pin once around many solves.
     """
+
+    resolved = _default_policy_from_env() if policy is None else policy
+    if resolved is False:
+        yield
+        return
+
+    if cpu_pin_scope_active():
+        depth = int(getattr(_PIN_STATE, "depth", 0))
+        _PIN_STATE.depth = depth + 1
+        try:
+            yield
+        finally:
+            _PIN_STATE.depth = depth
+        return
 
     if not _has_affinity_api():
         yield
         return
 
     previous = set(os.sched_getaffinity(0))
-    target = _resolve_target(policy, previous)
-    if target is None or target == previous:
+    target = _resolve_target(resolved, previous)
+    if target is None:
         yield
         return
 
     did_pin = False
-    try:
-        os.sched_setaffinity(0, target)
-        did_pin = True
-    except OSError:
-        yield
-        return
+    if target != previous:
+        try:
+            os.sched_setaffinity(0, target)
+            did_pin = True
+        except OSError:
+            yield
+            return
 
     try:
+        _PIN_STATE.depth = 1
         yield
     finally:
+        _PIN_STATE.depth = 0
         if did_pin:
             try:
                 os.sched_setaffinity(0, previous)
@@ -66,13 +92,10 @@ def _has_affinity_api() -> bool:
     )
 
 
-def _resolve_target(policy: CpuPinning, allowed: set[int]) -> set[int] | None:
+def _resolve_target(resolved: bool | int, allowed: set[int]) -> set[int] | None:
     if not allowed:
         return None
-    resolved = _default_policy_from_env() if policy is None else policy
     if isinstance(resolved, bool):
-        if not resolved:
-            return None
         cpu = min(allowed)
     elif isinstance(resolved, int):
         cpu = resolved

@@ -119,9 +119,11 @@ def test_facade_public_exports_are_stable() -> None:
         "VEQlibSolver",
         "build",
         "build_kernel",
+        "current_cpu_affinity",
         "default_kernel_cache_root",
         "initial_policy_code",
         "payload_json_with_initial_policy",
+        "pinned_cpu",
         "residual_normalization_code",
         "solve_payload_sequence",
         "solver_method_code",
@@ -498,6 +500,58 @@ def test_pinned_cpu_can_be_disabled_by_env(monkeypatch) -> None:
     assert calls == []
 
 
+def test_pinned_cpu_nested_scope_reuses_outer_affinity(monkeypatch) -> None:
+    current = {6, 7}
+    calls: list[tuple[int, tuple[int, ...]]] = []
+
+    def fake_getaffinity(pid: int) -> set[int]:
+        assert pid == 0
+        return set(current)
+
+    def fake_setaffinity(pid: int, cpus: set[int]) -> None:
+        assert pid == 0
+        calls.append((pid, tuple(sorted(cpus))))
+        current.clear()
+        current.update(cpus)
+
+    monkeypatch.setattr("veqlib.facade.affinity.os.sched_getaffinity", fake_getaffinity)
+    monkeypatch.setattr("veqlib.facade.affinity.os.sched_setaffinity", fake_setaffinity)
+    monkeypatch.delenv("VEQLIB_PIN_CPU", raising=False)
+    monkeypatch.delenv("VEQLIB_PIN_CPU_ID", raising=False)
+
+    with pinned_cpu():
+        assert current == {6}
+        with pinned_cpu():
+            assert current == {6}
+        with pinned_cpu():
+            assert current == {6}
+
+    assert current == {6, 7}
+    assert calls == [(0, (6,)), (0, (6, 7))]
+
+
+def test_kernel_pinned_uses_handle_policy(monkeypatch) -> None:
+    events: list[tuple[str, object]] = []
+
+    class FakePin:
+        def __init__(self, policy: object) -> None:
+            self.policy = policy
+
+        def __enter__(self) -> None:
+            events.append(("enter", self.policy))
+
+        def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+            events.append(("exit", self.policy))
+
+    monkeypatch.setattr("veqlib.facade.kernel.kernel.pinned_cpu", FakePin)
+
+    handle = Kernel(make_kernel_topology(), pin_cpu=9)
+    with handle.pinned():
+        events.append(("body", None))
+
+    assert events == [("enter", 9), ("body", None), ("exit", 9)]
+
+
 def test_thread_owned_solver_wraps_native_calls_in_pin_context(monkeypatch) -> None:
     events: list[tuple[str, object]] = []
 
@@ -522,3 +576,23 @@ def test_thread_owned_solver_wraps_native_calls_in_pin_context(monkeypatch) -> N
 
     assert solver.solve_direct() == "ok"
     assert events == [("enter", 4), ("solve", None), ("exit", 4)]
+
+
+def test_thread_owned_solver_skips_pin_context_inside_outer_scope(monkeypatch) -> None:
+    events: list[str] = []
+
+    class RawSolver:
+        def solve_direct(self) -> str:
+            events.append("solve")
+            return "ok"
+
+    def fail_pin(policy: object) -> object:
+        raise AssertionError(f"unexpected inner pin context: {policy!r}")
+
+    monkeypatch.setattr("veqlib.facade.kernel.registry.cpu_pin_scope_active", lambda: True)
+    monkeypatch.setattr("veqlib.facade.kernel.registry.pinned_cpu", fail_pin)
+
+    solver = ThreadOwnedKernelSolver(RawSolver(), pin_cpu=4)
+
+    assert solver.solve_direct() == "ok"
+    assert events == ["solve"]

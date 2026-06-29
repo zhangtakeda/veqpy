@@ -70,8 +70,18 @@ affinity set, so an outer `taskset`, cgroup, or scheduler allocation remains the
 hard boundary. Set `VEQLIB_PIN_CPU=0` to disable this scoped pinning, or set
 `VEQLIB_PIN_CPU_ID=<cpu>` to choose a specific allowed CPU. Per-handle
 constructors also accept `pin_cpu=False` to disable, `pin_cpu=True`/`None` for
-auto, or `pin_cpu=<int>` to request a CPU id. VEQlib is much more sensitive to
-this than VEQPy because the native solve is a short, tight shared-library hot
+auto, or `pin_cpu=<int>` to request a CPU id. For high-volume loops, prefer a
+single outer scope:
+
+```python
+with kernel.pinned():
+    for case in cases:
+        result = kernel.solve(case)
+```
+
+Nested internal pin scopes become Python-only no-ops inside that outer scope, so
+the loop does not pay per-solve affinity syscalls. VEQlib is much more sensitive
+to this than VEQPy because the native solve is a short, tight shared-library hot
 loop; scheduler migration, cache warmth, and turbo/NUMA changes become a large
 fraction of elapsed time. VEQPy's Numba/SciPy path is callback- and
 Python-dispatch-heavy enough that the same migration cost is usually a smaller

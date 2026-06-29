@@ -8,7 +8,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-from ..affinity import CpuPinning, pinned_cpu
+from ..affinity import CpuPinning, cpu_pin_scope_active, pinned_cpu
 from .builder import KernelArtifact, build_kernel
 from .options import solver_method_code
 from .types import KernelTopology as Topology
@@ -52,54 +52,50 @@ class ThreadOwnedKernelSolver:
 
     def metadata(self) -> Any:
         self.check_thread()
-        with pinned_cpu(self._pin_cpu):
-            return self._solver.metadata()
+        return self._call_native(self._solver.metadata)
 
     def metadata_json(self) -> str:
         self.check_thread()
-        with pinned_cpu(self._pin_cpu):
-            return self._solver.metadata_json()
+        return self._call_native(self._solver.metadata_json)
 
     def set_case_json(self, payload: str) -> None:
         self.check_thread()
-        with pinned_cpu(self._pin_cpu):
-            self._solver.set_case_json(payload)
+        self._call_native(self._solver.set_case_json, payload)
 
     def set_kernel_runtime(self, *args: Any) -> None:
         self.check_thread()
-        with pinned_cpu(self._pin_cpu):
-            self._solver.set_kernel_runtime(*args)
+        self._call_native(self._solver.set_kernel_runtime, *args)
 
     def warmup(self, count: int) -> None:
         self.check_thread()
-        with pinned_cpu(self._pin_cpu):
-            self._solver.warmup(count)
+        self._call_native(self._solver.warmup, count)
 
     def solve_json(self) -> str:
         self.check_thread()
-        with pinned_cpu(self._pin_cpu):
-            return self._solver.solve_json()
+        return self._call_native(self._solver.solve_json)
 
     def solve_direct(self) -> Any:
         self.check_thread()
-        with pinned_cpu(self._pin_cpu):
-            return self._solver.solve_direct()
+        return self._call_native(self._solver.solve_direct)
 
     def adopt_last_solution_as_initial(self) -> None:
         self.check_thread()
-        with pinned_cpu(self._pin_cpu):
-            self._solver.adopt_last_solution_as_initial()
+        self._call_native(self._solver.adopt_last_solution_as_initial)
 
     def residual_var_into(self, x: Any, out: Any) -> None:
         self.check_thread()
-        with pinned_cpu(self._pin_cpu):
-            self._solver.residual_var_into(x, out)
+        self._call_native(self._solver.residual_var_into, x, out)
 
     @property
     def last_elapsed_ms(self) -> float:
         self.check_thread()
+        return float(self._call_native(lambda: self._solver.last_elapsed_ms))
+
+    def _call_native(self, method: Any, *args: Any) -> Any:
+        if self._pin_cpu is False or cpu_pin_scope_active():
+            return method(*args)
         with pinned_cpu(self._pin_cpu):
-            return float(self._solver.last_elapsed_ms)
+            return method(*args)
 
 
 class KernelRegistry:
