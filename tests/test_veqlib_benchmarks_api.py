@@ -88,6 +88,7 @@ def test_continuation_comparison_rows_use_effective_nfev() -> None:
         "policies": ["cold", "warm-predict", "warm"],
         "rows": [
             {
+                "status": "passed",
                 "experiment": "C1 Ip",
                 "update": "ip",
                 "relative_span": 0.005,
@@ -108,6 +109,7 @@ def test_continuation_comparison_rows_use_effective_nfev() -> None:
     assert rows == [
         {
             "experiment": "C1 Ip",
+            "status": "passed",
             "update": "ip",
             "span": 0.005,
             "case": "solovev",

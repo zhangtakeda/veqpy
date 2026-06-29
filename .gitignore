@@ -75,3 +75,5 @@ veqlib/artifact/
 /figures/
 /references/
 # /scripts/
+benchmarks/
+!benchmarks/*.py

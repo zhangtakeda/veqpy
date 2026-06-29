@@ -36,7 +36,7 @@ def test_kernel_builder_dry_run_emits_full_topology_contract(tmp_path) -> None:
 
     assert artifact.built is False
     common_archive = artifact.metadata["common_artifacts"]["nanobind_static"]["archive_path"]
-    assert str(tmp_path / "release" / "common") in common_archive
+    assert str(tmp_path / "release" / "_common") in common_archive
     assert "_common" not in Path(common_archive).parts
     assert "nanobind-static" not in Path(common_archive).parts
     assert artifact.metadata["topology"]["source"] == {

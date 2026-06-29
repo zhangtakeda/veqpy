@@ -53,7 +53,7 @@
 - [x] **case.config / `KernelSolve`**: runtime solve policy 与 case 一起进入 ABI, 不通过 JSON 热路径传递.
   - `method`: `powell`、`levenberg-marquardt`、`newton-krylov`、`newton-raphson` 或对应 int code.
   - `initial`: `cold-zeros`、`cold-geometric`、`cold` 或对应 int code.
-  - `continue`: `cold-zeros`、`cold-geometric`、`cold`、`warm-fixed`、`warm-predict`、`warm-chord`、`warm`(`warm-predict` alias) 或对应 int code.
+  - `continue`: `cold-zeros`、`cold-geometric`、`cold`、`warm-fixed`、`warm-predict`、`warm-chord`、`warm`(`warm-fixed` alias) 或对应 int code.
     Python `KernelSolve` 因 `continue` 是保留字而使用 `continuation` 字段; serialized payload 与 C++ ABI 使用 `continue_policy_code`.
   - `norm`: `none`、`fast`、`balanced`、`safe` 或对应 int code.
   - `max_residual`、`max_evaluations`、accepted residual 参数、residual normalization 参数均作为 double/int runtime 字段传入.
@@ -101,9 +101,9 @@ Kernel 对 C++ 接口采用**惰性加载(lazy-load)**: 默认不立即挂载 na
 - `continue`/`KernelSolve.continuation` 只定义同一个 C++ solver handle 已有历史解之后的后续求解策略:
   - `cold-zeros`、`cold-geometric`、`cold`: 后续点也强制 cold restart.
   - `warm-fixed`: 只使用 C++ 侧最近一次 accepted solution 作为 candidate, 并用当前 case residual 做 certification; 不从 Python 侧读取额外状态.
-  - `warm-predict`: 在 `warm-fixed` 基础上使用 C++ 侧 latest/previous/older accepted solution 缓存做 secant/quadratic predictor; 数据来源仍完全在 C++ handle 内部.
+  - `warm-predict`: 在 `warm-fixed` 基础上使用 C++ 侧 latest/previous/older accepted solution 缓存做 secant/quadratic predictor; 至少需要同一 handle 内已有两个 accepted solve 才会尝试 secant predictor, 三个 accepted solve 才会尝试 quadratic predictor; 数据来源仍完全在 C++ handle 内部.
   - `warm-chord`: 在 `warm-predict` 基础上, 对当前 continuation candidate 临时构造一次 chord Jacobian 并尝试 chord-Newton certificate; 不维护持久 `chord_jacobian_` 缓存, 因此该 Jacobian 构造的 residual evaluations 属于显式额外成本.
-  - `warm`: 当前等价于 `warm-predict`; 后续若加入更高级 dispatcher, `warm` 才自动派发到具体策略.
+  - `warm`: 当前等价于 `warm-fixed`; 后续若加入更高级 dispatcher, `warm` 才自动派发到具体策略.
 - `KernelResult.nfev` / benchmark 中的 `effective_nfev` 必须包含 initial residual probe、warm certificate/predictor/chord 尝试、fallback nonlinear solve 以及 final residual check. 不允许只报告 nonlinear solver 自身的 `solver_nfev`.
 - [x] **`kernel.close()`**: 释放当前 handle 对 C++ solver/context/workspace 的引用. native module 仍由 Python import 系统和 process cache 持有, 不保证卸载.
 

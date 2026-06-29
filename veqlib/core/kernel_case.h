@@ -590,15 +590,14 @@ namespace veqlib_kernel_api
 
         constexpr bool continue_policy_uses_predictor(int code) noexcept
         {
-            return code == ContinuePolicyWarmPredict || code == ContinuePolicyWarmChord ||
-                   code == ContinuePolicyWarm;
+            return code == ContinuePolicyWarmPredict || code == ContinuePolicyWarmChord;
         }
 
         constexpr bool continue_policy_uses_chord(int code) noexcept { return code == ContinuePolicyWarmChord; }
 
         constexpr int resolved_continue_policy(int code) noexcept
         {
-            return code == ContinuePolicyWarm ? ContinuePolicyWarmPredict : code;
+            return code == ContinuePolicyWarm ? ContinuePolicyWarmFixed : code;
         }
 
         inline void validate_initial_policy_code(int code)

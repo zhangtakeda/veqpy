@@ -1214,9 +1214,11 @@ namespace veqlib_python
             return true;
         }
 
+        bool has_predictor_history() const noexcept { return has_latest_solution_ && has_previous_solution_; }
+
         bool try_predictor_certificates(int& certification_evals, double& best_raw_norm, SolveResult& result)
         {
-            if (!has_latest_solution_ || !has_previous_solution_)
+            if (!has_predictor_history())
                 return false;
 
             std::array<double, KernelShape::x_size> secant{};
