@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from veqlib.kernel import (
+from veqlib.facade import (
     INITIAL_POLICY_COLD,
     INITIAL_POLICY_WARM_CLONE,
     payload_json_with_initial_policy,

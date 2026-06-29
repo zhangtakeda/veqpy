@@ -58,7 +58,7 @@ and easier to reuse than full solver-native equilibrium or reconstruction pipeli
   active profile lengths, while `Profile` is used for serializable shape-profile
   snapshots on `Equilibrium`. `Grid` and `Equilibrium` use reactive derived properties
   to lazily reconstruct geometry and physics diagnostics by formula.
-- **Experimental VEQlib bridge**: `veqlib.kernel` exposes a C++-aligned
+- **Experimental VEQlib bridge**: `veqlib.facade` exposes a C++-aligned
   `KernelTopology + KernelInput + KernelSolve` API and builds/loads optional
   topology-specific VEQlib C++/nanobind kernels for the current MVP path. This is
   an optional acceleration path; the standard Python/Numba solver remains the default.
@@ -93,8 +93,8 @@ For a runtime-only install from a local source checkout, omit the `dev` extra:
 ```
 
 The optional VEQlib C++ kernel layer under `veqlib/` is not required for normal
-Python/Numba use. Its `facade/` tree provides `veqlib.kernel`; its `core/` tree
-holds the C++/CMake implementation. It is intentionally separate from VEQPy internals. Building it requires a local C++20 toolchain and native
+Python/Numba use. Its `facade/` tree provides `veqlib.facade`, its `core/` tree
+holds the C++/CMake implementation, and `benchmarks/` holds comparison scripts. It is intentionally separate from VEQPy internals. Building it requires a local C++20 toolchain and native
 libraries such as CMake 3.24+, `clang++`, nanobind, GCEM, nlohmann-json, CMINPACK,
 LAPACKE/LAPACK, and OpenBLAS; see [`veqlib/README.md`](veqlib/README.md) for the
 current build boundary and supported topology.

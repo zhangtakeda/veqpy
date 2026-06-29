@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from veqlib.kernel import KernelTopology, build_kernel
+from veqlib.facade import KernelTopology, build_kernel
 
 
 def test_kernel_builder_dry_run_emits_full_topology_contract(tmp_path) -> None:

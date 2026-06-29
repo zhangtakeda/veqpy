@@ -29,9 +29,8 @@ from typing import Any
 import numpy as np
 
 THIS_FILE = Path(__file__).resolve()
-VEQLIB_ROOT = THIS_FILE.parents[3]
-REPO_ROOT = THIS_FILE.parents[4]
-FACADE_ROOT = VEQLIB_ROOT / "facade"
+VEQLIB_ROOT = THIS_FILE.parents[1]
+REPO_ROOT = THIS_FILE.parents[2]
 CORE_DIR = VEQLIB_ROOT / "core"
 SCRIPT_DIR = REPO_ROOT / "scripts"
 FIGURE06_PATH = SCRIPT_DIR / "06-high-order-reconstructions.py"
@@ -44,11 +43,10 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("MKL_NUM_THREADS", "1")
 os.environ.setdefault("MPLCONFIGDIR", str(DEFAULT_MPLCONFIG))
 
-for path in (FACADE_ROOT, REPO_ROOT):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
-from veqlib.kernel import (  # noqa: E402
+from veqlib.facade import (  # noqa: E402
     INITIAL_POLICY_COLD,
     RESIDUAL_NORMALIZATION_FAST,
     SOLVER_METHOD_POWELL,
@@ -603,7 +601,7 @@ def main(argv: list[str] | None = None) -> int:
     selected = set(args.case) if args.case else None
     cases = _make_cases(args.repeat, args.warmup, selected)
     cache = args.cache_root or Path(tempfile.mkdtemp(prefix="veqlib-4case-"))
-    registry = KernelRegistry(cache_root=cache, source_dir=CORE_DIR)
+    registry = KernelRegistry(cache_root=cache)
     rows = []
     for case in cases:
         print(f"measuring {case.name} ...", flush=True)

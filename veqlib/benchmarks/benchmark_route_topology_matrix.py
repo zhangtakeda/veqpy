@@ -33,9 +33,8 @@ from typing import Any
 import numpy as np
 
 THIS_FILE = Path(__file__).resolve()
-VEQLIB_ROOT = THIS_FILE.parents[3]
-REPO_ROOT = THIS_FILE.parents[4]
-FACADE_ROOT = VEQLIB_ROOT / "facade"
+VEQLIB_ROOT = THIS_FILE.parents[1]
+REPO_ROOT = THIS_FILE.parents[2]
 CORE_DIR = VEQLIB_ROOT / "core"
 DEFAULT_OUTPUT = Path("/tmp/veqlib_route_topology_matrix.json")
 DEFAULT_MPLCONFIG = Path("/tmp/veqpy-mpl")
@@ -47,11 +46,10 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("MKL_NUM_THREADS", "1")
 os.environ.setdefault("MPLCONFIGDIR", str(DEFAULT_MPLCONFIG))
 
-for path in (FACADE_ROOT, REPO_ROOT):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
-from veqlib.kernel import (  # noqa: E402
+from veqlib.facade import (  # noqa: E402
     SOLVER_METHOD_LEVENBERG_MARQUARDT,
     SOLVER_METHOD_POWELL,
     KernelBoundary,

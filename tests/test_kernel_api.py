@@ -8,9 +8,10 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-import veqlib.kernel as kernel
 from numpy.testing import assert_allclose
-from veqlib.kernel import (
+
+import veqlib.facade as facade
+from veqlib.facade import (
     INITIAL_POLICY_COLD,
     RESIDUAL_NORMALIZATION_FAST,
     SOLVER_METHOD_POWELL,
@@ -84,8 +85,8 @@ def tiny_kernel_input(*, case_name: str | None = None) -> KernelInput:
     )
 
 
-def test_kernel_public_exports_are_stable() -> None:
-    assert kernel.__all__ == [
+def test_facade_public_exports_are_stable() -> None:
+    assert facade.__all__ == [
         "INITIAL_POLICY_COLD",
         "INITIAL_POLICY_COLD_GEOMETRIC",
         "INITIAL_POLICY_COLD_ZEROS",
@@ -125,11 +126,10 @@ def test_kernel_public_exports_are_stable() -> None:
     ]
 
 
-def test_veqlib_kernel_import_does_not_import_veqpy() -> None:
+def test_veqlib_facade_import_does_not_import_veqpy() -> None:
     env = os.environ.copy()
     existing_pythonpath = env.get("PYTHONPATH")
-    facade_root = PROJECT_ROOT / "veqlib" / "facade"
-    source_paths = os.pathsep.join((str(facade_root), str(PROJECT_ROOT)))
+    source_paths = str(PROJECT_ROOT)
     env["PYTHONPATH"] = (
         source_paths
         if not existing_pythonpath
@@ -139,7 +139,7 @@ def test_veqlib_kernel_import_does_not_import_veqpy() -> None:
         [
             sys.executable,
             "-c",
-            "import sys; import veqlib.kernel; "
+            "import sys; import veqlib.facade; "
             "print(any(name == 'veqpy' or name.startswith('veqpy.') for name in sys.modules))",
         ],
         env=env,
@@ -256,7 +256,7 @@ def test_kernel_solve_payload_uses_codes_and_x_size_default_budget() -> None:
 
 def test_kernel_handle_build_dry_run_and_payload_json(tmp_path) -> None:
     topology = make_kernel_topology()
-    handle = kernel.build(topology, cache_root=tmp_path, dry_run=True)
+    handle = facade.build(topology, cache_root=tmp_path, dry_run=True)
     payload = json.loads(handle.payload_json(tiny_kernel_input(case_name="payload-smoke")))
 
     assert handle.x_size == 9

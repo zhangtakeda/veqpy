@@ -14,20 +14,18 @@ from typing import Any
 import numpy as np
 
 THIS_FILE = Path(__file__).resolve()
-VEQLIB_ROOT = THIS_FILE.parents[3]
-REPO_ROOT = THIS_FILE.parents[4]
-FACADE_ROOT = VEQLIB_ROOT / "facade"
+VEQLIB_ROOT = THIS_FILE.parents[1]
+REPO_ROOT = THIS_FILE.parents[2]
 CORE_DIR = VEQLIB_ROOT / "core"
 BENCHMARK_PATH = REPO_ROOT / "tests" / "benchmark.py"
 DEFAULT_CXX_MODULE_DIR = CORE_DIR / "build" / "release"
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "tests" / "benchmark"
 FIXED_CONSTRAINT = "Ip"
 
-for path in (FACADE_ROOT, REPO_ROOT):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
-from veqlib.kernel import (  # noqa: E402
+from veqlib.facade import (  # noqa: E402
     INITIAL_POLICY_COLD,
     RESIDUAL_NORMALIZATION_FAST,
     SOLVER_METHOD_POWELL,

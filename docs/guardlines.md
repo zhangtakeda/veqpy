@@ -3,10 +3,10 @@
 **核心原则**: VEQPy 与 VEQlib 是两条互不拥有的实现线. VEQPy 继续作为 Python/Numba-engine 求解器; VEQlib 是后续发展的 C++/nanobind kernel runtime, 除结果对照、benchmark、迁移实验外不依赖 VEQPy.
 
 - **VEQPy**: 保留现有 `Grid + OperatorCase -> Operator -> Solver -> Equilibrium` 的 Numba 求解引擎、模型对象、可视化和序列化语义. 这些 API 不再承载 VEQlib compile-time topology 或 runtime bridge.
-- **VEQPy/adapter**: 如果需要从 `Problem`、`Operator`、GEQDSK 等高层对象转换到 VEQlib kernel 输入, 转换只能发生在 `veqlib.kernel` 之外的 adapter、example 或 benchmark 层. adapter 是边界外壳, 不是 VEQPy 公共 model/operator API.
+- **VEQPy/adapter**: 如果需要从 `Problem`、`Operator`、GEQDSK 等高层对象转换到 VEQlib kernel 输入, 转换只能发生在 `veqlib.facade` 之外的 adapter、example 或 benchmark 层. adapter 是边界外壳, 不是 VEQPy 公共 model/operator API.
 - **VEQPy 与 VEQlib 的交集**: 只允许 result comparison、benchmark、reference data translation 和迁移实验. VEQlib 不从 VEQPy 复用 `source_plan`、`packed_layout`、`Problem`、`Operator` 等内部语义.
-- **`veqlib.kernel`**: 是与 C++/nanobind ABI 对齐的 Python bridge, 不是 VEQPy model adapter. 它只拥有 `KernelTopology`、`KernelBuild`、`KernelBoundary`、`KernelInput`、`KernelSolve`、`KernelResult`、artifact registry 和 handle lifecycle.
-- **`veqlib.kernel` 禁止依赖**: `veqpy.model.Problem`、`veqpy.operator.Operator`、`source_plan`、`packed_layout` 等 VEQPy 内部语义. `Problem` 兼容若保留, 必须放在 `veqlib.kernel` 之外的独立 adapter/benchmark 层, 不得回流到 kernel package 或 VEQPy 公共 model 层.
+- **`veqlib.facade`**: 是与 C++/nanobind ABI 对齐的 Python bridge, 不是 VEQPy model adapter. 它只拥有 `KernelTopology`、`KernelBuild`、`KernelBoundary`、`KernelInput`、`KernelSolve`、`KernelResult`、artifact registry 和 handle lifecycle.
+- **`veqlib.facade` 禁止依赖**: `veqpy.model.Problem`、`veqpy.operator.Operator`、`source_plan`、`packed_layout` 等 VEQPy 内部语义. `Problem` 兼容若保留, 必须放在 `veqlib.facade` 之外的独立 adapter/benchmark 层, 不得回流到 kernel package 或 VEQPy 公共 model 层.
 - **VEQlib**: 以计算性能与 HPC 为唯一设计准则. 所产出的 kernel 在 kernel.solve 时, C++ 端必须做到零内存分配, 且除 index 操作与 double 运算外尽可能消除一切额外开销.
 - **VEQlib**: 不面向用户, 无需考虑任何安全性兜底策略, 包括非理想边缘情况下的行为.
 - **测试定位**: pytest 是 commit-local regression/verification 工具, 不是程序 API 或架构边界的定义来源. API 与边界以本文档、源码模块边界和显式设计决策为准; 测试只证明当前提交保持了期望行为.
@@ -95,7 +95,7 @@ VEQlib 的 ABI 只接受以下类型: `double`, 1D C-contiguous `float64` ndarra
 必须区分 **ABI 校验** 与 **安全兜底**:
 
 - **ABI 校验必须做**: nanobind/C++ 与 Python `Kernel` 边界必须检查 ndarray ndim、dtype、C-contiguous、source length 是否等于 `sample_count`、offset length 是否适配 `M_max + 1`、x/out shape 是否等于 `x_size`、enum code 是否合法、topology 是否支持当前 route/source ownership.
-- **安全兜底不做**: VEQlib 不做 silent clipping、自动重采样、route fallback、profile ownership 自动修正、物理参数猜测、失败后自动切换 solver 等用户体验型容错. 这些如果需要, 应发生在 `veqlib.kernel` 边界之外的 adapter/example/benchmark 层, 不进入 VEQlib hot path.
+- **安全兜底不做**: VEQlib 不做 silent clipping、自动重采样、route fallback、profile ownership 自动修正、物理参数猜测、失败后自动切换 solver 等用户体验型容错. 这些如果需要, 应发生在 `veqlib.facade` 边界之外的 adapter/example/benchmark 层, 不进入 VEQlib hot path.
 - **错误策略**: ABI contract violation 应立即抛出明确错误; 不能在 hot path 中静默修补输入.
 
 ---

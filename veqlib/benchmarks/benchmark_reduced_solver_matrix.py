@@ -20,9 +20,8 @@ from typing import Any
 import numpy as np
 
 THIS_FILE = Path(__file__).resolve()
-VEQLIB_ROOT = THIS_FILE.parents[3]
-REPO_ROOT = THIS_FILE.parents[4]
-FACADE_ROOT = VEQLIB_ROOT / "facade"
+VEQLIB_ROOT = THIS_FILE.parents[1]
+REPO_ROOT = THIS_FILE.parents[2]
 CORE_DIR = VEQLIB_ROOT / "core"
 SCRIPT_DIR = REPO_ROOT / "scripts"
 FIG07_PATH = SCRIPT_DIR / "07-pareto-analysis.py"
@@ -35,9 +34,8 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("MKL_NUM_THREADS", "1")
 os.environ.setdefault("MPLCONFIGDIR", str(DEFAULT_MPLCONFIG))
 
-for path in (FACADE_ROOT, REPO_ROOT):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
@@ -53,7 +51,7 @@ from config import (  # noqa: E402
     load_pf_benchmark,
 )
 
-from veqlib.kernel import (  # noqa: E402
+from veqlib.facade import (  # noqa: E402
     INITIAL_POLICY_COLD,
     RESIDUAL_NORMALIZATION_FAST,
     SOLVER_METHOD_LEVENBERG_MARQUARDT,
@@ -500,7 +498,7 @@ def _case_rows(
     warmup: int,
     repeat: int,
 ) -> list[dict[str, Any]]:
-    registry = KernelRegistry(cache_root=cache_root, source_dir=CORE_DIR)
+    registry = KernelRegistry(cache_root=cache_root)
     rows: list[dict[str, Any]] = []
     for case in cases:
         print(f"[matrix] {case.row_label}: VEQPy hybr baseline", flush=True)

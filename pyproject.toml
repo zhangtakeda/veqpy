@@ -57,7 +57,7 @@ Issues = "https://github.com/zhangtakeda/veqpy/issues"
 include-package-data = false
 
 [tool.setuptools.packages.find]
-where = [".", "veqlib/facade"]
+where = ["."]
 include = ["veqpy*", "veqlib*"]
 namespaces = false
 
@@ -70,7 +70,7 @@ select = ["E", "F", "W", "I"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["veqlib/facade"]
+pythonpath = ["."]
 addopts = "-p no:cacheprovider"
 markers = [
     "slow: tests that may compile kernels or run nonlinear solves",

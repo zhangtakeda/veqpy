@@ -35,7 +35,7 @@ VEQPy 适合参数扫描、源项预处理、控制导向迭代、输运耦合�
 - **明确的运行时边界**: `Grid + Problem -> Operator -> Solver -> Equilibrium` 将 packed 系数、运行时 workspace、非线性求解和求解后快照分层处理。`Problem` 是公开的问题定义类型。
 - **GEQDSK 工作流**: 支持 GEQDSK 读写、从 GEQDSK 边界拟合固定边界、快照导出、磁通面比较和常用诊断。
 - **公式化模型对象**: `Problem` 保存用户侧求解输入和 active profile 长度，`Profile` 用于 `Equilibrium` 上可序列化的形状剖面快照；`Grid` 与 `Equilibrium` 使用 reactive 派生属性按公式惰性重建几何量和物理诊断量。
-- **实验性 VEQlib bridge**: `veqlib.kernel` 暴露与 C++ 对齐的 `KernelTopology + KernelInput + KernelSolve` API，并按需构建/加载 topology-specific 的 VEQlib C++/nanobind kernel；这是可选加速路径，标准 Python/Numba 求解器仍是默认路径。
+- **实验性 VEQlib bridge**: `veqlib.facade` 暴露与 C++ 对齐的 `KernelTopology + KernelInput + KernelSolve` API，并按需构建/加载 topology-specific 的 VEQlib C++/nanobind kernel；这是可选加速路径，标准 Python/Numba 求解器仍是默认路径。
 
 ## 安装
 
@@ -63,7 +63,7 @@ python3.12 -m venv .venv
 .venv/bin/python -m pip install .
 ```
 
-`veqlib/` 下的可选 VEQlib C++ kernel 层不是普通 Python/Numba 使用的必要依赖。其 `facade/` 树提供 `veqlib.kernel`，`core/` 树保存 C++/CMake 实现，并且刻意与 VEQPy 内部语义分离。构建它需要本地 C++20 工具链和原生库，例如 CMake 3.24+、`clang++`、nanobind、GCEM、nlohmann-json、CMINPACK、LAPACKE/LAPACK 和 OpenBLAS；当前构建边界与支持 topology 见 [`veqlib/README.md`](../veqlib/README.md)。
+`veqlib/` 下的可选 VEQlib C++ kernel 层不是普通 Python/Numba 使用的必要依赖。其 `facade/` 树提供 `veqlib.facade`，`core/` 树保存 C++/CMake 实现，`benchmarks/` 保存对照脚本，并且刻意与 VEQPy 内部语义分离。构建它需要本地 C++20 工具链和原生库，例如 CMake 3.24+、`clang++`、nanobind、GCEM、nlohmann-json、CMINPACK、LAPACKE/LAPACK 和 OpenBLAS；当前构建边界与支持 topology 见 [`veqlib/README.md`](../veqlib/README.md)。
 
 下面的命令都显式使用 `.venv`；是否执行 `source .venv/bin/activate` 只是个人习惯。
 

@@ -21,12 +21,10 @@ from pathlib import Path
 import numpy as np
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-VEQLIB_FACADE_ROOT = PROJECT_ROOT / "veqlib" / "facade"
-for path in (VEQLIB_FACADE_ROOT, PROJECT_ROOT):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-from veqlib.kernel import (  # noqa: E402
+from veqlib.facade import (  # noqa: E402
     Kernel,
     KernelBoundary,
     KernelBuild,

@@ -15,9 +15,8 @@ from pathlib import Path
 from typing import Any
 
 THIS_FILE = Path(__file__).resolve()
-VEQLIB_ROOT = THIS_FILE.parents[3]
-REPO_ROOT = THIS_FILE.parents[4]
-FACADE_ROOT = VEQLIB_ROOT / "facade"
+VEQLIB_ROOT = THIS_FILE.parents[1]
+REPO_ROOT = THIS_FILE.parents[2]
 CORE_DIR = VEQLIB_ROOT / "core"
 DEFAULT_OUTPUT = Path("/tmp/veqlib_4case_ip_scan.json")
 DEFAULT_MPLCONFIG = Path("/tmp/veqpy-mpl")
@@ -28,12 +27,11 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("MKL_NUM_THREADS", "1")
 os.environ.setdefault("MPLCONFIGDIR", str(DEFAULT_MPLCONFIG))
 
-for path in (FACADE_ROOT, REPO_ROOT):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from veqlib.benchmarks.benchmark_4case_compare import _make_cases  # noqa: E402
-from veqlib.kernel import KernelRegistry, VEQlibSolver, solve_payload_sequence  # noqa: E402
+from veqlib.facade import KernelRegistry, VEQlibSolver, solve_payload_sequence  # noqa: E402
 
 
 def _quantile(values: list[float], q: float) -> float:
@@ -194,7 +192,7 @@ def main(argv: list[str] | None = None) -> int:
     selected = set(args.case) if args.case else None
     cases = _make_cases(repeat=1, warmup=0, selected=selected)
     cache = args.cache_root or Path(tempfile.mkdtemp(prefix="veqlib-4case-ip-scan-"))
-    registry = KernelRegistry(cache_root=cache, source_dir=CORE_DIR)
+    registry = KernelRegistry(cache_root=cache)
     rows = []
     for case_data in cases:
         print(f"measuring {case_data.name} ...", flush=True)

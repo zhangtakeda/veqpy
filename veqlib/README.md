@@ -1,10 +1,10 @@
 # VEQlib
 
 VEQlib is the experimental C++ kernel layer for VEQPy. The tree is split into
-`facade/` for the Python-facing typed API and benchmark adapters, and `core/` for
-the C++/CMake implementation. The Python package remains the owner of facade
-lifecycle, artifact loading, and test orchestration; C++ remains the owner of
-core kernel semantics and hot-path execution. Setup-time numerical constants are being moved into C++20
+`facade/` for Python-facing typed APIs and artifact lifecycle, `core/` for the
+C++/CMake implementation, and `benchmarks/` for benchmark and migration scripts.
+The Python facade remains the owner of handle lifecycle and artifact loading; C++
+remains the owner of core kernel semantics and hot-path execution. Setup-time numerical constants are being moved into C++20
 `constexpr` generation so the runtime kernel can consume fixed-layout arrays
 without Python-side numerical setup. This directory is for the gradually
 introduced C++20 pieces:
@@ -54,7 +54,7 @@ objects are mutable workspace owners and should not be shared across Python
 threads; use one solver instance per thread.
 
 The Python bridge builds topology-specific shared-library artifacts through
-`veqlib.kernel`. The public runtime shape is `KernelTopology + KernelInput +
+`veqlib.facade`. The public runtime shape is `KernelTopology + KernelInput +
 KernelSolve`; `KernelInput` is already lowered to the C++ runtime contract and
 does not depend on VEQPy `Problem`/`Operator` objects. Kernel artifacts are
 cached under `veqlib/artifact/` by default, under `VEQLIB_KERNEL_CACHE` when set,
@@ -283,10 +283,10 @@ overhead can be estimated as Python outer time minus C++ inner time.
 
 For optimization gates, run the four-case artifact benchmark from the repository
 root. It covers the 18-parameter PF case plus the solovev, chease, and efit
-GEQDSK cases through the Python `Topology` / nanobind-artifact path:
+GEQDSK cases through the Python `KernelTopology` / nanobind-artifact path:
 
 ```bash
-taskset -c 0 .venv/bin/python veqlib/facade/veqlib/benchmarks/benchmark_4case_compare.py \
+taskset -c 0 .venv/bin/python veqlib/benchmarks/benchmark_4case_compare.py \
   --repeat 11 \
   --warmup 3 \
   --output /tmp/veqlib_4case_compare.json
@@ -304,7 +304,7 @@ before the next warm-clone point, so a cold first point can seed the continuatio
 sequence without changing the residual definition:
 
 ```bash
-taskset -c 0 .venv/bin/python veqlib/facade/veqlib/benchmarks/benchmark_4case_ip_scan.py \
+taskset -c 0 .venv/bin/python veqlib/benchmarks/benchmark_4case_ip_scan.py \
   --points 11 \
   --relative-span 0.20 \
   --repeat 11 \
