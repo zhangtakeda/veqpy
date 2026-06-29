@@ -91,6 +91,13 @@ namespace veqlib_kernel_api
         {
             KernelOperator op;
             CaseInput      input{};
+            PackedVector   initial_raw{uninitialized};
+            PackedVector   initial_scaled{uninitialized};
+            std::array<double, 2> initial_alpha{};
+            double         initial_raw_norm    = 0.0;
+            double         initial_scaled_norm = 0.0;
+            bool           has_initial_residual = false;
+            int            initial_residual_evaluations = 0;
             int            jacobian_component_evaluations = 0;
             double         residual_callback_ms           = 0.0;
             double         residual_kernel_ms             = 0.0;
@@ -225,6 +232,16 @@ namespace veqlib_kernel_api
             default:
                 return build_none_residual_scale();
             }
+        }
+
+        int residual_scale_extra_evaluations(const CaseInput& input) noexcept
+        {
+            if (input.residual_normalization_code != ResidualNormalizationSafe)
+                return 0;
+            if (input.residual_normalization_probe_count <= 0 || !is_finite(input.residual_normalization_probe_step) ||
+                input.residual_normalization_probe_step <= 0.0)
+                return 0;
+            return input.residual_normalization_probe_count;
         }
 
         void scaled_residual_z_no_count(SolveContext& context, const double* z, double* fvec) noexcept;
@@ -470,9 +487,10 @@ namespace veqlib_kernel_api
             SolveContext& context, SolveResult& result, const double* z, int info, int nfev, int njev, int callbacks)
         {
             result.info      = info;
-            result.nfev      = nfev;
+            result.nfev      = context.initial_residual_evaluations + nfev + 1;
             result.njev      = njev;
             result.callbacks = callbacks;
+            result.solver_nfev = nfev;
             result.x         = decode_z_to_x(std::span<const double, KernelShape::x_size>{z, KernelShape::x_size},
                                      context.input.x_scale);
             const auto final_residual_started = std::chrono::steady_clock::now();
@@ -497,6 +515,16 @@ namespace veqlib_kernel_api
             result.linear_solve_ms      = context.linear_solve_ms;
             result.alpha    = {context.op.workspace.source_runtime.alpha1, context.op.workspace.source_runtime.alpha2};
             result.accepted = result.raw_norm <= acceptance_threshold(context.input);
+            result.cert_threshold                     = acceptance_threshold(context.input);
+            result.initial_raw_norm                   = context.initial_raw_norm;
+            result.fast_path_raw_norm                 = context.initial_raw_norm;
+            result.initial_residual_evaluations       = context.initial_residual_evaluations;
+            result.certification_residual_evaluations = 0;
+            result.total_raw_residual_evaluations     = result.nfev;
+            result.accepted_by                        = "solver";
+            result.fast_path                          = "none";
+            result.fallback_used                      = false;
+            result.fallback_reason                    = "";
         }
 
         template <typename SolverContext>
@@ -624,11 +652,22 @@ namespace veqlib_kernel_api
                 {"scaled_norm", result.scaled_norm},
                 {"info", result.info},
                 {"nfev", result.nfev},
+                {"solver_nfev", result.solver_nfev},
                 {"njev", result.njev},
                 {"callback_evaluations", result.callbacks},
                 {"jacobian_component_evaluations", result.jacobian_component_evaluations},
                 {"jvp_evaluations", result.jvp_evaluations},
                 {"linear_iterations", result.linear_iterations},
+                {"accepted_by", result.accepted_by},
+                {"fast_path", result.fast_path},
+                {"fallback_used", result.fallback_used},
+                {"fallback_reason", result.fallback_reason},
+                {"cert_threshold", result.cert_threshold},
+                {"initial_raw_norm", result.initial_raw_norm},
+                {"fast_path_raw_norm", result.fast_path_raw_norm},
+                {"initial_residual_evaluations", result.initial_residual_evaluations},
+                {"certification_residual_evaluations", result.certification_residual_evaluations},
+                {"total_raw_residual_evaluations", result.total_raw_residual_evaluations},
                 {"callback_timing_ms",
                  {
                      {"residual_total", result.residual_callback_ms},

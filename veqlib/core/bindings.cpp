@@ -31,6 +31,7 @@ NB_MODULE(veqlib_ext, module)
              nb::arg("accepted_residual_factor"),
              nb::arg("accepted_residual_floor"),
              nb::arg("initial_policy_code"),
+             nb::arg("continue_policy_code"),
              nb::arg("residual_normalization_code"),
              nb::arg("residual_normalization_floor"),
              nb::arg("residual_normalization_max_ratio"),

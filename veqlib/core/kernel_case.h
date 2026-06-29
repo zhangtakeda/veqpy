@@ -448,9 +448,9 @@ namespace veqlib_kernel_api
             }
         }
 
-        void apply_initial_policy(CaseInput& input)
+        void apply_cold_policy(CaseInput& input, int policy_code)
         {
-            switch (input.initial_policy_code)
+            switch (policy_code)
             {
             case InitialPolicyColdZeros:
                 input.x0.fill(0.0);
@@ -464,12 +464,12 @@ namespace veqlib_kernel_api
                 else
                     input.x0.fill(0.0);
                 return;
-            case InitialPolicyWarmClone:
-                return;
             default:
-                throw std::runtime_error("invalid initial policy code");
+                throw std::runtime_error("invalid cold policy code");
             }
         }
+
+        void apply_initial_policy(CaseInput& input) { apply_cold_policy(input, input.initial_policy_code); }
 
         constexpr const char* solver_entrypoint(SolverKind solver) noexcept
         {
@@ -548,14 +548,58 @@ namespace veqlib_kernel_api
                 return "cold-geometric";
             case InitialPolicyCold:
                 return "cold";
-            case InitialPolicyWarmClone:
-                return "warm-clone";
             default:
                 return "unknown";
             }
         }
 
-        constexpr bool initial_policy_is_warm_clone(int code) noexcept { return code == InitialPolicyWarmClone; }
+        constexpr const char* continue_policy_name(int code) noexcept
+        {
+            switch (code)
+            {
+            case ContinuePolicyColdZeros:
+                return "cold-zeros";
+            case ContinuePolicyColdGeometric:
+                return "cold-geometric";
+            case ContinuePolicyCold:
+                return "cold";
+            case ContinuePolicyWarmFixed:
+                return "warm-fixed";
+            case ContinuePolicyWarmPredict:
+                return "warm-predict";
+            case ContinuePolicyWarmChord:
+                return "warm-chord";
+            case ContinuePolicyWarm:
+                return "warm";
+            default:
+                return "unknown";
+            }
+        }
+
+        constexpr bool continue_policy_is_cold(int code) noexcept
+        {
+            return code == ContinuePolicyColdZeros || code == ContinuePolicyColdGeometric ||
+                   code == ContinuePolicyCold;
+        }
+
+        constexpr bool continue_policy_uses_warm_state(int code) noexcept
+        {
+            return code == ContinuePolicyWarmFixed || code == ContinuePolicyWarmPredict ||
+                   code == ContinuePolicyWarmChord || code == ContinuePolicyWarm;
+        }
+
+        constexpr bool continue_policy_uses_predictor(int code) noexcept
+        {
+            return code == ContinuePolicyWarmPredict || code == ContinuePolicyWarmChord ||
+                   code == ContinuePolicyWarm;
+        }
+
+        constexpr bool continue_policy_uses_chord(int code) noexcept { return code == ContinuePolicyWarmChord; }
+
+        constexpr int resolved_continue_policy(int code) noexcept
+        {
+            return code == ContinuePolicyWarm ? ContinuePolicyWarmPredict : code;
+        }
 
         inline void validate_initial_policy_code(int code)
         {
@@ -564,11 +608,29 @@ namespace veqlib_kernel_api
             case InitialPolicyColdZeros:
             case InitialPolicyColdGeometric:
             case InitialPolicyCold:
-            case InitialPolicyWarmClone:
                 return;
             default:
                 throw std::runtime_error("solver.initial_policy_code must be 1 (cold-zeros), 2 (cold-geometric), "
-                                         "3 (cold), or 4 (warm-clone)");
+                                         "or 3 (cold)");
+            }
+        }
+
+        inline void validate_continue_policy_code(int code)
+        {
+            switch (code)
+            {
+            case ContinuePolicyColdZeros:
+            case ContinuePolicyColdGeometric:
+            case ContinuePolicyCold:
+            case ContinuePolicyWarmFixed:
+            case ContinuePolicyWarmPredict:
+            case ContinuePolicyWarmChord:
+            case ContinuePolicyWarm:
+                return;
+            default:
+                throw std::runtime_error(
+                    "solver.continue_policy_code must be 1 (cold-zeros), 2 (cold-geometric), 3 (cold), "
+                    "4 (warm-fixed), 5 (warm-predict), 6 (warm-chord), or 7 (warm)");
             }
         }
 

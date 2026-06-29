@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <memory>
 #include <span>
 #include <stdexcept>
@@ -21,6 +22,7 @@
 #include "kernel_case.h"
 #include "kernel_runtime.h"
 #include "kernel_topology.h"
+#include "linalg.h"
 #include "tensor.h"
 
 namespace nb = nanobind;
@@ -36,7 +38,13 @@ namespace veqlib_python
     using veqlib_kernel_api::CaseInput;
     using veqlib_kernel_api::InitialPolicyColdGeometric;
     using veqlib_kernel_api::InitialPolicyCold;
-    using veqlib_kernel_api::InitialPolicyWarmClone;
+    using veqlib_kernel_api::ContinuePolicyColdZeros;
+    using veqlib_kernel_api::ContinuePolicyColdGeometric;
+    using veqlib_kernel_api::ContinuePolicyCold;
+    using veqlib_kernel_api::ContinuePolicyWarmFixed;
+    using veqlib_kernel_api::ContinuePolicyWarmPredict;
+    using veqlib_kernel_api::ContinuePolicyWarmChord;
+    using veqlib_kernel_api::ContinuePolicyWarm;
     using veqlib_kernel_api::PackedVector;
     using veqlib_kernel_api::SolveContext;
     using veqlib_kernel_api::SolveResult;
@@ -44,10 +52,12 @@ namespace veqlib_python
     using veqlib_kernel_api::build_residual_scale_for_context;
     using veqlib_kernel_api::build_x_block_scale_vector;
     using veqlib_kernel_api::build_inline_case;
+    using veqlib_kernel_api::apply_cold_policy;
     using veqlib_kernel_api::apply_initial_policy;
     using veqlib_kernel_api::boundary_curve_strain;
     using veqlib_kernel_api::json_array;
     using veqlib_kernel_api::norm2;
+    using veqlib_kernel_api::residual_scale_extra_evaluations;
     using veqlib_kernel_api::profile_params_for_case;
     using veqlib_kernel_api::run_solver_once;
     using veqlib_kernel_api::solve_result_json;
@@ -57,10 +67,16 @@ namespace veqlib_python
     using veqlib_kernel_api::solver_kind_from_runtime_method_code;
     using veqlib_kernel_api::solver_method_code;
     using veqlib_kernel_api::solver_method;
-    using veqlib_kernel_api::initial_policy_is_warm_clone;
     using veqlib_kernel_api::initial_policy_name;
+    using veqlib_kernel_api::continue_policy_is_cold;
+    using veqlib_kernel_api::continue_policy_name;
+    using veqlib_kernel_api::continue_policy_uses_chord;
+    using veqlib_kernel_api::continue_policy_uses_predictor;
+    using veqlib_kernel_api::continue_policy_uses_warm_state;
     using veqlib_kernel_api::residual_normalization_name;
+    using veqlib_kernel_api::resolved_continue_policy;
     using veqlib_kernel_api::validate_initial_policy_code;
+    using veqlib_kernel_api::validate_continue_policy_code;
     using veqlib_kernel_api::validate_residual_normalization_code;
     using veqlib_kernel_api::kernel_c_counts;
     using veqlib_kernel_api::kernel_s_counts;
@@ -84,10 +100,26 @@ namespace veqlib_python
         CaseInput input   = build_inline_case(0, 0, solver);
         auto      context = std::make_unique<SolveContext>(input);
 
-        PackedVector initial_raw{uninitialized};
         context->raw_residual(std::span<const double, KernelShape::x_size>{input.x0.data(), KernelShape::x_size},
-                              std::span<double, KernelShape::x_size>{initial_raw.data(), KernelShape::x_size});
-        context->input.residual_scale = build_residual_scale_for_context(*context, initial_raw);
+                              std::span<double, KernelShape::x_size>{
+                                  context->initial_raw.data(),
+                                  KernelShape::x_size,
+                              });
+        context->initial_alpha = {context->op.workspace.source_runtime.alpha1,
+                                  context->op.workspace.source_runtime.alpha2};
+        context->initial_raw_norm = norm2(std::span<const double, KernelShape::x_size>{
+            context->initial_raw.data(),
+            KernelShape::x_size,
+        });
+        context->input.residual_scale = build_residual_scale_for_context(*context, context->initial_raw);
+        for (size_t i = 0; i < KernelShape::x_size; ++i)
+            context->initial_scaled[i] = context->initial_raw[i] / context->input.residual_scale[i];
+        context->initial_scaled_norm = norm2(std::span<const double, KernelShape::x_size>{
+            context->initial_scaled.data(),
+            KernelShape::x_size,
+        });
+        context->has_initial_residual         = true;
+        context->initial_residual_evaluations = 1 + residual_scale_extra_evaluations(context->input);
         return context;
     }
 
@@ -266,6 +298,8 @@ namespace veqlib_python
         input.accepted_residual_floor  = finite_number(solver_config, "accepted_residual_floor");
         input.initial_policy_code      = required_int(solver_config, "initial_policy_code");
         validate_initial_policy_code(input.initial_policy_code);
+        input.continue_policy_code = optional_int(solver_config, "continue_policy_code", ContinuePolicyWarm);
+        validate_continue_policy_code(input.continue_policy_code);
         input.residual_normalization_code = required_int(solver_config, "residual_normalization_code");
         validate_residual_normalization_code(input.residual_normalization_code);
         input.residual_normalization_floor       = finite_number(solver_config, "residual_normalization_floor");
@@ -306,10 +340,7 @@ namespace veqlib_python
         input.fix_rho =
             optional_finite_number(constraints, "fix_rho", optional_finite_number(data, "fix_rho", input.fix_rho));
 
-        if (input.initial_policy_code == InitialPolicyWarmClone)
-            input.x0.fill(0.0);
-        else
-            apply_initial_policy(input);
+        apply_initial_policy(input);
 
         input.x_scale = build_x_block_scale_vector<KernelShape>(input.x0, profile_params_for_case(input));
         input.residual_scale.fill(1.0);
@@ -336,6 +367,7 @@ namespace veqlib_python
                                              double             accepted_residual_factor,
                                              double             accepted_residual_floor,
                                              int                initial_policy_code,
+                                             int                continue_policy_code,
                                              int                residual_normalization_code,
                                              double             residual_normalization_floor,
                                              double             residual_normalization_max_ratio,
@@ -377,6 +409,8 @@ namespace veqlib_python
         input.accepted_residual_floor  = accepted_residual_floor;
         input.initial_policy_code      = initial_policy_code;
         validate_initial_policy_code(input.initial_policy_code);
+        input.continue_policy_code = continue_policy_code;
+        validate_continue_policy_code(input.continue_policy_code);
         input.residual_normalization_code = residual_normalization_code;
         validate_residual_normalization_code(input.residual_normalization_code);
         input.residual_normalization_floor              = residual_normalization_floor;
@@ -386,10 +420,7 @@ namespace veqlib_python
         input.residual_normalization_probe_step         = residual_normalization_probe_step;
         input.residual_normalization_sensitivity_lambda = residual_normalization_sensitivity_lambda;
 
-        if (input.initial_policy_code == InitialPolicyWarmClone)
-            input.x0.fill(0.0);
-        else
-            apply_initial_policy(input);
+        apply_initial_policy(input);
 
         input.x_scale = build_x_block_scale_vector<KernelShape>(input.x0, profile_params_for_case(input));
         input.residual_scale.fill(1.0);
@@ -398,11 +429,11 @@ namespace veqlib_python
 
     inline double local_abs(double value) noexcept { return value < 0.0 ? -value : value; }
 
-    inline bool cold_policy_uses_geometric_seed(const CaseInput& input) noexcept
+    inline bool cold_policy_uses_geometric_seed(const CaseInput& input, int policy_code) noexcept
     {
-        if (input.initial_policy_code == InitialPolicyColdGeometric)
+        if (policy_code == InitialPolicyColdGeometric || policy_code == ContinuePolicyColdGeometric)
             return true;
-        if (input.initial_policy_code == InitialPolicyCold)
+        if (policy_code == InitialPolicyCold || policy_code == ContinuePolicyCold)
             return boundary_curve_strain(input) >= 0.20;
         return false;
     }
@@ -531,9 +562,9 @@ namespace veqlib_python
         }
     }
 
-    inline void refine_cold_initial_state(SolveContext& context)
+    inline void refine_cold_initial_state(SolveContext& context, int policy_code)
     {
-        if (!cold_policy_uses_geometric_seed(context.input))
+        if (!cold_policy_uses_geometric_seed(context.input, policy_code))
             return;
         double coeff = 0.0;
         if (!project_psin0_from_source_target(context, coeff))
@@ -549,14 +580,27 @@ namespace veqlib_python
 
     inline void refresh_initial_residual_scale(SolveContext& context)
     {
-        PackedVector initial_raw{uninitialized};
         context.raw_residual(
             std::span<const double, KernelShape::x_size>{
                 context.input.x0.data(),
                 KernelShape::x_size,
             },
-            std::span<double, KernelShape::x_size>{initial_raw.data(), KernelShape::x_size});
-        context.input.residual_scale = build_residual_scale_for_context(context, initial_raw);
+            std::span<double, KernelShape::x_size>{context.initial_raw.data(), KernelShape::x_size});
+        context.initial_alpha = {context.op.workspace.source_runtime.alpha1,
+                                 context.op.workspace.source_runtime.alpha2};
+        context.initial_raw_norm = norm2(std::span<const double, KernelShape::x_size>{
+            context.initial_raw.data(),
+            KernelShape::x_size,
+        });
+        context.input.residual_scale = build_residual_scale_for_context(context, context.initial_raw);
+        for (size_t i = 0; i < KernelShape::x_size; ++i)
+            context.initial_scaled[i] = context.initial_raw[i] / context.input.residual_scale[i];
+        context.initial_scaled_norm = norm2(std::span<const double, KernelShape::x_size>{
+            context.initial_scaled.data(),
+            KernelShape::x_size,
+        });
+        context.has_initial_residual         = true;
+        context.initial_residual_evaluations = 1 + residual_scale_extra_evaluations(context.input);
     }
 
     inline nlohmann::json solver_json(const CaseInput& input)
@@ -568,6 +612,7 @@ namespace veqlib_python
             {"accepted_residual_factor", input.accepted_residual_factor},
             {"accepted_residual_floor", input.accepted_residual_floor},
             {"initial_policy_code", input.initial_policy_code},
+            {"continue_policy_code", input.continue_policy_code},
             {"residual_normalization_code", input.residual_normalization_code},
             {"residual_normalization_floor", input.residual_normalization_floor},
             {"residual_normalization_max_ratio", input.residual_normalization_max_ratio},
@@ -757,6 +802,8 @@ namespace veqlib_python
 #endif
         solver["initial_policy_code"]         = input.initial_policy_code;
         solver["initial_policy"]              = initial_policy_name(input.initial_policy_code);
+        solver["continue_policy_code"]        = input.continue_policy_code;
+        solver["continue_policy"]             = continue_policy_name(input.continue_policy_code);
         solver["residual_normalization_code"] = input.residual_normalization_code;
         solver["residual_normalization"]      = residual_normalization_name(input.residual_normalization_code);
 
@@ -828,6 +875,7 @@ namespace veqlib_python
                                 double             accepted_residual_factor,
                                 double             accepted_residual_floor,
                                 int                initial_policy_code,
+                                int                continue_policy_code,
                                 int                residual_normalization_code,
                                 double             residual_normalization_floor,
                                 double             residual_normalization_max_ratio,
@@ -855,6 +903,7 @@ namespace veqlib_python
                                                            accepted_residual_factor,
                                                            accepted_residual_floor,
                                                            initial_policy_code,
+                                                           continue_policy_code,
                                                            residual_normalization_code,
                                                            residual_normalization_floor,
                                                            residual_normalization_max_ratio,
@@ -869,9 +918,9 @@ namespace veqlib_python
         {
             for (size_t i = 0; i < count; ++i)
             {
-                SolveResult result = run_solver_once(*context_);
-                if (initial_policy_is_warm_clone(context_->input.initial_policy_code))
-                    context_->input.x0 = result.x;
+                SolveResult result = solve_current_case();
+                if (accepted_result_succeeded(result))
+                    record_accepted_result(result, false);
             }
         }
 
@@ -892,10 +941,10 @@ namespace veqlib_python
         std::string solve_json()
         {
             const auto started = std::chrono::steady_clock::now();
-            last_result_       = run_solver_once(*context_);
+            last_result_       = solve_current_case();
             has_last_result_   = true;
-            if (initial_policy_is_warm_clone(context_->input.initial_policy_code))
-                context_->input.x0 = last_result_.x;
+            if (accepted_result_succeeded(last_result_))
+                record_accepted_result(last_result_, false);
             const auto elapsed = std::chrono::steady_clock::now() - started;
             last_elapsed_ms_   = std::chrono::duration<double, std::milli>(elapsed).count();
 
@@ -914,10 +963,10 @@ namespace veqlib_python
         nb::tuple solve_direct()
         {
             const auto started = std::chrono::steady_clock::now();
-            last_result_       = run_solver_once(*context_);
+            last_result_       = solve_current_case();
             has_last_result_   = true;
-            if (initial_policy_is_warm_clone(context_->input.initial_policy_code))
-                context_->input.x0 = last_result_.x;
+            if (accepted_result_succeeded(last_result_))
+                record_accepted_result(last_result_, false);
             const auto elapsed = std::chrono::steady_clock::now() - started;
             last_elapsed_ms_   = std::chrono::duration<double, std::milli>(elapsed).count();
 
@@ -1002,17 +1051,370 @@ namespace veqlib_python
         double last_elapsed_ms() const noexcept { return last_elapsed_ms_; }
 
     private:
+        static constexpr double predictor_growth_limit = 10.0;
+        static constexpr int    chord_max_iterations   = 3;
+
+        bool accepted_result_succeeded(const SolveResult& result) const noexcept
+        {
+            return result.accepted && solver_info_succeeded(context_->input.solver, result.info);
+        }
+
+        bool same_array(const std::array<double, KernelSource::sample_count>& lhs,
+                        const std::array<double, KernelSource::sample_count>& rhs) const noexcept
+        {
+            for (size_t i = 0; i < KernelSource::sample_count; ++i)
+                if (lhs[i] != rhs[i])
+                    return false;
+            return true;
+        }
+
+        bool same_offsets(const std::array<double, KernelShape::M_max + 1>& lhs,
+                          const std::array<double, KernelShape::M_max + 1>& rhs) const noexcept
+        {
+            for (size_t i = 0; i <= KernelShape::M_max; ++i)
+                if (lhs[i] != rhs[i])
+                    return false;
+            return true;
+        }
+
+        bool current_case_is_ip_only_reuse() const noexcept
+        {
+            if (!has_latest_input_)
+                return false;
+            const CaseInput& old = latest_input_;
+            const CaseInput& now = context_->input;
+            return old.a == now.a && old.R0 == now.R0 && old.Z0 == now.Z0 && old.B0 == now.B0 &&
+                   old.ka == now.ka && old.c0_offset == now.c0_offset && old.s1_offset == now.s1_offset &&
+                   old.fix_rho == now.fix_rho && same_offsets(old.c_offsets, now.c_offsets) &&
+                   same_offsets(old.s_offsets, now.s_offsets) && same_array(old.heat, now.heat) &&
+                   same_array(old.current, now.current);
+        }
+
+        void fill_certified_result(SolveResult&                                   result,
+                                   const std::array<double, KernelShape::x_size>& x,
+                                   const PackedVector&                            raw,
+                                   const PackedVector&                            scaled,
+                                   const std::array<double, 2>&                   alpha,
+                                   double                                         raw_norm,
+                                   double                                         scaled_norm,
+                                   const std::string&                             accepted_by,
+                                   const std::string&                             fast_path,
+                                   int                                            certification_evals) const
+        {
+            result.x           = x;
+            result.raw         = raw;
+            result.scaled      = scaled;
+            result.alpha       = alpha;
+            result.raw_norm    = raw_norm;
+            result.scaled_norm = scaled_norm;
+            result.info        = 1;
+            result.nfev        = context_->initial_residual_evaluations + certification_evals;
+            result.solver_nfev = 0;
+            result.njev        = 0;
+            result.callbacks   = 0;
+            result.jacobian_component_evaluations     = 0;
+            result.jvp_evaluations                    = 0;
+            result.linear_iterations                  = 0;
+            result.initial_residual_evaluations       = context_->initial_residual_evaluations;
+            result.certification_residual_evaluations = certification_evals;
+            result.total_raw_residual_evaluations     = result.nfev;
+            result.cert_threshold                     = acceptance_threshold(context_->input);
+            result.initial_raw_norm                   = context_->initial_raw_norm;
+            result.fast_path_raw_norm                 = raw_norm;
+            result.accepted_by                        = accepted_by;
+            result.fast_path                          = fast_path;
+            result.fallback_used                      = false;
+            result.fallback_reason                    = "";
+            result.accepted                           = true;
+        }
+
+        bool try_initial_certificate(SolveResult& result) const
+        {
+            if (!has_latest_solution_ || !context_->has_initial_residual)
+                return false;
+            const double threshold = acceptance_threshold(context_->input);
+            if (!std::isfinite(context_->initial_raw_norm) || context_->initial_raw_norm > threshold)
+                return false;
+
+            const std::string accepted_by =
+                current_case_is_ip_only_reuse() ? "ip_only_warm_fixed" : "warm_fixed_certificate";
+            fill_certified_result(result,
+                                  context_->input.x0,
+                                  context_->initial_raw,
+                                  context_->initial_scaled,
+                                  context_->initial_alpha,
+                                  context_->initial_raw_norm,
+                                  context_->initial_scaled_norm,
+                                  accepted_by,
+                                  "warm-fixed",
+                                  0);
+            return true;
+        }
+
+        void scale_raw_into(PackedVector& scaled, const PackedVector& raw) const noexcept
+        {
+            for (size_t i = 0; i < KernelShape::x_size; ++i)
+                scaled[i] = raw[i] / context_->input.residual_scale[i];
+        }
+
+        bool candidate_is_reasonable(const std::array<double, KernelShape::x_size>& candidate) const noexcept
+        {
+            if (!has_latest_solution_)
+                return false;
+            for (size_t i = 0; i < KernelShape::x_size; ++i)
+            {
+                if (!std::isfinite(candidate[i]))
+                    return false;
+                const double delta = std::abs(candidate[i] - latest_solution_[i]);
+                const double scale = std::max({std::abs(latest_solution_[i]), context_->input.x_scale[i], 1.0e-8});
+                if (delta > predictor_growth_limit * scale)
+                    return false;
+            }
+            return true;
+        }
+
+        bool try_candidate_certificate(const std::array<double, KernelShape::x_size>& candidate,
+                                       const std::string&                             accepted_by,
+                                       const std::string&                             fast_path,
+                                       int&                                           certification_evals,
+                                       double&                                        best_raw_norm,
+                                       SolveResult&                                   result)
+        {
+            if (!candidate_is_reasonable(candidate))
+                return false;
+
+            PackedVector raw{uninitialized};
+            context_->raw_residual(
+                std::span<const double, KernelShape::x_size>{candidate.data(), KernelShape::x_size},
+                std::span<double, KernelShape::x_size>{raw.data(), KernelShape::x_size});
+            const std::array<double, 2> alpha = {context_->op.workspace.source_runtime.alpha1,
+                                                 context_->op.workspace.source_runtime.alpha2};
+            ++certification_evals;
+
+            const double raw_norm = norm2(std::span<const double, KernelShape::x_size>{raw.data(), KernelShape::x_size});
+            if (std::isfinite(raw_norm) && raw_norm < best_raw_norm)
+                best_raw_norm = raw_norm;
+            if (!std::isfinite(raw_norm) || raw_norm > acceptance_threshold(context_->input))
+                return false;
+
+            PackedVector scaled{uninitialized};
+            scale_raw_into(scaled, raw);
+            const double scaled_norm =
+                norm2(std::span<const double, KernelShape::x_size>{scaled.data(), KernelShape::x_size});
+            fill_certified_result(result,
+                                  candidate,
+                                  raw,
+                                  scaled,
+                                  alpha,
+                                  raw_norm,
+                                  scaled_norm,
+                                  accepted_by,
+                                  fast_path,
+                                  certification_evals);
+            return true;
+        }
+
+        bool try_predictor_certificates(int& certification_evals, double& best_raw_norm, SolveResult& result)
+        {
+            if (!has_latest_solution_ || !has_previous_solution_)
+                return false;
+
+            std::array<double, KernelShape::x_size> secant{};
+            for (size_t i = 0; i < KernelShape::x_size; ++i)
+                secant[i] = latest_solution_[i] + (latest_solution_[i] - previous_solution_[i]);
+            if (try_candidate_certificate(
+                    secant, "secant_predictor_certificate", "warm-predict", certification_evals, best_raw_norm, result))
+                return true;
+
+            if (!has_older_solution_)
+                return false;
+
+            std::array<double, KernelShape::x_size> quadratic{};
+            for (size_t i = 0; i < KernelShape::x_size; ++i)
+                quadratic[i] = 3.0 * latest_solution_[i] - 3.0 * previous_solution_[i] + older_solution_[i];
+            return try_candidate_certificate(quadratic,
+                                             "quadratic_predictor_certificate",
+                                             "warm-predict",
+                                             certification_evals,
+                                             best_raw_norm,
+                                             result);
+        }
+
+        void build_chord_jacobian(const std::array<double, KernelShape::x_size>& current,
+                                  const PackedVector&                            current_raw,
+                                  tensor::Matrix<double, KernelShape::x_size, KernelShape::x_size>& jacobian,
+                                  int&                                           certification_evals)
+        {
+            for (size_t col = 0; col < KernelShape::x_size; ++col)
+            {
+                std::array<double, KernelShape::x_size> perturbed = current;
+                const double step = 1.0e-6 * std::max(1.0, std::abs(current[col]));
+                perturbed[col] += step;
+
+                PackedVector plus_raw{uninitialized};
+                context_->raw_residual(
+                    std::span<const double, KernelShape::x_size>{perturbed.data(), KernelShape::x_size},
+                    std::span<double, KernelShape::x_size>{plus_raw.data(), KernelShape::x_size});
+                ++certification_evals;
+
+                for (size_t row = 0; row < KernelShape::x_size; ++row)
+                    jacobian[row * KernelShape::x_size + col] = (plus_raw[row] - current_raw[row]) / step;
+            }
+        }
+
+        bool try_chord_newton_certificate(int& certification_evals, double& best_raw_norm, SolveResult& result)
+        {
+            std::array<double, KernelShape::x_size> current = context_->input.x0;
+            PackedVector                            current_raw = context_->initial_raw;
+            tensor::Matrix<double, KernelShape::x_size, KernelShape::x_size> chord_jacobian{uninitialized};
+            build_chord_jacobian(current, current_raw, chord_jacobian, certification_evals);
+
+            for (int iteration = 0; iteration < chord_max_iterations; ++iteration)
+            {
+                tensor::Matrix<double, KernelShape::x_size, 1> rhs{uninitialized};
+                for (size_t row = 0; row < KernelShape::x_size; ++row)
+                    rhs[row] = -current_raw[row];
+
+                tensor::Matrix<double, KernelShape::x_size, 1> step{uninitialized};
+                linalg::solve_into(step, chord_jacobian, rhs);
+
+                bool finite_step = true;
+                for (size_t i = 0; i < KernelShape::x_size; ++i)
+                    finite_step = finite_step && std::isfinite(step[i]);
+                if (!finite_step)
+                    return false;
+
+                std::array<double, KernelShape::x_size> trial{};
+                for (size_t i = 0; i < KernelShape::x_size; ++i)
+                    trial[i] = current[i] + step[i];
+
+                PackedVector trial_raw{uninitialized};
+                context_->raw_residual(
+                    std::span<const double, KernelShape::x_size>{trial.data(), KernelShape::x_size},
+                    std::span<double, KernelShape::x_size>{trial_raw.data(), KernelShape::x_size});
+                const std::array<double, 2> trial_alpha = {context_->op.workspace.source_runtime.alpha1,
+                                                           context_->op.workspace.source_runtime.alpha2};
+                ++certification_evals;
+                const double trial_norm =
+                    norm2(std::span<const double, KernelShape::x_size>{trial_raw.data(), KernelShape::x_size});
+                if (!std::isfinite(trial_norm))
+                    return false;
+
+                if (trial_norm <= acceptance_threshold(context_->input))
+                {
+                    PackedVector scaled{uninitialized};
+                    scale_raw_into(scaled, trial_raw);
+                    const double scaled_norm =
+                        norm2(std::span<const double, KernelShape::x_size>{scaled.data(), KernelShape::x_size});
+                    fill_certified_result(result,
+                                          trial,
+                                          trial_raw,
+                                          scaled,
+                                          trial_alpha,
+                                          trial_norm,
+                                          scaled_norm,
+                                          "chord_newton_certificate",
+                                          "warm-chord",
+                                          certification_evals);
+                    return true;
+                }
+
+                if (trial_norm >= best_raw_norm)
+                    return false;
+                best_raw_norm = trial_norm;
+                current       = trial;
+                current_raw   = trial_raw;
+            }
+            return false;
+        }
+
+        SolveResult solve_current_case()
+        {
+            const int policy = resolved_continue_policy(context_->input.continue_policy_code);
+            if (!has_latest_solution_ || continue_policy_is_cold(policy))
+                return run_solver_once(*context_);
+
+            SolveResult fast_result{};
+            if (try_initial_certificate(fast_result))
+                return fast_result;
+
+            int    certification_evals = 0;
+            double best_raw_norm       = context_->has_initial_residual
+                                           ? context_->initial_raw_norm
+                                           : std::numeric_limits<double>::max();
+
+            if (continue_policy_uses_predictor(policy) &&
+                try_predictor_certificates(certification_evals, best_raw_norm, fast_result))
+                return fast_result;
+
+            if (continue_policy_uses_chord(policy) &&
+                try_chord_newton_certificate(certification_evals, best_raw_norm, fast_result))
+                return fast_result;
+
+            SolveResult fallback = run_solver_once(*context_);
+            fallback.nfev += certification_evals;
+            fallback.certification_residual_evaluations = certification_evals;
+            fallback.total_raw_residual_evaluations += certification_evals;
+            fallback.accepted_by = std::string{solver_method(context_->input.solver)} + "_fallback";
+            fallback.fast_path   = continue_policy_name(context_->input.continue_policy_code);
+            fallback.fallback_used = true;
+            fallback.fallback_reason =
+                std::isfinite(best_raw_norm) ? "fast_path_raw_norm_above_threshold" : "fast_path_nonfinite_raw_norm";
+            fallback.fast_path_raw_norm = best_raw_norm;
+            return fallback;
+        }
+
+        void record_accepted_result(const SolveResult& result, bool refresh_scale)
+        {
+            context_->input.x0 = result.x;
+            context_->input.x_scale =
+                build_x_block_scale_vector<KernelShape>(context_->input.x0, profile_params_for_case(context_->input));
+            if (refresh_scale)
+                refresh_initial_residual_scale(*context_);
+
+            if (has_previous_solution_)
+            {
+                older_solution_     = previous_solution_;
+                has_older_solution_ = true;
+            }
+            if (has_latest_solution_)
+            {
+                previous_solution_     = latest_solution_;
+                has_previous_solution_ = true;
+            }
+            latest_solution_     = result.x;
+            has_latest_solution_ = true;
+            latest_input_        = context_->input;
+            has_latest_input_    = true;
+        }
+
         void apply_runtime_case(CaseInput next_input, std::string last_case_json)
         {
-            if (initial_policy_is_warm_clone(next_input.initial_policy_code))
+            bool should_refine_cold = true;
+            int  cold_policy_code   = next_input.initial_policy_code;
+            const int continue_policy = resolved_continue_policy(next_input.continue_policy_code);
+            if (has_latest_solution_)
             {
-                next_input.x0      = context_->input.x0;
-                next_input.x_scale = build_x_block_scale_vector<KernelShape>(
-                    next_input.x0,
-                    profile_params_for_case(next_input));
+                if (continue_policy_uses_warm_state(continue_policy))
+                {
+                    next_input.x0      = latest_solution_;
+                    next_input.x_scale = build_x_block_scale_vector<KernelShape>(
+                        next_input.x0,
+                        profile_params_for_case(next_input));
+                    should_refine_cold = false;
+                }
+                else if (continue_policy_is_cold(continue_policy))
+                {
+                    apply_cold_policy(next_input, continue_policy);
+                    next_input.x_scale = build_x_block_scale_vector<KernelShape>(
+                        next_input.x0,
+                        profile_params_for_case(next_input));
+                    cold_policy_code = continue_policy;
+                }
             }
             auto next_context = std::make_unique<SolveContext>(next_input);
-            refine_cold_initial_state(*next_context);
+            if (should_refine_cold)
+                refine_cold_initial_state(*next_context, cold_policy_code);
             refresh_initial_residual_scale(*next_context);
             context_        = std::move(next_context);
             last_case_json_ = std::move(last_case_json);
@@ -1021,7 +1423,15 @@ namespace veqlib_python
         SolverKind                    solver_;
         std::unique_ptr<SolveContext> context_;
         SolveResult                   last_result_{};
+        std::array<double, KernelShape::x_size> older_solution_{};
+        std::array<double, KernelShape::x_size> previous_solution_{};
+        std::array<double, KernelShape::x_size> latest_solution_{};
+        CaseInput                     latest_input_{};
         bool                          has_last_result_ = false;
+        bool                          has_older_solution_ = false;
+        bool                          has_previous_solution_ = false;
+        bool                          has_latest_solution_ = false;
+        bool                          has_latest_input_ = false;
         std::string                   last_case_json_  = "{}";
         double                        last_elapsed_ms_ = 0.0;
     };
