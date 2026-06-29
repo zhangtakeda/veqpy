@@ -62,6 +62,22 @@ or under legacy `VEQPY_KERNEL_CACHE` as a fallback. The bridge currently gates
 unsupported topologies before CMake generation through
 `KernelTopology.validate_supported_for_veqlib_mvp()`.
 
+The facade pins normal native calls to one CPU by default. Internally it
+temporarily narrows the current affinity set around `set_kernel_runtime()`,
+`solve_direct()`, warmup, residual probes, and metadata calls, then restores the
+previous affinity. Auto pinning chooses the smallest CPU from the current
+affinity set, so an outer `taskset`, cgroup, or scheduler allocation remains the
+hard boundary. Set `VEQLIB_PIN_CPU=0` to disable this scoped pinning, or set
+`VEQLIB_PIN_CPU_ID=<cpu>` to choose a specific allowed CPU. Per-handle
+constructors also accept `pin_cpu=False` to disable, `pin_cpu=True`/`None` for
+auto, or `pin_cpu=<int>` to request a CPU id. VEQlib is much more sensitive to
+this than VEQPy because the native solve is a short, tight shared-library hot
+loop; scheduler migration, cache warmth, and turbo/NUMA changes become a large
+fraction of elapsed time. VEQPy's Numba/SciPy path is callback- and
+Python-dispatch-heavy enough that the same migration cost is usually a smaller
+fraction of total latency, though pinned benchmarks are still preferred for
+retained timing evidence.
+
 ## Default Topology
 
 CMake generates `config.h` from cache variables and exposes them through
@@ -268,8 +284,9 @@ build the Release module and run the Python comparison script:
 cd veqlib/core
 cmake --preset clang-release
 cmake --build --preset clang-release --target veqlib_ext
-../../.venv/bin/python ../facade/veqlib/benchmarks/benchmark_pf_psin_uniform_compare.py \
-  --module-dir build/release \
+cd ../..
+.venv/bin/python veqlib/benchmarks/benchmark_pf_psin_uniform_compare.py \
+  --module-dir veqlib/core/build/release \
   --repeat 30 \
   --warmup 5 \
   --no-write
@@ -286,7 +303,7 @@ root. It covers the 18-parameter PF case plus the solovev, chease, and efit
 GEQDSK cases through the Python `KernelTopology` / nanobind-artifact path:
 
 ```bash
-taskset -c 0 .venv/bin/python veqlib/benchmarks/benchmark_4case_compare.py \
+.venv/bin/python veqlib/benchmarks/benchmark_4case_compare.py \
   --repeat 11 \
   --warmup 3 \
   --output /tmp/veqlib_4case_compare.json
@@ -304,7 +321,7 @@ before the next warm-clone point, so a cold first point can seed the continuatio
 sequence without changing the residual definition:
 
 ```bash
-taskset -c 0 .venv/bin/python veqlib/benchmarks/benchmark_4case_ip_scan.py \
+.venv/bin/python veqlib/benchmarks/benchmark_4case_ip_scan.py \
   --points 11 \
   --relative-span 0.20 \
   --repeat 11 \

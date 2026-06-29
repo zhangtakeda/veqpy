@@ -45,7 +45,12 @@ taskset -c <core> build/release/veqlib_stage_benchmark \
   --inner 10000 \
   --ring-size 16 \
   --output /tmp/veqlib-stage-baseline.json
-../.venv/bin/python benchmark_pf_psin_uniform_compare.py   --module-dir build/release   --repeat 30   --warmup 5   --no-write
+cd ../..
+.venv/bin/python veqlib/benchmarks/benchmark_pf_psin_uniform_compare.py \
+  --module-dir veqlib/core/build/release \
+  --repeat 30 \
+  --warmup 5 \
+  --no-write
 ```
 
 The executable-side stage benchmark is benchmark-only and must be rebuilt from
@@ -53,8 +58,10 @@ current source.  Use it for stage partitioning, then confirm retained changes
 with production nanobind/shared-library timings or explicitly archived
 experiment artifacts.
 
-Pinning to one core with `taskset -c <core>` is recommended for retained timing
-artifacts when the environment supports it.
+The Python facade benchmarks pin VEQlib native calls internally by default
+(`VEQLIB_PIN_CPU=0` disables, `VEQLIB_PIN_CPU_ID=<core>` selects an allowed CPU).
+Standalone C++ stage executables still need an external launcher such as
+`taskset -c <core>` for retained timing artifacts.
 
 ## Current ledger
 

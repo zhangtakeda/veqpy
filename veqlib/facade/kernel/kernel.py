@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from ..affinity import CpuPinning
 from .builder import KernelArtifact
 from .registry import KernelRegistry
 from .solver import VEQlibSolver
@@ -22,14 +23,17 @@ class Kernel:
         cache_root: Path | None = None,
         source_dir: Path | None = None,
         cxx: str = "clang++",
+        pin_cpu: CpuPinning = None,
     ) -> None:
         self.topology = topology
         self.build_config = KernelBuild() if build is None else build
         self.build_topology = topology.with_build(self.build_config)
+        self.pin_cpu = pin_cpu
         self.registry = registry or KernelRegistry(
             cache_root=cache_root,
             source_dir=source_dir,
             cxx=cxx,
+            pin_cpu=pin_cpu,
         )
         self._solver: VEQlibSolver | None = None
         self.history: list[KernelResult] = []
@@ -94,6 +98,7 @@ class Kernel:
             self._solver = VEQlibSolver(
                 self.build_topology,
                 registry=self.registry,
+                pin_cpu=self.pin_cpu,
             )
         return self._solver
 
@@ -122,6 +127,7 @@ def build(
     cache_root: Path | None = None,
     source_dir: Path | None = None,
     cxx: str = "clang++",
+    pin_cpu: CpuPinning = None,
     force: bool = False,
     dry_run: bool = False,
 ) -> Kernel:
@@ -134,6 +140,7 @@ def build(
         cache_root=cache_root,
         source_dir=source_dir,
         cxx=cxx,
+        pin_cpu=pin_cpu,
     )
     kernel.build(force=force, dry_run=dry_run)
     return kernel

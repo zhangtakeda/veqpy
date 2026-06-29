@@ -8,6 +8,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
+from ..affinity import CpuPinning, pinned_cpu
 from .builder import KernelArtifact, build_kernel
 from .options import solver_method_code
 from .types import KernelTopology as Topology
@@ -32,8 +33,9 @@ class LoadedKernel:
 class ThreadOwnedKernelSolver:
     """Small Python guard around the mutable C++ KernelSolver workspace."""
 
-    def __init__(self, solver: Any) -> None:
+    def __init__(self, solver: Any, *, pin_cpu: CpuPinning = None) -> None:
         self._solver = solver
+        self._pin_cpu = pin_cpu
         self._owner_thread_id = threading.get_ident()
 
     @property
@@ -50,44 +52,54 @@ class ThreadOwnedKernelSolver:
 
     def metadata(self) -> Any:
         self.check_thread()
-        return self._solver.metadata()
+        with pinned_cpu(self._pin_cpu):
+            return self._solver.metadata()
 
     def metadata_json(self) -> str:
         self.check_thread()
-        return self._solver.metadata_json()
+        with pinned_cpu(self._pin_cpu):
+            return self._solver.metadata_json()
 
     def set_case_json(self, payload: str) -> None:
         self.check_thread()
-        self._solver.set_case_json(payload)
+        with pinned_cpu(self._pin_cpu):
+            self._solver.set_case_json(payload)
 
     def set_kernel_runtime(self, *args: Any) -> None:
         self.check_thread()
-        self._solver.set_kernel_runtime(*args)
+        with pinned_cpu(self._pin_cpu):
+            self._solver.set_kernel_runtime(*args)
 
     def warmup(self, count: int) -> None:
         self.check_thread()
-        self._solver.warmup(count)
+        with pinned_cpu(self._pin_cpu):
+            self._solver.warmup(count)
 
     def solve_json(self) -> str:
         self.check_thread()
-        return self._solver.solve_json()
+        with pinned_cpu(self._pin_cpu):
+            return self._solver.solve_json()
 
     def solve_direct(self) -> Any:
         self.check_thread()
-        return self._solver.solve_direct()
+        with pinned_cpu(self._pin_cpu):
+            return self._solver.solve_direct()
 
     def adopt_last_solution_as_initial(self) -> None:
         self.check_thread()
-        self._solver.adopt_last_solution_as_initial()
+        with pinned_cpu(self._pin_cpu):
+            self._solver.adopt_last_solution_as_initial()
 
     def residual_var_into(self, x: Any, out: Any) -> None:
         self.check_thread()
-        self._solver.residual_var_into(x, out)
+        with pinned_cpu(self._pin_cpu):
+            self._solver.residual_var_into(x, out)
 
     @property
     def last_elapsed_ms(self) -> float:
         self.check_thread()
-        return float(self._solver.last_elapsed_ms)
+        with pinned_cpu(self._pin_cpu):
+            return float(self._solver.last_elapsed_ms)
 
 
 class KernelRegistry:
@@ -99,10 +111,12 @@ class KernelRegistry:
         cache_root: Path | None = None,
         source_dir: Path | None = None,
         cxx: str = "clang++",
+        pin_cpu: CpuPinning = None,
     ) -> None:
         self.cache_root = cache_root
         self.source_dir = source_dir
         self.cxx = cxx
+        self.pin_cpu = pin_cpu
         self._modules: dict[str, LoadedKernel] = {}
         self._topology_modules: dict[str, LoadedKernel] = {}
         self._thread_local = threading.local()
@@ -149,22 +163,24 @@ class KernelRegistry:
         *,
         solver: str | int = "powell",
         force: bool = False,
+        pin_cpu: CpuPinning = None,
     ) -> ThreadOwnedKernelSolver:
         loaded = self.load_kernel(topology, force=force)
         solvers = self._thread_solver_cache()
         solver_code = solver_method_code(solver)
-        key = (loaded.artifact.artifact_id, solver_code)
+        pin_policy = self.pin_cpu if pin_cpu is None else pin_cpu
+        key = (loaded.artifact.artifact_id, solver_code, _pinning_cache_key(pin_policy))
         cached = solvers.get(key)
         if cached is not None:
             return cached
         cpp_solver = loaded.module.KernelSolver(
             solver_code=solver_code,
         )
-        wrapped = ThreadOwnedKernelSolver(cpp_solver)
+        wrapped = ThreadOwnedKernelSolver(cpp_solver, pin_cpu=pin_policy)
         solvers[key] = wrapped
         return wrapped
 
-    def _thread_solver_cache(self) -> dict[tuple[str, int], ThreadOwnedKernelSolver]:
+    def _thread_solver_cache(self) -> dict[tuple[str, int, object], ThreadOwnedKernelSolver]:
         solvers = getattr(self._thread_local, "solvers", None)
         if solvers is None:
             solvers = {}
@@ -206,3 +222,9 @@ def _load_artifact_module(artifact: KernelArtifact) -> ModuleType:
 def _module_name_for_artifact(artifact_id: str) -> str:
     safe_id = artifact_id.replace("-", "_")
     return f"veqlib._kernel_cache.k_{safe_id}.veqlib_ext"
+
+
+def _pinning_cache_key(policy: CpuPinning) -> object:
+    if isinstance(policy, bool) or policy is None:
+        return policy
+    return int(policy)

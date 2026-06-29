@@ -30,6 +30,7 @@ from veqlib.facade import (  # noqa: E402
     RESIDUAL_NORMALIZATION_FAST,
     SOLVER_METHOD_POWELL,
 )
+from veqlib.facade.affinity import pinned_cpu  # noqa: E402
 from veqpy.operator import Operator  # noqa: E402
 from veqpy.solver import Solver  # noqa: E402
 from veqpy.solver.residual_scale import _build_block_rms_scale  # noqa: E402
@@ -288,12 +289,15 @@ def _run_cxx_binding_case(
 ) -> dict[str, Any]:
     module = _load_veqlib_module(module_dir)
     solver = module.KernelSolver()
-    solver.set_case_json(json.dumps(_kernel_case_payload(python_inputs)))
+    with pinned_cpu():
+        solver.set_case_json(json.dumps(_kernel_case_payload(python_inputs)))
 
     for _ in range(warmup):
-        solver.solve_direct()
+        with pinned_cpu():
+            solver.solve_direct()
 
-    report = json.loads(solver.metadata_json())
+    with pinned_cpu():
+        report = json.loads(solver.metadata_json())
     report["normalization"] = {
         "x_scale": python_inputs["x_scale"],
         "residual_scale": python_inputs["residual_scale"],
@@ -308,7 +312,8 @@ def _run_cxx_binding_case(
     final_result: tuple[Any, ...] | None = None
     for _ in range(repeat):
         start_ns = time.perf_counter_ns()
-        result = solver.solve_direct()
+        with pinned_cpu():
+            result = solver.solve_direct()
         stop_ns = time.perf_counter_ns()
         outer_ms = float(stop_ns - start_ns) / 1.0e6
         inner_ms = float(result[0])
@@ -318,7 +323,8 @@ def _run_cxx_binding_case(
         final_result = result
 
     if final_result is None:
-        final_result = solver.solve_direct()
+        with pinned_cpu():
+            final_result = solver.solve_direct()
 
     final_success = bool(final_result[1])
 
