@@ -10,8 +10,6 @@ Public API:
 - Profile
 - Problem
 - Equilibrium
-- Topology
-- TopologyError
 - Reactive
 - Serial
 
@@ -29,7 +27,6 @@ from veqpy.model.geqdsk import Geqdsk
 from veqpy.model.grid import Grid
 from veqpy.model.problem import Problem
 from veqpy.model.profile import Profile
-from veqpy.model.topology import Topology, TopologyError
 
 __all__ = [
     "Equilibrium",
@@ -40,6 +37,4 @@ __all__ = [
     "Problem",
     "Reactive",
     "Serial",
-    "Topology",
-    "TopologyError",
 ]
