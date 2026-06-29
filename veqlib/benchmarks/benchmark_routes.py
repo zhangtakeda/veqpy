@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Full route/topology benchmark for VEQlib against VEQPy.
+"""Route/topology benchmark for VEQlib against VEQPy.
 
-The default scope enumerates the 46 historical uniform source cases from
-``tests/benchmark.py``.  ``--scope full`` adds grid-sampled variants for the 92
-route/topology matrix.  Topology planning is always performed; supported native
+The default scope enumerates the 12 ``*:rho/psin:uniform:Ip`` route cases, which
+keeps one default run below the nanobind per-process cleanup-handler ceiling.
+``--scope uniform`` restores the 46 historical uniform source cases from
+``tests/benchmark.py``. ``--scope full`` adds grid-sampled variants for the 92
+route/topology matrix. Topology planning is always performed; supported native
 rows can be executed through the typed ``veqlib.facade`` runtime unless
 ``--no-run`` is passed. Native rows are isolated in one subprocess per row by
-default so a full matrix does not load dozens of nanobind domains into one
-interpreter; ``--run-native-in-process`` keeps the old single-process path for
+default so full matrices do not load dozens of nanobind domains into one
+interpreter; ``--run-native-in-process`` keeps the single-process path for
 debugging.
 """
 
@@ -60,8 +62,9 @@ from veqpy.operator import Operator
 from veqpy.operator.packed_layout import build_profile_layout, build_profile_names
 from veqpy.solver import Solver
 
-DEFAULT_OUTPUT = Path("/tmp/veqlib_routes.json")
+DEFAULT_OUTPUT = REPO_ROOT / "outputs" / "veqlib_routes.json"
 VALIDATION_ATOL = 1.0e-6
+DEFAULT_SCOPE = "ip-uniform"
 Topology = KernelTopology
 
 
@@ -116,10 +119,17 @@ def _cxx_solver_method_for_spec(spec: Any) -> int:
     return SOLVER_METHOD_POWELL
 
 
-def _iter_route_specs(benchmark: ModuleType, *, include_grid: bool) -> tuple[Any, ...]:
-    input_kinds = list(benchmark.BENCHMARK_INPUT_KINDS)
-    if include_grid and "grid" not in input_kinds:
-        input_kinds.append("grid")
+def _iter_route_specs(benchmark: ModuleType, *, scope: str) -> tuple[Any, ...]:
+    if scope == DEFAULT_SCOPE:
+        input_kinds = ("uniform",)
+        constraints_by_mode = {mode: ("Ip",) for mode in benchmark.BENCHMARK_MODES}
+    elif scope in {"uniform", "full"}:
+        input_kinds = list(benchmark.BENCHMARK_INPUT_KINDS)
+        if scope == "full" and "grid" not in input_kinds:
+            input_kinds.append("grid")
+        constraints_by_mode = benchmark.BENCHMARK_MODE_CONSTRAINTS
+    else:
+        raise ValueError(f"unknown route benchmark scope {scope!r}")
     return tuple(
         benchmark.BenchmarkCaseSpec(
             mode=mode,
@@ -130,10 +140,8 @@ def _iter_route_specs(benchmark: ModuleType, *, include_grid: bool) -> tuple[Any
         for mode in benchmark.BENCHMARK_MODES
         for coordinate in ("rho", "psin")
         for input_kind in input_kinds
-        for constraint in benchmark.BENCHMARK_MODE_CONSTRAINTS[mode]
+        for constraint in constraints_by_mode[mode]
     )
-
-
 def _filter_specs(specs: tuple[Any, ...], selected: set[str] | None) -> tuple[Any, ...]:
     if selected is None:
         return specs
@@ -705,7 +713,11 @@ def _add_bool_override(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--scope", choices=("uniform", "full"), default="uniform")
+    parser.add_argument(
+        "--scope",
+        choices=(DEFAULT_SCOPE, "uniform", "full"),
+        default=DEFAULT_SCOPE,
+    )
     parser.add_argument("--case", action="append", help="Case name or route:coord:nodes:constraint")
     parser.add_argument("--build", default="fastmath")
     parser.add_argument("--layout", default="degree")
@@ -755,7 +767,7 @@ def main(argv: list[str] | None = None) -> int:
 
     benchmark = _benchmark_module()
     specs = _filter_specs(
-        _iter_route_specs(benchmark, include_grid=args.scope == "full"),
+        _iter_route_specs(benchmark, scope=args.scope),
         set(args.case) if args.case else None,
     )
     cache_root = args.cache_root or default_kernel_cache_root()

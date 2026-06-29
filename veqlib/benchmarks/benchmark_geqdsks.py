@@ -21,6 +21,7 @@ import numpy as np
 
 from veqlib.benchmarks._common import (
     CORE_DIR,
+    REPO_ROOT,
     SCRIPTS_DIR,
     cpu_affinity,
     family_counts,
@@ -63,7 +64,7 @@ from config import (  # noqa: E402
     signature_from_metadata,
 )
 
-DEFAULT_OUTPUT = Path("/tmp/veqlib_geqdsk_configs.json")
+DEFAULT_OUTPUT = REPO_ROOT / "outputs" / "veqlib_geqdsk_configs.json"
 VALIDATION_ATOL = 1.0e-6
 Topology = KernelTopology
 

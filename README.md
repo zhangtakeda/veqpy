@@ -18,7 +18,6 @@
 [![Package](https://img.shields.io/badge/package-veqpy-blue)](https://pypi.org/project/veqpy/)
 [![License](https://img.shields.io/badge/License-BSD--3--Clause-green)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-pytest-informational)](tests/)
-[![Style](https://img.shields.io/badge/style-ruff)](https://docs.astral.sh/ruff/)
 
 ---
 

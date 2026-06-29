@@ -324,7 +324,7 @@ def _get_or_build_nanobind_static(
 ) -> dict[str, Any]:
     identity = _nanobind_static_identity(cxx=cxx, cmake_build_type=cmake_build_type)
     artifact_id = _compute_nanobind_static_id(identity)
-    root_dir = cache_root / "_common" / "nanobind-static" / build / artifact_id
+    root_dir = cache_root / build / "common" / artifact_id
     archive_path = root_dir / "cmake-build" / "libnanobind-static.a"
     metadata_path = root_dir / "metadata.json"
     lock_path = root_dir.with_suffix(".lock")
