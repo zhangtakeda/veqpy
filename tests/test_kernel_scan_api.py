@@ -4,18 +4,24 @@ import json
 from typing import Any
 
 from veqlib.facade import (
+    CONTINUE_POLICY_WARM,
+    CONTINUE_POLICY_WARM_FIXED,
     INITIAL_POLICY_COLD,
-    INITIAL_POLICY_WARM_CLONE,
+    payload_json_with_continue_policy,
     payload_json_with_initial_policy,
     solve_payload_sequence,
 )
 
 
-def _payload(initial_policy_code: int = INITIAL_POLICY_COLD) -> dict[str, Any]:
+def _payload(
+    initial_policy_code: int = INITIAL_POLICY_COLD,
+    continue_policy_code: int = CONTINUE_POLICY_WARM,
+) -> dict[str, Any]:
     return {
         "case_name": "scan",
         "solver": {
             "initial_policy_code": initial_policy_code,
+            "continue_policy_code": continue_policy_code,
             "method_code": 1,
         },
     }
@@ -49,35 +55,54 @@ class RecordingSolver:
             [],
         )
 
-    def adopt_last_solution_as_initial(self) -> None:
-        self.adopt_count += 1
-
 
 def test_payload_json_with_initial_policy_rewrites_deep_copy_only() -> None:
     payload = _payload(INITIAL_POLICY_COLD)
 
-    rewritten = json.loads(payload_json_with_initial_policy(payload, "warm-clone"))
+    rewritten = json.loads(payload_json_with_initial_policy(payload, "cold-geometric"))
 
-    assert rewritten["solver"]["initial_policy_code"] == INITIAL_POLICY_WARM_CLONE
+    assert rewritten["solver"]["initial_policy_code"] == 2
     assert payload["solver"]["initial_policy_code"] == INITIAL_POLICY_COLD
 
 
-def test_solve_payload_sequence_uses_warm_clone_continuation_and_scalar_snapshots() -> None:
+def test_payload_json_with_continue_policy_rewrites_deep_copy_only() -> None:
+    payload = _payload()
+
+    rewritten = json.loads(payload_json_with_continue_policy(payload, "warm-fixed"))
+
+    assert rewritten["solver"]["continue_policy_code"] == CONTINUE_POLICY_WARM_FIXED
+    assert payload["solver"]["continue_policy_code"] == CONTINUE_POLICY_WARM
+
+
+def test_solve_payload_sequence_uses_continue_policy_and_scalar_snapshots() -> None:
     solver = RecordingSolver()
 
-    steps = solve_payload_sequence(solver, [_payload(), _payload(), _payload()])
+    steps = solve_payload_sequence(
+        solver,
+        [_payload(), _payload(), _payload()],
+        continuation_policy="warm-fixed",
+    )
 
     assert [step.index for step in steps] == [0, 1, 2]
     assert [step.initial_policy_code for step in steps] == [
         INITIAL_POLICY_COLD,
-        INITIAL_POLICY_WARM_CLONE,
-        INITIAL_POLICY_WARM_CLONE,
+        INITIAL_POLICY_COLD,
+        INITIAL_POLICY_COLD,
+    ]
+    assert [step.continue_policy_code for step in steps] == [
+        CONTINUE_POLICY_WARM,
+        CONTINUE_POLICY_WARM_FIXED,
+        CONTINUE_POLICY_WARM_FIXED,
     ]
     assert [step.elapsed_ms for step in steps] == [1.5, 2.5, 3.5]
     assert [step.nfev for step in steps] == [10, 11, 12]
-    assert solver.adopt_count == 2
     assert [payload["solver"]["initial_policy_code"] for payload in solver.payloads] == [
         INITIAL_POLICY_COLD,
-        INITIAL_POLICY_WARM_CLONE,
-        INITIAL_POLICY_WARM_CLONE,
+        INITIAL_POLICY_COLD,
+        INITIAL_POLICY_COLD,
+    ]
+    assert [payload["solver"]["continue_policy_code"] for payload in solver.payloads] == [
+        CONTINUE_POLICY_WARM,
+        CONTINUE_POLICY_WARM_FIXED,
+        CONTINUE_POLICY_WARM_FIXED,
     ]

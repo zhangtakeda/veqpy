@@ -10,7 +10,14 @@ SOLVER_METHOD_NEWTON_RAPHSON: Final[int] = 5
 INITIAL_POLICY_COLD_ZEROS: Final[int] = 1
 INITIAL_POLICY_COLD_GEOMETRIC: Final[int] = 2
 INITIAL_POLICY_COLD: Final[int] = 3
-INITIAL_POLICY_WARM_CLONE: Final[int] = 4
+
+CONTINUE_POLICY_COLD_ZEROS: Final[int] = 1
+CONTINUE_POLICY_COLD_GEOMETRIC: Final[int] = 2
+CONTINUE_POLICY_COLD: Final[int] = 3
+CONTINUE_POLICY_WARM_FIXED: Final[int] = 4
+CONTINUE_POLICY_WARM_PREDICT: Final[int] = 5
+CONTINUE_POLICY_WARM_CHORD: Final[int] = 6
+CONTINUE_POLICY_WARM: Final[int] = 7
 
 RESIDUAL_NORMALIZATION_NONE: Final[int] = 0
 RESIDUAL_NORMALIZATION_FAST: Final[int] = 1
@@ -28,7 +35,16 @@ INITIAL_POLICY_CODES: Final[dict[str, int]] = {
     "cold-zeros": INITIAL_POLICY_COLD_ZEROS,
     "cold-geometric": INITIAL_POLICY_COLD_GEOMETRIC,
     "cold": INITIAL_POLICY_COLD,
-    "warm-clone": INITIAL_POLICY_WARM_CLONE,
+}
+
+CONTINUE_POLICY_CODES: Final[dict[str, int]] = {
+    "cold-zeros": CONTINUE_POLICY_COLD_ZEROS,
+    "cold-geometric": CONTINUE_POLICY_COLD_GEOMETRIC,
+    "cold": CONTINUE_POLICY_COLD,
+    "warm-fixed": CONTINUE_POLICY_WARM_FIXED,
+    "warm-predict": CONTINUE_POLICY_WARM_PREDICT,
+    "warm-chord": CONTINUE_POLICY_WARM_CHORD,
+    "warm": CONTINUE_POLICY_WARM,
 }
 
 RESIDUAL_NORMALIZATION_CODES: Final[dict[str, int]] = {
@@ -57,9 +73,23 @@ def initial_policy_code(value: str | int) -> int:
         INITIAL_POLICY_COLD_ZEROS,
         INITIAL_POLICY_COLD_GEOMETRIC,
         INITIAL_POLICY_COLD,
-        INITIAL_POLICY_WARM_CLONE,
     ):
         raise ValueError(f"Unsupported initial policy code {code!r}")
+    return code
+
+
+def continue_policy_code(value: str | int) -> int:
+    code = _option_code(value, CONTINUE_POLICY_CODES, "continue policy")
+    if code not in (
+        CONTINUE_POLICY_COLD_ZEROS,
+        CONTINUE_POLICY_COLD_GEOMETRIC,
+        CONTINUE_POLICY_COLD,
+        CONTINUE_POLICY_WARM_FIXED,
+        CONTINUE_POLICY_WARM_PREDICT,
+        CONTINUE_POLICY_WARM_CHORD,
+        CONTINUE_POLICY_WARM,
+    ):
+        raise ValueError(f"Unsupported continue policy code {code!r}")
     return code
 
 

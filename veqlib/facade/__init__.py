@@ -17,10 +17,16 @@ from .builder import (
 )
 from .kernel import Kernel, build, solve
 from .options import (
+    CONTINUE_POLICY_COLD,
+    CONTINUE_POLICY_COLD_GEOMETRIC,
+    CONTINUE_POLICY_COLD_ZEROS,
+    CONTINUE_POLICY_WARM,
+    CONTINUE_POLICY_WARM_CHORD,
+    CONTINUE_POLICY_WARM_FIXED,
+    CONTINUE_POLICY_WARM_PREDICT,
     INITIAL_POLICY_COLD,
     INITIAL_POLICY_COLD_GEOMETRIC,
     INITIAL_POLICY_COLD_ZEROS,
-    INITIAL_POLICY_WARM_CLONE,
     RESIDUAL_NORMALIZATION_BALANCED,
     RESIDUAL_NORMALIZATION_FAST,
     RESIDUAL_NORMALIZATION_NONE,
@@ -29,12 +35,18 @@ from .options import (
     SOLVER_METHOD_NEWTON_KRYLOV,
     SOLVER_METHOD_NEWTON_RAPHSON,
     SOLVER_METHOD_POWELL,
+    continue_policy_code,
     initial_policy_code,
     residual_normalization_code,
     solver_method_code,
 )
 from .registry import KernelLoadError, KernelRegistry, LoadedKernel, SolverThreadError
-from .scan import PayloadSequenceStep, payload_json_with_initial_policy, solve_payload_sequence
+from .scan import (
+    PayloadSequenceStep,
+    payload_json_with_continue_policy,
+    payload_json_with_initial_policy,
+    solve_payload_sequence,
+)
 from .solver import VEQlibSolver
 from .types import (
     KernelBoundary,
@@ -47,10 +59,16 @@ from .types import (
 )
 
 __all__ = [
+    "CONTINUE_POLICY_COLD",
+    "CONTINUE_POLICY_COLD_GEOMETRIC",
+    "CONTINUE_POLICY_COLD_ZEROS",
+    "CONTINUE_POLICY_WARM",
+    "CONTINUE_POLICY_WARM_CHORD",
+    "CONTINUE_POLICY_WARM_FIXED",
+    "CONTINUE_POLICY_WARM_PREDICT",
     "INITIAL_POLICY_COLD",
     "INITIAL_POLICY_COLD_GEOMETRIC",
     "INITIAL_POLICY_COLD_ZEROS",
-    "INITIAL_POLICY_WARM_CLONE",
     "Kernel",
     "KernelArtifact",
     "KernelBoundary",
@@ -79,9 +97,11 @@ __all__ = [
     "build",
     "build_kernel",
     "clean",
+    "continue_policy_code",
     "current_cpu_affinity",
     "default_kernel_cache_root",
     "initial_policy_code",
+    "payload_json_with_continue_policy",
     "payload_json_with_initial_policy",
     "pinned_cpu",
     "residual_normalization_code",

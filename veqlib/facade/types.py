@@ -8,7 +8,12 @@ from typing import Any, Self
 
 import numpy as np
 
-from .options import initial_policy_code, residual_normalization_code, solver_method_code
+from .options import (
+    continue_policy_code,
+    initial_policy_code,
+    residual_normalization_code,
+    solver_method_code,
+)
 
 _KERNEL_TOPOLOGY_KEY_LENGTH = 32
 _SOURCE_ROUTE_CODES = {
@@ -554,6 +559,7 @@ class KernelSolve:
     accepted_residual_factor: float = 10.0
     accepted_residual_floor: float = 1.0e-5
     initial: str | int = "cold"
+    continuation: str | int = "warm"
     norm: str | int = "fast"
     residual_normalization_floor: float = 1.0
     residual_normalization_max_ratio: float = 1.0e6
@@ -575,6 +581,7 @@ class KernelSolve:
             "accepted_residual_factor": float(self.accepted_residual_factor),
             "accepted_residual_floor": float(self.accepted_residual_floor),
             "initial_policy_code": initial_policy_code(self.initial),
+            "continue_policy_code": continue_policy_code(self.continuation),
             "residual_normalization_code": residual_normalization_code(self.norm),
             "residual_normalization_floor": float(self.residual_normalization_floor),
             "residual_normalization_max_ratio": float(self.residual_normalization_max_ratio),
@@ -595,6 +602,7 @@ class KernelSolve:
             payload["accepted_residual_factor"],
             payload["accepted_residual_floor"],
             payload["initial_policy_code"],
+            payload["continue_policy_code"],
             payload["residual_normalization_code"],
             payload["residual_normalization_floor"],
             payload["residual_normalization_max_ratio"],

@@ -15,6 +15,8 @@ from numpy.testing import assert_allclose
 import veqlib.facade as facade
 import veqlib.facade.affinity as affinity
 from veqlib.facade import (
+    CONTINUE_POLICY_WARM,
+    CONTINUE_POLICY_WARM_PREDICT,
     INITIAL_POLICY_COLD,
     RESIDUAL_NORMALIZATION_FAST,
     SOLVER_METHOD_POWELL,
@@ -92,10 +94,16 @@ def tiny_kernel_input(*, case_name: str | None = None) -> KernelInput:
 
 def test_facade_public_exports_are_stable() -> None:
     assert facade.__all__ == [
+        "CONTINUE_POLICY_COLD",
+        "CONTINUE_POLICY_COLD_GEOMETRIC",
+        "CONTINUE_POLICY_COLD_ZEROS",
+        "CONTINUE_POLICY_WARM",
+        "CONTINUE_POLICY_WARM_CHORD",
+        "CONTINUE_POLICY_WARM_FIXED",
+        "CONTINUE_POLICY_WARM_PREDICT",
         "INITIAL_POLICY_COLD",
         "INITIAL_POLICY_COLD_GEOMETRIC",
         "INITIAL_POLICY_COLD_ZEROS",
-        "INITIAL_POLICY_WARM_CLONE",
         "Kernel",
         "KernelArtifact",
         "KernelBoundary",
@@ -124,9 +132,11 @@ def test_facade_public_exports_are_stable() -> None:
         "build",
         "build_kernel",
         "clean",
+        "continue_policy_code",
         "current_cpu_affinity",
         "default_kernel_cache_root",
         "initial_policy_code",
+        "payload_json_with_continue_policy",
         "payload_json_with_initial_policy",
         "pinned_cpu",
         "residual_normalization_code",
@@ -260,6 +270,7 @@ def test_kernel_solve_payload_uses_codes_and_x_size_default_budget() -> None:
 
     assert payload["method_code"] == SOLVER_METHOD_POWELL
     assert payload["initial_policy_code"] == INITIAL_POLICY_COLD
+    assert payload["continue_policy_code"] == CONTINUE_POLICY_WARM
     assert payload["residual_normalization_code"] == RESIDUAL_NORMALIZATION_FAST
     assert payload["max_evaluations"] == 49
     assert solve.runtime_args(x_size=7) == (
@@ -269,6 +280,7 @@ def test_kernel_solve_payload_uses_codes_and_x_size_default_budget() -> None:
         10.0,
         1.0e-5,
         INITIAL_POLICY_COLD,
+        CONTINUE_POLICY_WARM,
         RESIDUAL_NORMALIZATION_FAST,
         1.0,
         1.0e6,
@@ -277,6 +289,9 @@ def test_kernel_solve_payload_uses_codes_and_x_size_default_budget() -> None:
         1.0e-6,
         0.5,
     )
+
+    predict = KernelSolve(continuation="warm-predict")
+    assert predict.to_payload_dict(x_size=7)["continue_policy_code"] == CONTINUE_POLICY_WARM_PREDICT
 
 
 def test_kernel_handle_build_dry_run_and_payload_json(tmp_path) -> None:
