@@ -36,6 +36,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT = Path("/tmp/veqlib_route_topology_matrix.json")
 DEFAULT_MPLCONFIG = Path("/tmp/veqpy-mpl")
 VALIDATION_ATOL = 1.0e-6
+MU0 = 4.0e-7 * np.pi
 
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 os.environ.setdefault("OMP_NUM_THREADS", "1")
@@ -45,15 +46,21 @@ os.environ.setdefault("MPLCONFIGDIR", str(DEFAULT_MPLCONFIG))
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from veqpy.cpp import (  # noqa: E402
+from veqlib.kernel import (  # noqa: E402
     SOLVER_METHOD_LEVENBERG_MARQUARDT,
     SOLVER_METHOD_POWELL,
+    KernelBoundary,
+    KernelBuild,
+    KernelInput,
     KernelRegistry,
+    KernelSolve,
+    KernelTopology,
+    TopologyError,
     VEQlibSolver,
     build_kernel,
 )
-from veqpy.kernel import KernelBuild, KernelInput, KernelSolve, KernelTopology  # noqa: E402
-from veqpy.model import Topology, TopologyError  # noqa: E402
+
+Topology = KernelTopology
 from veqpy.operator import Operator  # noqa: E402
 from veqpy.operator.packed_layout import build_profile_layout, build_profile_names  # noqa: E402
 from veqpy.solver import Solver  # noqa: E402
@@ -64,6 +71,8 @@ class RuntimeCaseData:
     spec: Any
     topology: Topology
     payload_json: str
+    kernel_input: KernelInput
+    kernel_solve: KernelSolve
     py_operator: Any
     py_measure: Any
     solver_method_code: int
@@ -255,7 +264,7 @@ def _topology_from_spec(
     build: str,
     layout: str = "degree",
     build_options: dict[str, object] | None = None,
-) -> tuple[Topology, tuple[str, ...]]:
+) -> tuple[KernelTopology, tuple[str, ...]]:
     coeffs = benchmark._case_profile_coeffs(spec)
     grid = benchmark.TEST_GRID
     m_max = _boundary_m_max(benchmark.BOUNDARY)
@@ -284,7 +293,7 @@ def _topology_from_spec(
         warnings.simplefilter("always", UserWarning)
         kernel_topology = KernelTopology(**topology_kwargs)
         kernel_build = KernelBuild(**build_kwargs)
-        topology = kernel_topology.to_legacy_topology(kernel_build)
+        topology = kernel_topology.with_build(kernel_build)
     warning_messages = tuple(str(item.message) for item in caught)
     return topology, warning_messages
 
@@ -331,6 +340,61 @@ def _max_abs(lhs: Any, rhs: Any) -> float:
     return float(np.max(np.abs(lhs_arr - rhs_arr)))
 
 
+def _scaled_source_inputs(case: Any) -> tuple[np.ndarray, np.ndarray, float, float]:
+    heat_input = np.asarray(case.heat_input, dtype=np.float64)
+    current_input = np.asarray(case.current_input, dtype=np.float64)
+    if heat_input.ndim != 1 or current_input.ndim != 1:
+        raise ValueError("benchmark source inputs must be 1D")
+    if heat_input.shape != current_input.shape:
+        raise ValueError(
+            "benchmark heat_input and current_input must share shape, "
+            f"got {heat_input.shape} and {current_input.shape}"
+        )
+    route = str(case.route).upper()
+    scaled_heat = heat_input.copy() if route == "PQ" else heat_input * MU0
+    scaled_current = current_input.copy() if route == "PF" else current_input * MU0
+    ip = float(case.Ip)
+    beta = float(case.beta)
+    scaled_ip = ip * MU0 if np.isfinite(ip) else ip
+    return (
+        np.ascontiguousarray(scaled_heat, dtype=np.float64),
+        np.ascontiguousarray(scaled_current, dtype=np.float64),
+        float(scaled_ip),
+        beta,
+    )
+
+
+def _kernel_boundary_from_case(case: Any) -> KernelBoundary:
+    boundary = case.boundary
+    return KernelBoundary(
+        a=float(boundary.a),
+        R0=float(boundary.R0),
+        Z0=float(boundary.Z0),
+        B0=float(boundary.B0),
+        ka=float(boundary.ka),
+        c_offsets=np.asarray(boundary.c_offsets, dtype=np.float64),
+        s_offsets=np.asarray(boundary.s_offsets, dtype=np.float64),
+    )
+
+
+def _kernel_input_from_benchmark_case(
+    case: Any,
+    *,
+    fix_rho: float,
+    case_name: str,
+) -> KernelInput:
+    scaled_heat, scaled_current, scaled_ip, beta = _scaled_source_inputs(case)
+    return KernelInput(
+        boundary=_kernel_boundary_from_case(case),
+        scaled_heat=scaled_heat,
+        scaled_current=scaled_current,
+        scaled_Ip=scaled_ip,
+        beta=beta,
+        fix_rho=fix_rho,
+        case_name=case_name,
+    )
+
+
 def _runtime_case_data(benchmark: ModuleType, spec: Any, topology: Topology) -> RuntimeCaseData:
     reference = _benchmark_reference()
     case = benchmark._make_benchmark_case(spec, reference)
@@ -339,7 +403,7 @@ def _runtime_case_data(benchmark: ModuleType, spec: Any, topology: Topology) -> 
     operator = Operator(grid, case)
     x0 = operator.pack_coefficients(benchmark._coefficients_from_coeffs(coeffs))
     solver_method_code = _cxx_solver_method_for_spec(spec)
-    kernel_input = KernelInput.from_problem(
+    kernel_input = _kernel_input_from_benchmark_case(
         case,
         fix_rho=float(operator.fix_rho),
         case_name=_spec_label(spec),
@@ -351,18 +415,10 @@ def _runtime_case_data(benchmark: ModuleType, spec: Any, topology: Topology) -> 
         initial="cold",
         norm="fast",
         residual_normalization_floor=float(benchmark.CONFIG.residual_normalization_floor),
-        residual_normalization_max_ratio=float(
-            benchmark.CONFIG.residual_normalization_max_ratio
-        ),
-        residual_normalization_huber_tau=float(
-            benchmark.CONFIG.residual_normalization_huber_tau
-        ),
-        residual_normalization_probe_count=int(
-            benchmark.CONFIG.residual_normalization_probe_count
-        ),
-        residual_normalization_probe_step=float(
-            benchmark.CONFIG.residual_normalization_probe_step
-        ),
+        residual_normalization_max_ratio=float(benchmark.CONFIG.residual_normalization_max_ratio),
+        residual_normalization_huber_tau=float(benchmark.CONFIG.residual_normalization_huber_tau),
+        residual_normalization_probe_count=int(benchmark.CONFIG.residual_normalization_probe_count),
+        residual_normalization_probe_step=float(benchmark.CONFIG.residual_normalization_probe_step),
         residual_normalization_sensitivity_lambda=float(
             benchmark.CONFIG.residual_normalization_sensitivity_lambda
         ),
@@ -422,6 +478,8 @@ def _runtime_case_data(benchmark: ModuleType, spec: Any, topology: Topology) -> 
         spec=spec,
         topology=topology,
         payload_json=json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
+        kernel_input=kernel_input,
+        kernel_solve=kernel_solve,
         py_operator=operator,
         py_measure=measure_py,
         solver_method_code=solver_method_code,
@@ -445,7 +503,10 @@ def _measure_cxx(
     build_start = time.perf_counter()
     artifact = solver.build(force=False, dry_run=False)
     build_wall_ms = (time.perf_counter() - build_start) * 1000.0
-    solver.set_case_json(case_data.payload_json)
+    solver.set_kernel_runtime(
+        *case_data.kernel_input.runtime_args(),
+        *case_data.kernel_solve.runtime_args(x_size=case_data.x_size),
+    )
     for _ in range(warmup):
         solver.solve_direct()
 

@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from veqpy.cpp.kernel_builder import build_kernel
-from veqpy.model import Topology
+from veqlib.kernel import KernelTopology, build_kernel
 
 
 def test_kernel_builder_dry_run_emits_full_topology_contract(tmp_path) -> None:
-    topology = Topology(
+    topology = KernelTopology(
         h_count=3,
         v_count=0,
         kappa_count=6,
@@ -54,6 +53,16 @@ def test_kernel_builder_dry_run_emits_full_topology_contract(tmp_path) -> None:
         "packed": "family",
         "profile_first": True,
         "code": 1,
+        "profile_order": [
+            "h",
+            "v",
+            "k",
+            "c0",
+            "c1",
+            "s1",
+            "psin",
+            "F",
+        ],
     }
 
     configure = artifact.metadata["build"]["cmake_configure"]
