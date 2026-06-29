@@ -436,6 +436,33 @@ def _compare(cxx: dict[str, Any], py: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _reference_dofs_payload(
+    benchmark: ModuleType,
+    case: RuntimeCase,
+    cxx: dict[str, Any],
+    py: dict[str, Any],
+) -> dict[str, float]:
+    reference = _benchmark_reference()
+    active_profiles = case.py_operator.problem.active_profiles
+    cxx_shape_x = benchmark._extract_shape_x(
+        active_profiles,
+        np.asarray(cxx["x"], dtype=np.float64),
+    )
+    py_shape_x = benchmark._extract_shape_x(
+        active_profiles,
+        np.asarray(py["x"], dtype=np.float64),
+    )
+    return {
+        "veqlib_shape_error": float(
+            benchmark._shape_error(reference.reference_shape_x, cxx_shape_x)
+        ),
+        "veqpy_shape_error": float(
+            benchmark._shape_error(reference.reference_shape_x, py_shape_x)
+        ),
+        "veqlib_vs_veqpy_shape_error": max_abs(cxx_shape_x, py_shape_x),
+    }
+
+
 def _topology_payload(topology: Topology, warnings_: tuple[str, ...]) -> dict[str, Any]:
     return {
         "status": "planned",
@@ -539,6 +566,7 @@ def _run_supported_row(
     py = case.py_measure(warmup=warmup, repeat=repeat)
     cxx = _measure_veqlib(case, registry=registry, warmup=warmup, repeat=repeat)
     compare = _compare(cxx, py)
+    reference_dofs = _reference_dofs_payload(benchmark, case, cxx, py)
     passed = cxx["success_all"] and py["success_all"] and compare["within_atol"]
     return {
         "status": "passed" if passed else "failed",
@@ -548,6 +576,7 @@ def _run_supported_row(
             "veqpy-numba-hybr": _compact_py(py),
         },
         "closeness_to_numba": compare,
+        "reference_dofs": reference_dofs,
     }
 
 
@@ -587,6 +616,7 @@ def _run_supported_row_subprocess(
         str(source_dir),
         "--skip-artifact-dry-run",
         "--run-native-in-process",
+        "--quiet-progress",
     ]
     _append_optional_arg(command, "--cmake-build-type", args.cmake_build_type)
     _append_optional_arg(command, "--fp-mode", args.fp_mode)
@@ -711,6 +741,75 @@ def _add_bool_override(
     group.add_argument(negative, dest=dest, action="store_false", help=argparse.SUPPRESS)
 
 
+def _native_engine_payload(runtime: dict[str, Any]) -> dict[str, Any] | None:
+    engines = runtime.get("engines")
+    if not isinstance(engines, dict):
+        return None
+    for name, payload in engines.items():
+        if str(name).startswith("veqlib-") and isinstance(payload, dict):
+            return payload
+    return None
+
+
+def _veqpy_engine_payload(runtime: dict[str, Any]) -> dict[str, Any] | None:
+    engines = runtime.get("engines")
+    if not isinstance(engines, dict):
+        return None
+    payload = engines.get("veqpy-numba-hybr")
+    return payload if isinstance(payload, dict) else None
+
+
+def _timing_median_ms(engine: dict[str, Any] | None) -> float:
+    if engine is None:
+        return float("nan")
+    timing = engine.get("timing")
+    if not isinstance(timing, dict):
+        return float("nan")
+    return float(timing.get("median_ms", float("nan")))
+
+
+def _format_optional_float(value: float, *, decimals: int = 6) -> str:
+    return "n/a" if not np.isfinite(value) else f"{value:.{decimals}f}"
+
+
+def _format_optional_sci(value: float) -> str:
+    return "n/a" if not np.isfinite(value) else f"{value:.3e}"
+
+
+def _format_optional_speedup(py_ms: float, cxx_ms: float) -> str:
+    if not np.isfinite(py_ms) or not np.isfinite(cxx_ms) or cxx_ms <= 0.0:
+        return "n/a"
+    return f"{py_ms / cxx_ms:.3f}x"
+
+
+def _print_summary_table(rows: list[dict[str, Any]]) -> None:
+    print(
+        "| status | route | coordinate | nodes | constraint | x_size | "
+        "ref dofs err | VEQlib median ms | VEQPy median ms | speedup |"
+    )
+    print("|---|---|---|---|---|---:|---:|---:|---:|---:|")
+    for row in rows:
+        runtime = row["runtime"]
+        native = _native_engine_payload(runtime)
+        py = _veqpy_engine_payload(runtime)
+        cxx_ms = _timing_median_ms(native)
+        py_ms = _timing_median_ms(py)
+        reference_dofs = runtime.get("reference_dofs")
+        if isinstance(reference_dofs, dict):
+            ref_dofs_error = float(reference_dofs.get("veqlib_shape_error", float("nan")))
+        else:
+            ref_dofs_error = float("nan")
+        print(
+            f"| {runtime['status']} | {row.get('route', 'n/a')} | "
+            f"{row.get('coordinate', 'n/a')} | {row.get('nodes', 'n/a')} | "
+            f"{row.get('constraint', 'n/a')} | {runtime.get('x_size', 'n/a')} | "
+            f"{_format_optional_sci(ref_dofs_error)} | "
+            f"{_format_optional_float(cxx_ms)} | "
+            f"{_format_optional_float(py_ms)} | "
+            f"{_format_optional_speedup(py_ms, cxx_ms)} |"
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -761,6 +860,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--run-native-in-process", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--skip-artifact-dry-run", action="store_true")
     parser.add_argument("--no-write", action="store_true")
+    parser.add_argument("--quiet-progress", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     if args.warmup < 0 or args.repeat <= 0:
         raise ValueError("--warmup must be >= 0 and --repeat must be > 0")
@@ -791,7 +891,9 @@ def main(argv: list[str] | None = None) -> int:
             if args.no_run:
                 row["runtime"] = {"status": "not_requested"}
             elif topology is not None:
-                print(f"[routes] running {_spec_label(spec)}", flush=True)
+                if not args.quiet_progress:
+                    print(f"[routes] {_spec_label(spec)}: VEQPy", flush=True)
+                    print(f"[routes] {_spec_label(spec)}: VEQlib", flush=True)
                 try:
                     if args.run_native_in_process:
                         row["runtime"] = _run_supported_row(
@@ -834,7 +936,7 @@ def main(argv: list[str] | None = None) -> int:
     if not args.no_write:
         write_json(args.output, payload)
         print(f"json: {args.output}")
-    print(json.dumps(payload["summary"], indent=2, sort_keys=True))
+    _print_summary_table(rows)
     return 0
 
 
