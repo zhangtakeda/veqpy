@@ -48,7 +48,7 @@ from config import (  # noqa: E402
     load_pf_benchmark,
 )
 
-from veqpy.cpp import (  # noqa: E402
+from veqlib.kernel import (  # noqa: E402
     INITIAL_POLICY_COLD,
     RESIDUAL_NORMALIZATION_FAST,
     SOLVER_METHOD_LEVENBERG_MARQUARDT,
@@ -56,9 +56,11 @@ from veqpy.cpp import (  # noqa: E402
     SOLVER_METHOD_NEWTON_RAPHSON,
     SOLVER_METHOD_POWELL,
     KernelRegistry,
+    KernelTopology,
     VEQlibSolver,
 )
-from veqpy.model import Topology  # noqa: E402
+
+Topology = KernelTopology
 
 SOLVERS: tuple[tuple[str, str, int | None], ...] = (
     ("veqpy-hybr", "veqpy", None),

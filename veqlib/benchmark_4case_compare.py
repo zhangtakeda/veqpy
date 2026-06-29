@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Four-case VEQlib-vs-VEQPy benchmark gate.
 
-This script is intentionally Python-facing: it exercises the same Topology ->
-nanobind artifact -> KernelSolver path used by VEQPy, then compares against the
+This script is intentionally Python-facing: it exercises the VEQlib KernelTopology ->
+nanobind artifact -> KernelSolver path, then compares against the
 VEQPy/Numba solver for the 18-parameter PF benchmark plus the three GEQDSK cases
 used by the Figure 06 workflow (solovev, chease, efit).
 
@@ -43,14 +43,16 @@ os.environ.setdefault("MPLCONFIGDIR", str(DEFAULT_MPLCONFIG))
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from veqpy.cpp import (  # noqa: E402
+from veqlib.kernel import (  # noqa: E402
     INITIAL_POLICY_COLD,
     RESIDUAL_NORMALIZATION_FAST,
     SOLVER_METHOD_POWELL,
     KernelRegistry,
+    KernelTopology,
     VEQlibSolver,
 )
-from veqpy.model import Topology  # noqa: E402
+
+Topology = KernelTopology
 from veqpy.operator import Operator  # noqa: E402
 from veqpy.solver import Solver  # noqa: E402
 
@@ -166,7 +168,7 @@ def _geqdsk_case_payload(
     c_offsets = np.asarray(boundary.c_offsets, dtype=np.float64)
     s_offsets = np.asarray(boundary.s_offsets, dtype=np.float64)
     return {
-        "schema": "veqpy.cpp.geqdsk_case_payload.v1",
+        "schema": "veqlib.geqdsk_case_payload.v1",
         "case_key": str(case_spec.case_key),
         "topology_key": topology.key,
         "topology": topology.to_canonical_dict(),
@@ -276,7 +278,7 @@ class CaseData:
 
 def _benchmark_case_data(repeat: int, warmup: int) -> CaseData:
     benchmark = _load_module(
-        "veqpy_route_benchmark_for_cpp_4case",
+        "veqpy_route_benchmark_for_veqlib_4case",
         REPO_ROOT / "tests" / "benchmark.py",
     )
     ref = benchmark._solve_reference(show_progress=False)

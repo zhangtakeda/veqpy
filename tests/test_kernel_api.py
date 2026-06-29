@@ -103,6 +103,7 @@ def test_kernel_public_exports_are_stable() -> None:
         "KernelSolve",
         "KernelTopology",
         "LoadedKernel",
+        "PayloadSequenceStep",
         "RESIDUAL_NORMALIZATION_BALANCED",
         "RESIDUAL_NORMALIZATION_FAST",
         "RESIDUAL_NORMALIZATION_NONE",
@@ -118,7 +119,9 @@ def test_kernel_public_exports_are_stable() -> None:
         "build_kernel",
         "default_kernel_cache_root",
         "initial_policy_code",
+        "payload_json_with_initial_policy",
         "residual_normalization_code",
+        "solve_payload_sequence",
         "solver_method_code",
     ]
 

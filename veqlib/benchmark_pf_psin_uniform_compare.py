@@ -22,7 +22,7 @@ FIXED_CONSTRAINT = "Ip"
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from veqpy.cpp import (  # noqa: E402
+from veqlib.kernel import (  # noqa: E402
     INITIAL_POLICY_COLD,
     RESIDUAL_NORMALIZATION_FAST,
     SOLVER_METHOD_POWELL,

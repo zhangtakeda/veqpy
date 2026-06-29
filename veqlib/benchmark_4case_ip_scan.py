@@ -28,7 +28,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from veqlib.benchmark_4case_compare import _make_cases  # noqa: E402
-from veqpy.cpp import KernelRegistry, VEQlibSolver, solve_payload_sequence  # noqa: E402
+from veqlib.kernel import KernelRegistry, VEQlibSolver, solve_payload_sequence  # noqa: E402
 
 
 def _quantile(values: list[float], q: float) -> float:

@@ -26,6 +26,7 @@ from .options import (
     solver_method_code,
 )
 from .registry import KernelLoadError, KernelRegistry, LoadedKernel, SolverThreadError
+from .scan import PayloadSequenceStep, payload_json_with_initial_policy, solve_payload_sequence
 from .solver import VEQlibSolver
 from .types import (
     KernelBoundary,
@@ -54,6 +55,7 @@ __all__ = [
     "KernelSolve",
     "KernelTopology",
     "LoadedKernel",
+    "PayloadSequenceStep",
     "RESIDUAL_NORMALIZATION_BALANCED",
     "RESIDUAL_NORMALIZATION_FAST",
     "RESIDUAL_NORMALIZATION_NONE",
@@ -69,6 +71,8 @@ __all__ = [
     "build_kernel",
     "default_kernel_cache_root",
     "initial_policy_code",
+    "payload_json_with_initial_policy",
     "residual_normalization_code",
+    "solve_payload_sequence",
     "solver_method_code",
 ]
