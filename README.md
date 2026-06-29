@@ -58,10 +58,10 @@ and easier to reuse than full solver-native equilibrium or reconstruction pipeli
   active profile lengths, while `Profile` is used for serializable shape-profile
   snapshots on `Equilibrium`. `Grid` and `Equilibrium` use reactive derived properties
   to lazily reconstruct geometry and physics diagnostics by formula.
-- **Experimental VEQlib bridge**: `veqpy.model.Topology` canonicalizes fixed kernel
-  topologies, and `veqpy.cpp` can build/load optional topology-specific VEQlib
-  C++/nanobind kernels for the current PF(`psin`)/uniform/`Ip` MVP path. This is an
-  optional acceleration path; the standard Python/Numba solver remains the default.
+- **Experimental VEQlib bridge**: `veqlib.kernel` exposes a C++-aligned
+  `KernelTopology + KernelInput + KernelSolve` API and builds/loads optional
+  topology-specific VEQlib C++/nanobind kernels for the current MVP path. This is
+  an optional acceleration path; the standard Python/Numba solver remains the default.
 
 ## Installation
 
@@ -93,11 +93,12 @@ For a runtime-only install from a local source checkout, omit the `dev` extra:
 ```
 
 The optional VEQlib C++ kernel layer under `veqlib/` is not required for normal
-Python/Numba use. It is built on demand through `veqpy.cpp` and currently targets the
-PF(`psin`)/uniform/`Ip` topology. Building it requires a local C++20 toolchain and
-native libraries such as CMake 3.24+, `clang++`, nanobind, GCEM, nlohmann-json,
-CMINPACK, LAPACKE/LAPACK, and OpenBLAS; see [`veqlib/README.md`](veqlib/README.md)
-for the current build boundary and supported topology.
+Python/Numba use. It is built on demand through `veqlib.kernel` (with legacy
+`veqpy.cpp` compatibility still available for older tools). Building it requires a
+local C++20 toolchain and native libraries such as CMake 3.24+, `clang++`, nanobind,
+GCEM, nlohmann-json, CMINPACK, LAPACKE/LAPACK, and OpenBLAS; see
+[`veqlib/README.md`](veqlib/README.md) for the current build boundary and supported
+topology.
 
 All commands below use `.venv` explicitly; activating the environment is optional.
 

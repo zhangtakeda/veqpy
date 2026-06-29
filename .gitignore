@@ -66,8 +66,9 @@ tests/_outputs/
 tests/demo/
 tests/benchmark/
 
-# Example outputs, if examples/ is introduced.
-examples/
+# Example source is trackable; generated outputs stay local.
+examples/*
+!examples/*.py
 outputs/
 tmp/
 veqlib/artifact/

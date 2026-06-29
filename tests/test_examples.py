@@ -56,3 +56,15 @@ def test_geqdsk_workflow_example_runs_with_tmp_output(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr + result.stdout
     assert (outdir / "demo_geqdsk_workflow.png").is_file()
     assert (outdir / "demo_geqdsk_equilibrium.json").is_file()
+
+
+@pytest.mark.slow
+@pytest.mark.examples
+def test_kernel_build_solve_example_runs_with_tmp_output(tmp_path: Path) -> None:
+    outdir = tmp_path / "kernel"
+    result = _run_example("kernel_build_solve.py", outdir, timeout=180)
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert "VEQlib kernel build + solve demo" in result.stdout
+    assert "success: True" in result.stdout
+    assert (outdir / "kernel_cache").is_dir()

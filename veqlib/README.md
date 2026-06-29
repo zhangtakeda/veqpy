@@ -18,7 +18,8 @@ introduced C++20 pieces:
 - CMINPACK-backed nonlinear solves compatible with VEQPy's `hybr` / `lm`
   migration path;
 - optional Enzyme-based automatic differentiation for C++ kernels;
-- JSON-based smoke tests and small structured data exchange with Python.
+- typed nanobind runtime setup through `set_kernel_runtime(...)`, with JSON
+  payloads retained for debug and legacy smoke tests.
 
 The current boundary is intentionally narrow: VEQPy carries model meaning and
 selects configurations, while VEQlib generates the fixed arrays needed by the
@@ -42,7 +43,7 @@ import veqlib_ext
 
 solver = veqlib_ext.KernelSolver()
 solver.metadata()
-solver.set_case_json(payload_json)
+solver.set_kernel_runtime(...)
 solver.solve_direct()  # scalars plus read-only NumPy views
 ```
 
@@ -50,12 +51,14 @@ solver.solve_direct()  # scalars plus read-only NumPy views
 objects are mutable workspace owners and should not be shared across Python
 threads; use one solver instance per thread.
 
-VEQPy's Python bridge builds topology-specific shared-library artifacts through
-`veqpy.cpp`. The canonical topology type is `veqpy.model.Topology`; kernel
-artifacts are cached under `veqlib/artifact/` by default, or under
-`VEQPY_KERNEL_CACHE` when that environment variable is set. The bridge currently
-gates unsupported topologies before CMake generation; only PF/psin/uniform/Ip is
-accepted by `Topology.validate_supported_for_veqlib_mvp()`.
+The Python bridge builds topology-specific shared-library artifacts through
+`veqlib.kernel`. The public runtime shape is `KernelTopology + KernelInput +
+KernelSolve`; `KernelInput` is already lowered to the C++ runtime contract and
+does not depend on VEQPy `Problem`/`Operator` objects. Kernel artifacts are
+cached under `veqlib/artifact/` by default, under `VEQLIB_KERNEL_CACHE` when set,
+or under legacy `VEQPY_KERNEL_CACHE` as a fallback. The bridge currently gates
+unsupported topologies before CMake generation through
+`KernelTopology.validate_supported_for_veqlib_mvp()`.
 
 ## Default Topology
 
