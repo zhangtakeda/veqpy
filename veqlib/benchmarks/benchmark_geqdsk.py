@@ -13,11 +13,23 @@ from __future__ import annotations
 import argparse
 import sys
 import time
+from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+from rich import box
+from rich.console import Console
+from rich.progress import (
+    BarColumn,
+    MofNCompleteColumn,
+    Progress,
+    TextColumn,
+    TimeElapsedColumn,
+)
+from rich.table import Table
+from rich.text import Text
 
 from veqlib.benchmarks._common import (
     CORE_DIR,
@@ -66,7 +78,12 @@ from config import (  # noqa: E402
 
 DEFAULT_OUTPUT = REPO_ROOT / "outputs" / "veqlib_geqdsk_configs.json"
 VALIDATION_ATOL = 1.0e-6
+REPORT_TABLE_BOX = box.Box("    \n    \n ── \n    \n ── \n ── \n    \n ── \n")
 Topology = KernelTopology
+
+
+def _console() -> Console:
+    return Console(highlight=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -401,23 +418,119 @@ def _row(
     }
 
 
-def _print_summary(rows: list[dict[str, Any]]) -> None:
-    print(
-        "| status | case | config | x_size | VEQlib median ms | VEQPy median ms | "
-        "speedup | x_diff | raw_diff |"
+def _progress_context(console: Console, *, quiet: bool) -> Any:
+    if quiet:
+        return nullcontext(None)
+    return Progress(
+        TextColumn("[dim]{task.fields[current]:<24.24}[/]"),
+        BarColumn(
+            bar_width=48,
+            complete_style="cyan",
+            finished_style="green",
+            pulse_style="cyan",
+        ),
+        MofNCompleteColumn(),
+        TextColumn("{task.fields[phase]:>8}"),
+        TimeElapsedColumn(),
+        console=console,
+        transient=False,
     )
-    print("|---|---|---|---:|---:|---:|---:|---:|---:|")
+
+
+def _print_config_tree(
+    console: Console,
+    *,
+    cases: list[GeqdskConfigCase],
+    build: str,
+    repeat: int,
+    warmup: int,
+) -> None:
+    console.print(Text("[config]", style="bold cyan"))
+    lines = (
+        f"cases: [green]{len(cases)}[/]",
+        f"build: [green]{build}[/]",
+        f"warmup: [green]{warmup}[/]",
+        f"repeat: [green]{repeat}[/]",
+    )
+    for index, line in enumerate(lines):
+        branch = "└──" if index == len(lines) - 1 else "├──"
+        console.print(f"  {branch} {line}")
+
+
+def _print_outputs_tree(console: Console, outputs: dict[str, Path]) -> None:
+    if not outputs:
+        return
+    console.print(Text("[outputs]", style="bold cyan"))
+    paths: list[Path] = []
+    for path in outputs.values():
+        try:
+            display_path = path.resolve().relative_to(REPO_ROOT)
+        except ValueError:
+            display_path = path
+        paths.append(display_path)
+    for index, path in enumerate(paths):
+        branch = "└──" if index == len(paths) - 1 else "├──"
+        console.print(f"  {branch} [green]{path}[/]")
+
+
+def _status_cell(status: object) -> str:
+    text = str(status)
+    if text == "passed":
+        return "[green]passed[/]"
+    if text == "failed":
+        return "[red]failed[/]"
+    return text
+
+
+def _progress_phase(status: object) -> str:
+    text = str(status)
+    if text == "passed":
+        return "[green]passed[/]"
+    if text == "failed":
+        return "[red]failed[/]"
+    return "[dim]done[/]"
+
+
+def _format_speedup(py_ms: float, cxx_ms: float) -> str:
+    if cxx_ms <= 0.0:
+        return "inf"
+    return f"{py_ms / cxx_ms:.3f}x"
+
+
+def _print_summary(console: Console, rows: list[dict[str, Any]]) -> None:
+    table = Table(
+        box=REPORT_TABLE_BOX,
+        show_lines=False,
+        expand=False,
+        padding=(0, 1),
+    )
+    table.add_column("status", no_wrap=True)
+    table.add_column("case", no_wrap=True)
+    table.add_column("config", no_wrap=True)
+    table.add_column("x", justify="right")
+    table.add_column(Text("Cxx (ms)"), justify="right")
+    table.add_column(Text("Numba (ms)"), justify="right")
+    table.add_column("speedup", justify="right")
+    table.add_column("x diff", justify="right")
+    table.add_column("raw diff", justify="right")
     for row in rows:
         cxx = row["engines"]["veqlib-fastmath-powell"]
         py = row["engines"]["veqpy-numba-hybr"]
         cxx_ms = float(cxx["timing"]["median_ms"])
         py_ms = float(py["timing"]["median_ms"])
         compare = row["closeness_to_numba"]
-        print(
-            f"| {row['status']} | {row['case']} | {row['config']} | {row['x_size']} | "
-            f"{cxx_ms:.6f} | {py_ms:.6f} | {py_ms / cxx_ms if cxx_ms > 0 else float('inf'):.3f}x | "
-            f"{compare['x_max_abs']:.3e} | {compare['raw_max_abs']:.3e} |"
+        table.add_row(
+            _status_cell(row["status"]),
+            str(row["case"]),
+            str(row["config"]),
+            str(row["x_size"]),
+            f"{cxx_ms:.6f}",
+            f"{py_ms:.6f}",
+            _format_speedup(py_ms, cxx_ms),
+            f"{float(compare['x_max_abs']):.2e}",
+            f"{float(compare['raw_max_abs']):.2e}",
         )
+    console.print(table)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -445,16 +558,41 @@ def main(argv: list[str] | None = None) -> int:
     )
     cache_root = args.cache_root or default_kernel_cache_root()
     registry = KernelRegistry(cache_root=cache_root, source_dir=args.source_dir.resolve())
-    rows = [
-        _row(
-            case,
-            registry=registry,
-            warmup=args.warmup,
-            repeat=args.repeat,
-            progress=not args.quiet_progress,
+    console = _console()
+    rows: list[dict[str, Any]] = []
+    if not args.quiet_progress:
+        _print_config_tree(
+            console,
+            cases=cases,
+            build=str(args.build),
+            repeat=int(args.repeat),
+            warmup=int(args.warmup),
         )
-        for case in cases
-    ]
+        console.print()
+        console.print(Text("[progress]", style="bold cyan"))
+    with _progress_context(console, quiet=args.quiet_progress) as progress:
+        task_id = None
+        if progress is not None:
+            task_id = progress.add_task(
+                "geqdsk",
+                total=len(cases),
+                current="-",
+                phase="[cyan]run[/]",
+            )
+        for case in cases:
+            if progress is not None and task_id is not None:
+                progress.update(task_id, current=case.row_label, phase="[cyan]run[/]")
+            row = _row(
+                case,
+                registry=registry,
+                warmup=args.warmup,
+                repeat=args.repeat,
+                progress=False,
+            )
+            rows.append(row)
+            if progress is not None and task_id is not None:
+                progress.update(task_id, phase=_progress_phase(row["status"]))
+                progress.advance(task_id)
     payload = {
         "schema": "veqlib.geqdsk_configs.v1",
         "build": str(args.build),
@@ -474,8 +612,9 @@ def main(argv: list[str] | None = None) -> int:
     }
     if not args.no_write:
         write_json(args.output, payload)
-        print(f"json: {args.output}")
-    _print_summary(rows)
+        console.print()
+        _print_outputs_tree(console, {"json": args.output})
+    _print_summary(console, rows)
     return 0
 
 

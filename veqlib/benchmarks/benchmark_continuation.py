@@ -15,11 +15,23 @@ import csv
 import math
 import sys
 import time
+from contextlib import nullcontext
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+from rich import box
+from rich.console import Console
+from rich.progress import (
+    BarColumn,
+    MofNCompleteColumn,
+    Progress,
+    TextColumn,
+    TimeElapsedColumn,
+)
+from rich.table import Table
+from rich.text import Text
 
 from veqlib.benchmarks._common import (
     CORE_DIR,
@@ -65,6 +77,11 @@ UPDATE_LABELS = {
     "source": "C3 source",
     "mixed": "C4 mixed",
 }
+REPORT_TABLE_BOX = box.Box("    \n    \n ── \n    \n ── \n ── \n    \n ── \n")
+
+
+def _console() -> Console:
+    return Console(highlight=False)
 
 
 def _scan_offsets(*, points: int, relative_span: float) -> list[float]:
@@ -291,7 +308,9 @@ def _measure_case(
         )
         for policy in policies
     }
+    success_all = bool(all(measurement["success_all"] for measurement in measurements.values()))
     return {
+        "status": "passed" if success_all else "failed",
         "case": case.case_key,
         "config": case.config_label,
         "row": case.row_label,
@@ -368,6 +387,7 @@ def _comparison_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
         )
         comparison = {
             "experiment": row["experiment"],
+            "status": str(row.get("status", "passed" if policy_values else "failed")),
             "update": row["update"],
             "span": row["relative_span"],
             "case": row["case"],
@@ -443,26 +463,122 @@ def _write_markdown(rows: list[dict[str, Any]], path: Path, *, policies: tuple[s
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def _print_summary(rows: list[dict[str, Any]], *, policies: tuple[str, ...]) -> None:
-    policy_header = " | ".join(policies)
-    policy_align = " | ".join("---:" for _ in policies)
-    print(f"| experiment | span | case | config | {policy_header} | best | vs cold | vs warm |")
-    print(f"|---|---:|---|---|{policy_align}|---|---:|---:|")
+def _progress_context(console: Console, *, quiet: bool) -> Any:
+    if quiet:
+        return nullcontext(None)
+    return Progress(
+        TextColumn("[dim]{task.fields[current]:<32.32}[/]"),
+        BarColumn(
+            bar_width=48,
+            complete_style="cyan",
+            finished_style="green",
+            pulse_style="cyan",
+        ),
+        MofNCompleteColumn(),
+        TextColumn("{task.fields[phase]:>8}"),
+        TimeElapsedColumn(),
+        console=console,
+        transient=False,
+    )
+
+
+def _print_config_tree(
+    console: Console,
+    *,
+    cases: tuple[str, ...],
+    configs: tuple[str, ...],
+    updates: tuple[str, ...],
+    spans: tuple[float, ...],
+    policies: tuple[str, ...],
+    repeat: int,
+    warmup: int,
+    points: int,
+) -> None:
+    console.print(Text("[config]", style="bold cyan"))
+    lines = (
+        f"cases: [green]{', '.join(cases)}[/]",
+        f"configs: [green]{', '.join(configs)}[/]",
+        f"updates: [green]{', '.join(updates)}[/]",
+        f"spans: [green]{', '.join(f'{span:g}' for span in spans)}[/]",
+        f"policies: [green]{', '.join(policies)}[/]",
+        f"points: [green]{points}[/]",
+        f"warmup: [green]{warmup}[/]",
+        f"repeat: [green]{repeat}[/]",
+    )
+    for index, line in enumerate(lines):
+        branch = "└──" if index == len(lines) - 1 else "├──"
+        console.print(f"  {branch} {line}")
+
+
+def _print_outputs_tree(console: Console, outputs: dict[str, Path]) -> None:
+    if not outputs:
+        return
+    console.print(Text("[outputs]", style="bold cyan"))
+    paths: list[Path] = []
+    for path in outputs.values():
+        try:
+            display_path = path.resolve().relative_to(REPO_ROOT)
+        except ValueError:
+            display_path = path
+        paths.append(display_path)
+    for index, path in enumerate(paths):
+        branch = "└──" if index == len(paths) - 1 else "├──"
+        console.print(f"  {branch} [green]{path}[/]")
+
+
+def _status_cell(status: object) -> str:
+    text = str(status)
+    if text == "passed":
+        return "[green]passed[/]"
+    if text == "failed":
+        return "[red]failed[/]"
+    return text
+
+
+def _progress_phase(status: object) -> str:
+    text = str(status)
+    if text == "passed":
+        return "[green]passed[/]"
+    if text == "failed":
+        return "[red]failed[/]"
+    return "[dim]done[/]"
+
+
+def _print_summary(
+    console: Console,
+    rows: list[dict[str, Any]],
+    *,
+    policies: tuple[str, ...],
+) -> None:
+    table = Table(
+        box=REPORT_TABLE_BOX,
+        show_lines=False,
+        expand=False,
+        padding=(0, 1),
+    )
+    table.add_column("status", no_wrap=True)
+    table.add_column("experiment", no_wrap=True)
+    table.add_column("span", justify="right")
+    table.add_column("case", no_wrap=True)
+    table.add_column("config", no_wrap=True)
+    for policy in policies:
+        table.add_column(policy, justify="right")
+    table.add_column("best", no_wrap=True)
+    table.add_column("vs cold", justify="right")
+    table.add_column("vs warm", justify="right")
     for row in rows:
-        policy_values = " | ".join(_format_nfev(float(row[policy])) for policy in policies)
-        print(
-            "| {experiment} | {span:g} | {case} | {config} | {values} | {best} | "
-            "{vs_cold:.2f}x | {vs_warm:.2f}x |".format(
-                experiment=row["experiment"],
-                span=float(row["span"]),
-                case=row["case"],
-                config=row["config"],
-                values=policy_values,
-                best=row["best"],
-                vs_cold=float(row["vs_cold"]),
-                vs_warm=float(row["vs_warm"]),
-            )
+        table.add_row(
+            _status_cell(row["status"]),
+            str(row["experiment"]),
+            f"{float(row['span']):g}",
+            str(row["case"]),
+            str(row["config"]),
+            *(_format_nfev(float(row[policy])) for policy in policies),
+            str(row["best"]),
+            f"{float(row['vs_cold']):.2f}x",
+            f"{float(row['vs_warm']):.2f}x",
         )
+    console.print(table)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -480,6 +596,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--cache-root", type=Path, default=None)
     parser.add_argument("--source-dir", type=Path, default=CORE_DIR)
     parser.add_argument("--no-write", action="store_true")
+    parser.add_argument("--quiet-progress", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     if args.points <= 0:
         raise ValueError("--points must be positive")
@@ -499,26 +616,50 @@ def main(argv: list[str] | None = None) -> int:
     cache_root = args.cache_root or default_kernel_cache_root()
     registry = KernelRegistry(cache_root=cache_root, source_dir=args.source_dir.resolve())
 
+    console = _console()
+    row_plan = [(update, span, case) for update in updates for span in spans for case in cases]
     rows: list[dict[str, Any]] = []
-    for update in updates:
-        for span in spans:
-            for case in cases:
-                print(
-                    f"[continuation] update={update} span={span:g} case={case.row_label}",
-                    flush=True,
-                )
-                rows.append(
-                    _measure_case(
-                        case,
-                        registry=registry,
-                        repeat=args.repeat,
-                        warmup=args.warmup,
-                        points=args.points,
-                        relative_span=span,
-                        update=update,
-                        policies=policies,
-                    )
-                )
+    if not args.quiet_progress:
+        _print_config_tree(
+            console,
+            cases=tuple(sorted(selected_cases)),
+            configs=tuple(_selected_configs(args)),
+            updates=updates,
+            spans=spans,
+            policies=policies,
+            repeat=int(args.repeat),
+            warmup=int(args.warmup),
+            points=int(args.points),
+        )
+        console.print()
+        console.print(Text("[progress]", style="bold cyan"))
+    with _progress_context(console, quiet=args.quiet_progress) as progress:
+        task_id = None
+        if progress is not None:
+            task_id = progress.add_task(
+                "continuation",
+                total=len(row_plan),
+                current="-",
+                phase="[cyan]run[/]",
+            )
+        for update, span, case in row_plan:
+            current = f"{update}:{span:g}:{case.row_label}"
+            if progress is not None and task_id is not None:
+                progress.update(task_id, current=current, phase="[cyan]run[/]")
+            row = _measure_case(
+                case,
+                registry=registry,
+                repeat=args.repeat,
+                warmup=args.warmup,
+                points=args.points,
+                relative_span=span,
+                update=update,
+                policies=policies,
+            )
+            rows.append(row)
+            if progress is not None and task_id is not None:
+                progress.update(task_id, phase=_progress_phase(row["status"]))
+                progress.advance(task_id)
 
     payload = {
         "schema": "veqlib.continuation_nfev.v1",
@@ -537,7 +678,7 @@ def main(argv: list[str] | None = None) -> int:
         "repeat": int(args.repeat),
         "warmup": int(args.warmup),
         "policies": list(policies),
-        "warm_alias": "warm-predict",
+        "warm_alias": "warm-fixed",
         "cache_root": str(cache_root),
         "source_dir": str(args.source_dir.resolve()),
         "cpu_affinity": cpu_affinity(),
@@ -553,10 +694,9 @@ def main(argv: list[str] | None = None) -> int:
         write_json(raw_path, payload)
         _write_csv(comparison_rows, csv_path, policies=policies)
         _write_markdown(comparison_rows, md_path, policies=policies)
-        print(f"json: {raw_path}")
-        print(f"csv : {csv_path}")
-        print(f"md  : {md_path}")
-    _print_summary(comparison_rows, policies=policies)
+        console.print()
+        _print_outputs_tree(console, {"json": raw_path, "csv": csv_path, "md": md_path})
+    _print_summary(console, comparison_rows, policies=policies)
     return 0
 
 

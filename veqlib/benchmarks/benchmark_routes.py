@@ -22,6 +22,7 @@ import sys
 import tempfile
 import time
 import warnings
+from contextlib import nullcontext
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -29,6 +30,18 @@ from types import ModuleType
 from typing import Any
 
 import numpy as np
+from rich import box
+from rich.console import Console
+from rich.progress import (
+    BarColumn,
+    MofNCompleteColumn,
+    Progress,
+    TextColumn,
+    TimeElapsedColumn,
+)
+from rich.table import Table
+from rich.text import Text
+from rich.tree import Tree
 
 from veqlib.benchmarks._common import (
     CORE_DIR,
@@ -65,6 +78,9 @@ from veqpy.solver import Solver
 DEFAULT_OUTPUT = REPO_ROOT / "outputs" / "veqlib_routes.json"
 VALIDATION_ATOL = 1.0e-6
 DEFAULT_SCOPE = "ip-uniform"
+SOLVER_INITIAL_POLICY = "cold"
+SOLVER_CONTINUATION_POLICY = "cold"
+REPORT_TABLE_BOX = box.Box("    \n    \n ── \n    \n ── \n ── \n    \n ── \n")
 Topology = KernelTopology
 
 
@@ -85,6 +101,10 @@ _SOLVER_LABELS = {
     SOLVER_METHOD_POWELL: "veqlib-fastmath-powell",
     SOLVER_METHOD_LEVENBERG_MARQUARDT: "veqlib-fastmath-lm",
 }
+
+
+def _console() -> Console:
+    return Console(highlight=False)
 
 
 @lru_cache(maxsize=1)
@@ -142,6 +162,8 @@ def _iter_route_specs(benchmark: ModuleType, *, scope: str) -> tuple[Any, ...]:
         for input_kind in input_kinds
         for constraint in constraints_by_mode[mode]
     )
+
+
 def _filter_specs(specs: tuple[Any, ...], selected: set[str] | None) -> tuple[Any, ...]:
     if selected is None:
         return specs
@@ -289,14 +311,17 @@ def _kernel_solve_from_config(config: Any, *, method: int, x_size: int) -> Kerne
         method=method,
         max_residual=float(config.max_residual),
         max_evaluations=int(x_size) ** 2,
-        initial="cold",
+        initial=SOLVER_INITIAL_POLICY,
+        continuation=SOLVER_CONTINUATION_POLICY,
         norm="fast",
         residual_normalization_floor=float(config.residual_normalization_floor),
         residual_normalization_max_ratio=float(config.residual_normalization_max_ratio),
         residual_normalization_huber_tau=float(config.residual_normalization_huber_tau),
         residual_normalization_probe_count=int(config.residual_normalization_probe_count),
         residual_normalization_probe_step=float(config.residual_normalization_probe_step),
-        residual_normalization_sensitivity_lambda=float(config.residual_normalization_sensitivity_lambda),
+        residual_normalization_sensitivity_lambda=float(
+            config.residual_normalization_sensitivity_lambda
+        ),
     )
 
 
@@ -456,9 +481,7 @@ def _reference_dofs_payload(
         "veqlib_shape_error": float(
             benchmark._shape_error(reference.reference_shape_x, cxx_shape_x)
         ),
-        "veqpy_shape_error": float(
-            benchmark._shape_error(reference.reference_shape_x, py_shape_x)
-        ),
+        "veqpy_shape_error": float(benchmark._shape_error(reference.reference_shape_x, py_shape_x)),
         "veqlib_vs_veqpy_shape_error": max_abs(cxx_shape_x, py_shape_x),
     }
 
@@ -568,9 +591,20 @@ def _run_supported_row(
     compare = _compare(cxx, py)
     reference_dofs = _reference_dofs_payload(benchmark, case, cxx, py)
     passed = cxx["success_all"] and py["success_all"] and compare["within_atol"]
-    return {
+    failure_reason = None
+    if not cxx["success_all"]:
+        failure_reason = "veqlib_solve_failed"
+    elif not py["success_all"]:
+        failure_reason = "veqpy_solve_failed"
+    elif not compare["within_atol"]:
+        failure_reason = "validation_mismatch"
+    runtime = {
         "status": "passed" if passed else "failed",
         "x_size": case.x_size,
+        "solver_policy": {
+            "initial": SOLVER_INITIAL_POLICY,
+            "continue": SOLVER_CONTINUATION_POLICY,
+        },
         "engines": {
             case.solver_engine_label: cxx,
             "veqpy-numba-hybr": _compact_py(py),
@@ -578,6 +612,9 @@ def _run_supported_row(
         "closeness_to_numba": compare,
         "reference_dofs": reference_dofs,
     }
+    if failure_reason is not None:
+        runtime["failure_reason"] = failure_reason
+    return runtime
 
 
 def _run_supported_row_subprocess(
@@ -773,7 +810,7 @@ def _format_optional_float(value: float, *, decimals: int = 6) -> str:
 
 
 def _format_optional_sci(value: float) -> str:
-    return "n/a" if not np.isfinite(value) else f"{value:.3e}"
+    return "n/a" if not np.isfinite(value) else f"{value:.2e}"
 
 
 def _format_optional_speedup(py_ms: float, cxx_ms: float) -> str:
@@ -782,32 +819,179 @@ def _format_optional_speedup(py_ms: float, cxx_ms: float) -> str:
     return f"{py_ms / cxx_ms:.3f}x"
 
 
-def _print_summary_table(rows: list[dict[str, Any]]) -> None:
-    print(
-        "| status | route | coordinate | nodes | constraint | x_size | "
-        "ref dofs err | VEQlib median ms | VEQPy median ms | speedup |"
+def _progress_context(console: Console, *, quiet: bool) -> Any:
+    if quiet:
+        return nullcontext(None)
+    return Progress(
+        TextColumn("[dim]{task.fields[current]:<24.24}[/]"),
+        BarColumn(
+            bar_width=48,
+            complete_style="cyan",
+            finished_style="green",
+            pulse_style="cyan",
+        ),
+        MofNCompleteColumn(),
+        TextColumn("{task.fields[phase]:>8}"),
+        TimeElapsedColumn(),
+        console=console,
+        transient=False,
     )
-    print("|---|---|---|---|---|---:|---:|---:|---:|---:|")
+
+
+def _print_config_tree(
+    console: Console,
+    *,
+    scope: str,
+    specs: tuple[Any, ...],
+    build: str,
+    layout: str,
+    repeat: int,
+    warmup: int,
+) -> None:
+    console.print(Text("[config]", style="bold cyan"))
+    lines = (
+        f"scope: [green]{scope}[/]",
+        f"cases: [green]{len(specs)}[/]",
+        f"build: [green]{build}/{layout}[/]",
+        f"initial: [green]{SOLVER_INITIAL_POLICY}[/]",
+        f"continue: [green]{SOLVER_CONTINUATION_POLICY}[/]",
+        f"warmup: [green]{warmup}[/]",
+        f"repeat: [green]{repeat}[/]",
+    )
+    for index, line in enumerate(lines):
+        branch = "└──" if index == len(lines) - 1 else "├──"
+        console.print(f"  {branch} {line}")
+
+
+def _print_outputs_tree(console: Console, outputs: dict[str, Path]) -> None:
+    if not outputs:
+        return
+    console.print(Text("[outputs]", style="bold cyan"))
+    paths: list[Path] = []
+    for path in outputs.values():
+        try:
+            display_path = path.resolve().relative_to(REPO_ROOT)
+        except ValueError:
+            display_path = path
+        paths.append(display_path)
+    for index, path in enumerate(paths):
+        branch = "└──" if index == len(paths) - 1 else "├──"
+        console.print(f"  {branch} [green]{path}[/]")
+
+
+def _status_cell(status: object) -> str:
+    text = str(status)
+    if text == "passed":
+        return "[green]passed[/]"
+    if text == "failed":
+        return "[red]failed[/]"
+    if text == "not_requested":
+        return "[blue]not requested[/]"
+    if text.startswith("blocked"):
+        return "[yellow]blocked[/]"
+    if text.startswith("skipped") or text == "invalid":
+        return "[yellow]skipped[/]"
+    return text
+
+
+def _progress_phase(status: object) -> str:
+    text = str(status)
+    if text == "passed":
+        return "[green]passed[/]"
+    if text == "failed":
+        return "[red]failed[/]"
+    if text == "not_requested":
+        return "[blue]skip[/]"
+    if text.startswith("blocked"):
+        return "[yellow]blocked[/]"
+    if text.startswith("skipped"):
+        return "[yellow]skipped[/]"
+    return "[dim]done[/]"
+
+
+def _failure_detail(runtime: dict[str, Any]) -> str:
+    if runtime.get("status") == "not_requested":
+        return "n/a"
+    reason = runtime.get("failure_reason")
+    if reason in {"veqlib_solve_failed", "veqpy_solve_failed"}:
+        return str(reason).replace("_", " ")
+    closeness = runtime.get("closeness_to_numba")
+    if not isinstance(closeness, dict):
+        return "n/a"
+    if bool(closeness.get("within_atol", False)):
+        return "[green]ok[/]"
+    dx = float(closeness.get("x_max_abs", float("nan")))
+    draw = float(closeness.get("raw_max_abs", float("nan")))
+    return f"Δx={_format_optional_sci(dx)} Δr={_format_optional_sci(draw)}"
+
+
+def _print_summary(
+    console: Console,
+    summary: dict[str, int],
+) -> None:
+    counts = Table(
+        box=REPORT_TABLE_BOX,
+        show_lines=False,
+        expand=False,
+        padding=(0, 1),
+    )
+    counts.add_column("summary")
+    counts.add_column("count", justify="right")
+    for key in (
+        "total",
+        "topology_planned",
+        "native_ready",
+        "native_blocked",
+        "runtime_passed",
+        "runtime_failed",
+        "runtime_not_requested",
+    ):
+        counts.add_row(key.replace("_", " "), str(summary[key]))
+    console.print(counts)
+
+
+def _print_failures(console: Console, rows: list[dict[str, Any]]) -> None:
+    failed = [row for row in rows if row["runtime"]["status"] == "failed"]
+    if not failed:
+        return
+    console.print()
+    tree = Tree(Text("[failures]", style="bold red"))
+    for row in failed:
+        tree.add(f"{row.get('case', 'n/a')}: {_failure_detail(row['runtime'])}")
+    console.print(tree)
+
+
+def _print_timing_table(
+    console: Console,
+    rows: list[dict[str, Any]],
+) -> None:
+    table = Table(
+        box=REPORT_TABLE_BOX,
+        show_lines=False,
+        expand=False,
+        padding=(0, 1),
+    )
+    table.add_column("case", no_wrap=True)
+    table.add_column("status", no_wrap=True)
+    table.add_column("x", justify="right")
+    table.add_column(Text("Cxx (ms)"), justify="right")
+    table.add_column(Text("Numba (ms)"), justify="right")
+    table.add_column("speedup", justify="right")
     for row in rows:
         runtime = row["runtime"]
         native = _native_engine_payload(runtime)
         py = _veqpy_engine_payload(runtime)
         cxx_ms = _timing_median_ms(native)
         py_ms = _timing_median_ms(py)
-        reference_dofs = runtime.get("reference_dofs")
-        if isinstance(reference_dofs, dict):
-            ref_dofs_error = float(reference_dofs.get("veqlib_shape_error", float("nan")))
-        else:
-            ref_dofs_error = float("nan")
-        print(
-            f"| {runtime['status']} | {row.get('route', 'n/a')} | "
-            f"{row.get('coordinate', 'n/a')} | {row.get('nodes', 'n/a')} | "
-            f"{row.get('constraint', 'n/a')} | {runtime.get('x_size', 'n/a')} | "
-            f"{_format_optional_sci(ref_dofs_error)} | "
-            f"{_format_optional_float(cxx_ms)} | "
-            f"{_format_optional_float(py_ms)} | "
-            f"{_format_optional_speedup(py_ms, cxx_ms)} |"
+        table.add_row(
+            str(row.get("case", "n/a")),
+            _status_cell(runtime["status"]),
+            str(runtime.get("x_size", "n/a")),
+            _format_optional_float(cxx_ms),
+            _format_optional_float(py_ms),
+            _format_optional_speedup(py_ms, cxx_ms),
         )
+    console.print(table)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -865,6 +1049,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.warmup < 0 or args.repeat <= 0:
         raise ValueError("--warmup must be >= 0 and --repeat must be > 0")
 
+    console = _console()
     benchmark = _benchmark_module()
     specs = _filter_specs(
         _iter_route_specs(benchmark, scope=args.scope),
@@ -876,45 +1061,79 @@ def main(argv: list[str] | None = None) -> int:
     build_options = _build_option_overrides(args)
 
     rows: list[dict[str, Any]] = []
-    for spec in specs:
-        row, topology = _plan_row(
-            benchmark,
-            spec,
-            build=args.build,
-            layout=args.layout,
-            build_options=build_options,
-            cache_root=cache_root,
-            source_dir=source_dir,
-            skip_artifact_dry_run=args.skip_artifact_dry_run,
+    if not args.quiet_progress:
+        _print_config_tree(
+            console,
+            scope=str(args.scope),
+            specs=specs,
+            build=str(args.build),
+            layout=str(args.layout),
+            repeat=int(args.repeat),
+            warmup=int(args.warmup),
         )
-        if row["runtime"]["status"] == "ready_supported_native_kernel":
-            if args.no_run:
-                row["runtime"] = {"status": "not_requested"}
-            elif topology is not None:
-                if not args.quiet_progress:
-                    print(f"[routes] {_spec_label(spec)}: VEQPy", flush=True)
-                    print(f"[routes] {_spec_label(spec)}: VEQlib", flush=True)
-                try:
-                    if args.run_native_in_process:
-                        row["runtime"] = _run_supported_row(
-                            benchmark,
-                            spec,
-                            topology,
-                            registry=registry,
-                            warmup=args.warmup,
-                            repeat=args.repeat,
-                        )
-                    else:
-                        row["runtime"] = _run_supported_row_subprocess(
-                            spec,
-                            args=args,
-                            cache_root=cache_root,
-                            source_dir=source_dir,
-                        )
-                except Exception as exc:
-                    row["runtime"] = {"status": "failed", "error": f"{type(exc).__name__}: {exc}"}
-        rows.append(row)
+        console.print()
+        console.print(Text("[progress]", style="bold cyan"))
+    with _progress_context(console, quiet=args.quiet_progress) as progress:
+        task_id = None
+        if progress is not None:
+            task_id = progress.add_task(
+                "routes",
+                total=len(specs),
+                current="-",
+                phase="[dim]plan[/]",
+            )
+        for spec in specs:
+            selector = _spec_selector(spec)
+            if progress is not None and task_id is not None:
+                progress.update(
+                    task_id,
+                    current=selector,
+                    phase="[dim]plan[/]",
+                )
+            row, topology = _plan_row(
+                benchmark,
+                spec,
+                build=args.build,
+                layout=args.layout,
+                build_options=build_options,
+                cache_root=cache_root,
+                source_dir=source_dir,
+                skip_artifact_dry_run=args.skip_artifact_dry_run,
+            )
+            if row["runtime"]["status"] == "ready_supported_native_kernel":
+                if args.no_run:
+                    row["runtime"] = {"status": "not_requested"}
+                elif topology is not None:
+                    if progress is not None and task_id is not None:
+                        progress.update(task_id, phase="[cyan]run[/]")
+                    try:
+                        if args.run_native_in_process:
+                            row["runtime"] = _run_supported_row(
+                                benchmark,
+                                spec,
+                                topology,
+                                registry=registry,
+                                warmup=args.warmup,
+                                repeat=args.repeat,
+                            )
+                        else:
+                            row["runtime"] = _run_supported_row_subprocess(
+                                spec,
+                                args=args,
+                                cache_root=cache_root,
+                                source_dir=source_dir,
+                            )
+                    except Exception as exc:
+                        row["runtime"] = {
+                            "status": "failed",
+                            "error": f"{type(exc).__name__}: {exc}",
+                        }
+            rows.append(row)
+            if progress is not None and task_id is not None:
+                progress.update(task_id, phase=_progress_phase(row["runtime"]["status"]))
+                progress.advance(task_id)
 
+    summary = _summarize(rows)
     payload = {
         "schema": "veqlib.routes.v2",
         "scope": str(args.scope),
@@ -922,6 +1141,10 @@ def main(argv: list[str] | None = None) -> int:
         "build": str(args.build),
         "build_option_overrides": build_options,
         "layout": str(args.layout),
+        "solver_policy": {
+            "initial": SOLVER_INITIAL_POLICY,
+            "continue": SOLVER_CONTINUATION_POLICY,
+        },
         "repeat": int(args.repeat),
         "warmup": int(args.warmup),
         "native_isolation": "in_process" if args.run_native_in_process else "subprocess_per_row",
@@ -930,13 +1153,16 @@ def main(argv: list[str] | None = None) -> int:
         "source_dir": str(source_dir),
         "cpu_affinity": cpu_affinity(),
         "env": runtime_env(),
-        "summary": _summarize(rows),
+        "summary": summary,
         "rows": rows,
     }
     if not args.no_write:
         write_json(args.output, payload)
-        print(f"json: {args.output}")
-    _print_summary_table(rows)
+        console.print()
+        _print_outputs_tree(console, {"json": args.output})
+    _print_summary(console, summary)
+    _print_failures(console, rows)
+    _print_timing_table(console, rows)
     return 0
 
 
