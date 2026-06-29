@@ -4,9 +4,6 @@ import os
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import TypeAlias
-
-CpuPinning: TypeAlias = bool | int | None
 
 _DISABLE_TOKENS = {"0", "false", "no", "off", "none", "disable", "disabled"}
 _ENABLE_TOKENS = {"1", "true", "yes", "on", "auto", "pin", "enable", "enabled"}
@@ -31,7 +28,7 @@ def cpu_pin_scope_active() -> bool:
 
 
 @contextmanager
-def pinned_cpu(policy: CpuPinning = None) -> Iterator[None]:
+def pinned_cpu(policy: bool | int | None = None) -> Iterator[None]:
     """Temporarily pin the current thread/process to one CPU for VEQlib calls.
 
     ``policy=None`` reads the environment and defaults to enabled auto pinning.
@@ -108,7 +105,7 @@ def _resolve_target(resolved: bool | int, allowed: set[int]) -> set[int] | None:
     return {int(cpu)}
 
 
-def _default_policy_from_env() -> CpuPinning:
+def _default_policy_from_env() -> bool | int:
     token = os.environ.get("VEQLIB_PIN_CPU", "auto").strip().lower()
     if token in _DISABLE_TOKENS:
         return False

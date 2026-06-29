@@ -23,6 +23,7 @@ ARTIFACT_SCHEMA = "veqlib.kernel_artifact.v1"
 SOURCE_DIGEST_SCHEMA = "veqlib.source_digest.v1"
 PYTHON_SOURCE_DIGEST_SCHEMA = "veqlib.kernel_python_source_digest.v1"
 NANOBIND_STATIC_SCHEMA = "veqlib.nanobind_static_artifact.v1"
+VEQLIB_CXX = "clang++-18"
 
 
 class KernelBuildError(RuntimeError):
@@ -61,7 +62,6 @@ def build_kernel(
     *,
     cache_root: Path | None = None,
     source_dir: Path | None = None,
-    cxx: str = "clang++",
     force: bool = False,
     dry_run: bool = False,
 ) -> KernelArtifact:
@@ -77,6 +77,7 @@ def build_kernel(
     if not source_dir.exists():
         raise KernelBuildError(f"VEQlib source directory does not exist: {source_dir}")
 
+    cxx = VEQLIB_CXX
     build_identity = _build_identity(topology, source_dir=source_dir, cxx=cxx)
     artifact_id = _compute_artifact_id(topology, build_identity)
     root = (cache_root or default_kernel_cache_root()).expanduser()

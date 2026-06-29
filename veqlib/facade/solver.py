@@ -4,7 +4,6 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from .affinity import CpuPinning
 from .builder import KernelArtifact
 from .options import solver_method_code
 from .registry import KernelRegistry, SolverThreadError, ThreadOwnedKernelSolver
@@ -21,16 +20,14 @@ class VEQlibSolver:
         registry: KernelRegistry | None = None,
         cache_root: Path | None = None,
         source_dir: Path | None = None,
-        cxx: str = "clang++",
         solver: str | int = "powell",
-        pin_cpu: CpuPinning = None,
+        pin_cpu: bool | int | None = None,
     ) -> None:
         topology.validate_supported_for_veqlib_mvp()
         self.topology = topology
         self.registry = registry or KernelRegistry(
             cache_root=cache_root,
             source_dir=source_dir,
-            cxx=cxx,
             pin_cpu=pin_cpu,
         )
         self.solver_code = solver_method_code(solver)

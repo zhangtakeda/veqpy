@@ -5,7 +5,7 @@ from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import Any
 
-from .affinity import CpuPinning, pinned_cpu
+from .affinity import pinned_cpu
 from .builder import KernelArtifact
 from .registry import KernelRegistry
 from .solver import VEQlibSolver
@@ -23,17 +23,17 @@ class Kernel:
         registry: KernelRegistry | None = None,
         cache_root: Path | None = None,
         source_dir: Path | None = None,
-        cxx: str = "clang++",
-        pin_cpu: CpuPinning = None,
+        pin_cpu: bool | int | None = None,
+        backend: str = "cxx",
     ) -> None:
         self.topology = topology
         self.build_config = KernelBuild() if build is None else build
         self.build_topology = topology.with_build(self.build_config)
+        self.backend = backend
         self.pin_cpu = pin_cpu
         self.registry = registry or KernelRegistry(
             cache_root=cache_root,
             source_dir=source_dir,
-            cxx=cxx,
             pin_cpu=pin_cpu,
         )
         self._solver: VEQlibSolver | None = None
@@ -132,8 +132,7 @@ def build(
     registry: KernelRegistry | None = None,
     cache_root: Path | None = None,
     source_dir: Path | None = None,
-    cxx: str = "clang++",
-    pin_cpu: CpuPinning = None,
+    pin_cpu: bool | int | None = None,
     force: bool = False,
     dry_run: bool = False,
 ) -> Kernel:
@@ -145,7 +144,6 @@ def build(
         registry=registry,
         cache_root=cache_root,
         source_dir=source_dir,
-        cxx=cxx,
         pin_cpu=pin_cpu,
     )
     kernel.build(force=force, dry_run=dry_run)

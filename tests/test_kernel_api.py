@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import json
 import os
 import subprocess
@@ -11,6 +12,7 @@ import pytest
 from numpy.testing import assert_allclose
 
 import veqlib.facade as facade
+import veqlib.facade.affinity as affinity
 from veqlib.facade import (
     INITIAL_POLICY_COLD,
     RESIDUAL_NORMALIZATION_FAST,
@@ -128,6 +130,19 @@ def test_facade_public_exports_are_stable() -> None:
         "solve_payload_sequence",
         "solver_method_code",
     ]
+
+
+def test_facade_user_signatures_hide_compiler_and_type_alias() -> None:
+    for api in (
+        Kernel,
+        facade.build,
+        facade.build_kernel,
+        facade.KernelRegistry,
+        facade.VEQlibSolver,
+    ):
+        assert "cxx" not in inspect.signature(api).parameters
+    assert not hasattr(facade, "CpuPinning")
+    assert not hasattr(affinity, "CpuPinning")
 
 
 def test_veqlib_facade_import_does_not_import_veqpy() -> None:

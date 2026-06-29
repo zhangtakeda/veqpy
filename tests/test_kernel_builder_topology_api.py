@@ -84,3 +84,29 @@ def test_kernel_builder_dry_run_emits_full_topology_contract(tmp_path) -> None:
     assert "-DVEQLIB_ENABLE_NATIVE_OPTIMIZATIONS=OFF" in configure
     assert "-DVEQLIB_ENABLE_THIN_LTO=OFF" in configure
     assert "-DVEQLIB_ANALYSIS_BUILD=ON" in configure
+
+
+def test_kernel_builder_forces_clang18_toolchain(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("VEQLIB_CXX", "definitely-not-used")
+    monkeypatch.setenv("CXX", "also-not-used")
+    topology = KernelTopology(
+        h_count=2,
+        v_count=0,
+        kappa_count=2,
+        psin_count=3,
+        F_count=0,
+        c_counts=(),
+        s_counts=(2,),
+        Nr=8,
+        Nt=8,
+        route="PF",
+        coordinate="psin",
+        constraint="Ip",
+        nodes="uniform",
+        sample_count=9,
+    )
+
+    artifact = build_kernel(topology, cache_root=tmp_path, dry_run=True)
+
+    assert artifact.metadata["build_identity"]["tools"]["cxx"] == "clang++-18"
+    assert "-DCMAKE_CXX_COMPILER=clang++-18" in artifact.metadata["build"]["cmake_configure"]
