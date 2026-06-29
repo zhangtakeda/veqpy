@@ -123,7 +123,7 @@ VEQlib 的 ABI 只接受以下类型: `double`, 1D C-contiguous `float64` ndarra
 
 - **retained benchmark 入口**: 当前只保留三个主入口:
   - `veqlib/benchmarks/benchmark_routes.py`: route/topology 一致性与速度矩阵.
-  - `veqlib/benchmarks/benchmark_geqdsks.py`: Low/Medium/High/Ref 四种配置 × 三个 GEQDSK case 的 VEQPy 对照.
+  - `veqlib/benchmarks/benchmark_geqdsk.py`: Low/Medium/High/Ref 四种配置 × 三个 GEQDSK case 的 VEQPy 对照.
   - `veqlib/benchmarks/benchmark_continuation.py`: GEQDSK continuation sweep, 输出各 cold/warm policy 的 effective nfev 表.
 - **默认输出目录**: route/geqdsk retained benchmark 默认写入仓库根目录 `outputs/`, 例如 `outputs/veqlib_routes.json` 与 `outputs/veqlib_geqdsk_configs.json`; continuation nfev benchmark 默认写入 `veqlib/benchmarks/results/continuation_nfev/`. 这些都是本地生成物目录, 不作为源文件或 API 依据.
 - **route benchmark scope**: `benchmark_routes.py` 默认只跑 12 个 `*:rho/psin:uniform:Ip` case, 即 6 个 route × 2 个 coordinate × `Ip` constraint. 显式 `--scope uniform` 才跑历史 46 个 uniform case; 显式 `--scope full` 才跑 92 个 uniform/grid 全矩阵.

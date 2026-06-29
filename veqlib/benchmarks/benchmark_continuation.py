@@ -30,7 +30,7 @@ from veqlib.benchmarks._common import (
     runtime_env,
     write_json,
 )
-from veqlib.benchmarks.benchmark_geqdsks import GeqdskConfigCase, _make_cases
+from veqlib.benchmarks.benchmark_geqdsk import GeqdskConfigCase, _make_cases
 from veqlib.facade import (
     KernelInput,
     KernelRegistry,

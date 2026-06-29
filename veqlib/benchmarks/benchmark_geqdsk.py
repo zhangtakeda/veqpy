@@ -370,10 +370,13 @@ def _row(
     registry: KernelRegistry,
     warmup: int,
     repeat: int,
+    progress: bool,
 ) -> dict[str, Any]:
-    print(f"[geqdsk] {case.row_label}: VEQPy", flush=True)
+    if progress:
+        print(f"[geqdsk] {case.row_label}: VEQPy", flush=True)
     py = case.py_measure(warmup=warmup, repeat=repeat)
-    print(f"[geqdsk] {case.row_label}: VEQlib", flush=True)
+    if progress:
+        print(f"[geqdsk] {case.row_label}: VEQlib", flush=True)
     cxx = _measure_veqlib(case, registry=registry, warmup=warmup, repeat=repeat)
     compare = _compare(cxx, py)
     passed = cxx["success_all"] and py["success_all"] and compare["within_atol"]
@@ -428,6 +431,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--cache-root", type=Path, default=None)
     parser.add_argument("--source-dir", type=Path, default=CORE_DIR)
     parser.add_argument("--no-write", action="store_true")
+    parser.add_argument("--quiet-progress", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     if args.warmup < 0 or args.repeat <= 0:
         raise ValueError("--warmup must be >= 0 and --repeat must be > 0")
@@ -441,7 +445,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     cache_root = args.cache_root or default_kernel_cache_root()
     registry = KernelRegistry(cache_root=cache_root, source_dir=args.source_dir.resolve())
-    rows = [_row(case, registry=registry, warmup=args.warmup, repeat=args.repeat) for case in cases]
+    rows = [
+        _row(
+            case,
+            registry=registry,
+            warmup=args.warmup,
+            repeat=args.repeat,
+            progress=not args.quiet_progress,
+        )
+        for case in cases
+    ]
     payload = {
         "schema": "veqlib.geqdsk_configs.v1",
         "build": str(args.build),

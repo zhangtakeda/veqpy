@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import json
 
-from veqlib.benchmarks import benchmark_continuation, benchmark_geqdsks, benchmark_routes
+from veqlib.benchmarks import benchmark_continuation, benchmark_geqdsk, benchmark_routes
 
 
 def test_retained_benchmark_defaults_write_under_outputs() -> None:
     assert benchmark_routes.DEFAULT_OUTPUT.parts[-2:] == ("outputs", "veqlib_routes.json")
-    assert benchmark_geqdsks.DEFAULT_OUTPUT.parts[-2:] == (
+    assert benchmark_geqdsk.DEFAULT_OUTPUT.parts[-2:] == (
         "outputs",
         "veqlib_geqdsk_configs.json",
     )
@@ -56,7 +56,7 @@ def test_routes_no_run_smoke(tmp_path) -> None:
 
 
 def test_geqdsk_config_case_plan_smoke() -> None:
-    cases = benchmark_geqdsks._make_cases(
+    cases = benchmark_geqdsk._make_cases(
         build="fastmath",
         selected_cases={"solovev"},
         selected_configs={"low"},

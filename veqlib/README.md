@@ -311,7 +311,7 @@ the same default artifact cache under `veqlib/artifact` unless `--cache-root` is
 provided:
 
 ```bash
-.venv/bin/python veqlib/benchmarks/benchmark_geqdsks.py \
+.venv/bin/python veqlib/benchmarks/benchmark_geqdsk.py \
   --build fastmath \
   --repeat 100 \
   --warmup 5 \
