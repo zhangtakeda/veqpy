@@ -166,9 +166,9 @@ on per-call affinity changes.
 Useful VEQlib checks from the repository root:
 
 ```bash
-.venv/bin/python -m compileall -q veqlib/facade tests/test_kernel_builder_topology_api.py tests/test_kernel_api.py
-.venv/bin/ruff check veqlib/facade tests/test_kernel_builder_topology_api.py tests/test_kernel_api.py
-.venv/bin/python -m pytest tests/test_kernel_builder_topology_api.py tests/test_kernel_api.py
+.venv/bin/python -m compileall -q veqlib/facade tests/test_kernel_api.py
+.venv/bin/ruff check veqlib/facade tests/test_kernel_api.py
+.venv/bin/python -m pytest tests/test_kernel_api.py
 ```
 
 Pure VEQPy/Numba benchmark entrypoints:
