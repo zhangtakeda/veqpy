@@ -71,6 +71,7 @@ POLICY_CHOICES = (
 )
 COLD_POLICIES = frozenset({"cold-zeros", "cold-geometric", "cold"})
 DEFAULT_POLICIES = POLICY_CHOICES
+SUMMARY_POLICIES = ("cold", "warm-fixed", "warm-predict", "warm-chord")
 UPDATE_LABELS = {
     "ip": "C1 Ip",
     "boundary": "C2 boundary",
@@ -379,9 +380,9 @@ def _comparison_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
         else:
             best_policy = "failed"
             best_nfev = float("nan")
-        cold_nfev = (
-            _mean_nfev(row["policies"]["cold"]) if "cold" in row["policies"] else float("nan")
-        )
+        cold_nfev = float("nan")
+        if "cold" in row["policies"] and row["policies"]["cold"]["success_all"]:
+            cold_nfev = _mean_nfev(row["policies"]["cold"])
         warm_nfev = (
             _mean_nfev(row["policies"]["warm"]) if "warm" in row["policies"] else float("nan")
         )
@@ -400,7 +401,11 @@ def _comparison_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
             "success_all": bool(all(row["policies"][policy]["success_all"] for policy in policies)),
         }
         for policy in policies:
-            comparison[policy] = _mean_nfev(row["policies"][policy])
+            comparison[policy] = (
+                _mean_nfev(row["policies"][policy])
+                if row["policies"][policy]["success_all"]
+                else float("nan")
+            )
         rows.append(comparison)
     return rows
 
@@ -409,55 +414,68 @@ def _write_csv(rows: list[dict[str, Any]], path: Path, *, policies: tuple[str, .
     path.parent.mkdir(parents=True, exist_ok=True)
     columns = [
         "experiment",
-        "update",
-        "span",
         "case",
-        "config",
-        "x_size",
-        *policies,
+        *SUMMARY_POLICIES,
         "best",
-        "best_nfev",
         "vs_cold",
-        "vs_warm",
-        "success_all",
     ]
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=columns)
         writer.writeheader()
         for row in rows:
-            writer.writerow({column: row[column] for column in columns})
+            writer.writerow(_summary_csv_row(row))
 
 
 def _format_nfev(value: float) -> str:
-    return "nan" if not np.isfinite(value) else f"{value:.1f}"
+    if not np.isfinite(value):
+        return "-"
+    return str(int(value)) if float(value).is_integer() else f"{value:.1f}"
+
+
+def _format_policy_nfev(row: dict[str, Any], policy: str) -> str:
+    return _format_nfev(float(row.get(policy, float("nan"))))
+
+
+def _format_vs_cold(row: dict[str, Any]) -> str:
+    if not np.isfinite(float(row.get("cold", float("nan")))) or not np.isfinite(
+        float(row["vs_cold"])
+    ):
+        return "-"
+    return f"{float(row['vs_cold']):.2f}x"
+
+
+def _summary_csv_row(row: dict[str, Any]) -> dict[str, str]:
+    return {
+        "experiment": str(row["experiment"]),
+        "case": str(row["case"]),
+        **{policy: _format_policy_nfev(row, policy) for policy in SUMMARY_POLICIES},
+        "best": str(row["best"]),
+        "vs_cold": _format_vs_cold(row),
+    }
 
 
 def _write_markdown(rows: list[dict[str, Any]], path: Path, *, policies: tuple[str, ...]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    policy_header = " | ".join(policies)
-    policy_align = " | ".join("---:" for _ in policies)
+    policy_header = " | ".join(SUMMARY_POLICIES)
+    policy_align = " | ".join("---:" for _ in SUMMARY_POLICIES)
     lines = [
         "# VEQlib Continuation nfev Benchmark",
         "",
         "The policy columns are mean effective nfev across repeats; effective nfev includes "
         "warm-start certification/predictor/chord residual evaluations and fallback solves.",
         "",
-        f"| experiment | span | case | config | {policy_header} | best | vs cold | vs warm |",
-        f"|---|---:|---|---|{policy_align}|---|---:|---:|",
+        f"| experiment | case | {policy_header} | best | vs cold |",
+        f"|---|---|{policy_align}|---|---:|",
     ]
     for row in rows:
-        policy_values = " | ".join(_format_nfev(float(row[policy])) for policy in policies)
+        policy_values = " | ".join(_format_policy_nfev(row, policy) for policy in SUMMARY_POLICIES)
         lines.append(
-            "| {experiment} | {span:g} | {case} | {config} | {values} | {best} | "
-            "{vs_cold:.2f}x | {vs_warm:.2f}x |".format(
+            "| {experiment} | {case} | {values} | {best} | {vs_cold} |".format(
                 experiment=row["experiment"],
-                span=float(row["span"]),
                 case=row["case"],
-                config=row["config"],
                 values=policy_values,
                 best=row["best"],
-                vs_cold=float(row["vs_cold"]),
-                vs_warm=float(row["vs_warm"]),
+                vs_cold=_format_vs_cold(row),
             )
         )
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -556,27 +574,19 @@ def _print_summary(
         expand=False,
         padding=(0, 1),
     )
-    table.add_column("status", no_wrap=True)
     table.add_column("experiment", no_wrap=True)
-    table.add_column("span", justify="right")
     table.add_column("case", no_wrap=True)
-    table.add_column("config", no_wrap=True)
-    for policy in policies:
+    for policy in SUMMARY_POLICIES:
         table.add_column(policy, justify="right")
     table.add_column("best", no_wrap=True)
     table.add_column("vs cold", justify="right")
-    table.add_column("vs warm", justify="right")
     for row in rows:
         table.add_row(
-            _status_cell(row["status"]),
             str(row["experiment"]),
-            f"{float(row['span']):g}",
             str(row["case"]),
-            str(row["config"]),
-            *(_format_nfev(float(row[policy])) for policy in policies),
+            *(_format_policy_nfev(row, policy) for policy in SUMMARY_POLICIES),
             str(row["best"]),
-            f"{float(row['vs_cold']):.2f}x",
-            f"{float(row['vs_warm']):.2f}x",
+            _format_vs_cold(row),
         )
     console.print(table)
 
