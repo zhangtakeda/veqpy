@@ -337,8 +337,9 @@ namespace veqlib_python
         input.Ip =
             optional_finite_number(constraints, "scaled_Ip", optional_finite_number(data, "scaled_Ip", input.Ip));
         input.beta = optional_finite_number(constraints, "beta", optional_finite_number(data, "beta", input.beta));
-        input.fix_rho =
+        const double legacy_fix_rho =
             optional_finite_number(constraints, "fix_rho", optional_finite_number(data, "fix_rho", input.fix_rho));
+        input.fix_rho = optional_finite_number(solver_config, "fix_rho", legacy_fix_rho);
 
         apply_initial_policy(input);
 
@@ -606,6 +607,7 @@ namespace veqlib_python
     inline nlohmann::json solver_json(const CaseInput& input)
     {
         return {
+            {"fix_rho", input.fix_rho},
             {"method_code", solver_method_code(input.solver)},
             {"max_residual", input.max_residual},
             {"max_evaluations", input.max_evaluations},
@@ -736,8 +738,7 @@ namespace veqlib_python
                  {"scaled_heat", json_array(input.heat)},
                  {"scaled_current", json_array(input.current)},
              }},
-            {"constraints", {{"scaled_Ip", input.Ip}, {"beta", input.beta}, {"fix_rho", input.fix_rho}}},
-            {"fix_rho", input.fix_rho},
+            {"constraints", {{"scaled_Ip", input.Ip}, {"beta", input.beta}}},
         };
     }
 
@@ -989,13 +990,13 @@ namespace veqlib_python
                                   alpha_view(last_result_.alpha.data(), owner));
         }
 
-        void residual_var_into(PackedArrayView x, MutablePackedArrayView out)
+        void residual_var_into(MutablePackedArrayView out, PackedArrayView x)
         {
             context_->raw_residual(std::span<const double, KernelShape::x_size>{x.data(), KernelShape::x_size},
                                    std::span<double, KernelShape::x_size>{out.data(), KernelShape::x_size});
         }
 
-        void jvp_into(PackedArrayView x, PackedArrayView v, MutablePackedArrayView out)
+        void jvp_into(MutablePackedArrayView out, PackedArrayView x, PackedArrayView v)
         {
             constexpr size_t n = KernelShape::x_size;
             double           v_norm_sq = 0.0;
@@ -1026,7 +1027,7 @@ namespace veqlib_python
                 out.data()[i] = (f_plus[i] - f_base[i]) / eps;
         }
 
-        void jacobian_into(PackedArrayView x, MutableJacobianArrayView out)
+        void jacobian_into(MutableJacobianArrayView out, PackedArrayView x)
         {
             constexpr size_t n = KernelShape::x_size;
             PackedVector     x_plus{uninitialized};

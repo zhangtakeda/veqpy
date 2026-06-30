@@ -50,10 +50,10 @@ from benchmarks._common import (
 )
 from benchmarks.veqlib_geqdsk_pareto import GeqdskConfigCase, _make_cases
 from veqlib.facade import (
+    KernelConfig,
     KernelInput,
     KernelRegistry,
     KernelResult,
-    KernelSolve,
     VEQlibSolver,
     default_kernel_cache_root,
 )
@@ -199,9 +199,9 @@ def _input_with_update(base_input: KernelInput, update: str, offset: float) -> K
     return _with_case_suffix(updated, f"{update}-{offset:+.6g}")
 
 
-def _policy_runtime_solve(base_solve: KernelSolve, policy: str) -> KernelSolve:
+def _policy_runtime_config(base_config: KernelConfig, policy: str) -> KernelConfig:
     initial_policy = _initial_policy_for_policy(policy)
-    return replace(base_solve, initial=initial_policy, continuation=policy)
+    return replace(base_config, initial=initial_policy, continuation=policy)
 
 
 def _initial_policy_for_policy(policy: str) -> str:
@@ -215,16 +215,16 @@ def _run_policy_sequence_once(
     registry: KernelRegistry,
     policy: str,
 ) -> dict[str, Any]:
-    solver = VEQlibSolver(case.topology, registry=registry, solver=case.kernel_solve.method)
+    solver = VEQlibSolver(case.topology, registry=registry, solver=case.kernel_config.method)
     solver.metadata()  # force artifact load outside the timed sequence
-    solve_policy = _policy_runtime_solve(case.kernel_solve, policy)
+    runtime_config = _policy_runtime_config(case.kernel_config, policy)
     started = time.perf_counter_ns()
     results: list[KernelResult] = []
     try:
         for kernel_input in inputs:
             solver.set_kernel_runtime(
                 *kernel_input.runtime_args(),
-                *solve_policy.runtime_args(x_size=case.x_size),
+                *runtime_config.runtime_args(x_size=case.x_size),
             )
             results.append(KernelResult.from_solve_direct(solver.solve_direct()))
     finally:
@@ -297,7 +297,7 @@ def _measure_case(
 ) -> dict[str, Any]:
     offsets = _scan_offsets(points=points, relative_span=relative_span)
     inputs = [_input_with_update(case.kernel_input, update, offset) for offset in offsets]
-    build_solver = VEQlibSolver(case.topology, registry=registry, solver=case.kernel_solve.method)
+    build_solver = VEQlibSolver(case.topology, registry=registry, solver=case.kernel_config.method)
     build_start = time.perf_counter_ns()
     artifact = build_solver.build(force=False, dry_run=False)
     build_wall_ms = float(time.perf_counter_ns() - build_start) / 1.0e6

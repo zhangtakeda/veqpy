@@ -50,19 +50,19 @@ NB_MODULE(veqlib_ext, module)
              "Use the last accepted solve result as the current initial state.")
         .def("residual_var_into",
              &veqlib_python::KernelSolver::residual_var_into,
-             nb::arg("x"),
              nb::arg("out"),
+             nb::arg("x"),
              "Evaluate the raw variational residual into a caller-owned packed output array.")
         .def("jvp_into",
              &veqlib_python::KernelSolver::jvp_into,
+             nb::arg("out"),
              nb::arg("x"),
              nb::arg("v"),
-             nb::arg("out"),
              "Evaluate a raw-residual Jacobian-vector product into a caller-owned packed output array.")
         .def("jacobian_into",
              &veqlib_python::KernelSolver::jacobian_into,
-             nb::arg("x"),
              nb::arg("out"),
+             nb::arg("x"),
              "Evaluate the dense raw-residual Jacobian into a caller-owned row-major matrix.")
         .def_prop_ro("last_elapsed_ms", &veqlib_python::KernelSolver::last_elapsed_ms);
 }

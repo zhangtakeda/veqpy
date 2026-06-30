@@ -28,9 +28,9 @@ from veqlib.facade import (  # noqa: E402
     Kernel,
     KernelBoundary,
     KernelBuild,
+    KernelConfig,
     KernelInput,
     KernelResult,
-    KernelSolve,
     KernelTopology,
 )
 
@@ -106,13 +106,13 @@ def main() -> None:
     )
     artifact = kernel.build()
 
-    # 3. Prepare typed runtime input and solve policy.
+    # 3. Prepare typed runtime input and config.
     runtime_input = build_input()
-    solve_config = KernelSolve(method="powell", initial="cold", norm="fast")
+    runtime_config = KernelConfig(method="powell", initial="cold", norm="fast")
 
     # 4. Solve. Kernel.solve() uses set_kernel_runtime(...) by default and returns
     #    a Python-owned KernelResult snapshot.
-    result = kernel.solve(runtime_input, solve=solve_config)
+    result = kernel.solve(runtime_input, config=runtime_config)
     assert isinstance(result, KernelResult)
 
     print("VEQlib kernel build + solve demo")

@@ -86,14 +86,14 @@ class VEQlibSolver:
     def adopt_last_solution_as_initial(self) -> None:
         self._solver().adopt_last_solution_as_initial()
 
-    def residual_var_into(self, x: Any, out: Any) -> None:
-        self._solver().residual_var_into(x, out)
+    def residual_var_into(self, out: Any, x: Any) -> None:
+        self._solver().residual_var_into(out, x)
 
-    def jvp_into(self, x: Any, v: Any, out: Any) -> None:
-        self._solver().jvp_into(x, v, out)
+    def jvp_into(self, out: Any, x: Any, v: Any) -> None:
+        self._solver().jvp_into(out, x, v)
 
-    def jacobian_into(self, x: Any, out: Any) -> None:
-        self._solver().jacobian_into(x, out)
+    def jacobian_into(self, out: Any, x: Any) -> None:
+        self._solver().jacobian_into(out, x)
 
     def close(self) -> None:
         self.check_thread()

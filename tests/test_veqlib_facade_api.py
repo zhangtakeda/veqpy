@@ -15,9 +15,9 @@ from veqlib.facade import (
     Kernel,
     KernelBoundary,
     KernelBuild,
+    KernelConfig,
     KernelInput,
     KernelResult,
-    KernelSolve,
     KernelTopology,
 )
 
@@ -127,6 +127,7 @@ def test_kernel_topology_and_input_payload_are_user_facing_contracts() -> None:
     assert payload["boundary"]["a"] == 0.5
     assert_allclose(payload["source"]["scaled_heat"], runtime_input.scaled_heat)
     assert_allclose(payload["constraints"]["scaled_Ip"], 3.0e6 * MU0)
+    assert "fix_rho" not in payload["constraints"]
     assert not runtime_input.scaled_heat.flags.writeable
     assert not runtime_input.scaled_current.flags.writeable
 
@@ -146,6 +147,7 @@ def test_kernel_dry_run_payload_and_python_owned_result_snapshot(tmp_path: Path)
     assert isinstance(handle, Kernel)
     assert handle.x_size == 9
     assert payload["case_name"] == "payload-smoke"
+    assert payload["solver"]["fix_rho"] == 0.05
     assert payload["solver"]["max_evaluations"] == 81
 
     raw_x = np.ones(3, dtype=np.float64)
@@ -175,12 +177,25 @@ def test_kernel_python_build_and_solve_native_flow(tmp_path: Path) -> None:
     assert artifact.built is True
     assert artifact.shared_library_path.exists()
 
-    result = handle.solve(tiny_kernel_input(), solve=KernelSolve(method="powell", initial="cold"))
+    result = handle.solve(tiny_kernel_input(), config=KernelConfig(method="powell", initial="cold"))
     assert result.success is True
     assert result.x.shape == (handle.x_size,)
     assert result.raw.shape == (handle.x_size,)
     assert result.scaled.shape == (handle.x_size,)
     assert_allclose(handle.residual(result.x), result.raw)
+
+    residual_out = np.empty(handle.x_size, dtype=np.float64)
+    handle.residual_into(residual_out, result.x)
+    assert_allclose(residual_out, result.raw)
+
+    jvp_out = np.empty(handle.x_size, dtype=np.float64)
+    handle.jvp_into(jvp_out, result.x, np.ones(handle.x_size, dtype=np.float64))
+    assert jvp_out.shape == (handle.x_size,)
+
+    jacobian_out = np.empty((handle.x_size, handle.x_size), dtype=np.float64)
+    handle.jacobian_into(jacobian_out, result.x)
+    assert jacobian_out.shape == (handle.x_size, handle.x_size)
+
     assert handle.jvp(result.x, np.ones(handle.x_size, dtype=np.float64)).shape == (handle.x_size,)
     assert handle.jacobian(result.x).shape == (handle.x_size, handle.x_size)
 

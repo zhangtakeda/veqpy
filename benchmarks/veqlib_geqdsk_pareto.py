@@ -67,9 +67,9 @@ from benchmarks._common import (
 from veqlib.facade import (
     KernelBoundary,
     KernelBuild,
+    KernelConfig,
     KernelInput,
     KernelRegistry,
-    KernelSolve,
     KernelTopology,
     VEQlibSolver,
     default_kernel_cache_root,
@@ -97,7 +97,7 @@ class GeqdskConfigCase:
     signature: dict[str, int]
     topology: Topology
     kernel_input: KernelInput
-    kernel_solve: KernelSolve
+    kernel_config: KernelConfig
     py_operator: Any
     py_measure: Any
     x_size: int
@@ -164,13 +164,13 @@ def _kernel_input_from_operator(
         scaled_current=np.asarray(source_plan.scaled_current, dtype=np.float64),
         scaled_Ip=float(source_plan.scaled_Ip),
         beta=float(source_plan.beta),
-        fix_rho=float(operator.fix_rho),
         case_name=f"{case_key}-{config_label.lower()}",
     )
 
 
-def _kernel_solve_from_config(config: Any, *, x_size: int) -> KernelSolve:
-    return KernelSolve(
+def _kernel_config_from_config(config: Any, *, x_size: int, fix_rho: float) -> KernelConfig:
+    return KernelConfig(
+        fix_rho=fix_rho,
         method=NATIVE_SOLVER_METHOD,
         max_residual=float(config.max_residual),
         max_evaluations=int(REFERENCE_SOLVER_MAXFEV),
@@ -271,7 +271,11 @@ def _case_from_signature(
     topology = _topology_for_case(signature, case, build=build, grid=grid)
     kernel_input = _kernel_input_from_operator(case_key, config_label, case, operator)
     x_size = int(topology.packed_size())
-    kernel_solve = _kernel_solve_from_config(benchmark.CONFIG, x_size=x_size)
+    kernel_config = _kernel_config_from_config(
+        benchmark.CONFIG,
+        x_size=x_size,
+        fix_rho=float(operator.fix_rho),
+    )
 
     def measure_py(*, warmup: int, repeat: int) -> dict[str, Any]:
         return _measure_veqpy(benchmark, case, grid, warmup=warmup, repeat=repeat)
@@ -283,7 +287,7 @@ def _case_from_signature(
         signature=dict(signature),
         topology=topology,
         kernel_input=kernel_input,
-        kernel_solve=kernel_solve,
+        kernel_config=kernel_config,
         py_operator=operator,
         py_measure=measure_py,
         x_size=x_size,
@@ -339,7 +343,7 @@ def _measure_veqlib(
     def configure() -> None:
         solver.set_kernel_runtime(
             *case.kernel_input.runtime_args(),
-            *case.kernel_solve.runtime_args(x_size=case.x_size),
+            *case.kernel_config.runtime_args(x_size=case.x_size),
         )
 
     timing = measure_native_solver(solver, configure, warmup=warmup, repeat=repeat)

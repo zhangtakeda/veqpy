@@ -11,7 +11,7 @@ from .affinity import pinned_cpu
 from .builder import KernelArtifact
 from .registry import KernelRegistry
 from .solver import VEQlibSolver
-from .types import KernelBuild, KernelInput, KernelResult, KernelSolve, KernelTopology
+from .types import KernelBuild, KernelConfig, KernelInput, KernelResult, KernelTopology
 
 
 class Kernel:
@@ -51,68 +51,68 @@ class Kernel:
 
     def payload_json(
         self,
-        input: KernelInput,
+        case: KernelInput,
         *,
-        solve: KernelSolve | None = None,
+        config: KernelConfig | None = None,
         case_name: str | None = None,
     ) -> str:
-        kernel_input = self._kernel_input(input, case_name=case_name)
-        kernel_solve = KernelSolve() if solve is None else solve
-        payload = kernel_input.to_payload_dict()
-        payload["solver"] = kernel_solve.to_payload_dict(x_size=self.x_size)
+        kernel_case = self._kernel_input(case, case_name=case_name)
+        kernel_config = KernelConfig() if config is None else config
+        payload = kernel_case.to_payload_dict()
+        payload["solver"] = kernel_config.to_payload_dict(x_size=self.x_size)
         return json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
 
     def solve(
         self,
-        input: KernelInput,
+        case: KernelInput,
         *,
-        solve: KernelSolve | None = None,
+        config: KernelConfig | None = None,
         case_name: str | None = None,
     ) -> KernelResult:
         solver = self._veqlib_solver()
-        kernel_input = self._kernel_input(input, case_name=case_name)
-        kernel_solve = KernelSolve() if solve is None else solve
+        kernel_case = self._kernel_input(case, case_name=case_name)
+        kernel_config = KernelConfig() if config is None else config
         try:
             solver.set_kernel_runtime(
-                *kernel_input.runtime_args(),
-                *kernel_solve.runtime_args(x_size=self.x_size),
+                *kernel_case.runtime_args(),
+                *kernel_config.runtime_args(x_size=self.x_size),
             )
         except AttributeError:
-            solver.set_case_json(self.payload_json(kernel_input, solve=kernel_solve))
+            solver.set_case_json(self.payload_json(kernel_case, config=kernel_config))
         self.result = KernelResult.from_solve_direct(solver.solve_direct())
         self.history.append(self.result)
         return self.result
 
     def residual(self, x: Any) -> np.ndarray:
         out = np.empty(self.x_size, dtype=np.float64)
-        self.residual_into(x, out)
+        self.residual_into(out, x)
         return out
 
-    def residual_into(self, x: Any, out: np.ndarray) -> None:
-        packed_x = self._packed_input(x, "x")
+    def residual_into(self, out: np.ndarray, x: Any) -> None:
         packed_out = self._packed_output(out, (self.x_size,), "out")
-        self._veqlib_solver().residual_var_into(packed_x, packed_out)
+        packed_x = self._packed_input(x, "x")
+        self._veqlib_solver().residual_var_into(packed_out, packed_x)
 
     def jvp(self, x: Any, v: Any) -> np.ndarray:
         out = np.empty(self.x_size, dtype=np.float64)
-        self.jvp_into(x, v, out)
+        self.jvp_into(out, x, v)
         return out
 
-    def jvp_into(self, x: Any, v: Any, out: np.ndarray) -> None:
+    def jvp_into(self, out: np.ndarray, x: Any, v: Any) -> None:
+        packed_out = self._packed_output(out, (self.x_size,), "out")
         packed_x = self._packed_input(x, "x")
         packed_v = self._packed_input(v, "v")
-        packed_out = self._packed_output(out, (self.x_size,), "out")
-        self._veqlib_solver().jvp_into(packed_x, packed_v, packed_out)
+        self._veqlib_solver().jvp_into(packed_out, packed_x, packed_v)
 
     def jacobian(self, x: Any) -> np.ndarray:
         out = np.empty((self.x_size, self.x_size), dtype=np.float64)
-        self.jacobian_into(x, out)
+        self.jacobian_into(out, x)
         return out
 
-    def jacobian_into(self, x: Any, out: np.ndarray) -> None:
-        packed_x = self._packed_input(x, "x")
+    def jacobian_into(self, out: np.ndarray, x: Any) -> None:
         matrix_out = self._packed_output(out, (self.x_size, self.x_size), "out")
-        self._veqlib_solver().jacobian_into(packed_x, matrix_out)
+        packed_x = self._packed_input(x, "x")
+        self._veqlib_solver().jacobian_into(matrix_out, packed_x)
 
     def clear(self) -> None:
         self.history.clear()
@@ -128,13 +128,9 @@ class Kernel:
 
         return pinned_cpu(self.pin_cpu)
 
-    def metadata(self) -> Any:
-        return self._veqlib_solver().metadata()
-
-    def metadata_json(self) -> str:
-        return self._veqlib_solver().metadata_json()
-
     def _veqlib_solver(self) -> VEQlibSolver:
+        if self.backend != "cxx":
+            raise ValueError("VEQlib facade currently only supports backend='cxx'")
         if self._solver is None:
             self._solver = VEQlibSolver(
                 self.build_topology,
@@ -162,18 +158,17 @@ class Kernel:
         return out
 
     @staticmethod
-    def _kernel_input(input: KernelInput, *, case_name: str | None) -> KernelInput:
-        if not isinstance(input, KernelInput):
-            raise TypeError(f"input must be KernelInput, got {type(input).__name__}")
+    def _kernel_input(case: KernelInput, *, case_name: str | None) -> KernelInput:
+        if not isinstance(case, KernelInput):
+            raise TypeError(f"case must be KernelInput, got {type(case).__name__}")
         if case_name is None:
-            return input
+            return case
         return KernelInput(
-            boundary=input.boundary,
-            scaled_heat=input.scaled_heat,
-            scaled_current=input.scaled_current,
-            scaled_Ip=input.scaled_Ip,
-            beta=input.beta,
-            fix_rho=input.fix_rho,
+            boundary=case.boundary,
+            scaled_heat=case.scaled_heat,
+            scaled_current=case.scaled_current,
+            scaled_Ip=case.scaled_Ip,
+            beta=case.beta,
             case_name=case_name,
         )
 
@@ -205,9 +200,9 @@ def build(
 
 def solve(
     topology: KernelTopology,
-    input: KernelInput,
+    case: KernelInput,
     *,
-    solve: KernelSolve | None = None,
+    config: KernelConfig | None = None,
     build: KernelBuild | None = None,
     registry: KernelRegistry | None = None,
     cache_root: Path | None = None,
@@ -228,6 +223,6 @@ def solve(
     )
     try:
         kernel.build(force=force, dry_run=False)
-        return kernel.solve(input, solve=solve, case_name=case_name)
+        return kernel.solve(case, config=config, case_name=case_name)
     finally:
         kernel.close()
