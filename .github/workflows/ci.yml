@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-build-smoke:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          - "3.12"
+          - "3.13"
+
+    env:
+      MPLBACKEND: Agg
+      PYTHONUNBUFFERED: "1"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install VEQlib native build dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            clang-18 \
+            cmake \
+            git \
+            libcminpack-dev \
+            liblapacke-dev \
+            libopenblas-dev \
+            nlohmann-json3-dev
+          git clone --depth 1 --branch v1.18.0 https://github.com/kthohr/gcem.git "${RUNNER_TEMP}/gcem"
+          cmake -S "${RUNNER_TEMP}/gcem" -B "${RUNNER_TEMP}/gcem-build" \
+            -DCMAKE_INSTALL_PREFIX="${HOME}/opt/gcem-install"
+          cmake --build "${RUNNER_TEMP}/gcem-build" --target install
+
+      - name: Install development dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Compile Python sources
+        run: python -m compileall -q veqpy tests examples veqlib/facade benchmarks scripts
+
+      - name: Lint with Ruff
+        run: ruff check veqpy tests examples veqlib/facade benchmarks scripts
+
+      - name: Run tests
+        run: pytest
+
+      - name: Build source and wheel distributions
+        run: python -m build
+
+      - name: Check package metadata
+        run: twine check dist/*
+
+      - name: Install wheel in an isolated virtual environment
+        shell: bash
+        run: |
+          smoke_env="${RUNNER_TEMP}/veqpy-wheel-smoke-${{ matrix.python-version }}"
+          smoke_import_dir="$(mktemp -d "${RUNNER_TEMP}/veqpy-wheel-import-XXXXXX")"
+          wheel_path="$(ls dist/*.whl)"
+          python -m venv "${smoke_env}"
+          "${smoke_env}/bin/python" -m pip install --upgrade pip
+          "${smoke_env}/bin/python" -m pip install "${wheel_path}"
+          cd "${smoke_import_dir}"
+          "${smoke_env}/bin/python" - <<'PY'
+          import importlib.metadata as metadata
+          import os
+          from pathlib import Path
+
+          import veqpy
+          from veqpy.model import Grid
+          from veqpy.operator import Operator
+          from veqpy.solver import Solver
+          from veqlib.facade import KernelTopology
+
+          module_path = Path(veqpy.__file__).resolve()
+          workspace = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
+          if workspace == module_path or workspace in module_path.parents:
+              raise SystemExit(f"imported veqpy from source tree instead of installed wheel: {module_path}")
+
+          print("veqpy distribution", metadata.version("veqpy"))
+          print("veqpy module", module_path)
+          print("smoke symbols", Grid.__name__, Operator.__name__, Solver.__name__, KernelTopology.__name__)
+          PY
