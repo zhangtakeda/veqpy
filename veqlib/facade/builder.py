@@ -758,11 +758,7 @@ def _is_source_digest_file(path: Path) -> bool:
     ignored = {"artifact", "build", "__pycache__", "experiments"}
     if any(part in ignored for part in path.parts):
         return False
-    return path.suffix in {".h", ".cpp", ".in", ".txt"} or path.name in {
-        "CMakeLists.txt",
-        "CMakePresets.json",
-        "README.md",
-    }
+    return path.suffix in {".h", ".cpp", ".in"} or path.name == "CMakeLists.txt"
 
 
 def _default_build_parallel_jobs() -> int:

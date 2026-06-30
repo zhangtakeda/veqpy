@@ -93,10 +93,10 @@ For a runtime-only install from a local source checkout, omit the `dev` extra:
 
 The optional VEQlib C++ kernel layer under `veqlib/` is not required for normal
 Python/Numba use. Its `facade/` tree provides `veqlib.facade`, its `core/` tree
-holds the C++/CMake implementation, and `benchmarks/` holds comparison scripts. It is intentionally separate from VEQPy internals. Building it requires a local C++20 toolchain and native
-libraries such as CMake 3.24+, `clang++`, nanobind, GCEM, nlohmann-json, CMINPACK,
-LAPACKE/LAPACK, and OpenBLAS; see [`veqlib/README.md`](veqlib/README.md) for the
-current build boundary and supported topology.
+holds the C++/CMake implementation, and `benchmarks/` holds comparison scripts.
+It is intentionally separate from VEQPy internals. Building it requires a local
+C++20 toolchain and native libraries such as CMake 3.24+, `clang++`, nanobind,
+GCEM, nlohmann-json, CMINPACK, LAPACKE/LAPACK, and OpenBLAS.
 
 All commands below use `.venv` explicitly; activating the environment is optional.
 
@@ -136,6 +136,71 @@ paper/data artifacts rather than user-demo outputs.
 .venv/bin/python -m pytest
 ```
 
+## Optional C++ Kernels
+
+VEQlib is the experimental C++/nanobind kernel layer used for topology-specific
+shared-library kernels and VEQPy-vs-native benchmarks. The Python facade owns the
+artifact lifecycle: `KernelTopology` fixes compile-time structure, `KernelInput`
+supplies per-case runtime data, and `KernelSolve` supplies runtime solver policy.
+Manual CMake presets are not part of the supported workflow; Python calls CMake
+with explicit `-D...` definitions and loads the resulting artifact through
+`veqlib.facade`.
+
+The current production boundary is narrow: route/topology planning covers the
+benchmark matrix, while native execution is gated by
+`KernelTopology.validate_supported_for_veqlib_mvp()`. Runtime values such as
+boundary coefficients, source arrays, `Ip`, `beta`, solver tolerances, and `x0`
+do not participate in the kernel artifact identity. The artifact cache key is
+computed from the canonical topology, build options, Python/toolchain ABI, the
+native CMake define contract, and a digest of implementation inputs under
+`veqlib/core` (`.h`, `.cpp`, `.in`, and `CMakeLists.txt`). Artifacts are cached
+under `veqlib/artifact/` by default, `VEQLIB_KERNEL_CACHE` when set, or legacy
+`VEQPY_KERNEL_CACHE` as fallback.
+
+The facade pins short native calls to one CPU by default to reduce scheduler
+noise. Set `VEQLIB_PIN_CPU=0` to disable scoped pinning, or
+`VEQLIB_PIN_CPU_ID=<cpu>` to request a specific allowed CPU. For high-volume
+loops, prefer one outer pinning scope via the facade handle rather than relying
+on per-call affinity changes.
+
+Useful VEQlib checks from the repository root:
+
+```bash
+.venv/bin/python -m compileall -q veqlib/facade tests/test_kernel_builder_topology_api.py tests/test_kernel_api.py
+.venv/bin/ruff check veqlib/facade tests/test_kernel_builder_topology_api.py tests/test_kernel_api.py
+.venv/bin/python -m pytest tests/test_kernel_builder_topology_api.py tests/test_kernel_api.py
+```
+
+Route/topology comparison benchmark:
+
+```bash
+.venv/bin/python veqlib/benchmarks/benchmark_routes.py \
+  --build fastmath \
+  --repeat 100 \
+  --warmup 5 \
+  --output veqlib/benchmarks/results/manual/routes.json
+```
+
+GEQDSK configuration benchmark:
+
+```bash
+.venv/bin/python veqlib/benchmarks/benchmark_geqdsk.py \
+  --build fastmath \
+  --repeat 100 \
+  --warmup 5 \
+  --output veqlib/benchmarks/results/manual/geqdsk_configs.json
+```
+
+Continuation-policy effective-nfev benchmark:
+
+```bash
+.venv/bin/python veqlib/benchmarks/benchmark_continuation.py
+```
+
+Executable-side C++ diagnostics are secondary. Retained performance evidence
+should use the production nanobind/shared-library path through `veqlib.facade`,
+paired with VEQPy correctness comparison.
+
 ## Implementation Documentation
 
 Design patterns and model layer:
@@ -148,8 +213,6 @@ Design patterns and model layer:
   and persistence boundaries.
 - [[model.md]](docs/details/model.md): responsibilities, snapshot boundaries, and diagnostic
   interfaces for `Grid`, `Profile`, `Boundary`, `Geqdsk`, and `Equilibrium`.
-- [`veqlib/README.md`](veqlib/README.md): the optional VEQlib C++/nanobind kernel
-  layer, topology keys, and the current PF(`psin`)/uniform/`Ip` support boundary.
 
 Hot-path operator and solver:
 

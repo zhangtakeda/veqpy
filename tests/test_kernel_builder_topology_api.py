@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 from veqlib.facade import KernelArtifact, KernelTopology, build_kernel, clean
-from veqlib.facade.builder import touch_artifact_used
+from veqlib.facade.builder import _source_digest, touch_artifact_used
 
 
 def test_kernel_builder_dry_run_emits_full_topology_contract(tmp_path) -> None:
@@ -37,7 +37,7 @@ def test_kernel_builder_dry_run_emits_full_topology_contract(tmp_path) -> None:
     assert artifact.built is False
     common_archive = artifact.metadata["common_artifacts"]["nanobind_static"]["archive_path"]
     assert str(tmp_path / "release" / "_common") in common_archive
-    assert "_common" not in Path(common_archive).parts
+    assert "_common" in Path(common_archive).parts
     assert "nanobind-static" not in Path(common_archive).parts
     assert artifact.metadata["topology"]["source"] == {
         "route_key": ["PQ", "rho", "grid"],
@@ -87,6 +87,36 @@ def test_kernel_builder_dry_run_emits_full_topology_contract(tmp_path) -> None:
     assert "-DVEQLIB_ENABLE_NATIVE_OPTIMIZATIONS=OFF" in configure
     assert "-DVEQLIB_ENABLE_THIN_LTO=OFF" in configure
     assert "-DVEQLIB_ANALYSIS_BUILD=ON" in configure
+
+
+def test_kernel_source_digest_only_tracks_native_implementation_inputs(tmp_path) -> None:
+    retained = {
+        "CMakeLists.txt": "cmake_minimum_required(VERSION 3.24)\n",
+        "config.h.in": "#pragma once\n",
+        "kernel_case.h": "#pragma once\n",
+        "linalg.cpp": "int answer() { return 42; }\n",
+    }
+    ignored = {
+        "README.md": "docs\n",
+        "notes.txt": "notes\n",
+        "CMakePresets.json": "{}\n",
+        "binding_smoke.py": "import veqlib_ext\n",
+        "build/generated.h": "#pragma once\n",
+        "experiments/probe.cpp": "int probe();\n",
+    }
+    for name, text in (retained | ignored).items():
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+
+    digest = _source_digest(tmp_path)
+    baseline = digest["sha256"]
+
+    assert digest["file_count"] == len(retained)
+    (tmp_path / "README.md").write_text("changed docs\n")
+    assert _source_digest(tmp_path)["sha256"] == baseline
+    (tmp_path / "kernel_case.h").write_text("#pragma once\n// changed\n")
+    assert _source_digest(tmp_path)["sha256"] != baseline
 
 
 def test_kernel_builder_forces_clang18_toolchain(tmp_path, monkeypatch) -> None:

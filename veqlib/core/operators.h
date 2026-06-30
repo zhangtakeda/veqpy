@@ -1,5 +1,6 @@
 #pragma once
 
+#include "abi_enums.h"
 #include "geometry.h"
 #include "profiles.h"
 #include "residual.h"
@@ -39,27 +40,11 @@ namespace operators::detail
         double beta = 0.0;
     };
 
-    inline constexpr int source_route_pf                  = 1;
-    inline constexpr int source_route_pp                  = 2;
-    inline constexpr int source_route_pi                  = 3;
-    inline constexpr int source_route_pj1                 = 4;
-    inline constexpr int source_route_pj2                 = 5;
-    inline constexpr int source_route_pq                  = 6;
-    inline constexpr int source_coordinate_rho            = 1;
-    inline constexpr int source_coordinate_psin           = 2;
-    inline constexpr int source_nodes_uniform             = 1;
-    inline constexpr int source_nodes_grid                = 2;
-    inline constexpr int source_active_none               = 0;
-    inline constexpr int source_active_psin               = 1;
-    inline constexpr int source_active_F                  = 2;
-    inline constexpr int source_parameterization_identity = 0;
-    inline constexpr int source_parameterization_sqrt_psin = 1;
-
     template <typename Shape,
               typename GridType,
               typename SourceShape,
               int SourceRouteCode           = source_route_pf,
-              int SourceConstraintCode      = 1,
+              int SourceConstraintCode      = source_constraint_ip,
               int SourceCoordinateCode      = source_coordinate_psin,
               int SourceNodesCode           = source_nodes_uniform,
               int SourceActiveFamilyCode    = source_active_psin,
@@ -74,12 +59,14 @@ namespace operators::detail
                           SourceRouteCode == source_route_pj2 || SourceRouteCode == source_route_pq,
                       "native source topology currently supports PF, PP, PI, PJ1, PJ2, and PQ routes");
         static_assert((SourceRouteCode == source_route_pf &&
-                       (SourceConstraintCode == 0 || SourceConstraintCode == 1 || SourceConstraintCode == 2)) ||
+                       (SourceConstraintCode == source_constraint_null || SourceConstraintCode == source_constraint_ip ||
+                        SourceConstraintCode == source_constraint_beta)) ||
                           ((SourceRouteCode == source_route_pp || SourceRouteCode == source_route_pi ||
                             SourceRouteCode == source_route_pj1 || SourceRouteCode == source_route_pj2 ||
                             SourceRouteCode == source_route_pq) &&
-                           (SourceConstraintCode == 0 || SourceConstraintCode == 1 || SourceConstraintCode == 2 ||
-                            SourceConstraintCode == 3)),
+                           (SourceConstraintCode == source_constraint_null || SourceConstraintCode == source_constraint_ip ||
+                            SourceConstraintCode == source_constraint_beta ||
+                            SourceConstraintCode == source_constraint_ip_beta)),
                       "source topology constraint is not implemented for this native route");
         static_assert(SourceCoordinateCode == source_coordinate_rho || SourceCoordinateCode == source_coordinate_psin,
                       "native source topology supports rho or psin coordinates");

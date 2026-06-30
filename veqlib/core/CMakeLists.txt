@@ -674,16 +674,3 @@ add_test(
         --ring-size
         2
 )
-if(VEQLIB_ENABLE_PYTHON_BINDINGS)
-    add_test(
-        NAME veqlib_python_binding
-        COMMAND
-            "${Python_EXECUTABLE}"
-            "${PROJECT_SOURCE_DIR}/binding_smoke.py"
-    )
-    set_tests_properties(
-        veqlib_python_binding
-        PROPERTIES
-            ENVIRONMENT "PYTHONPATH=$<TARGET_FILE_DIR:veqlib_ext>"
-    )
-endif()

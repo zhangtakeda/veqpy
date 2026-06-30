@@ -75,7 +75,7 @@ from veqpy.operator import Operator
 from veqpy.operator.packed_layout import build_profile_layout, build_profile_names
 from veqpy.solver import Solver
 
-DEFAULT_OUTPUT = REPO_ROOT / "outputs" / "veqlib_routes.json"
+DEFAULT_OUTPUT = REPO_ROOT / "veqlib" / "benchmarks" / "results" / "veqlib_routes.json"
 VALIDATION_ATOL = 1.0e-6
 DEFAULT_SCOPE = "ip-uniform"
 SOLVER_INITIAL_POLICY = "cold"

@@ -57,7 +57,7 @@ if str(REPO_ROOT / "scripts") not in sys.path:
 
 from config import CASE_KEYS, CONFIG_LABELS  # noqa: E402
 
-DEFAULT_OUTPUT_DIR = REPO_ROOT / "veqlib" / "benchmarks" / "results" / "continuation_nfev"
+DEFAULT_OUTPUT_DIR = REPO_ROOT / "veqlib" / "benchmarks" / "results" / "veqlib_continuation"
 UPDATE_CHOICES = ("ip", "boundary", "source", "mixed")
 DEFAULT_SPANS = (0.0002, 0.005, 0.01, 0.05, 0.20)
 POLICY_CHOICES = (

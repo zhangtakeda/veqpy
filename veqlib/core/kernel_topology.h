@@ -10,6 +10,7 @@
 #include <span>
 #include <string>
 
+#include "abi_enums.h"
 #include "config.h"
 #include "grid.h"
 #include "operators.h"
@@ -173,39 +174,6 @@ namespace veqlib_kernel_api
             Powell,
         };
 
-        enum RuntimeSolverMethodCode : int
-        {
-            SolverMethodPowell             = 1,
-            SolverMethodLevenbergMarquardt = 2,
-            SolverMethodNewtonKrylov       = 4,
-            SolverMethodNewtonRaphson      = 5,
-        };
-
-        enum InitialPolicyCode : int
-        {
-            InitialPolicyColdZeros     = 1,
-            InitialPolicyColdGeometric = 2,
-            InitialPolicyCold          = 3,
-        };
-
-        enum ContinuePolicyCode : int
-        {
-            ContinuePolicyColdZeros     = 1,
-            ContinuePolicyColdGeometric = 2,
-            ContinuePolicyCold          = 3,
-            ContinuePolicyWarmFixed     = 4,
-            ContinuePolicyWarmPredict   = 5,
-            ContinuePolicyWarmChord     = 6,
-            ContinuePolicyWarm          = 7,
-        };
-
-        enum ResidualNormalizationCode : int
-        {
-            ResidualNormalizationNone     = 0,
-            ResidualNormalizationFast     = 1,
-            ResidualNormalizationBalanced = 2,
-            ResidualNormalizationSafe     = 3,
-        };
 
         struct CaseInput
         {

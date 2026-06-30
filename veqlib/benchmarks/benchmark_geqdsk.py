@@ -76,7 +76,7 @@ from config import (  # noqa: E402
     signature_from_metadata,
 )
 
-DEFAULT_OUTPUT = REPO_ROOT / "outputs" / "veqlib_geqdsk_configs.json"
+DEFAULT_OUTPUT = REPO_ROOT / "veqlib" / "benchmarks" / "results" / "veqlib_geqdsk.json"
 VALIDATION_ATOL = 1.0e-6
 REPORT_TABLE_BOX = box.Box("    \n    \n ── \n    \n ── \n ── \n    \n ── \n")
 Topology = KernelTopology

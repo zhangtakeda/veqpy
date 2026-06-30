@@ -63,7 +63,7 @@ python3.12 -m venv .venv
 .venv/bin/python -m pip install .
 ```
 
-`veqlib/` 下的可选 VEQlib C++ kernel 层不是普通 Python/Numba 使用的必要依赖。其 `facade/` 树提供 `veqlib.facade`，`core/` 树保存 C++/CMake 实现，`benchmarks/` 保存对照脚本，并且刻意与 VEQPy 内部语义分离。构建它需要本地 C++20 工具链和原生库，例如 CMake 3.24+、`clang++`、nanobind、GCEM、nlohmann-json、CMINPACK、LAPACKE/LAPACK 和 OpenBLAS；当前构建边界与支持 topology 见 [`veqlib/README.md`](../veqlib/README.md)。
+`veqlib/` 下的可选 VEQlib C++ kernel 层不是普通 Python/Numba 使用的必要依赖。其 `facade/` 树提供 `veqlib.facade`，`core/` 树保存 C++/CMake 实现，`benchmarks/` 保存对照脚本，并且刻意与 VEQPy 内部语义分离。构建它需要本地 C++20 工具链和原生库，例如 CMake 3.24+、`clang++`、nanobind、GCEM、nlohmann-json、CMINPACK、LAPACKE/LAPACK 和 OpenBLAS；当前 Python facade 构建边界、artifact cache/hash 语义和 benchmark 入口见仓库根 [`README.md`](../README.md) 的 VEQlib 小节。
 
 下面的命令都显式使用 `.venv`；是否执行 `source .venv/bin/activate` 只是个人习惯。
 
@@ -102,7 +102,7 @@ GEQDSK demo:
 - [[registry.md]](details_cn/registry.md): registry-backed 方法族、source route 坐标化和分发边界。
 - [[serial.md]](details_cn/serial.md): root-state 序列化、格式 handler 和持久化边界。
 - [[model.md]](details_cn/model.md): `Grid`、`Profile`、`Boundary`、`Geqdsk`、`Equilibrium` 的职责、快照边界和诊断接口。
-- [`veqlib/README.md`](../veqlib/README.md): 可选 VEQlib C++/nanobind kernel 层、topology key，以及当前 PF(`psin`)/uniform/`Ip` 支持边界。
+- 仓库根 [`README.md`](../README.md) 的 VEQlib 小节：可选 C++/nanobind kernel 层、topology/artifact cache 语义和 benchmark 入口。
 
 热路径算子与求解器:
 

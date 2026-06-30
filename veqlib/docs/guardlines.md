@@ -19,7 +19,7 @@
 2. **runtime**: 指对一个已编译好的 kernel, 持续输入成千上万个 case 进行求解的阶段. runtime 的单次求解耗时是我们优先关注的性能指标.
 3. **topology**: 编译 VEQlib kernel 时所依赖的全部模板元参数的集合. 每个 kernel 与其 topology 一一对应. cache 的 key 至少包含"VEQlib 源码 + topology + build options + toolchain/native ABI"的 hash.
 4. **case**: 在 runtime 阶段输入的待求解问题数据, 由接口层转化为 C++ ABI 可直接消费的标量和 `float64` 数组后传入 VEQlib.
-5. **artifact cache**: 当前 Python facade 拥有 artifact identity、磁盘 cache 与文件锁. 普通 topology artifact 写在 `veqlib/artifact/<build>/<artifact-id>/`; 同一 build preset 共享的公共编译产物写在 `veqlib/artifact/<build>/common/<common-id>/`. 不再使用 `_common/` 或 `nanobind-static/` 作为公共目录层级.
+5. **artifact cache**: 当前 Python facade 拥有 artifact identity、磁盘 cache 与文件锁. 普通 topology artifact 写在 `veqlib/artifact/<build>/<artifact-id>/`; 同一 build preset 共享的公共编译产物写在 `veqlib/artifact/<build>/_common/<common-id>/`.
 6. **toolchain**: VEQlib facade 始终使用 `clang++-18` 作为 C++ 编译器; 不读取 `VEQLIB_CXX` 或 `CXX` 环境变量来切换 toolchain.
 
 > **注意**: topology 与 case 不一定各自只有单一的类型表示, 它们均代表一类数据的聚合.
@@ -109,7 +109,7 @@ Kernel 对 C++ 接口采用**惰性加载(lazy-load)**: 默认不立即挂载 na
 
 ## VEQlib ABI 约束
 
-VEQlib 的 ABI 只接受以下类型: `double`, 1D C-contiguous `float64` ndarray, `int`/`size_t`. 所有字符串参数必须在 Python 层映射为对应的枚举整数, C++ 只消费 int code. 该映射表需在 Python 与 C++ 源码中同步维护. 未来应以一份 `.toml` 或 `.json` schema 文件作为 single source of truth, 构建时自动生成 Python 侧的枚举类和 C++ 侧的头文件. 这样版本不一致时编译直接失败.
+VEQlib 的 ABI 只接受以下类型: `double`, 1D C-contiguous `float64` ndarray, `int`/`size_t`. 所有字符串参数必须在 Python 层映射为对应的枚举整数, C++ 只消费 int code. ABI int code 的 C++ 事实源集中在 `veqlib/core/abi_enums.h`; Python 侧保留轻量映射表, 并由 pytest 解析该 C++ 头来检查 Python/C++ 是否一致. 这样避免让普通 CMake build 依赖 Python codegen, 同时防止两侧硬编码静默漂移.
 
 必须区分 **ABI 校验** 与 **安全兜底**:
 
@@ -125,7 +125,7 @@ VEQlib 的 ABI 只接受以下类型: `double`, 1D C-contiguous `float64` ndarra
   - `veqlib/benchmarks/benchmark_routes.py`: route/topology 一致性与速度矩阵.
   - `veqlib/benchmarks/benchmark_geqdsk.py`: Low/Medium/High/Ref 四种配置 × 三个 GEQDSK case 的 VEQPy 对照.
   - `veqlib/benchmarks/benchmark_continuation.py`: GEQDSK continuation sweep, 输出各 cold/warm policy 的 effective nfev 表.
-- **默认输出目录**: route/geqdsk retained benchmark 默认写入仓库根目录 `outputs/`, 例如 `outputs/veqlib_routes.json` 与 `outputs/veqlib_geqdsk_configs.json`; continuation nfev benchmark 默认写入 `veqlib/benchmarks/results/continuation_nfev/`. 这些都是本地生成物目录, 不作为源文件或 API 依据.
+- **默认输出目录**: route/geqdsk retained benchmark 默认写入 `veqlib/benchmarks/results/veqlib_routes.json` 与 `veqlib/benchmarks/results/veqlib_geqdsk.json`; continuation nfev benchmark 默认写入 `veqlib/benchmarks/results/veqlib_continuation/`. 这些都是本地生成物目录, 不作为源文件或 API 依据.
 - **route benchmark scope**: `benchmark_routes.py` 默认只跑 12 个 `*:rho/psin:uniform:Ip` case, 即 6 个 route × 2 个 coordinate × `Ip` constraint. 显式 `--scope uniform` 才跑历史 46 个 uniform case; 显式 `--scope full` 才跑 92 个 uniform/grid 全矩阵.
 - **nanobind 多 topology 限制**: 当前每个 topology artifact 仍是一个独立 nanobind extension module, 并使用 per-artifact `VEQLIB_NB_DOMAIN` 避免同名 `KernelSolver` 类型重复注册. 在同一个 Python 进程里加载大量不同 domain 会消耗 CPython low-level `Py_AtExit` cleanup slot; CPython 3.12 常见上限是 32. 这不是数值错误, 但说明该进程不适合长期加载几十/上百个 topology artifact.
 - **subprocess 隔离语义**: `benchmark_routes.py` 对 native rows 默认使用 subprocess-per-row 隔离, 使 full matrix 不在一个 Python 解释器里加载大量 nanobind domain. 计时 JSON 中的 solve samples 来自子进程内 warmup 后的 `solve_direct()` 循环, 不包括父进程 orchestration 或 subprocess 启动开销.
@@ -133,4 +133,4 @@ VEQlib 的 ABI 只接受以下类型: `double`, 1D C-contiguous `float64` ndarra
 
 ---
 
-> **注意**: 以下约束描述的是最终代码的成熟形态, 当前实现很可能尚未完全达到. 由于代码仍在开发/重构中, 现有 pytest 测试只作为当前提交的局部回归证据, 不应作为架构/API 的设计基线. 配点法相关内容暂不纳入迁移范围. 此外, 当前代码存在电流/压强的 scale 操作, 但未来 Python 与 C++ 层面均应去除, C++ 层面将 mu0 作为编译期常数编译期应该可以自动化简, 同时使内核实现的语义更加明确.
+> **注意**: 以下约束描述的是最终代码的成熟形态, 当前实现很可能尚未完全达到. 由于代码仍在开发/重构中, 现有 pytest 测试只作为当前提交的局部回归证据, 不应作为架构/API 的设计基线. 配点法相关内容暂不纳入迁移范围.
