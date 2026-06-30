@@ -204,17 +204,18 @@ class Kernel:
         solver = self._veqlib_solver()
         kernel_boundary = self._kernel_boundary(boundary)
         kernel_input = self._kernel_input(input, case_name=case_name)
-        try:
-            solver.set_kernel_runtime(
-                "" if kernel_input.case_name is None else kernel_input.case_name,
-                *kernel_boundary.runtime_args(),
-                *kernel_input.runtime_args(),
-                *config.runtime_args(x_size=self.x_size),
-            )
-        except AttributeError:
+        set_kernel_runtime = getattr(solver, "set_kernel_runtime", None)
+        if set_kernel_runtime is None:
             solver.set_case_json(
                 self.payload_json(kernel_boundary, kernel_input, config=config)
             )
+            return solver
+        set_kernel_runtime(
+            "" if kernel_input.case_name is None else kernel_input.case_name,
+            *kernel_boundary.runtime_args(),
+            *kernel_input.runtime_args(),
+            *config.runtime_args(x_size=self.x_size),
+        )
         return solver
 
     @staticmethod

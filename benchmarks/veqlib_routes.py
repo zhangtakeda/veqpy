@@ -3,14 +3,13 @@
 
 The default scope enumerates the 12 ``*:rho/psin:uniform:Ip`` route cases, which
 keeps one default run below the nanobind per-process cleanup-handler ceiling.
-``--scope uniform`` restores the 46 historical uniform source cases from
-``tests/benchmark.py``. ``--scope full`` adds grid-sampled variants for the 92
-route/topology matrix. Topology planning is always performed; supported native
-rows can be executed through the typed ``veqlib.facade`` runtime unless
-``--no-run`` is passed. Native rows are isolated in one subprocess per row by
-default so full matrices do not load dozens of nanobind domains into one
-interpreter; ``--run-native-in-process`` keeps the single-process path for
-debugging.
+``--scope uniform`` restores the 46 historical synthetic uniform source cases.
+``--scope full`` adds grid-sampled variants for the 92 route/topology matrix.
+Topology planning is always performed; supported native rows can be executed
+through the typed ``veqlib.facade`` runtime unless ``--no-run`` is passed.
+Native rows are isolated in one subprocess per row by default so full matrices
+do not load dozens of nanobind domains into one interpreter;
+``--run-native-in-process`` keeps the single-process path for debugging.
 """
 
 from __future__ import annotations
@@ -26,7 +25,6 @@ from contextlib import nullcontext
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from types import ModuleType
 from typing import Any
 
 import numpy as np
@@ -49,16 +47,28 @@ from rich.tree import Tree
 
 from benchmarks._common import (
     CORE_DIR,
+    MU0,
     REPO_ROOT,
+    ROUTE_TEST_GRID,
+    ROUTE_TEST_SOURCE_SAMPLE_COUNT,
+    active_profiles_from_coeffs,
+    coefficients_from_coeffs,
     cpu_affinity,
+    extract_shape_x,
     family_counts,
+    filter_route_specs,
     float_stats,
     int_stats,
-    load_module,
+    iter_route_specs,
+    make_route_problem,
     max_abs,
     measure_native_solver,
     profile_count,
+    route_spec_label,
+    route_spec_selector,
     runtime_env,
+    shape_error,
+    solve_route_reference,
     write_json,
 )
 from veqlib.facade import (
@@ -75,9 +85,11 @@ from veqlib.facade import (
     build_kernel,
     default_kernel_cache_root,
 )
+from veqpy.engine import backend_abi
+from veqpy.model import Boundary, Grid, Problem
 from veqpy.operator import Operator
 from veqpy.operator.packed_layout import build_profile_layout, build_profile_names
-from veqpy.solver import Solver
+from veqpy.solver import Solver, SolverConfig
 
 DEFAULT_OUTPUT = REPO_ROOT / "benchmarks" / "results" / "veqlib_routes.json"
 VALIDATION_ATOL = 1.0e-6
@@ -87,6 +99,40 @@ NATIVE_SOLVER_CONTINUATION_POLICY = "cold"
 NATIVE_SOLVER_NORMALIZATION = "fast"
 REPORT_TABLE_BOX = box.Box("    \n    \n ── \n    \n ── \n ── \n    \n ── \n")
 Topology = KernelTopology
+
+REFERENCE_SOURCE_SAMPLE_COUNT = 51
+REFERENCE_GRID = Grid(Nr=64, Nt=32, quadrature_scheme="legendre")
+SYNTHETIC_CONFIG = SolverConfig(
+    method="hybr",
+    enable_verbose=False,
+    enable_history=False,
+)
+SYNTHETIC_REFERENCE_CONFIG = SolverConfig(
+    method=SYNTHETIC_CONFIG.method,
+    max_residual=SYNTHETIC_CONFIG.max_residual,
+    max_evaluations=SYNTHETIC_CONFIG.max_evaluations,
+    initial_policy=None,
+    enable_verbose=False,
+    enable_history=False,
+)
+BASE_COEFFS: dict[str, list[float]] = {
+    "h": [0.0] * 3,
+    "k": [0.0] * 6,
+    "s1": [0.0] * 3,
+}
+PSIN_ROBUST_COEFFS: dict[str, list[float]] = {
+    **BASE_COEFFS,
+    "psin": [0.0] * 6,
+}
+SYNTHETIC_BOUNDARY = Boundary(
+    a=1.05 / 1.85,
+    R0=1.05,
+    Z0=0.0,
+    B0=3.0,
+    ka=2.2,
+    s_offsets=np.array([0.0, float(np.arcsin(0.5))]),
+)
+SYNTHETIC_IP = 3.0e6
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,25 +159,62 @@ def _console() -> Console:
     return Console(highlight=False)
 
 
-@lru_cache(maxsize=1)
-def _benchmark_module() -> ModuleType:
-    return load_module(
-        "veqpy_route_benchmark_for_veqlib_routes",
-        REPO_ROOT / "tests" / "benchmark.py",
+def _pf_reference_profiles(psin: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    beta0 = 0.75
+    alpha_p, alpha_f = 5.0, 3.32
+    exp_ap, exp_af = np.exp(alpha_p), np.exp(alpha_f)
+    den_p = 1.0 + exp_ap * (alpha_p - 1.0)
+    den_f = 1.0 + exp_af * (alpha_f - 1.0)
+    current_input = (1.0 - beta0) * alpha_f * (np.exp(alpha_f * psin) - exp_af) / den_f
+    heat_input = beta0 * alpha_p * (np.exp(alpha_p * psin) - exp_ap) / den_p
+    return current_input, heat_input
+
+
+def _synthetic_reference_problem() -> Problem:
+    rho_src = np.linspace(0.0, 1.0, REFERENCE_SOURCE_SAMPLE_COUNT)
+    psin_src = rho_src * rho_src
+    ffn_psin_src, pn_psin_src = _pf_reference_profiles(psin_src)
+    ffn_r_src = ffn_psin_src * (2.0 * rho_src)
+    pn_r_src = pn_psin_src * (2.0 * rho_src)
+    return Problem(
+        route="PF",
+        coordinate="rho",
+        nodes="uniform",
+        active_profiles=active_profiles_from_coeffs(BASE_COEFFS),
+        boundary=SYNTHETIC_BOUNDARY,
+        heat_input=pn_r_src / MU0,
+        current_input=ffn_r_src,
+        Ip=SYNTHETIC_IP,
     )
 
 
 @lru_cache(maxsize=1)
 def _benchmark_reference() -> Any:
-    return _benchmark_module()._solve_reference(show_progress=False)
+    return solve_route_reference(
+        _synthetic_reference_problem(),
+        REFERENCE_GRID,
+        SYNTHETIC_REFERENCE_CONFIG,
+        BASE_COEFFS,
+    )
+
+
+def _profile_coeffs_for_case(spec: Any) -> dict[str, list[float]]:
+    route_key = (str(spec.mode).upper(), str(spec.coordinate).lower(), str(spec.input_kind).lower())
+    if route_key in backend_abi.PROFILE_OWNED_PSIN_ROUTE_KEYS:
+        coeffs = {name: list(values) for name, values in PSIN_ROBUST_COEFFS.items()}
+    else:
+        coeffs = {name: list(values) for name, values in BASE_COEFFS.items()}
+    if spec.mode == "PJ2":
+        coeffs["F"] = [0.0] * 5
+    return coeffs
 
 
 def _spec_label(spec: Any) -> str:
-    return str(spec.case_name)
+    return route_spec_label(spec)
 
 
 def _spec_selector(spec: Any) -> str:
-    return f"{spec.mode}:{spec.coordinate}:{spec.input_kind}:{spec.constraint}"
+    return route_spec_selector(spec)
 
 
 def _cxx_solver_method_for_spec(spec: Any) -> int:
@@ -145,47 +228,8 @@ def _cxx_solver_method_for_spec(spec: Any) -> int:
     return SOLVER_METHOD_POWELL
 
 
-def _iter_route_specs(benchmark: ModuleType, *, scope: str) -> tuple[Any, ...]:
-    if scope == DEFAULT_SCOPE:
-        input_kinds = ("uniform",)
-        constraints_by_mode = {mode: ("Ip",) for mode in benchmark.BENCHMARK_MODES}
-    elif scope in {"uniform", "full"}:
-        input_kinds = list(benchmark.BENCHMARK_INPUT_KINDS)
-        if scope == "full" and "grid" not in input_kinds:
-            input_kinds.append("grid")
-        constraints_by_mode = benchmark.BENCHMARK_MODE_CONSTRAINTS
-    else:
-        raise ValueError(f"unknown route benchmark scope {scope!r}")
-    return tuple(
-        benchmark.BenchmarkCaseSpec(
-            mode=mode,
-            coordinate=coordinate,
-            constraint=constraint,
-            input_kind=input_kind,
-        )
-        for mode in benchmark.BENCHMARK_MODES
-        for coordinate in ("rho", "psin")
-        for input_kind in input_kinds
-        for constraint in constraints_by_mode[mode]
-    )
-
-
-def _filter_specs(specs: tuple[Any, ...], selected: set[str] | None) -> tuple[Any, ...]:
-    if selected is None:
-        return specs
-    selected_lower = {item.lower() for item in selected}
-    retained = tuple(
-        spec
-        for spec in specs
-        if _spec_label(spec).lower() in selected_lower
-        or _spec_selector(spec).lower() in selected_lower
-    )
-    matched = {_spec_label(spec).lower() for spec in retained}
-    matched.update(_spec_selector(spec).lower() for spec in retained)
-    missing = selected_lower.difference(matched)
-    if missing:
-        raise ValueError(f"unknown case selector(s): {', '.join(sorted(missing))}")
-    return retained
+def _iter_route_specs(*, scope: str) -> tuple[Any, ...]:
+    return iter_route_specs(scope=scope, default_scope=DEFAULT_SCOPE, allow_grid=True)
 
 
 def _active_profiles_from_topology(topology: Topology) -> dict[str, int]:
@@ -242,23 +286,22 @@ def _boundary_m_max(boundary: Any) -> int:
     )
 
 
-def _sample_count_for_spec(benchmark: ModuleType, spec: Any) -> int:
+def _sample_count_for_spec(spec: Any) -> int:
     if str(spec.input_kind).lower() == "grid":
-        return int(benchmark.TEST_GRID.Nr)
-    return int(benchmark.TEST_SOURCE_SAMPLE_COUNT)
+        return int(ROUTE_TEST_GRID.Nr)
+    return int(ROUTE_TEST_SOURCE_SAMPLE_COUNT)
 
 
 def _topology_from_spec(
-    benchmark: ModuleType,
     spec: Any,
     *,
     build: str,
     layout: str = "degree",
     build_options: dict[str, object] | None = None,
 ) -> tuple[KernelTopology, tuple[str, ...]]:
-    coeffs = benchmark._case_profile_coeffs(spec)
-    grid = benchmark.TEST_GRID
-    m_max = _boundary_m_max(benchmark.BOUNDARY)
+    coeffs = _profile_coeffs_for_case(spec)
+    grid = ROUTE_TEST_GRID
+    m_max = _boundary_m_max(SYNTHETIC_BOUNDARY)
     topology_kwargs: dict[str, object] = {
         "h_count": profile_count(coeffs, "h"),
         "v_count": profile_count(coeffs, "v"),
@@ -273,7 +316,7 @@ def _topology_from_spec(
         "coordinate": str(spec.coordinate),
         "constraint": str(spec.constraint),
         "nodes": str(spec.input_kind),
-        "sample_count": _sample_count_for_spec(benchmark, spec),
+        "sample_count": _sample_count_for_spec(spec),
         "M_max": m_max,
         "K_max": max(2, m_max),
     }
@@ -334,13 +377,19 @@ def _kernel_config_from_config(
     )
 
 
-def _runtime_case(benchmark: ModuleType, spec: Any, topology: Topology) -> RuntimeCase:
+def _runtime_case(spec: Any, topology: Topology) -> RuntimeCase:
     reference = _benchmark_reference()
-    case = benchmark._make_benchmark_case(spec, reference)
-    coeffs = benchmark._case_profile_coeffs(spec)
-    grid = benchmark.TEST_GRID
+    coeffs = _profile_coeffs_for_case(spec)
+    grid = ROUTE_TEST_GRID
+    case = make_route_problem(
+        spec,
+        reference,
+        coeffs,
+        grid=grid,
+        sample_count=_sample_count_for_spec(spec),
+    )
     operator = Operator(grid, case)
-    x0 = operator.pack_coefficients(benchmark._coefficients_from_coeffs(coeffs))
+    x0 = operator.pack_coefficients(coefficients_from_coeffs(coeffs))
     method = _cxx_solver_method_for_spec(spec)
     kernel_boundary = _kernel_boundary_from_case(case)
     kernel_input = _kernel_input_from_operator(
@@ -349,19 +398,19 @@ def _runtime_case(benchmark: ModuleType, spec: Any, topology: Topology) -> Runti
         case_name=_spec_label(spec),
     )
     kernel_config = _kernel_config_from_config(
-        benchmark.CONFIG,
+        SYNTHETIC_CONFIG,
         method=method,
         x_size=int(x0.size),
     )
 
     def measure_py(*, warmup: int, repeat: int) -> dict[str, Any]:
         for _ in range(warmup):
-            solver = Solver(operator=Operator(grid, case.copy()), config=benchmark.CONFIG)
+            solver = Solver(operator=Operator(grid, case.copy()), config=SYNTHETIC_CONFIG)
             solver.solve(
                 x0=x0,
-                method=benchmark.CONFIG.method,
-                max_residual=benchmark.CONFIG.max_residual,
-                max_evaluations=benchmark.CONFIG.max_evaluations,
+                method=SYNTHETIC_CONFIG.method,
+                max_residual=SYNTHETIC_CONFIG.max_residual,
+                max_evaluations=SYNTHETIC_CONFIG.max_evaluations,
                 enable_verbose=False,
                 enable_history=False,
             )
@@ -370,13 +419,13 @@ def _runtime_case(benchmark: ModuleType, spec: Any, topology: Topology) -> Runti
         success: list[bool] = []
         last_solver = None
         for _ in range(repeat):
-            solver = Solver(operator=Operator(grid, case.copy()), config=benchmark.CONFIG)
+            solver = Solver(operator=Operator(grid, case.copy()), config=SYNTHETIC_CONFIG)
             started = time.perf_counter_ns()
             solver.solve(
                 x0=x0,
-                method=benchmark.CONFIG.method,
-                max_residual=benchmark.CONFIG.max_residual,
-                max_evaluations=benchmark.CONFIG.max_evaluations,
+                method=SYNTHETIC_CONFIG.method,
+                max_residual=SYNTHETIC_CONFIG.max_residual,
+                max_evaluations=SYNTHETIC_CONFIG.max_evaluations,
                 enable_verbose=False,
                 enable_history=False,
             )
@@ -479,26 +528,23 @@ def _compare(cxx: dict[str, Any], py: dict[str, Any]) -> dict[str, Any]:
 
 
 def _reference_dofs_payload(
-    benchmark: ModuleType,
     case: RuntimeCase,
     cxx: dict[str, Any],
     py: dict[str, Any],
 ) -> dict[str, float]:
     reference = _benchmark_reference()
     active_profiles = case.py_operator.problem.active_profiles
-    cxx_shape_x = benchmark._extract_shape_x(
+    cxx_shape_x = extract_shape_x(
         active_profiles,
         np.asarray(cxx["x"], dtype=np.float64),
     )
-    py_shape_x = benchmark._extract_shape_x(
+    py_shape_x = extract_shape_x(
         active_profiles,
         np.asarray(py["x"], dtype=np.float64),
     )
     return {
-        "veqlib_shape_error": float(
-            benchmark._shape_error(reference.reference_shape_x, cxx_shape_x)
-        ),
-        "veqpy_shape_error": float(benchmark._shape_error(reference.reference_shape_x, py_shape_x)),
+        "veqlib_shape_error": float(shape_error(reference.reference_shape_x, cxx_shape_x)),
+        "veqpy_shape_error": float(shape_error(reference.reference_shape_x, py_shape_x)),
         "veqlib_vs_veqpy_shape_error": max_abs(cxx_shape_x, py_shape_x),
     }
 
@@ -529,7 +575,6 @@ def _topology_payload(topology: Topology, warnings_: tuple[str, ...]) -> dict[st
 
 
 def _plan_row(
-    benchmark: ModuleType,
     spec: Any,
     *,
     build: str,
@@ -541,7 +586,6 @@ def _plan_row(
 ) -> tuple[dict[str, Any], Topology | None]:
     try:
         topology, warning_messages = _topology_from_spec(
-            benchmark,
             spec,
             build=build,
             layout=layout,
@@ -594,7 +638,6 @@ def _plan_row(
 
 
 def _run_supported_row(
-    benchmark: ModuleType,
     spec: Any,
     topology: Topology,
     *,
@@ -602,11 +645,11 @@ def _run_supported_row(
     warmup: int,
     repeat: int,
 ) -> dict[str, Any]:
-    case = _runtime_case(benchmark, spec, topology)
+    case = _runtime_case(spec, topology)
     py = case.py_measure(warmup=warmup, repeat=repeat)
     cxx = _measure_veqlib(case, registry=registry, warmup=warmup, repeat=repeat)
     compare = _compare(cxx, py)
-    reference_dofs = _reference_dofs_payload(benchmark, case, cxx, py)
+    reference_dofs = _reference_dofs_payload(case, cxx, py)
     passed = cxx["success_all"] and py["success_all"] and compare["within_atol"]
     failure_reason = None
     if not cxx["success_all"]:
@@ -1074,9 +1117,8 @@ def main(argv: list[str] | None = None) -> int:
         raise ValueError("--warmup must be >= 0 and --repeat must be > 0")
 
     console = _console()
-    benchmark = _benchmark_module()
-    specs = _filter_specs(
-        _iter_route_specs(benchmark, scope=args.scope),
+    specs = filter_route_specs(
+        _iter_route_specs(scope=args.scope),
         set(args.case) if args.case else None,
     )
     cache_root = args.cache_root or default_kernel_cache_root()
@@ -1115,7 +1157,6 @@ def main(argv: list[str] | None = None) -> int:
                     phase="[dim]plan[/]",
                 )
             row, topology = _plan_row(
-                benchmark,
                 spec,
                 build=args.build,
                 layout=args.layout,
@@ -1133,7 +1174,6 @@ def main(argv: list[str] | None = None) -> int:
                     try:
                         if args.run_native_in_process:
                             row["runtime"] = _run_supported_row(
-                                benchmark,
                                 spec,
                                 topology,
                                 registry=registry,

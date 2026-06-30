@@ -178,6 +178,47 @@ def test_kernel_dry_run_payload_and_python_owned_result_snapshot(tmp_path: Path)
     assert result.alpha.flags.owndata
 
 
+class _JsonOnlySolver:
+    def __init__(self) -> None:
+        self.payloads: list[dict[str, object]] = []
+
+    def set_case_json(self, payload: str) -> None:
+        self.payloads.append(json.loads(payload))
+
+
+class _BrokenRuntimeSolver(_JsonOnlySolver):
+    def set_kernel_runtime(self, *args: object) -> None:
+        raise AttributeError("native runtime internals missing")
+
+
+def test_kernel_runtime_json_fallback_only_handles_missing_method(tmp_path: Path) -> None:
+    handle = Kernel(make_kernel_topology(), cache_root=tmp_path)
+
+    json_only = _JsonOnlySolver()
+    handle._solver = json_only
+    assert (
+        handle._set_runtime(
+            tiny_kernel_boundary(),
+            tiny_kernel_input(),
+            KernelConfig(),
+            case_name="json-fallback",
+        )
+        is json_only
+    )
+    assert json_only.payloads[0]["case_name"] == "json-fallback"
+
+    broken_runtime = _BrokenRuntimeSolver()
+    handle._solver = broken_runtime
+    with pytest.raises(AttributeError, match="native runtime internals missing"):
+        handle._set_runtime(
+            tiny_kernel_boundary(),
+            tiny_kernel_input(),
+            KernelConfig(),
+            case_name="must-propagate",
+        )
+    assert broken_runtime.payloads == []
+
+
 @pytest.mark.slow
 def test_kernel_python_build_and_solve_native_flow(tmp_path: Path) -> None:
     topology = make_kernel_topology()
