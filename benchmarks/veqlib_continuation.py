@@ -50,6 +50,7 @@ from benchmarks._common import (
 )
 from benchmarks.veqlib_geqdsk_pareto import GeqdskConfigCase, _make_cases
 from veqlib.facade import (
+    KernelBoundary,
     KernelConfig,
     KernelInput,
     KernelRegistry,
@@ -81,6 +82,7 @@ UPDATE_LABELS = {
     "mixed": "C4 mixed",
 }
 REPORT_TABLE_BOX = box.Box("    \n    \n ── \n    \n ── \n ── \n    \n ── \n")
+RuntimePoint = tuple[KernelBoundary, KernelInput]
 
 
 def _console() -> Console:
@@ -127,18 +129,16 @@ def _scaled_boundary_array(
 
 
 def _scale_boundary(
-    kernel_input: KernelInput,
+    boundary: KernelBoundary,
     offset: float,
     *,
     strength: float = 1.0,
-) -> KernelInput:
-    boundary = kernel_input.boundary
-    updated_boundary = replace(
+) -> KernelBoundary:
+    return replace(
         boundary,
         c_offsets=_scaled_boundary_array(boundary.c_offsets, offset, strength=strength, sine=False),
         s_offsets=_scaled_boundary_array(boundary.s_offsets, offset, strength=strength, sine=True),
     )
-    return replace(kernel_input, boundary=updated_boundary)
 
 
 def _scaled_source_array(
@@ -183,20 +183,27 @@ def _scale_source(
     )
 
 
-def _input_with_update(base_input: KernelInput, update: str, offset: float) -> KernelInput:
+def _input_with_update(
+    base_boundary: KernelBoundary,
+    base_input: KernelInput,
+    update: str,
+    offset: float,
+) -> RuntimePoint:
+    boundary = base_boundary
     if update == "ip":
         updated = _scale_ip(base_input, offset)
     elif update == "boundary":
-        updated = _scale_boundary(base_input, offset)
+        updated = base_input
+        boundary = _scale_boundary(base_boundary, offset)
     elif update == "source":
         updated = _scale_source(base_input, offset)
     elif update == "mixed":
         updated = _scale_ip(base_input, offset, strength=0.5)
-        updated = _scale_boundary(updated, offset, strength=0.5)
+        boundary = _scale_boundary(base_boundary, offset, strength=0.5)
         updated = _scale_source(updated, offset, strength=0.5)
     else:
         raise ValueError(f"unknown continuation update {update!r}")
-    return _with_case_suffix(updated, f"{update}-{offset:+.6g}")
+    return boundary, _with_case_suffix(updated, f"{update}-{offset:+.6g}")
 
 
 def _policy_runtime_config(base_config: KernelConfig, policy: str) -> KernelConfig:
@@ -210,7 +217,7 @@ def _initial_policy_for_policy(policy: str) -> str:
 
 def _run_policy_sequence_once(
     case: GeqdskConfigCase,
-    inputs: list[KernelInput],
+    inputs: list[RuntimePoint],
     *,
     registry: KernelRegistry,
     policy: str,
@@ -221,8 +228,10 @@ def _run_policy_sequence_once(
     started = time.perf_counter_ns()
     results: list[KernelResult] = []
     try:
-        for kernel_input in inputs:
+        for kernel_boundary, kernel_input in inputs:
             solver.set_kernel_runtime(
+                "" if kernel_input.case_name is None else kernel_input.case_name,
+                *kernel_boundary.runtime_args(),
                 *kernel_input.runtime_args(),
                 *runtime_config.runtime_args(x_size=case.x_size),
             )
@@ -250,7 +259,7 @@ def _run_policy_sequence_once(
 
 def _measure_policy(
     case: GeqdskConfigCase,
-    inputs: list[KernelInput],
+    inputs: list[RuntimePoint],
     *,
     registry: KernelRegistry,
     repeat: int,
@@ -296,7 +305,10 @@ def _measure_case(
     policies: tuple[str, ...],
 ) -> dict[str, Any]:
     offsets = _scan_offsets(points=points, relative_span=relative_span)
-    inputs = [_input_with_update(case.kernel_input, update, offset) for offset in offsets]
+    inputs = [
+        _input_with_update(case.kernel_boundary, case.kernel_input, update, offset)
+        for offset in offsets
+    ]
     build_solver = VEQlibSolver(case.topology, registry=registry, solver=case.kernel_config.method)
     build_start = time.perf_counter_ns()
     artifact = build_solver.build(force=False, dry_run=False)

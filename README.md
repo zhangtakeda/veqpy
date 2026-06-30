@@ -53,9 +53,10 @@ and easier to reuse than full solver-native equilibrium or reconstruction pipeli
   snapshots on `Equilibrium`. `Grid` and `Equilibrium` use reactive derived properties
   to lazily reconstruct geometry and physics diagnostics by formula.
 - **Experimental VEQlib bridge**: `veqlib.facade` exposes a C++-aligned
-  `KernelTopology + KernelInput + KernelConfig` API and builds/loads optional
-  topology-specific VEQlib C++/nanobind kernels for the current MVP path. This is
-  an optional acceleration path; the standard Python/Numba solver remains the default.
+  `KernelTopology + KernelBoundary + KernelInput + KernelConfig` API and builds/loads
+  optional topology-specific VEQlib C++/nanobind kernels for the current MVP path.
+  This is an optional acceleration path; the standard Python/Numba solver remains
+  the default.
 
 ## Installation
 
@@ -135,8 +136,9 @@ paper/data artifacts rather than user-demo outputs.
 
 VEQlib is the experimental C++/nanobind kernel layer used for topology-specific
 shared-library kernels and VEQPy-vs-native benchmarks. The Python facade owns the
-artifact lifecycle: `KernelTopology` fixes compile-time structure, `KernelInput`
-supplies per-case runtime data, and `KernelConfig` supplies runtime solve/operator configuration.
+artifact lifecycle: `KernelTopology` fixes compile-time structure, `KernelBoundary`
+supplies per-case boundary geometry, `KernelInput` supplies source/constraint data,
+and `KernelConfig` supplies runtime solve/operator configuration.
 Manual CMake presets are not part of the supported workflow; Python calls CMake
 with explicit `-D...` definitions and loads the resulting artifact through
 `veqlib.facade`.

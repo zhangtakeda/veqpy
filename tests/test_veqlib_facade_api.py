@@ -74,7 +74,6 @@ def tiny_kernel_input(*, case_name: str | None = None) -> KernelInput:
     psin = np.linspace(0.0, 1.0, 9, dtype=np.float64)
     scaled_current, scaled_heat = pf_reference_profiles(psin)
     return KernelInput(
-        boundary=tiny_kernel_boundary(),
         scaled_heat=scaled_heat,
         scaled_current=scaled_current,
         scaled_Ip=3.0e6 * MU0,
@@ -111,8 +110,10 @@ def test_kernel_topology_and_input_payload_are_user_facing_contracts() -> None:
     topology = make_kernel_topology(c_counts=(0, 0), s_counts=(2, 0, 0), K_max=None)
     same_shape = make_kernel_topology(c_counts=(), s_counts=(2,), L_max=2, M_max=1, K_max=2)
     family_topology = topology.with_build(KernelBuild(layout="profile-first", build="release"))
-    runtime_input = tiny_kernel_input(case_name="tiny")
-    payload = runtime_input.to_payload_dict()
+    kernel_input = tiny_kernel_input(case_name="tiny")
+    kernel_boundary = tiny_kernel_boundary()
+    payload = kernel_input.to_payload_dict()
+    boundary_payload = kernel_boundary.to_payload_dict()
 
     assert topology.to_canonical_dict() == same_shape.to_canonical_dict()
     assert topology.key == same_shape.key
@@ -124,16 +125,22 @@ def test_kernel_topology_and_input_payload_are_user_facing_contracts() -> None:
     assert topology.packed_size() == 9
 
     assert payload["case_name"] == "tiny"
-    assert payload["boundary"]["a"] == 0.5
-    assert_allclose(payload["source"]["scaled_heat"], runtime_input.scaled_heat)
+    assert "boundary" not in payload
+    assert boundary_payload["a"] == 0.5
+    assert_allclose(payload["source"]["scaled_heat"], kernel_input.scaled_heat)
     assert_allclose(payload["constraints"]["scaled_Ip"], 3.0e6 * MU0)
     assert "fix_rho" not in payload["constraints"]
-    assert not runtime_input.scaled_heat.flags.writeable
-    assert not runtime_input.scaled_current.flags.writeable
+    assert kernel_boundary.c_offsets.flags.c_contiguous
+    assert kernel_boundary.s_offsets.flags.c_contiguous
+    assert kernel_input.scaled_heat.flags.c_contiguous
+    assert kernel_input.scaled_current.flags.c_contiguous
+    assert not kernel_boundary.c_offsets.flags.writeable
+    assert not kernel_boundary.s_offsets.flags.writeable
+    assert not kernel_input.scaled_heat.flags.writeable
+    assert not kernel_input.scaled_current.flags.writeable
 
     with pytest.raises(ValueError, match="scaled_heat must be 1D"):
         KernelInput(
-            boundary=tiny_kernel_boundary(),
             scaled_heat=np.ones((2, 1), dtype=np.float64),
             scaled_current=np.ones(2, dtype=np.float64),
         )
@@ -142,11 +149,14 @@ def test_kernel_topology_and_input_payload_are_user_facing_contracts() -> None:
 def test_kernel_dry_run_payload_and_python_owned_result_snapshot(tmp_path: Path) -> None:
     topology = make_kernel_topology()
     handle = facade.build(topology, cache_root=tmp_path, dry_run=True)
-    payload = json.loads(handle.payload_json(tiny_kernel_input(case_name="payload-smoke")))
+    payload = json.loads(
+        handle.payload_json(tiny_kernel_boundary(), tiny_kernel_input(case_name="payload-smoke"))
+    )
 
     assert isinstance(handle, Kernel)
     assert handle.x_size == 9
     assert payload["case_name"] == "payload-smoke"
+    assert payload["boundary"]["a"] == 0.5
     assert "fix_rho" not in payload["solver"]
     assert payload["solver"]["max_evaluations"] == 81
 
@@ -177,27 +187,47 @@ def test_kernel_python_build_and_solve_native_flow(tmp_path: Path) -> None:
     assert artifact.built is True
     assert artifact.shared_library_path.exists()
 
-    result = handle.solve(tiny_kernel_input(), config=KernelConfig(method="powell", initial="cold"))
+    kernel_boundary = tiny_kernel_boundary()
+    kernel_input = tiny_kernel_input()
+    result = handle.solve(
+        kernel_boundary,
+        kernel_input,
+        config=KernelConfig(method="powell", initial="cold"),
+    )
     assert result.success is True
     assert result.x.shape == (handle.x_size,)
     assert result.raw.shape == (handle.x_size,)
     assert result.scaled.shape == (handle.x_size,)
-    assert_allclose(handle.residual(result.x), result.raw)
+    assert_allclose(handle.residual(result.x, kernel_boundary, kernel_input), result.raw)
 
     residual_out = np.empty(handle.x_size, dtype=np.float64)
-    handle.residual_into(residual_out, result.x)
+    handle.residual_into(residual_out, result.x, kernel_boundary, kernel_input)
     assert_allclose(residual_out, result.raw)
 
     jvp_out = np.empty(handle.x_size, dtype=np.float64)
-    handle.jvp_into(jvp_out, result.x, np.ones(handle.x_size, dtype=np.float64))
+    handle.jvp_into(
+        jvp_out,
+        result.x,
+        np.ones(handle.x_size, dtype=np.float64),
+        kernel_boundary,
+        kernel_input,
+    )
     assert jvp_out.shape == (handle.x_size,)
 
     jacobian_out = np.empty((handle.x_size, handle.x_size), dtype=np.float64)
-    handle.jacobian_into(jacobian_out, result.x)
+    handle.jacobian_into(jacobian_out, result.x, kernel_boundary, kernel_input)
     assert jacobian_out.shape == (handle.x_size, handle.x_size)
 
-    assert handle.jvp(result.x, np.ones(handle.x_size, dtype=np.float64)).shape == (handle.x_size,)
-    assert handle.jacobian(result.x).shape == (handle.x_size, handle.x_size)
+    assert handle.jvp(
+        result.x,
+        np.ones(handle.x_size, dtype=np.float64),
+        kernel_boundary,
+        kernel_input,
+    ).shape == (handle.x_size,)
+    assert handle.jacobian(result.x, kernel_boundary, kernel_input).shape == (
+        handle.x_size,
+        handle.x_size,
+    )
 
     handle.clear()
     assert handle.history == []

@@ -57,10 +57,8 @@ def pf_reference_profiles(psin: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return current.astype(np.float64), heat.astype(np.float64)
 
 
-def build_input() -> KernelInput:
-    psin = np.linspace(0.0, 1.0, 9, dtype=np.float64)
-    current_input, scaled_heat = pf_reference_profiles(psin)
-    boundary = KernelBoundary(
+def build_boundary() -> KernelBoundary:
+    return KernelBoundary(
         a=0.5,
         R0=1.0,
         Z0=0.0,
@@ -68,8 +66,12 @@ def build_input() -> KernelInput:
         ka=1.7,
         s_offsets=np.array([0.0, float(np.arcsin(0.2))], dtype=np.float64),
     )
+
+
+def build_input() -> KernelInput:
+    psin = np.linspace(0.0, 1.0, 9, dtype=np.float64)
+    current_input, scaled_heat = pf_reference_profiles(psin)
     return KernelInput(
-        boundary=boundary,
         scaled_heat=scaled_heat,
         scaled_current=current_input,
         scaled_Ip=3.0e6 * MU0,
@@ -107,12 +109,13 @@ def main() -> None:
     artifact = kernel.build()
 
     # 3. Prepare typed runtime input and config.
-    runtime_input = build_input()
-    runtime_config = KernelConfig(method="powell", initial="cold", norm="fast")
+    kernel_boundary = build_boundary()
+    kernel_input = build_input()
+    kernel_config = KernelConfig(method="powell", initial="cold", norm="fast")
 
     # 4. Solve. Kernel.solve() uses set_kernel_runtime(...) by default and returns
     #    a Python-owned KernelResult snapshot.
-    result = kernel.solve(runtime_input, config=runtime_config)
+    result = kernel.solve(kernel_boundary, kernel_input, config=kernel_config)
     assert isinstance(result, KernelResult)
 
     print("VEQlib kernel build + solve demo")

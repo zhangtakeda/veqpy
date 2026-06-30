@@ -96,6 +96,7 @@ class GeqdskConfigCase:
     row_label: str
     signature: dict[str, int]
     topology: Topology
+    kernel_boundary: KernelBoundary
     kernel_input: KernelInput
     kernel_config: KernelConfig
     py_operator: Any
@@ -154,12 +155,10 @@ def _kernel_boundary_from_case(case: Any) -> KernelBoundary:
 def _kernel_input_from_operator(
     case_key: str,
     config_label: str,
-    case: Any,
     operator: Any,
 ) -> KernelInput:
     source_plan = operator.plan.source_plan
     return KernelInput(
-        boundary=_kernel_boundary_from_case(case),
         scaled_heat=np.asarray(source_plan.scaled_heat, dtype=np.float64),
         scaled_current=np.asarray(source_plan.scaled_current, dtype=np.float64),
         scaled_Ip=float(source_plan.scaled_Ip),
@@ -268,7 +267,8 @@ def _case_from_signature(
     case = build_pf_case(benchmark, reference, signature)
     operator = benchmark.Operator(grid, case)
     topology = _topology_for_case(signature, case, build=build, grid=grid)
-    kernel_input = _kernel_input_from_operator(case_key, config_label, case, operator)
+    kernel_boundary = _kernel_boundary_from_case(case)
+    kernel_input = _kernel_input_from_operator(case_key, config_label, operator)
     x_size = int(topology.packed_size())
     kernel_config = _kernel_config_from_config(
         benchmark.CONFIG,
@@ -284,6 +284,7 @@ def _case_from_signature(
         row_label=f"{case_key}:{config_label.lower()}",
         signature=dict(signature),
         topology=topology,
+        kernel_boundary=kernel_boundary,
         kernel_input=kernel_input,
         kernel_config=kernel_config,
         py_operator=operator,
@@ -340,6 +341,8 @@ def _measure_veqlib(
 
     def configure() -> None:
         solver.set_kernel_runtime(
+            "" if case.kernel_input.case_name is None else case.kernel_input.case_name,
+            *case.kernel_boundary.runtime_args(),
             *case.kernel_input.runtime_args(),
             *case.kernel_config.runtime_args(x_size=case.x_size),
         )

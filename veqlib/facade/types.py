@@ -164,6 +164,28 @@ class KernelBoundary:
         s_copy.setflags(write=False)
         object.__setattr__(self, "s_offsets", s_copy)
 
+    def to_payload_dict(self) -> dict[str, Any]:
+        return {
+            "a": self.a,
+            "R0": self.R0,
+            "Z0": self.Z0,
+            "B0": self.B0,
+            "ka": self.ka,
+            "c_offsets": self.c_offsets.tolist(),
+            "s_offsets": self.s_offsets.tolist(),
+        }
+
+    def runtime_args(self) -> tuple[Any, ...]:
+        return (
+            self.a,
+            self.R0,
+            self.Z0,
+            self.B0,
+            self.ka,
+            np.ascontiguousarray(self.c_offsets, dtype=np.float64),
+            np.ascontiguousarray(self.s_offsets, dtype=np.float64),
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class KernelTopology:
@@ -472,9 +494,8 @@ class KernelTopology:
 
 @dataclass(frozen=True, slots=True)
 class KernelInput:
-    """Runtime physical input lowered for one VEQlib kernel solve."""
+    """Runtime source and physical constraints for one VEQlib kernel solve."""
 
-    boundary: KernelBoundary | dict[str, object]
     scaled_heat: np.ndarray | list[float] | tuple[float, ...]
     scaled_current: np.ndarray | list[float] | tuple[float, ...]
     scaled_Ip: float = np.nan
@@ -482,12 +503,6 @@ class KernelInput:
     case_name: str | None = None
 
     def __post_init__(self) -> None:
-        boundary = (
-            self.boundary
-            if isinstance(self.boundary, KernelBoundary)
-            else KernelBoundary(**self.boundary)
-        )
-        object.__setattr__(self, "boundary", boundary)
         heat = _readonly_1d(self.scaled_heat, "scaled_heat")
         current = _readonly_1d(self.scaled_current, "scaled_current")
         if heat.shape != current.shape:
@@ -503,17 +518,7 @@ class KernelInput:
         object.__setattr__(self, "case_name", case_name)
 
     def to_payload_dict(self) -> dict[str, Any]:
-        boundary = self.boundary
         payload: dict[str, Any] = {
-            "boundary": {
-                "a": boundary.a,
-                "R0": boundary.R0,
-                "Z0": boundary.Z0,
-                "B0": boundary.B0,
-                "ka": boundary.ka,
-                "c_offsets": boundary.c_offsets.tolist(),
-                "s_offsets": boundary.s_offsets.tolist(),
-            },
             "source": {
                 "scaled_heat": self.scaled_heat.tolist(),
                 "scaled_current": self.scaled_current.tolist(),
@@ -529,16 +534,7 @@ class KernelInput:
         return payload
 
     def runtime_args(self) -> tuple[Any, ...]:
-        boundary = self.boundary
         return (
-            "" if self.case_name is None else self.case_name,
-            boundary.a,
-            boundary.R0,
-            boundary.Z0,
-            boundary.B0,
-            boundary.ka,
-            np.ascontiguousarray(boundary.c_offsets, dtype=np.float64),
-            np.ascontiguousarray(boundary.s_offsets, dtype=np.float64),
             self.scaled_heat,
             self.scaled_current,
             self.scaled_Ip,

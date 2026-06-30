@@ -93,6 +93,7 @@ Topology = KernelTopology
 class RuntimeCase:
     spec: Any
     topology: Topology
+    kernel_boundary: KernelBoundary
     kernel_input: KernelInput
     kernel_config: KernelConfig
     py_operator: Any
@@ -301,7 +302,6 @@ def _kernel_boundary_from_case(case: Any) -> KernelBoundary:
 def _kernel_input_from_operator(case: Any, operator: Any, *, case_name: str) -> KernelInput:
     source_plan = operator.plan.source_plan
     return KernelInput(
-        boundary=_kernel_boundary_from_case(case),
         scaled_heat=np.asarray(source_plan.scaled_heat, dtype=np.float64),
         scaled_current=np.asarray(source_plan.scaled_current, dtype=np.float64),
         scaled_Ip=float(source_plan.scaled_Ip),
@@ -342,6 +342,7 @@ def _runtime_case(benchmark: ModuleType, spec: Any, topology: Topology) -> Runti
     operator = Operator(grid, case)
     x0 = operator.pack_coefficients(benchmark._coefficients_from_coeffs(coeffs))
     method = _cxx_solver_method_for_spec(spec)
+    kernel_boundary = _kernel_boundary_from_case(case)
     kernel_input = _kernel_input_from_operator(
         case,
         operator,
@@ -401,6 +402,7 @@ def _runtime_case(benchmark: ModuleType, spec: Any, topology: Topology) -> Runti
     return RuntimeCase(
         spec=spec,
         topology=topology,
+        kernel_boundary=kernel_boundary,
         kernel_input=kernel_input,
         kernel_config=kernel_config,
         py_operator=operator,
@@ -425,6 +427,8 @@ def _measure_veqlib(
 
     def configure() -> None:
         solver.set_kernel_runtime(
+            "" if case.kernel_input.case_name is None else case.kernel_input.case_name,
+            *case.kernel_boundary.runtime_args(),
             *case.kernel_input.runtime_args(),
             *case.kernel_config.runtime_args(x_size=case.x_size),
         )
