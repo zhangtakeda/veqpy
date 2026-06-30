@@ -63,7 +63,7 @@ python3.12 -m venv .venv
 .venv/bin/python -m pip install .
 ```
 
-`veqlib/` 下的可选 VEQlib C++ kernel 层不是普通 Python/Numba 使用的必要依赖。其 `facade/` 树提供 `veqlib.facade`，`core/` 树保存 C++/CMake 实现，仓库顶层 `benchmarks/` 包保存对照脚本，并且刻意与 VEQPy 内部语义分离。构建它需要本地 C++20 工具链和原生库，例如 CMake 3.24+、`clang++`、nanobind、GCEM、nlohmann-json、CMINPACK、LAPACKE/LAPACK 和 OpenBLAS；当前 Python facade 构建边界、artifact cache/hash 语义和 benchmark 入口见仓库根 [`README.md`](../README.md) 的 VEQlib 小节。
+`veqlib/` 下的可选 VEQlib C++ kernel 层不是普通 Python/Numba 使用的必要依赖。其 `facade/` 树提供 `veqlib.facade`，`core/` 树保存 C++/CMake 实现，仓库顶层 `benchmarks/` 包保存 VEQPy 与 VEQlib 对照脚本，并且刻意与 VEQPy 内部语义分离。构建它需要本地 C++20 工具链和原生库，例如 CMake 3.24+、`clang++`、nanobind、GCEM、nlohmann-json、CMINPACK、LAPACKE/LAPACK 和 OpenBLAS；当前 Python facade 构建边界、artifact cache/hash 语义和 benchmark 入口见仓库根 [`README.md`](../README.md) 的 VEQlib 小节。
 
 下面的命令都显式使用 `.venv`；是否执行 `source .venv/bin/activate` 只是个人习惯。
 

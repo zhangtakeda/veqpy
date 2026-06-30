@@ -43,7 +43,6 @@ from benchmarks._common import (
     REFERENCE_LAYOUT_NT,
     REFERENCE_SOLVER_MAXFEV,
     REPO_ROOT,
-    SOLVER_INITIAL_POLICY,
     build_pf_case,
     build_pf_reference_case,
     cpu_affinity,
@@ -62,6 +61,9 @@ from benchmarks._common import (
     signature_from_metadata,
     write_json,
 )
+from benchmarks._common import (
+    SOLVER_INITIAL_POLICY as REFERENCE_SOLVER_INITIAL_POLICY,
+)
 from veqlib.facade import (
     KernelBoundary,
     KernelBuild,
@@ -75,6 +77,10 @@ from veqlib.facade import (
 
 DEFAULT_OUTPUT = REPO_ROOT / "benchmarks" / "results" / "veqlib_geqdsk.json"
 VALIDATION_ATOL = 1.0e-6
+NATIVE_SOLVER_METHOD = "powell"
+NATIVE_SOLVER_INITIAL_POLICY = "cold"
+NATIVE_SOLVER_CONTINUATION_POLICY = "cold"
+NATIVE_SOLVER_NORMALIZATION = "fast"
 REPORT_TABLE_BOX = box.Box("    \n    \n ── \n    \n ── \n ── \n    \n ── \n")
 Topology = KernelTopology
 
@@ -165,11 +171,12 @@ def _kernel_input_from_operator(
 
 def _kernel_solve_from_config(config: Any, *, x_size: int) -> KernelSolve:
     return KernelSolve(
-        method="powell",
+        method=NATIVE_SOLVER_METHOD,
         max_residual=float(config.max_residual),
         max_evaluations=int(REFERENCE_SOLVER_MAXFEV),
-        initial="cold",
-        norm="fast",
+        initial=NATIVE_SOLVER_INITIAL_POLICY,
+        continuation=NATIVE_SOLVER_CONTINUATION_POLICY,
+        norm=NATIVE_SOLVER_NORMALIZATION,
         residual_normalization_floor=float(config.residual_normalization_floor),
         residual_normalization_max_ratio=float(config.residual_normalization_max_ratio),
         residual_normalization_huber_tau=float(config.residual_normalization_huber_tau),
@@ -189,7 +196,7 @@ def _measure_veqpy(
     warmup: int,
     repeat: int,
 ) -> dict[str, Any]:
-    for _ in range(max(1, warmup)):
+    for _ in range(warmup):
         solver = benchmark.Solver(
             operator=benchmark.Operator(grid, case.copy()),
             config=benchmark.CONFIG,
@@ -324,7 +331,7 @@ def _measure_veqlib(
     warmup: int,
     repeat: int,
 ) -> dict[str, Any]:
-    solver = VEQlibSolver(case.topology, registry=registry, solver="powell")
+    solver = VEQlibSolver(case.topology, registry=registry, solver=NATIVE_SOLVER_METHOD)
     build_start = time.perf_counter_ns()
     artifact = solver.build(force=False, dry_run=False)
     build_wall_ms = float(time.perf_counter_ns() - build_start) / 1.0e6
@@ -446,6 +453,9 @@ def _print_config_tree(
     lines = (
         f"cases: [green]{len(cases)}[/]",
         f"build: [green]{build}[/]",
+        f"initial: [green]{NATIVE_SOLVER_INITIAL_POLICY}[/]",
+        f"continue: [green]{NATIVE_SOLVER_CONTINUATION_POLICY}[/]",
+        f"norm: [green]{NATIVE_SOLVER_NORMALIZATION}[/]",
         f"warmup: [green]{warmup}[/]",
         f"repeat: [green]{repeat}[/]",
     )
@@ -501,15 +511,14 @@ def _print_summary(console: Console, rows: list[dict[str, Any]]) -> None:
         expand=False,
         padding=(0, 1),
     )
-    table.add_column("status", no_wrap=True)
     table.add_column("case", no_wrap=True)
+    table.add_column("status", no_wrap=True)
     table.add_column("config", no_wrap=True)
     table.add_column("x", justify="right")
     table.add_column(Text("Cxx (ms)"), justify="right")
     table.add_column(Text("Numba (ms)"), justify="right")
     table.add_column("speedup", justify="right")
-    table.add_column("x diff", justify="right")
-    table.add_column("raw diff", justify="right")
+    table.add_column("diff", justify="right")
     for row in rows:
         cxx = row["engines"]["veqlib-fastmath-powell"]
         py = row["engines"]["veqpy-numba-hybr"]
@@ -517,15 +526,14 @@ def _print_summary(console: Console, rows: list[dict[str, Any]]) -> None:
         py_ms = float(py["timing"]["median_ms"])
         compare = row["closeness_to_numba"]
         table.add_row(
-            _status_cell(row["status"]),
             str(row["case"]),
+            _status_cell(row["status"]),
             str(row["config"]),
             str(row["x_size"]),
             f"{cxx_ms:.6f}",
             f"{py_ms:.6f}",
             _format_speedup(py_ms, cxx_ms),
             f"{float(compare['x_max_abs']):.2e}",
-            f"{float(compare['raw_max_abs']):.2e}",
         )
     console.print(table)
 
@@ -600,10 +608,16 @@ def main(argv: list[str] | None = None) -> int:
         "source_dir": str(args.source_dir.resolve()),
         "cpu_affinity": cpu_affinity(),
         "env": runtime_env(),
+        "native_solver_policy": {
+            "method": NATIVE_SOLVER_METHOD,
+            "initial": NATIVE_SOLVER_INITIAL_POLICY,
+            "continue": NATIVE_SOLVER_CONTINUATION_POLICY,
+            "norm": NATIVE_SOLVER_NORMALIZATION,
+        },
         "layout": {
             "Nr": REFERENCE_LAYOUT_NR,
             "Nt": REFERENCE_LAYOUT_NT,
-            "solver_initial_policy": SOLVER_INITIAL_POLICY,
+            "solver_initial_policy": REFERENCE_SOLVER_INITIAL_POLICY,
         },
         "rows": rows,
     }

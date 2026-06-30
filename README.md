@@ -171,6 +171,24 @@ Useful VEQlib checks from the repository root:
 .venv/bin/python -m pytest tests/test_kernel_builder_topology_api.py tests/test_kernel_api.py
 ```
 
+Pure VEQPy/Numba benchmark entrypoints:
+
+```bash
+.venv/bin/python -m benchmarks.veqpy_routes \
+  --repeat 100 \
+  --warmup 5 \
+  --output benchmarks/results/manual/veqpy_routes.json
+
+.venv/bin/python -m benchmarks.veqpy_geqdsk_routes \
+  --repeat 1 \
+  --warmup 5 \
+  --output benchmarks/results/manual/veqpy_geqdsk_routes.json
+```
+
+`benchmarks.veqpy_geqdsk_routes` defaults to the Solovev GEQDSK case; pass
+`--geqdsk /path/to/case.geqdsk` to run another input. The `--repeat 1` example
+is a quick smoke run; use larger repeat counts for timing evidence.
+
 Route/topology comparison benchmark:
 
 ```bash
@@ -184,7 +202,7 @@ Route/topology comparison benchmark:
 GEQDSK configuration benchmark:
 
 ```bash
-.venv/bin/python -m benchmarks.veqlib_geqdsk \
+.venv/bin/python -m benchmarks.veqlib_geqdsk_pareto \
   --build fastmath \
   --repeat 100 \
   --warmup 5 \

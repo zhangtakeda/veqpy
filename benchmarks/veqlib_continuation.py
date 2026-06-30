@@ -48,7 +48,7 @@ from benchmarks._common import (
     runtime_env,
     write_json,
 )
-from benchmarks.veqlib_geqdsk import GeqdskConfigCase, _make_cases
+from benchmarks.veqlib_geqdsk_pareto import GeqdskConfigCase, _make_cases
 from veqlib.facade import (
     KernelInput,
     KernelRegistry,
@@ -60,7 +60,7 @@ from veqlib.facade import (
 
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "benchmarks" / "results" / "veqlib_continuation"
 UPDATE_CHOICES = ("ip", "boundary", "source", "mixed")
-DEFAULT_SPANS = (0.0002, 0.005, 0.01, 0.05, 0.20)
+DEFAULT_SPANS = (0.01,)
 POLICY_CHOICES = (
     "cold-zeros",
     "cold-geometric",
@@ -71,6 +71,7 @@ POLICY_CHOICES = (
     "warm",
 )
 COLD_POLICIES = frozenset({"cold-zeros", "cold-geometric", "cold"})
+WARM_POLICY_INITIAL_POLICY = "cold"
 DEFAULT_POLICIES = POLICY_CHOICES
 SUMMARY_POLICIES = ("cold", "warm-fixed", "warm-predict", "warm-chord")
 UPDATE_LABELS = {
@@ -199,9 +200,12 @@ def _input_with_update(base_input: KernelInput, update: str, offset: float) -> K
 
 
 def _policy_runtime_solve(base_solve: KernelSolve, policy: str) -> KernelSolve:
-    if policy in COLD_POLICIES:
-        return replace(base_solve, initial=policy, continuation=policy)
-    return replace(base_solve, initial="cold", continuation=policy)
+    initial_policy = _initial_policy_for_policy(policy)
+    return replace(base_solve, initial=initial_policy, continuation=policy)
+
+
+def _initial_policy_for_policy(policy: str) -> str:
+    return policy if policy in COLD_POLICIES else WARM_POLICY_INITIAL_POLICY
 
 
 def _run_policy_sequence_once(
@@ -263,7 +267,7 @@ def _measure_policy(
     last = samples[-1]
     return {
         "policy": policy,
-        "initial_policy": policy if policy in COLD_POLICIES else "cold",
+        "initial_policy": _initial_policy_for_policy(policy),
         "continue_policy": policy,
         "wall_ms": float_stats([float(sample["wall_ms"]) for sample in samples]),
         "internal_ms": float_stats([float(sample["internal_ms"]) for sample in samples]),

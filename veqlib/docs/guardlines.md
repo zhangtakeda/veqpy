@@ -121,12 +121,15 @@ VEQlib 的 ABI 只接受以下类型: `double`, 1D C-contiguous `float64` ndarra
 
 # Benchmark 与多 topology 生命周期
 
-- **retained benchmark 入口**: 当前只保留三个主入口:
+- **retained benchmark 入口**: 当前保留五个主入口:
+  - `python -m benchmarks.veqpy_routes`: 纯 VEQPy/Numba synthetic route/constraint timing 与诊断矩阵.
+  - `python -m benchmarks.veqpy_geqdsk_routes`: 纯 VEQPy/Numba GEQDSK truth route/constraint timing 与诊断矩阵.
   - `python -m benchmarks.veqlib_routes`: route/topology 一致性与速度矩阵.
-  - `python -m benchmarks.veqlib_geqdsk`: Low/Medium/High/Ref 四种配置 × 三个 GEQDSK case 的 VEQPy 对照.
+  - `python -m benchmarks.veqlib_geqdsk_pareto`: Low/Medium/High/Ref 四种配置 × 三个 GEQDSK case 的 VEQPy 对照.
   - `python -m benchmarks.veqlib_continuation`: GEQDSK continuation sweep, 输出各 cold/warm policy 的 effective nfev 表.
-- **默认输出目录**: route/geqdsk retained benchmark 默认写入 `benchmarks/results/veqlib_routes.json` 与 `benchmarks/results/veqlib_geqdsk.json`; continuation nfev benchmark 默认写入 `benchmarks/results/veqlib_continuation/`. 这些都是本地生成物目录, 不作为源文件或 API 依据.
-- **route benchmark scope**: `benchmarks.veqlib_routes` 默认只跑 12 个 `*:rho/psin:uniform:Ip` case, 即 6 个 route × 2 个 coordinate × `Ip` constraint. 显式 `--scope uniform` 才跑历史 46 个 uniform case; 显式 `--scope full` 才跑 92 个 uniform/grid 全矩阵.
+- **默认输出目录**: route/geqdsk retained benchmark 默认写入 `benchmarks/results/veqpy_routes.json`, `benchmarks/results/veqpy_geqdsk_routes.json`, `benchmarks/results/veqlib_routes.json` 与 `benchmarks/results/veqlib_geqdsk.json`; continuation nfev benchmark 默认写入 `benchmarks/results/veqlib_continuation/`. 这些都是本地生成物目录, 不作为源文件或 API 依据.
+- **route benchmark scope**: `benchmarks.veqpy_routes` 与 `benchmarks.veqlib_routes` 默认只跑 12 个 `*:rho/psin:uniform:Ip` case, 即 6 个 route × 2 个 coordinate × `Ip` constraint. 显式 `--scope uniform` 才跑历史 46 个 uniform case; 显式 `--scope full` 才跑 92 个 uniform/grid 全矩阵. `benchmarks.veqpy_geqdsk_routes` 同样默认规划 12 个 Ip/uniform route case, GEQDSK 输入默认使用 Solovev, 可用 `--geqdsk /path/to/case.geqdsk` 覆盖; 显式 `--scope uniform` 跑 GEQDSK uniform 全矩阵.
+- **timing scope**: route/geqdsk retained benchmark 的默认 warmup 面向 steady-state timing; 显式 `--warmup 0` 表示 cold/JIT-inclusive run, 不应和默认 steady-state speedup 混用. VEQlib 表中的 `Cxx (ms)` 是 Python facade wall time around `solve_direct()`, JSON 同时保留 `inner_timing` 作为 native-reported solve time; speedup 是 solver-level solve-loop 对比, 不是单 residual kernel microbenchmark.
 - **nanobind 多 topology 限制**: 当前每个 topology artifact 仍是一个独立 nanobind extension module, 并使用 per-artifact `VEQLIB_NB_DOMAIN` 避免同名 `KernelSolver` 类型重复注册. 在同一个 Python 进程里加载大量不同 domain 会消耗 CPython low-level `Py_AtExit` cleanup slot; CPython 3.12 常见上限是 32. 这不是数值错误, 但说明该进程不适合长期加载几十/上百个 topology artifact.
 - **subprocess 隔离语义**: `benchmarks.veqlib_routes` 对 native rows 默认使用 subprocess-per-row 隔离, 使 full matrix 不在一个 Python 解释器里加载大量 nanobind domain. 计时 JSON 中的 solve samples 来自子进程内 warmup 后的 `solve_direct()` 循环, 不包括父进程 orchestration 或 subprocess 启动开销.
 - **长期方向**: 如果 VEQlib 需要一个 Python 进程长期管理大量 topology, 应迁移到"一个稳定 nanobind bridge module + 多个纯 C/C++ backend artifact"的结构. nanobind 类型只注册一次, topology-specific backend 不再携带 nanobind type/domain. 这是后续架构方向, 不是当前 commit 的实现前提.

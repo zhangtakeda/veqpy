@@ -82,8 +82,9 @@ from veqpy.solver import Solver
 DEFAULT_OUTPUT = REPO_ROOT / "benchmarks" / "results" / "veqlib_routes.json"
 VALIDATION_ATOL = 1.0e-6
 DEFAULT_SCOPE = "ip-uniform"
-SOLVER_INITIAL_POLICY = "cold"
-SOLVER_CONTINUATION_POLICY = "cold"
+NATIVE_SOLVER_INITIAL_POLICY = "cold"
+NATIVE_SOLVER_CONTINUATION_POLICY = "cold"
+NATIVE_SOLVER_NORMALIZATION = "fast"
 REPORT_TABLE_BOX = box.Box("    \n    \n ── \n    \n ── \n ── \n    \n ── \n")
 Topology = KernelTopology
 
@@ -315,9 +316,9 @@ def _kernel_solve_from_config(config: Any, *, method: int, x_size: int) -> Kerne
         method=method,
         max_residual=float(config.max_residual),
         max_evaluations=int(x_size) ** 2,
-        initial=SOLVER_INITIAL_POLICY,
-        continuation=SOLVER_CONTINUATION_POLICY,
-        norm="fast",
+        initial=NATIVE_SOLVER_INITIAL_POLICY,
+        continuation=NATIVE_SOLVER_CONTINUATION_POLICY,
+        norm=NATIVE_SOLVER_NORMALIZATION,
         residual_normalization_floor=float(config.residual_normalization_floor),
         residual_normalization_max_ratio=float(config.residual_normalization_max_ratio),
         residual_normalization_huber_tau=float(config.residual_normalization_huber_tau),
@@ -345,7 +346,7 @@ def _runtime_case(benchmark: ModuleType, spec: Any, topology: Topology) -> Runti
     kernel_solve = _kernel_solve_from_config(benchmark.CONFIG, method=method, x_size=int(x0.size))
 
     def measure_py(*, warmup: int, repeat: int) -> dict[str, Any]:
-        for _ in range(max(1, warmup)):
+        for _ in range(warmup):
             solver = Solver(operator=Operator(grid, case.copy()), config=benchmark.CONFIG)
             solver.solve(
                 x0=x0,
@@ -606,8 +607,9 @@ def _run_supported_row(
         "status": "passed" if passed else "failed",
         "x_size": case.x_size,
         "solver_policy": {
-            "initial": SOLVER_INITIAL_POLICY,
-            "continue": SOLVER_CONTINUATION_POLICY,
+            "initial": NATIVE_SOLVER_INITIAL_POLICY,
+            "continue": NATIVE_SOLVER_CONTINUATION_POLICY,
+            "norm": NATIVE_SOLVER_NORMALIZATION,
         },
         "engines": {
             case.solver_engine_label: cxx,
@@ -857,8 +859,9 @@ def _print_config_tree(
         f"scope: [green]{scope}[/]",
         f"cases: [green]{len(specs)}[/]",
         f"build: [green]{build}/{layout}[/]",
-        f"initial: [green]{SOLVER_INITIAL_POLICY}[/]",
-        f"continue: [green]{SOLVER_CONTINUATION_POLICY}[/]",
+        f"initial: [green]{NATIVE_SOLVER_INITIAL_POLICY}[/]",
+        f"continue: [green]{NATIVE_SOLVER_CONTINUATION_POLICY}[/]",
+        f"norm: [green]{NATIVE_SOLVER_NORMALIZATION}[/]",
         f"warmup: [green]{warmup}[/]",
         f"repeat: [green]{repeat}[/]",
     )
@@ -963,6 +966,7 @@ def _print_failures(console: Console, rows: list[dict[str, Any]]) -> None:
     for row in failed:
         tree.add(f"{row.get('case', 'n/a')}: {_failure_detail(row['runtime'])}")
     console.print(tree)
+    console.print()
 
 
 def _print_timing_table(
@@ -981,12 +985,15 @@ def _print_timing_table(
     table.add_column(Text("Cxx (ms)"), justify="right")
     table.add_column(Text("Numba (ms)"), justify="right")
     table.add_column("speedup", justify="right")
+    table.add_column("diff", justify="right")
     for row in rows:
         runtime = row["runtime"]
         native = _native_engine_payload(runtime)
         py = _veqpy_engine_payload(runtime)
         cxx_ms = _timing_median_ms(native)
         py_ms = _timing_median_ms(py)
+        closeness = runtime.get("closeness_to_numba")
+        closeness = closeness if isinstance(closeness, dict) else {}
         table.add_row(
             str(row.get("case", "n/a")),
             _status_cell(runtime["status"]),
@@ -994,6 +1001,7 @@ def _print_timing_table(
             _format_optional_float(cxx_ms),
             _format_optional_float(py_ms),
             _format_optional_speedup(py_ms, cxx_ms),
+            _format_optional_sci(float(closeness.get("x_max_abs", float("nan")))),
         )
     console.print(table)
 
@@ -1146,8 +1154,9 @@ def main(argv: list[str] | None = None) -> int:
         "build_option_overrides": build_options,
         "layout": str(args.layout),
         "solver_policy": {
-            "initial": SOLVER_INITIAL_POLICY,
-            "continue": SOLVER_CONTINUATION_POLICY,
+            "initial": NATIVE_SOLVER_INITIAL_POLICY,
+            "continue": NATIVE_SOLVER_CONTINUATION_POLICY,
+            "norm": NATIVE_SOLVER_NORMALIZATION,
         },
         "repeat": int(args.repeat),
         "warmup": int(args.warmup),
