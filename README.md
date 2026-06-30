@@ -8,11 +8,12 @@
 
 <br clear="left"><br>
 
-[![arXiv](https://img.shields.io/badge/arXiv-2606.11821-b31b1b.svg)](https://arxiv.org/abs/2606.11821)
-[![Python](https://img.shields.io/badge/Python-3.12%2B-blue)](https://www.python.org/)
-[![Package](https://img.shields.io/badge/package-veqpy-blue)](https://pypi.org/project/veqpy/)
-[![License](https://img.shields.io/badge/License-BSD--3--Clause-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-pytest-informational)](tests/)
+[![arXiv][arxiv-badge]][veq-arxiv]
+[![Python][python-badge]][python]
+[![Package][package-badge]][pypi]
+[![CI][ci-badge]][ci]
+[![Tests][tests-badge]][tests]
+[![License][license-badge]][license]
 
 ---
 
@@ -70,8 +71,8 @@ python3.12 -m venv .venv
 ```
 
 For development, install VEQPy from a source checkout in editable mode. The `dev` extra
-installs the runtime dependencies together with `pytest`, `ruff`, `build`, `twine`, and
-other development helpers into the same environment.
+installs the runtime dependencies together with `pytest`, `ruff`, `build`, `twine`,
+`nanobind`, and other development helpers into the same environment.
 
 ```bash
 git clone https://github.com/zhangtakeda/veqpy.git
@@ -121,22 +122,53 @@ profiles from the GEQDSK file, and writes a two-column VEQPy-vs-GEQDSK compariso
 figure. By default, it reads `./data/EFIT.geqdsk` and writes outputs under
 `./outputs/geqdsk_workflow`; set `VEQPY_GEQDSK` and `VEQPY_OUTPUT_DIR` to override
 those paths. Manuscript-oriented reproduction scripts are available under
-[`scripts/`](scripts/); they are heavier than the minimal examples and may write
+[`scripts/`][scripts]; they are heavier than the minimal examples and may write
 paper/data artifacts rather than user-demo outputs.
 
 ## Development Checks
 
+Core local checks mirror the push/PR CI workflow.
+
 ```bash
-.venv/bin/python -m compileall -q veqpy tests examples
-.venv/bin/ruff check veqpy tests examples
+.venv/bin/python -m compileall -q veqpy tests examples veqlib/facade benchmarks scripts
+.venv/bin/ruff check veqpy tests examples veqlib/facade benchmarks scripts
 .venv/bin/python -m pytest
 ```
 
 ## Optional C++ Kernels
 
 VEQlib is the experimental C++/nanobind kernel layer used for topology-specific
-shared-library kernels and VEQPy-vs-native benchmarks. The Python facade owns the
-artifact lifecycle: `KernelTopology` fixes compile-time structure, `KernelBoundary`
+shared-library kernels and VEQPy-vs-native benchmarks.
+
+Representative VEQlib-vs-Numba timing snapshot from `benchmarks.veqlib_geqdsk_pareto`
+using the production nanobind/shared-library path is shown below. The three benchmark
+families are GEQDSK-backed cases:
+
+- `D-shaped`: `data/SOLOVEV.geqdsk`
+- `H-mode`: `data/CHEASE.geqdsk`
+- `X-point`: `data/EFIT.geqdsk`
+
+Timings are median full nonlinear-solve wall times in milliseconds after warmup;
+the VEQlib timing excludes native build time. `solution diff` is the maximum absolute
+VEQlib-vs-Numba solution-vector difference for the benchmark case. Bold rows mark the
+representative High configuration for each GEQDSK family.
+
+| case(params)    |  VEQlib (ms) |    Numba (ms) |     speedup | solution diff |
+| --------------- | -----------: | ------------: | ----------: | ------------: |
+| D-shaped(4)     |     0.038366 |      1.103223 |     28.755x |      2.73e-09 |
+| D-shaped(5)     |     0.052353 |      1.136383 |     21.706x |      9.20e-09 |
+| **D-shaped(9)** | **0.067753** |  **1.552996** | **22.921x** |  **1.25e-08** |
+| D-shaped(75)    |     0.784600 |      6.810340 |      8.680x |      1.47e-08 |
+| H-mode(27)      |     0.235108 |      5.113339 |     21.749x |      1.89e-07 |
+| H-mode(36)      |     0.291192 |      6.740179 |     23.147x |      3.87e-08 |
+| **H-mode(60)**  | **0.562023** | **14.010330** | **24.928x** |  **1.86e-08** |
+| H-mode(130)     |     2.596726 |     43.290484 |     16.671x |      1.38e-07 |
+| X-point(19)     |     0.139611 |      2.690838 |     19.274x |      3.51e-09 |
+| X-point(29)     |     0.250460 |      3.718143 |     14.845x |      4.51e-08 |
+| **X-point(94)** | **1.346315** | **10.342658** |  **7.682x** |  **3.44e-08** |
+| X-point(130)    |     2.575587 |     22.298123 |      8.657x |      1.24e-09 |
+
+The Python facade owns the artifact lifecycle: `KernelTopology` fixes compile-time structure, `KernelBoundary`
 supplies per-case boundary geometry, `KernelInput` supplies source/constraint data,
 and `KernelConfig` supplies runtime solve/operator configuration.
 Manual CMake presets are not part of the supported workflow; Python calls CMake
@@ -220,11 +252,11 @@ paired with VEQPy correctness comparison.
 
 User-facing architecture notes:
 
-- [[model.md]](docs/veqpy/model.md): responsibilities, snapshot boundaries, and diagnostic
+- [`model.md`][model-doc]: responsibilities, snapshot boundaries, and diagnostic
   interfaces for `Grid`, `Profile`, `Boundary`, `Geqdsk`, and `Equilibrium`.
-- [[operator.md]](docs/veqpy/operator.md): source routes, packed state, stage pipeline,
+- [`operator.md`][operator-doc]: source routes, packed state, stage pipeline,
   and runtime/snapshot separation.
-- [[solver.md]](docs/veqpy/solver.md): nonlinear solve lifecycle, fallback behavior,
+- [`solver.md`][solver-doc]: nonlinear solve lifecycle, fallback behavior,
   residual normalization, and collocation polish.
 
 Low-level base/math design notes for `Reactive`, `Serial`, `Registry`, interpolation,
@@ -235,7 +267,7 @@ quadrature, and calculus now live in the corresponding source module headers.
 VEQPy is associated with the companion manuscript **"VEQ: a fast parametric
 Grad--Shafranov solver for fixed-boundary tokamak equilibria with flexible source
 inputs"**. The repository includes manuscript-oriented figure scripts under
-[`scripts/`](scripts/) and benchmark helpers under [`benchmarks/`](benchmarks/). Tagged
+[`scripts/`][scripts] and benchmark helpers under [`benchmarks/`][benchmarks]. Tagged
 release artifacts can pin rendered figures, generated reference data, and dependency
 metadata for archival reproduction.
 
@@ -244,12 +276,14 @@ Related VEQ-family and representation papers include:
 - Ruohan Zhang, Huasheng Xie, Yueyan Li, Weiqi Meng, Feng Wang, and Zhengxiong Wang,
   "VEQ: a fast parametric Grad-Shafranov solver for fixed-boundary tokamak equilibria
   with flexible source profiles", arXiv:2606.11821, 2026.
-  <https://arxiv.org/abs/2606.11821>
+  [https://arxiv.org/abs/2606.11821][veq-arxiv]
 - Huasheng Xie and Yueyan Li, "What Is the Minimum Number of Parameters Required to
   Represent Solutions of the Grad-Shafranov Equation?", arXiv:2601.02942, 2026.
-  <https://arxiv.org/abs/2601.02942>
+  [https://arxiv.org/abs/2601.02942][veq-min-parameters-arxiv]
 - Xingyu Li, Huasheng Xie, Lai Wei, and Zhengxiong Wang, "Investigation of Toroidal
-  Rotation Effects on Spherical Torus Equilibria using the Fast Spectral Solver VEQ-R", arXiv:2602.11422, 2026. <https://arxiv.org/abs/2602.11422>
+  Rotation Effects on Spherical Torus Equilibria using the Fast Spectral Solver VEQ-R",
+  arXiv:2602.11422, 2026.
+  [https://arxiv.org/abs/2602.11422][veqr-arxiv]
 
 ---
 
@@ -265,3 +299,23 @@ Related VEQ-family and representation papers include:
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<em>zhangtakeda@gmail.com</em><br>
 
 </p>
+
+[package-badge]: https://img.shields.io/badge/package-veqpy-blue.svg
+[python-badge]: https://img.shields.io/badge/Python-3.12%2B-blue.svg?logo=python&logoColor=white
+[ci-badge]: https://img.shields.io/github/actions/workflow/status/zhangtakeda/veqpy/ci.yml?branch=main&label=CI&logo=githubactions&logoColor=white
+[license-badge]: https://img.shields.io/badge/license-BSD--3--Clause-blue.svg
+[arxiv-badge]: https://img.shields.io/badge/arXiv-2606.11821-b31b1b.svg?logo=arxiv&logoColor=white
+[tests-badge]: https://img.shields.io/badge/tests-pytest-blue.svg
+[pypi]: https://pypi.org/project/veqpy/
+[python]: https://www.python.org/
+[ci]: https://github.com/zhangtakeda/veqpy/actions/workflows/ci.yml
+[license]: LICENSE
+[tests]: tests/
+[scripts]: scripts/
+[benchmarks]: benchmarks/
+[model-doc]: docs/veqpy/model.md
+[operator-doc]: docs/veqpy/operator.md
+[solver-doc]: docs/veqpy/solver.md
+[veq-arxiv]: https://arxiv.org/abs/2606.11821
+[veq-min-parameters-arxiv]: https://arxiv.org/abs/2601.02942
+[veqr-arxiv]: https://arxiv.org/abs/2602.11422
