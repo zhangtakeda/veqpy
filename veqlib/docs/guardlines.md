@@ -30,27 +30,27 @@
 
 ## topology (setup 阶段固定)
 
-- [x] **topology.dofs**: 以字典形式描述 kernel 支持的自由度参数搭配, 例如 `{h=2, v=0, ..., c_counts: tuple/list/array, ...}`.
-- [x] **topology.grid**: 径向节点数 `Nr`、环向节点数 `Nt`, 以及更细节的 quadrature(积分节点分布方案)与 calculus(微积分构造方案).
-- [x] **topology.orders**: `L_max`(默认从 dofs 推断), `M_max`(默认从 dofs 推断; 显式设置时用于保留更高阶的边界影响), `K_max`(约束 c/s_family 的计算阶数).
-- [x] **topology.source**: 包含 `route`(PF)、`coordinate`(rho/psin)、`sampling`(grid/uniform 及具体采样点数)、`constraint`(null/Ip/beta/Ip_beta).
-- [x] **topology.layout**: 定义如何将 dofs 字典映射为展平后的向量 `x` (degree/family).
-- [x] **topology.build**: 编译配置, 提供4种预设: 默认的 fastmath(全开优化), fastmath-enzyme(全开优化), debug(便于定位错误), release(遇错直接退出而非报错). 也支持在任一预设基础上对具体编译选项单独调整, 包括 enzyme 的 block 大小 (这部分隐含大量选项, CMake 中的具体配置例如 enable_unsafe_math_optimizations 等).
+- **topology.dofs**: 以字典形式描述 kernel 支持的自由度参数搭配, 例如 `{h=2, v=0, ..., c_counts: tuple/list/array, ...}`.
+- **topology.grid**: 径向节点数 `Nr`、环向节点数 `Nt`, 以及更细节的 quadrature(积分节点分布方案)与 calculus(微积分构造方案).
+- **topology.orders**: `L_max`(默认从 dofs 推断), `M_max`(默认从 dofs 推断; 显式设置时用于保留更高阶的边界影响), `K_max`(约束 c/s_family 的计算阶数).
+- **topology.source**: 包含 `route`(PF)、`coordinate`(rho/psin)、`sampling`(grid/uniform 及具体采样点数)、`constraint`(null/Ip/beta/Ip_beta).
+- **topology.layout**: 定义如何将 dofs 字典映射为展平后的向量 `x` (degree/family).
+- **topology.build**: 编译配置, 提供4种预设: 默认的 fastmath(全开优化), fastmath-enzyme(全开优化), debug(便于定位错误), release(遇错直接退出而非报错). 也支持在任一预设基础上对具体编译选项单独调整, 包括 enzyme 的 block 大小 (这部分隐含大量选项, CMake 中的具体配置例如 enable_unsafe_math_optimizations 等).
 
 ## case (runtime 阶段逐次输入)
 
-- [x] **case.boundary / `KernelBoundary`**: 当前 runtime ABI 只接受已经参数化的边界:
+- **case.boundary / `KernelBoundary`**: 当前 runtime ABI 只接受已经参数化的边界:
   - `a, R0, Z0, B0, ka: double`
   - `c_offsets, s_offsets: 1D float64 ndarray`
   - `c_offsets` 与 `s_offsets` 长度不得超过 topology 中的 `M_max + 1`. `s_offsets[0]` 按约定为 0.
   - `Boundary(R0, Z0, B0, a, R: array, Z: array)` 形式是未来 planned adapter. 如果由 kernel 内部把 RZ 初始化成边界参数, 拟合阶数、拟合方法和最大 Fourier 阶数必须在 topology 阶段固定.
-- [x] **case.inputs / `KernelInput`**: runtime source 输入是 C++ 已降阶后的 typed 数组, 不是 VEQPy `Profile` 或 `Problem`.
+- **case.inputs / `KernelInput`**: runtime source 输入是 C++ 已降阶后的 typed 数组, 不是 VEQPy `Profile` 或 `Problem`.
   - `scaled_heat: 1D float64 ndarray`
   - `scaled_current: 1D float64 ndarray`
   - 两者必须同 shape, C-contiguous, 且长度必须等于 `KernelTopology.sample_count`.
   - 当前过渡实现仍传入 `scaled_heat`、`scaled_current`、`scaled_Ip`: 即 Python 侧已经按当前 legacy 规则完成 `mu0` scaling. 未来成熟形态应删除 Python/C++ 两侧的 runtime scaling, 由 C++ 编译期常数和 route 语义处理单位.
   - `scaled_Ip` 与 `beta` 是 double 约束值; 未提供时使用 `NaN` 表示. `fix_rho` 是 double runtime 参数.
-- [x] **case.config / `KernelSolve`**: runtime solve policy 与 case 一起进入 ABI, 不通过 JSON 热路径传递.
+- **case.config / `KernelSolve`**: runtime solve policy 与 case 一起进入 ABI, 不通过 JSON 热路径传递.
   - `method`: `powell`、`levenberg-marquardt`、`newton-krylov`、`newton-raphson` 或对应 int code.
   - `initial`: `cold-zeros`、`cold-geometric`、`cold` 或对应 int code.
   - `continue`: `cold-zeros`、`cold-geometric`、`cold`、`warm-fixed`、`warm-predict`、`warm-chord`、`warm`(`warm-fixed` alias) 或对应 int code.
@@ -70,27 +70,27 @@ Kernel 对 C++ 接口采用**惰性加载(lazy-load)**: 默认不立即挂载 na
 
 ## API 接口说明
 
-- [x] **`kernel = build(topo)`**: 先检索本地 artifact cache, 按需编译内核并挂载到 handle(默认 lazy-load native module). 若调用者未保存返回值, handle 立即析构; 在 lazy 模式下几乎无 runtime 开销. 两个进程同时对同一 artifact 触发 build 时, 通过 per-artifact 文件锁串行化: 一个进程持锁编译, 另一个阻塞等待; 锁释放后重新检查 artifact metadata 和 .so, 若可复用则直接加载结果. 编译失败(cmake 报错、OOM、进程被 kill), 锁的超时行为需要更细的设计. 不支持同进程 native reload.
-- [x] **`build(topo)`(无返回值接收)**: 仅执行编译, 将 topology 对应的 artifact 写入本地 cache. handle 析构后, 在未 lazy-load 的情况下几乎无 runtime 开销.
-- [x] **`result = kernel.solve(case, solve=...)`**: 高层 Python handle API. 它负责 build/load artifact, lazy-load native module, 调用 `set_kernel_runtime(...)` 写入 runtime case 与 solve policy, 调用 C++ `solve_direct()`, 然后把 C++ transient view copy-out 成 Python-owned `KernelResult`. `kernel.result` 与 `kernel.history[-1]` 指向这个 owned snapshot. 普通 Python 调用者应使用这一层.
-- [x] **`KernelSolver.set_kernel_runtime(...)`**: 低层 nanobind ABI setter, 不是求解接口. 它只把 `KernelInput + KernelSolve` 展开后的 scalars/ndarray/int code 一次性写入 C++ `KernelSolver` 的当前 `CaseInput/SolveContext`, 并刷新 continuation state、cold initial state、residual scale 等 runtime 上下文. 它不返回结果, 不更新 Python `Kernel.history`, 也不做 artifact build/load. 调用它之后仍需调用 `solve_direct()` 才会真正求解.
-- [x] **`KernelSolver.set_case_json(payload)`**: debug/legacy 入口. 功能上与 `set_kernel_runtime(...)` 同属 runtime setter, 但通过 JSON 解析完成. 新 hot path 和新 API 不应依赖它.
-- [x] **CPU pinning**: 普通 `veqlib.facade` 调用默认在 Python bridge 内部做 scoped CPU pinning, 即在 native runtime setter、`solve_direct()`、warmup/residual probe 等调用前临时把当前 affinity 缩到一个 CPU, 调用后恢复原 affinity. 默认 CPU 是当前 allowed affinity set 中的最小值; 外层 `taskset`/cgroup/调度器仍是硬边界. `VEQLIB_PIN_CPU=0` 关闭, `VEQLIB_PIN_CPU_ID=<cpu>` 指定 CPU. 对 build 后重复大量 solve 的 Python 体感路径, 应使用 `with kernel.pinned(): ...` 或 `with veqlib.facade.pinned_cpu(): ...` 包住整段循环; 内部 nested pin scope 只做 Python 级 no-op, 不做每次 solve 的 affinity syscall. 这属于 benchmark/runtime invocation contract, 不是 C++ 数值 ABI 的一部分.
-- [x] **`kernel.clear()`**: 清除该 kernel handle 缓存的全部 history. kernel.clear() 清的是 Python 侧的 history, 不影响 C++ 工作区, 所以 continuation 语义不受 clear() 影响.
-- [x] **`kernel.close()`**: 释放该 handle 私有的 C++ solver、context、workspace、result. 不保证卸载已加载的 native module.
-- [x] **`kernel.residual(x)` / `kernel.residual_into(x, out)`**: 传入与 dofs 长度一致的向量 `x`, 在当前 runtime case/context 下直接返回对应 raw variational residual 的 Python-owned copy. `kernel.residual_into(x, out)` 是面向 benchmark/debug 的 no-allocation 变体.
-- [x] **`kernel.jvp(x, v)` / `kernel.jvp_into(x, v, out)`**: 在当前 runtime case/context 下计算 raw residual Jacobian-vector product. AD/Enzyme 或 FD 选择是 topology/build policy, 不能在 runtime 临时改变.
-- [x] **`kernel.jacobian(x)` / `kernel.jacobian_into(x, out)`**: 在当前 runtime case/context 下返回 row-major dense raw residual Jacobian 的 Python-owned copy. `jacobian_into(x, out)` 是 no-allocation 版本.
-- [x] **`result = solve(topo, case)`**: 临时求解一次, 完成后立即释放 kernel. 等价于 `return build(topo).solve(case)`. 它返回的 result 是 owned/copy-out Result snapshot, 因此不依赖临时 kernel 的生命周期.
-- [x] **`clean()`**: clean() 清理的是磁盘 artifact cache. 支持按最晚编译日期或最晚调用日期筛选清理范围. 拿不到独占锁的 artifact 直接跳过; 已被当前进程 import 的 native module 在 POSIX 上仍可被 unlink(当前进程不受影响, 但磁盘文件消失), Windows 上通常会删除失败.
+- **`kernel = build(topo)`**: 先检索本地 artifact cache, 按需编译内核并挂载到 handle(默认 lazy-load native module). 若调用者未保存返回值, handle 立即析构; 在 lazy 模式下几乎无 runtime 开销. 两个进程同时对同一 artifact 触发 build 时, 通过 per-artifact 文件锁串行化: 一个进程持锁编译, 另一个阻塞等待; 锁释放后重新检查 artifact metadata 和 .so, 若可复用则直接加载结果. 编译失败(cmake 报错、OOM、进程被 kill), 锁的超时行为需要更细的设计. 不支持同进程 native reload.
+- **`build(topo)`(无返回值接收)**: 仅执行编译, 将 topology 对应的 artifact 写入本地 cache. handle 析构后, 在未 lazy-load 的情况下几乎无 runtime 开销.
+- **`result = kernel.solve(case, solve=...)`**: 高层 Python handle API. 它负责 build/load artifact, lazy-load native module, 调用 `set_kernel_runtime(...)` 写入 runtime case 与 solve policy, 调用 C++ `solve_direct()`, 然后把 C++ transient view copy-out 成 Python-owned `KernelResult`. `kernel.result` 与 `kernel.history[-1]` 指向这个 owned snapshot. 普通 Python 调用者应使用这一层.
+- **`KernelSolver.set_kernel_runtime(...)`**: 低层 nanobind ABI setter, 不是求解接口. 它只把 `KernelInput + KernelSolve` 展开后的 scalars/ndarray/int code 一次性写入 C++ `KernelSolver` 的当前 `CaseInput/SolveContext`, 并刷新 continuation state、cold initial state、residual scale 等 runtime 上下文. 它不返回结果, 不更新 Python `Kernel.history`, 也不做 artifact build/load. 调用它之后仍需调用 `solve_direct()` 才会真正求解.
+- **`KernelSolver.set_case_json(payload)`**: debug/legacy 入口. 功能上与 `set_kernel_runtime(...)` 同属 runtime setter, 但通过 JSON 解析完成. 新 hot path 和新 API 不应依赖它.
+- **CPU pinning**: 普通 `veqlib.facade` 调用默认在 Python bridge 内部做 scoped CPU pinning, 即在 native runtime setter、`solve_direct()`、warmup/residual probe 等调用前临时把当前 affinity 缩到一个 CPU, 调用后恢复原 affinity. 默认 CPU 是当前 allowed affinity set 中的最小值; 外层 `taskset`/cgroup/调度器仍是硬边界. `VEQLIB_PIN_CPU=0` 关闭, `VEQLIB_PIN_CPU_ID=<cpu>` 指定 CPU. 对 build 后重复大量 solve 的 Python 体感路径, 应使用 `with kernel.pinned(): ...` 或 `with veqlib.facade.pinned_cpu(): ...` 包住整段循环; 内部 nested pin scope 只做 Python 级 no-op, 不做每次 solve 的 affinity syscall. 这属于 benchmark/runtime invocation contract, 不是 C++ 数值 ABI 的一部分.
+- **`kernel.clear()`**: 清除该 kernel handle 缓存的全部 history. kernel.clear() 清的是 Python 侧的 history, 不影响 C++ 工作区, 所以 continuation 语义不受 clear() 影响.
+- **`kernel.close()`**: 释放该 handle 私有的 C++ solver、context、workspace、result. 不保证卸载已加载的 native module.
+- **`kernel.residual(x)` / `kernel.residual_into(x, out)`**: 传入与 dofs 长度一致的向量 `x`, 在当前 runtime case/context 下直接返回对应 raw variational residual 的 Python-owned copy. `kernel.residual_into(x, out)` 是面向 benchmark/debug 的 no-allocation 变体.
+- **`kernel.jvp(x, v)` / `kernel.jvp_into(x, v, out)`**: 在当前 runtime case/context 下计算 raw residual Jacobian-vector product. AD/Enzyme 或 FD 选择是 topology/build policy, 不能在 runtime 临时改变.
+- **`kernel.jacobian(x)` / `kernel.jacobian_into(x, out)`**: 在当前 runtime case/context 下返回 row-major dense raw residual Jacobian 的 Python-owned copy. `jacobian_into(x, out)` 是 no-allocation 版本.
+- **`result = solve(topo, case)`**: 临时求解一次, 完成后立即释放 kernel. 等价于 `return build(topo).solve(case)`. 它返回的 result 是 owned/copy-out Result snapshot, 因此不依赖临时 kernel 的生命周期.
+- **`clean()`**: clean() 清理的是磁盘 artifact cache. 支持按最晚编译日期或最晚调用日期筛选清理范围. 拿不到独占锁的 artifact 直接跳过; 已被当前进程 import 的 native module 在 POSIX 上仍可被 unlink(当前进程不受影响, 但磁盘文件消失), Windows 上通常会删除失败.
 
 ## Result 与 lifecycle
 
-- [x] **C++ result view**: `solve_direct()` 返回的 `x/raw/scaled/alpha` 是 C++ mutable workspace 的 transient view. 下一次 solve、set runtime case、close 或 solver 析构后, 这些 view 不应再作为稳定结果使用.
-- [x] **Python `KernelResult`**: `Kernel.solve()` 必须立即 copy-out `x/raw/scaled/alpha`, 并复制 scalar stats (`success`、`info`、`nfev`、norms 等). `KernelResult` 是用户可持久保存的结果对象.
-- [x] **`kernel.history`**: 只保存 Python-owned `KernelResult` snapshot. 第二次 solve 不得修改第一次 result.
-- [x] **`kernel.result`**: 指向最近一次 `KernelResult`, 等价于 `kernel.history[-1]` 的 result 引用.
-- [x] **`kernel.clear()`**: 只清 Python `history/result`, 不清 C++ context/workspace, 不改变 C++ continuation 语义.
+- **C++ result view**: `solve_direct()` 返回的 `x/raw/scaled/alpha` 是 C++ mutable workspace 的 transient view. 下一次 solve、set runtime case、close 或 solver 析构后, 这些 view 不应再作为稳定结果使用.
+- **Python `KernelResult`**: `Kernel.solve()` 必须立即 copy-out `x/raw/scaled/alpha`, 并复制 scalar stats (`success`、`info`、`nfev`、norms 等). `KernelResult` 是用户可持久保存的结果对象.
+- **`kernel.history`**: 只保存 Python-owned `KernelResult` snapshot. 第二次 solve 不得修改第一次 result.
+- **`kernel.result`**: 指向最近一次 `KernelResult`, 等价于 `kernel.history[-1]` 的 result 引用.
+- **`kernel.clear()`**: 只清 Python `history/result`, 不清 C++ context/workspace, 不改变 C++ continuation 语义.
 
 ## Cold initial 与 warm continuation policy
 
@@ -105,7 +105,7 @@ Kernel 对 C++ 接口采用**惰性加载(lazy-load)**: 默认不立即挂载 na
   - `warm-chord`: 在 `warm-predict` 基础上, 对当前 continuation candidate 临时构造一次 chord Jacobian 并尝试 chord-Newton certificate; 不维护持久 `chord_jacobian_` 缓存, 因此该 Jacobian 构造的 residual evaluations 属于显式额外成本.
   - `warm`: 当前等价于 `warm-fixed`; 后续若加入更高级 dispatcher, `warm` 才自动派发到具体策略.
 - `KernelResult.nfev` / benchmark 中的 `effective_nfev` 必须包含 initial residual probe、warm certificate/predictor/chord 尝试、fallback nonlinear solve 以及 final residual check. 不允许只报告 nonlinear solver 自身的 `solver_nfev`.
-- [x] **`kernel.close()`**: 释放当前 handle 对 C++ solver/context/workspace 的引用. native module 仍由 Python import 系统和 process cache 持有, 不保证卸载.
+- **`kernel.close()`**: 释放当前 handle 对 C++ solver/context/workspace 的引用. native module 仍由 Python import 系统和 process cache 持有, 不保证卸载.
 
 ## VEQlib ABI 约束
 
@@ -122,13 +122,13 @@ VEQlib 的 ABI 只接受以下类型: `double`, 1D C-contiguous `float64` ndarra
 # Benchmark 与多 topology 生命周期
 
 - **retained benchmark 入口**: 当前只保留三个主入口:
-  - `veqlib/benchmarks/benchmark_routes.py`: route/topology 一致性与速度矩阵.
-  - `veqlib/benchmarks/benchmark_geqdsk.py`: Low/Medium/High/Ref 四种配置 × 三个 GEQDSK case 的 VEQPy 对照.
-  - `veqlib/benchmarks/benchmark_continuation.py`: GEQDSK continuation sweep, 输出各 cold/warm policy 的 effective nfev 表.
-- **默认输出目录**: route/geqdsk retained benchmark 默认写入 `veqlib/benchmarks/results/veqlib_routes.json` 与 `veqlib/benchmarks/results/veqlib_geqdsk.json`; continuation nfev benchmark 默认写入 `veqlib/benchmarks/results/veqlib_continuation/`. 这些都是本地生成物目录, 不作为源文件或 API 依据.
-- **route benchmark scope**: `benchmark_routes.py` 默认只跑 12 个 `*:rho/psin:uniform:Ip` case, 即 6 个 route × 2 个 coordinate × `Ip` constraint. 显式 `--scope uniform` 才跑历史 46 个 uniform case; 显式 `--scope full` 才跑 92 个 uniform/grid 全矩阵.
+  - `python -m benchmarks.veqlib_routes`: route/topology 一致性与速度矩阵.
+  - `python -m benchmarks.veqlib_geqdsk`: Low/Medium/High/Ref 四种配置 × 三个 GEQDSK case 的 VEQPy 对照.
+  - `python -m benchmarks.veqlib_continuation`: GEQDSK continuation sweep, 输出各 cold/warm policy 的 effective nfev 表.
+- **默认输出目录**: route/geqdsk retained benchmark 默认写入 `benchmarks/results/veqlib_routes.json` 与 `benchmarks/results/veqlib_geqdsk.json`; continuation nfev benchmark 默认写入 `benchmarks/results/veqlib_continuation/`. 这些都是本地生成物目录, 不作为源文件或 API 依据.
+- **route benchmark scope**: `benchmarks.veqlib_routes` 默认只跑 12 个 `*:rho/psin:uniform:Ip` case, 即 6 个 route × 2 个 coordinate × `Ip` constraint. 显式 `--scope uniform` 才跑历史 46 个 uniform case; 显式 `--scope full` 才跑 92 个 uniform/grid 全矩阵.
 - **nanobind 多 topology 限制**: 当前每个 topology artifact 仍是一个独立 nanobind extension module, 并使用 per-artifact `VEQLIB_NB_DOMAIN` 避免同名 `KernelSolver` 类型重复注册. 在同一个 Python 进程里加载大量不同 domain 会消耗 CPython low-level `Py_AtExit` cleanup slot; CPython 3.12 常见上限是 32. 这不是数值错误, 但说明该进程不适合长期加载几十/上百个 topology artifact.
-- **subprocess 隔离语义**: `benchmark_routes.py` 对 native rows 默认使用 subprocess-per-row 隔离, 使 full matrix 不在一个 Python 解释器里加载大量 nanobind domain. 计时 JSON 中的 solve samples 来自子进程内 warmup 后的 `solve_direct()` 循环, 不包括父进程 orchestration 或 subprocess 启动开销.
+- **subprocess 隔离语义**: `benchmarks.veqlib_routes` 对 native rows 默认使用 subprocess-per-row 隔离, 使 full matrix 不在一个 Python 解释器里加载大量 nanobind domain. 计时 JSON 中的 solve samples 来自子进程内 warmup 后的 `solve_direct()` 循环, 不包括父进程 orchestration 或 subprocess 启动开销.
 - **长期方向**: 如果 VEQlib 需要一个 Python 进程长期管理大量 topology, 应迁移到"一个稳定 nanobind bridge module + 多个纯 C/C++ backend artifact"的结构. nanobind 类型只注册一次, topology-specific backend 不再携带 nanobind type/domain. 这是后续架构方向, 不是当前 commit 的实现前提.
 
 ---

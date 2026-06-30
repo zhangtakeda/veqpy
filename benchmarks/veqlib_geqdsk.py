@@ -19,6 +19,10 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from rich import box
 from rich.console import Console
 from rich.progress import (
@@ -31,18 +35,31 @@ from rich.progress import (
 from rich.table import Table
 from rich.text import Text
 
-from veqlib.benchmarks._common import (
+from benchmarks._common import (
+    CASE_KEYS,
+    CONFIG_LABELS,
     CORE_DIR,
+    REFERENCE_LAYOUT_NR,
+    REFERENCE_LAYOUT_NT,
+    REFERENCE_SOLVER_MAXFEV,
     REPO_ROOT,
-    SCRIPTS_DIR,
+    SOLVER_INITIAL_POLICY,
+    build_pf_case,
+    build_pf_reference_case,
     cpu_affinity,
     family_counts,
     float_stats,
     int_stats,
+    load_pf_benchmark,
+    load_reduced_equilibrium_manifest,
+    load_reference_equilibrium_manifest,
+    manifest_entry,
     max_abs,
     measure_native_solver,
     profile_count,
+    reference_manifest_entry,
     runtime_env,
+    signature_from_metadata,
     write_json,
 )
 from veqlib.facade import (
@@ -56,27 +73,7 @@ from veqlib.facade import (
     default_kernel_cache_root,
 )
 
-if str(SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_DIR))
-
-from config import (  # noqa: E402
-    CASE_KEYS,
-    CONFIG_LABELS,
-    REFERENCE_LAYOUT_NR,
-    REFERENCE_LAYOUT_NT,
-    REFERENCE_SOLVER_MAXFEV,
-    SOLVER_INITIAL_POLICY,
-    build_pf_case,
-    build_pf_reference_case,
-    load_pf_benchmark,
-    load_reduced_equilibrium_manifest,
-    load_reference_equilibrium_manifest,
-    manifest_entry,
-    reference_manifest_entry,
-    signature_from_metadata,
-)
-
-DEFAULT_OUTPUT = REPO_ROOT / "veqlib" / "benchmarks" / "results" / "veqlib_geqdsk.json"
+DEFAULT_OUTPUT = REPO_ROOT / "benchmarks" / "results" / "veqlib_geqdsk.json"
 VALIDATION_ATOL = 1.0e-6
 REPORT_TABLE_BOX = box.Box("    \n    \n ── \n    \n ── \n ── \n    \n ── \n")
 Topology = KernelTopology

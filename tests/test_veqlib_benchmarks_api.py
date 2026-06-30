@@ -2,20 +2,32 @@ from __future__ import annotations
 
 import json
 
-from veqlib.benchmarks import benchmark_continuation, benchmark_geqdsk, benchmark_routes
+from benchmarks import (
+    veqlib_continuation as benchmark_continuation,
+)
+from benchmarks import (
+    veqlib_geqdsk as benchmark_geqdsk,
+)
+from benchmarks import (
+    veqlib_routes as benchmark_routes,
+)
 
 
-def test_retained_benchmark_defaults_write_under_outputs() -> None:
-    assert benchmark_routes.DEFAULT_OUTPUT.parts[-2:] == ("outputs", "veqlib_routes.json")
-    assert benchmark_geqdsk.DEFAULT_OUTPUT.parts[-2:] == (
-        "outputs",
-        "veqlib_geqdsk_configs.json",
-    )
-    assert benchmark_continuation.DEFAULT_OUTPUT_DIR.parts[-4:] == (
-        "veqlib",
+def test_retained_benchmark_defaults_write_under_benchmarks_results() -> None:
+    assert benchmark_routes.DEFAULT_OUTPUT.parts[-3:] == (
         "benchmarks",
         "results",
-        "continuation_nfev",
+        "veqlib_routes.json",
+    )
+    assert benchmark_geqdsk.DEFAULT_OUTPUT.parts[-3:] == (
+        "benchmarks",
+        "results",
+        "veqlib_geqdsk.json",
+    )
+    assert benchmark_continuation.DEFAULT_OUTPUT_DIR.parts[-3:] == (
+        "benchmarks",
+        "results",
+        "veqlib_continuation",
     )
 
 

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from veqlib.benchmarks import benchmark_routes as matrix
+from benchmarks import veqlib_routes as matrix
 
 
 def test_route_matrix_enumerates_benchmark_uniform_cases() -> None:
     benchmark = matrix._benchmark_module()
 
-    specs = matrix._iter_route_specs(benchmark, include_grid=False)
+    specs = matrix._iter_route_specs(benchmark, scope="uniform")
 
     assert len(specs) == 46
     assert {spec.input_kind for spec in specs} == {"uniform"}
@@ -17,7 +17,7 @@ def test_route_matrix_enumerates_benchmark_uniform_cases() -> None:
 def test_route_matrix_can_extend_to_grid_topology_cases() -> None:
     benchmark = matrix._benchmark_module()
 
-    specs = matrix._iter_route_specs(benchmark, include_grid=True)
+    specs = matrix._iter_route_specs(benchmark, scope="full")
 
     assert len(specs) == 92
     assert sum(spec.input_kind == "grid" for spec in specs) == 46

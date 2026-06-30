@@ -30,6 +30,10 @@ from types import ModuleType
 from typing import Any
 
 import numpy as np
+
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from rich import box
 from rich.console import Console
 from rich.progress import (
@@ -43,7 +47,7 @@ from rich.table import Table
 from rich.text import Text
 from rich.tree import Tree
 
-from veqlib.benchmarks._common import (
+from benchmarks._common import (
     CORE_DIR,
     REPO_ROOT,
     cpu_affinity,
@@ -75,7 +79,7 @@ from veqpy.operator import Operator
 from veqpy.operator.packed_layout import build_profile_layout, build_profile_names
 from veqpy.solver import Solver
 
-DEFAULT_OUTPUT = REPO_ROOT / "veqlib" / "benchmarks" / "results" / "veqlib_routes.json"
+DEFAULT_OUTPUT = REPO_ROOT / "benchmarks" / "results" / "veqlib_routes.json"
 VALIDATION_ATOL = 1.0e-6
 DEFAULT_SCOPE = "ip-uniform"
 SOLVER_INITIAL_POLICY = "cold"

@@ -93,8 +93,8 @@ For a runtime-only install from a local source checkout, omit the `dev` extra:
 
 The optional VEQlib C++ kernel layer under `veqlib/` is not required for normal
 Python/Numba use. Its `facade/` tree provides `veqlib.facade`, its `core/` tree
-holds the C++/CMake implementation, and `benchmarks/` holds comparison scripts.
-It is intentionally separate from VEQPy internals. Building it requires a local
+holds the C++/CMake implementation, and the top-level `benchmarks/` package holds
+comparison scripts. It is intentionally separate from VEQPy internals. Building it requires a local
 C++20 toolchain and native libraries such as CMake 3.24+, `clang++`, nanobind,
 GCEM, nlohmann-json, CMINPACK, LAPACKE/LAPACK, and OpenBLAS.
 
@@ -174,27 +174,27 @@ Useful VEQlib checks from the repository root:
 Route/topology comparison benchmark:
 
 ```bash
-.venv/bin/python veqlib/benchmarks/benchmark_routes.py \
+.venv/bin/python -m benchmarks.veqlib_routes \
   --build fastmath \
   --repeat 100 \
   --warmup 5 \
-  --output veqlib/benchmarks/results/manual/routes.json
+  --output benchmarks/results/manual/routes.json
 ```
 
 GEQDSK configuration benchmark:
 
 ```bash
-.venv/bin/python veqlib/benchmarks/benchmark_geqdsk.py \
+.venv/bin/python -m benchmarks.veqlib_geqdsk \
   --build fastmath \
   --repeat 100 \
   --warmup 5 \
-  --output veqlib/benchmarks/results/manual/geqdsk_configs.json
+  --output benchmarks/results/manual/geqdsk_configs.json
 ```
 
 Continuation-policy effective-nfev benchmark:
 
 ```bash
-.venv/bin/python veqlib/benchmarks/benchmark_continuation.py
+.venv/bin/python -m benchmarks.veqlib_continuation
 ```
 
 Executable-side C++ diagnostics are secondary. Retained performance evidence
@@ -232,8 +232,8 @@ Numerical construction:
 
 VEQPy is associated with the companion manuscript **"VEQ: a fast parametric
 Grad--Shafranov solver for fixed-boundary tokamak equilibria with flexible source
-inputs"**. The repository includes manuscript-oriented figure and benchmark scripts
-under [`scripts/`](scripts/) and benchmark helpers under [`veqlib/`](veqlib/). Tagged
+inputs"**. The repository includes manuscript-oriented figure scripts under
+[`scripts/`](scripts/) and benchmark helpers under [`benchmarks/`](benchmarks/). Tagged
 release artifacts can pin rendered figures, generated reference data, and dependency
 metadata for archival reproduction.
 

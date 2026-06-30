@@ -2,7 +2,7 @@
 """Continuation-policy benchmark for VEQlib using effective nfev.
 
 This benchmark ports the remote certified-continuation sweep onto the current
-``veqlib.benchmarks`` package and the typed facade API.  The primary metric is
+top-level ``benchmarks`` package and the typed facade API.  The primary metric is
 ``effective_nfev``: the total residual-evaluation count reported by the native
 solve, including warm-start certificates/predictors/chord attempts as well as
 fallback nonlinear solves.
@@ -21,6 +21,10 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from rich import box
 from rich.console import Console
 from rich.progress import (
@@ -33,7 +37,9 @@ from rich.progress import (
 from rich.table import Table
 from rich.text import Text
 
-from veqlib.benchmarks._common import (
+from benchmarks._common import (
+    CASE_KEYS,
+    CONFIG_LABELS,
     CORE_DIR,
     REPO_ROOT,
     cpu_affinity,
@@ -42,7 +48,7 @@ from veqlib.benchmarks._common import (
     runtime_env,
     write_json,
 )
-from veqlib.benchmarks.benchmark_geqdsk import GeqdskConfigCase, _make_cases
+from benchmarks.veqlib_geqdsk import GeqdskConfigCase, _make_cases
 from veqlib.facade import (
     KernelInput,
     KernelRegistry,
@@ -52,12 +58,7 @@ from veqlib.facade import (
     default_kernel_cache_root,
 )
 
-if str(REPO_ROOT / "scripts") not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT / "scripts"))
-
-from config import CASE_KEYS, CONFIG_LABELS  # noqa: E402
-
-DEFAULT_OUTPUT_DIR = REPO_ROOT / "veqlib" / "benchmarks" / "results" / "veqlib_continuation"
+DEFAULT_OUTPUT_DIR = REPO_ROOT / "benchmarks" / "results" / "veqlib_continuation"
 UPDATE_CHOICES = ("ip", "boundary", "source", "mixed")
 DEFAULT_SPANS = (0.0002, 0.005, 0.01, 0.05, 0.20)
 POLICY_CHOICES = (
