@@ -8,12 +8,12 @@
 
 <br clear="left"><br>
 
+[![arXiv][arxiv-badge]][veq-arxiv]
 [![Python][python-badge]][python]
 [![Package][package-badge]][pypi]
 [![CI][ci-badge]][ci]
 [![Tests][tests-badge]][tests]
 [![License][license-badge]][license]
-[![arXiv][arxiv-badge]][veq-arxiv]
 
 ---
 
@@ -138,8 +138,37 @@ Core local checks mirror the push/PR CI workflow.
 ## Optional C++ Kernels
 
 VEQlib is the experimental C++/nanobind kernel layer used for topology-specific
-shared-library kernels and VEQPy-vs-native benchmarks. The Python facade owns the
-artifact lifecycle: `KernelTopology` fixes compile-time structure, `KernelBoundary`
+shared-library kernels and VEQPy-vs-native benchmarks.
+
+Representative VEQlib-vs-Numba timing snapshot from `benchmarks.veqlib_geqdsk_pareto`
+using the production nanobind/shared-library path is shown below. The three benchmark
+families are GEQDSK-backed cases:
+
+- `D-shaped`: `data/SOLOVEV.geqdsk`
+- `H-mode`: `data/CHEASE.geqdsk`
+- `X-point`: `data/EFIT.geqdsk`
+
+Timings are median full nonlinear-solve wall times in milliseconds after warmup;
+the VEQlib timing excludes native build time. `solution diff` is the maximum absolute
+VEQlib-vs-Numba solution-vector difference for the benchmark case. Bold rows mark the
+representative High configuration for each GEQDSK family.
+
+| case(params)    |  VEQlib (ms) |    Numba (ms) |     speedup | solution diff |
+| --------------- | -----------: | ------------: | ----------: | ------------: |
+| D-shaped(4)     |     0.038366 |      1.103223 |     28.755x |      2.73e-09 |
+| D-shaped(5)     |     0.052353 |      1.136383 |     21.706x |      9.20e-09 |
+| **D-shaped(9)** | **0.067753** |  **1.552996** | **22.921x** |  **1.25e-08** |
+| D-shaped(75)    |     0.784600 |      6.810340 |      8.680x |      1.47e-08 |
+| H-mode(27)      |     0.235108 |      5.113339 |     21.749x |      1.89e-07 |
+| H-mode(36)      |     0.291192 |      6.740179 |     23.147x |      3.87e-08 |
+| **H-mode(60)**  | **0.562023** | **14.010330** | **24.928x** |  **1.86e-08** |
+| H-mode(130)     |     2.596726 |     43.290484 |     16.671x |      1.38e-07 |
+| X-point(19)     |     0.139611 |      2.690838 |     19.274x |      3.51e-09 |
+| X-point(29)     |     0.250460 |      3.718143 |     14.845x |      4.51e-08 |
+| **X-point(94)** | **1.346315** | **10.342658** |  **7.682x** |  **3.44e-08** |
+| X-point(130)    |     2.575587 |     22.298123 |      8.657x |      1.24e-09 |
+
+The Python facade owns the artifact lifecycle: `KernelTopology` fixes compile-time structure, `KernelBoundary`
 supplies per-case boundary geometry, `KernelInput` supplies source/constraint data,
 and `KernelConfig` supplies runtime solve/operator configuration.
 Manual CMake presets are not part of the supported workflow; Python calls CMake
@@ -276,7 +305,7 @@ Related VEQ-family and representation papers include:
 [ci-badge]: https://img.shields.io/github/actions/workflow/status/zhangtakeda/veqpy/ci.yml?branch=main&label=CI&logo=githubactions&logoColor=white
 [license-badge]: https://img.shields.io/badge/license-BSD--3--Clause-blue.svg
 [arxiv-badge]: https://img.shields.io/badge/arXiv-2606.11821-b31b1b.svg?logo=arxiv&logoColor=white
-[tests-badge]: https://img.shields.io/badge/tests-pytest-blue.svg?logo=pytest&logoColor=white
+[tests-badge]: https://img.shields.io/badge/tests-pytest-blue.svg
 [pypi]: https://pypi.org/project/veqpy/
 [python]: https://www.python.org/
 [ci]: https://github.com/zhangtakeda/veqpy/actions/workflows/ci.yml
