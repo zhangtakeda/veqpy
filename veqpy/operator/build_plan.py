@@ -17,10 +17,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-import veqpy.engine.backend_abi as backend_abi
-from veqpy.engine import validate_route
-from veqpy.model.grid import Grid
-from veqpy.model.problem import Problem
+from veqpy.engine import backend_abi, validate_route
+from veqpy.model import Grid, Problem
 from veqpy.operator.packed_layout import (
     PROFILE_OFFSET_SPECS,
     PROFILE_STATIC_KWARGS,

@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from rich.console import Console
 from rich.tree import Tree
 
-from veqpy.model.problem import Problem
+from veqpy.model import Problem
 from veqpy.solver.solver_config import SolverConfig
 from veqpy.solver.solver_result import SolverResult
 

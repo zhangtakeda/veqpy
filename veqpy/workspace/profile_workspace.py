@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from veqpy.engine.numba_profile import update_profile
+from veqpy.engine import update_profile
 from veqpy.workspace.field_rows import PROFILE_R, PROFILE_RR, PROFILE_VALUE
 
 if TYPE_CHECKING:

@@ -16,8 +16,7 @@ from collections.abc import Callable
 
 import numpy as np
 
-from veqpy.engine.numba_geometry import update_geometry_hot_auto
-from veqpy.engine.numba_source import update_fourier_family_fields
+from veqpy.engine import update_fourier_family_fields, update_geometry_hot_auto
 
 
 def build_geometry_stage_runner(

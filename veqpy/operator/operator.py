@@ -19,12 +19,9 @@ from dataclasses import InitVar, dataclass, field
 
 import numpy as np
 
-from veqpy.layout.binding import build_operator_layout
-from veqpy.layout.runtime import OperatorLayout
-from veqpy.math.interpolate import SOURCE_INTERP_DEFAULT
-from veqpy.model.equilibrium import Equilibrium
-from veqpy.model.grid import Grid
-from veqpy.model.problem import Problem
+from veqpy.layout import OperatorLayout, build_operator_layout
+from veqpy.math import SOURCE_INTERP_DEFAULT
+from veqpy.model import Equilibrium, Grid, Problem
 from veqpy.operator.build_plan import (
     OperatorBuildPlan,
     build_operator_plan,
@@ -51,11 +48,13 @@ from veqpy.operator.source_plan import (
     validate_source_inputs,
 )
 from veqpy.operator.source_runtime import refresh_source_runtime
-from veqpy.workspace import allocate_runtime_state
-from veqpy.workspace.geometry_workspace import GeometryWorkspace
-from veqpy.workspace.profile_workspace import ProfileWorkspace
-from veqpy.workspace.residual_workspace import ResidualWorkspace
-from veqpy.workspace.source_workspace import SourceWorkspace
+from veqpy.workspace import (
+    GeometryWorkspace,
+    ProfileWorkspace,
+    ResidualWorkspace,
+    SourceWorkspace,
+    allocate_runtime_state,
+)
 
 
 @dataclass(slots=True, init=False)

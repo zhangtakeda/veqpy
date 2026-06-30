@@ -33,7 +33,7 @@ from collections.abc import Callable
 
 import numpy as np
 
-from veqpy.base.registry import Registry
+from veqpy.base import Registry
 
 DEFAULT_LOCAL_BARYCENTRIC_STENCIL = 8
 SOURCE_INTERP_KIND_ENV = "VEQPY_SOURCE_INTERP_KIND"

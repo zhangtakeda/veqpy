@@ -32,7 +32,7 @@ from collections.abc import Callable
 
 import numpy as np
 
-from veqpy.base.registry import Registry
+from veqpy.base import Registry
 from veqpy.math.interpolate import barycentric_log_weights, interpolation_matrix
 
 # -----------------------------------------------------------------------------

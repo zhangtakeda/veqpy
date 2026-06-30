@@ -9,9 +9,8 @@ Public API:
 - Grid
 - Profile
 - Problem
+- Geqdsk
 - Equilibrium
-- Reactive
-- Serial
 
 Notes:
 - This module only provides package-level exports.
@@ -20,13 +19,8 @@ Notes:
 
 from __future__ import annotations
 
-from veqpy.base import Reactive, Serial
-from veqpy.model.boundary import Boundary
-from veqpy.model.equilibrium import Equilibrium
-from veqpy.model.geqdsk import Geqdsk
-from veqpy.model.grid import Grid
-from veqpy.model.problem import Problem
-from veqpy.model.profile import Profile
+from importlib import import_module
+from typing import Any
 
 __all__ = [
     "Equilibrium",
@@ -35,6 +29,30 @@ __all__ = [
     "Boundary",
     "Profile",
     "Problem",
-    "Reactive",
-    "Serial",
 ]
+
+_EXPORTS = {
+    "Boundary": ("veqpy.model.boundary", "Boundary"),
+    "Equilibrium": ("veqpy.model.equilibrium", "Equilibrium"),
+    "Geqdsk": ("veqpy.model.geqdsk", "Geqdsk"),
+    "Grid": ("veqpy.model.grid", "Grid"),
+    "Problem": ("veqpy.model.problem", "Problem"),
+    "Profile": ("veqpy.model.profile", "Profile"),
+}
+
+
+def __getattr__(name: str) -> Any:
+    """Resolve exported model-layer types lazily at the package boundary."""
+
+    if name not in _EXPORTS:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module_name, attr_name = _EXPORTS[name]
+    value = getattr(import_module(module_name), attr_name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    """Return normal module attributes plus lazy package-boundary exports."""
+
+    return sorted(set(globals()) | set(__all__))

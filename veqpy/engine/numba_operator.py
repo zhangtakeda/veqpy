@@ -46,16 +46,17 @@ from veqpy.engine.numba_source import (
     _update_pj2_from_psin_uniform_inputs_with_scratch,
     uniform_barycentric_weights,
 )
-from veqpy.math.interpolate import build_uniform_source_interpolation_coefficients
+from veqpy.math import build_uniform_source_interpolation_coefficients
 
 if TYPE_CHECKING:
-    from veqpy.operator.build_plan import ResidualBindingLayout
-    from veqpy.operator.source_plan import SourcePlan
-    from veqpy.workspace.geometry_workspace import GeometryWorkspace
-    from veqpy.workspace.grid_workspace import GridWorkspace
-    from veqpy.workspace.profile_workspace import ProfileWorkspace
-    from veqpy.workspace.residual_workspace import ResidualWorkspace
-    from veqpy.workspace.source_workspace import SourceWorkspace
+    from veqpy.operator import ResidualBindingLayout, SourcePlan
+    from veqpy.workspace import (
+        GeometryWorkspace,
+        GridWorkspace,
+        ProfileWorkspace,
+        ResidualWorkspace,
+        SourceWorkspace,
+    )
 
 
 def bind_source_eval_runner(

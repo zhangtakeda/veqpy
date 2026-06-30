@@ -20,8 +20,7 @@ from typing import Self
 
 import numpy as np
 
-from veqpy.base import Serial
-from veqpy.base.serial import SERIAL_TYPE_REGISTRY
+from veqpy.base import SERIAL_TYPE_REGISTRY, Serial
 
 
 @dataclass(frozen=True, slots=True)

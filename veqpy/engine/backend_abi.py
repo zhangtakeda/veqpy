@@ -30,13 +30,14 @@ import numpy as np
 from veqpy.engine.numba_source import SOURCE_ROUTE_KEYS
 
 if TYPE_CHECKING:
-    from veqpy.operator.build_plan import ResidualBindingLayout
-    from veqpy.operator.source_plan import SourcePlan
-    from veqpy.workspace.geometry_workspace import GeometryWorkspace
-    from veqpy.workspace.grid_workspace import GridWorkspace
-    from veqpy.workspace.profile_workspace import ProfileWorkspace
-    from veqpy.workspace.residual_workspace import ResidualWorkspace
-    from veqpy.workspace.source_workspace import SourceWorkspace
+    from veqpy.operator import ResidualBindingLayout, SourcePlan
+    from veqpy.workspace import (
+        GeometryWorkspace,
+        GridWorkspace,
+        ProfileWorkspace,
+        ResidualWorkspace,
+        SourceWorkspace,
+    )
 
 
 RouteKey = tuple[str, str, str]

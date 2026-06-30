@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 if TYPE_CHECKING:
-    from veqpy.engine.backend_abi import SourceExecutionABI
+    from veqpy.engine import SourceExecutionABI
 
 
 @dataclass(init=False, slots=True)

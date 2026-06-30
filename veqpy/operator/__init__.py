@@ -7,6 +7,7 @@ Role:
 Public API:
 - Operator
 - Packed-state naming/layout helpers for preparing coefficient vectors
+- Build/source plan types used by peer submodules
 
 Notes:
 - Build topology lives in ``veqpy.operator.build_plan``; runtime memory and
@@ -16,25 +17,15 @@ Notes:
 
 from __future__ import annotations
 
-from veqpy.operator.operator import Operator
-from veqpy.operator.packed_layout import (
-    PACKED_LAYOUT_PROFILE_FIRST,
-    build_active_profile_metadata,
-    build_fourier_profile_names,
-    build_profile_index,
-    build_profile_layout,
-    build_profile_names,
-    build_shape_profile_names,
-    decode_packed_blocks,
-    encode_packed_state,
-    get_prefix_profile_names,
-    packed_size,
-    validate_packed_state,
-)
+from importlib import import_module
+from typing import Any
 
 __all__ = [
     "Operator",
+    "OperatorBuildPlan",
     "PACKED_LAYOUT_PROFILE_FIRST",
+    "ResidualBindingLayout",
+    "SourcePlan",
     "build_active_profile_metadata",
     "build_fourier_profile_names",
     "build_profile_index",
@@ -47,3 +38,51 @@ __all__ = [
     "packed_size",
     "validate_packed_state",
 ]
+
+_EXPORTS = {
+    "Operator": ("veqpy.operator.operator", "Operator"),
+    "OperatorBuildPlan": ("veqpy.operator.build_plan", "OperatorBuildPlan"),
+    "ResidualBindingLayout": ("veqpy.operator.build_plan", "ResidualBindingLayout"),
+    "SourcePlan": ("veqpy.operator.source_plan", "SourcePlan"),
+    "PACKED_LAYOUT_PROFILE_FIRST": (
+        "veqpy.operator.packed_layout",
+        "PACKED_LAYOUT_PROFILE_FIRST",
+    ),
+    "build_active_profile_metadata": (
+        "veqpy.operator.packed_layout",
+        "build_active_profile_metadata",
+    ),
+    "build_fourier_profile_names": (
+        "veqpy.operator.packed_layout",
+        "build_fourier_profile_names",
+    ),
+    "build_profile_index": ("veqpy.operator.packed_layout", "build_profile_index"),
+    "build_profile_layout": ("veqpy.operator.packed_layout", "build_profile_layout"),
+    "build_profile_names": ("veqpy.operator.packed_layout", "build_profile_names"),
+    "build_shape_profile_names": (
+        "veqpy.operator.packed_layout",
+        "build_shape_profile_names",
+    ),
+    "decode_packed_blocks": ("veqpy.operator.packed_layout", "decode_packed_blocks"),
+    "encode_packed_state": ("veqpy.operator.packed_layout", "encode_packed_state"),
+    "get_prefix_profile_names": ("veqpy.operator.packed_layout", "get_prefix_profile_names"),
+    "packed_size": ("veqpy.operator.packed_layout", "packed_size"),
+    "validate_packed_state": ("veqpy.operator.packed_layout", "validate_packed_state"),
+}
+
+
+def __getattr__(name: str) -> Any:
+    """Resolve exported operator symbols lazily at the package boundary."""
+
+    if name not in _EXPORTS:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module_name, attr_name = _EXPORTS[name]
+    value = getattr(import_module(module_name), attr_name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    """Return normal module attributes plus lazy package-boundary exports."""
+
+    return sorted(set(globals()) | set(__all__))

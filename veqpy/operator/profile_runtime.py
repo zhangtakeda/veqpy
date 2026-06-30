@@ -12,8 +12,8 @@ from collections.abc import Callable
 
 import numpy as np
 
-from veqpy.engine.numba_source import validate_route
-from veqpy.model.problem import Problem
+from veqpy.engine import validate_route
+from veqpy.model import Problem
 from veqpy.operator.packed_layout import build_profile_layout
 from veqpy.workspace import GridWorkspace
 

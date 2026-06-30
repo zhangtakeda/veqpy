@@ -25,7 +25,7 @@ from veqpy.workspace.residual_workspace import ResidualWorkspace
 from veqpy.workspace.source_workspace import SourceWorkspace
 
 if TYPE_CHECKING:
-    from veqpy.engine.backend_abi import SourceExecutionABI
+    from veqpy.engine import SourceExecutionABI
     from veqpy.workspace.grid_workspace import GridWorkspace
 
 

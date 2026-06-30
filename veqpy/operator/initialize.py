@@ -19,11 +19,11 @@ from typing import TYPE_CHECKING
 import numpy as np
 from numba import njit
 
-from veqpy.model.problem import Problem
+from veqpy.model import Problem
 
 if TYPE_CHECKING:
     from veqpy.operator.build_plan import OperatorBuildPlan
-    from veqpy.workspace.profile_workspace import ProfileWorkspace
+    from veqpy.workspace import ProfileWorkspace
 
 _SOURCE_CURRENT_ROUGHNESS_WEIGHT = 0.5
 _SOURCE_STRUCTURE_REL_TOL = 1.0e-6

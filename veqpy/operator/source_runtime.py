@@ -16,15 +16,15 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from veqpy.engine.numba_source import (
+from veqpy.engine import (
     build_source_remap_cache,
     resolve_source_inputs,
 )
-from veqpy.math.interpolate import build_uniform_source_interpolation_coefficients
+from veqpy.math import build_uniform_source_interpolation_coefficients
 from veqpy.operator.source_plan import SourcePlan
 
 if TYPE_CHECKING:
-    from veqpy.workspace.source_workspace import SourceWorkspace
+    from veqpy.workspace import SourceWorkspace
 
 
 def refresh_source_runtime(

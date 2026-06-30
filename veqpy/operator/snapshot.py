@@ -13,10 +13,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from veqpy.model.equilibrium import Equilibrium
-from veqpy.model.grid import Grid
-from veqpy.model.problem import Problem
-from veqpy.model.profile import Profile
+from veqpy.model import Equilibrium, Grid, Problem, Profile
 from veqpy.operator.packed_layout import decode_packed_blocks
 
 

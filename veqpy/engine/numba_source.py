@@ -27,22 +27,10 @@ from dataclasses import dataclass
 import numpy as np
 from numba import njit
 
-try:
-    from veqpy.base.registry import Registry
-except ModuleNotFoundError as exc:
-    if exc.name != "orjson":
-        raise
-    from importlib.util import module_from_spec, spec_from_file_location
-    from pathlib import Path
-
-    _registry_path = Path(__file__).resolve().parents[1] / "base" / "registry.py"
-    _registry_spec = spec_from_file_location("_veqpy_base_registry", _registry_path)
-    if _registry_spec is None or _registry_spec.loader is None:
-        raise
-    _registry_module = module_from_spec(_registry_spec)
-    _registry_spec.loader.exec_module(_registry_module)
-    Registry = _registry_module.Registry
-from veqpy.math.fast import (
+from veqpy.base import Registry
+from veqpy.math import (
+    DEFAULT_LOCAL_BARYCENTRIC_STENCIL,
+    build_uniform_source_interpolation_matrix,
     copy_into,
     dot,
     matvec_into,
@@ -53,11 +41,7 @@ from veqpy.math.fast import (
     scaled_ratio_into,
     weighted_dot,
 )
-from veqpy.math.interpolate import (
-    DEFAULT_LOCAL_BARYCENTRIC_STENCIL,
-    build_uniform_source_interpolation_matrix,
-)
-from veqpy.workspace.field_rows import (
+from veqpy.workspace import (
     GEOMETRY_RADIAL_KN,
     GEOMETRY_RADIAL_KN_R,
     GEOMETRY_RADIAL_LN_R,

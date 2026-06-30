@@ -27,7 +27,7 @@ from collections.abc import Callable
 import numpy as np
 from scipy.linalg import eigh_tridiagonal
 
-from veqpy.base.registry import Registry
+from veqpy.base import Registry
 
 # -----------------------------------------------------------------------------
 # Public implementation

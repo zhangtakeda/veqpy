@@ -23,9 +23,8 @@ from time import perf_counter
 import numpy as np
 from rich.console import Console
 
-from veqpy.model.equilibrium import Equilibrium
-from veqpy.model.problem import Problem
-from veqpy.operator.operator import Operator
+from veqpy.model import Equilibrium, Problem
+from veqpy.operator import Operator
 from veqpy.solver.residual_scale import (
     _block_rms_values,
     _build_block_rms_scale,

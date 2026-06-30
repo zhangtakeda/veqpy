@@ -19,7 +19,7 @@ from __future__ import annotations
 import numpy as np
 from numba import njit
 
-from veqpy.workspace.field_rows import (
+from veqpy.workspace import (
     GEOMETRY_RADIAL_KN,
     GEOMETRY_RADIAL_KN_R,
     GEOMETRY_RADIAL_LN_R,

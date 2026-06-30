@@ -22,14 +22,18 @@ from rich.tree import Tree
 
 from veqpy.base import Reactive, Serial
 from veqpy.math import (
+    DEFAULT_CALCULUS,
+    DEFAULT_QUADRATURE,
     RHO_AXIS,
     THETA_AXIS,
     apply_accumulation,
     apply_differentiation,
+    colwise_weighted_sum_into,
+    dot,
+    make_calculus,
+    make_quadrature,
+    rowwise_sum_into,
 )
-from veqpy.math.calculus import DEFAULT_CALCULUS, make_calculus
-from veqpy.math.fast import colwise_weighted_sum_into, dot, rowwise_sum_into
-from veqpy.math.quadrature import DEFAULT_QUADRATURE, make_quadrature
 
 
 class Grid(Reactive, Serial):

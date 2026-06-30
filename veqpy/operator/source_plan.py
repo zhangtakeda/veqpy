@@ -19,18 +19,18 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from veqpy.engine.numba_source import (
+from veqpy.engine import (
     COORDINATE_CODES,
     source_parameterization_for_route_key,
 )
-from veqpy.math.interpolate import (
+from veqpy.math import (
     SOURCE_INTERP_DEFAULT,
     normalize_source_interpolation_kind,
     source_interpolation_kind_is_barycentric,
 )
 
 if TYPE_CHECKING:
-    from veqpy.model.problem import Problem
+    from veqpy.model import Problem
 
 RouteKey = tuple[str, str, str]
 

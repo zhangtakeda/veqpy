@@ -28,13 +28,15 @@ from veqpy.layout.residual_binding import (
 from veqpy.layout.source_binding import build_bound_source_stage_runner
 
 if TYPE_CHECKING:
-    from veqpy.model.problem import Problem
-    from veqpy.operator.build_plan import OperatorBuildPlan, ResidualBindingLayout
-    from veqpy.workspace.geometry_workspace import GeometryWorkspace
-    from veqpy.workspace.grid_workspace import GridWorkspace
-    from veqpy.workspace.profile_workspace import ProfileWorkspace
-    from veqpy.workspace.residual_workspace import ResidualWorkspace
-    from veqpy.workspace.source_workspace import SourceWorkspace
+    from veqpy.model import Problem
+    from veqpy.operator import OperatorBuildPlan, ResidualBindingLayout
+    from veqpy.workspace import (
+        GeometryWorkspace,
+        GridWorkspace,
+        ProfileWorkspace,
+        ResidualWorkspace,
+        SourceWorkspace,
+    )
 
 from .runtime import OperatorLayout
 

@@ -16,13 +16,7 @@ from collections.abc import Callable
 
 import numpy as np
 
-from veqpy.engine.numba_source import (
-    PJ2_PSIN_UNIFORM_FIXED_POINT_MAX_ITER,
-    PJ2_PSIN_UNIFORM_FIXED_POINT_MAX_RESIDUAL,
-    _materialize_profile_owned_psin_source_impl,
-    _resolve_source_inputs_prepared,
-    _update_fixed_point_psin_query_impl,
-)
+from veqpy.engine import numba_source
 
 
 def build_bound_source_stage_runner(
@@ -99,7 +93,7 @@ def _build_source_stage_runner_shared(
                     raise RuntimeError("psin_profile runtime fields are not initialized")
                 # Optimized psin owns the root fields here.  Materialization also
                 # remaps heat/current using the just-built psin coordinate.
-                _materialize_profile_owned_psin_source_impl(
+                numba_source._materialize_profile_owned_psin_source_impl(
                     psin,
                     psin_r,
                     psin_rr,
@@ -158,7 +152,7 @@ def _build_source_stage_runner_shared(
                 raise ValueError(
                     f"Unsupported source parameterization {source_plan.parameterization!r}"
                 )
-            _resolve_source_inputs_prepared(
+            numba_source._resolve_source_inputs_prepared(
                 source_workspace.materialized_heat_input,
                 source_workspace.materialized_current_input,
                 source_plan.scaled_heat,
@@ -238,7 +232,7 @@ def _build_pj2_psin_uniform_source_stage_runner(
             source_workspace.psin_query[-1] = 1.0
         alpha1 = float("nan")
         alpha2 = float("nan")
-        for _ in range(PJ2_PSIN_UNIFORM_FIXED_POINT_MAX_ITER):
+        for _ in range(numba_source.PJ2_PSIN_UNIFORM_FIXED_POINT_MAX_ITER):
             # Each iteration remaps source samples using the previous psin query,
             # runs the source kernel, then tests whether the produced psin moved.
             if source_plan.parameterization == "identity":
@@ -253,7 +247,7 @@ def _build_pj2_psin_uniform_source_stage_runner(
                 raise ValueError(
                     f"Unsupported source parameterization {source_plan.parameterization!r}"
                 )
-            _resolve_source_inputs_prepared(
+            numba_source._resolve_source_inputs_prepared(
                 source_workspace.materialized_heat_input,
                 source_workspace.materialized_current_input,
                 source_plan.scaled_heat,
@@ -276,10 +270,10 @@ def _build_pj2_psin_uniform_source_stage_runner(
                 problem_R0,
             )
             if bool(
-                _update_fixed_point_psin_query_impl(
+                numba_source._update_fixed_point_psin_query_impl(
                     source_workspace.psin_query,
                     target_root_fields[0],
-                    float(PJ2_PSIN_UNIFORM_FIXED_POINT_MAX_RESIDUAL),
+                    float(numba_source.PJ2_PSIN_UNIFORM_FIXED_POINT_MAX_RESIDUAL),
                 )
             ):
                 break

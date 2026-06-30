@@ -5,14 +5,41 @@ Role:
 - Mark ``veqpy.layout`` as the executable layout package.
 
 Public API:
-- No broad package-root re-exports.
+- OperatorLayout
+- build_operator_layout
 
 Notes:
-- Import executable layout types from ``veqpy.layout.runtime``.
-- Import binders from their concrete ``veqpy.layout.*_binding`` modules.
-- Package roots are the only modules that declare ``__all__``.
+- Package-root exports are the cross-submodule layout contract.
 """
 
 from __future__ import annotations
 
-__all__: list[str] = []
+from importlib import import_module
+from typing import Any
+
+__all__ = [
+    "OperatorLayout",
+    "build_operator_layout",
+]
+
+_EXPORTS = {
+    "OperatorLayout": ("veqpy.layout.runtime", "OperatorLayout"),
+    "build_operator_layout": ("veqpy.layout.binding", "build_operator_layout"),
+}
+
+
+def __getattr__(name: str) -> Any:
+    """Resolve exported layout symbols lazily at the package boundary."""
+
+    if name not in _EXPORTS:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module_name, attr_name = _EXPORTS[name]
+    value = getattr(import_module(module_name), attr_name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    """Return normal module attributes plus lazy package-boundary exports."""
+
+    return sorted(set(globals()) | set(__all__))
