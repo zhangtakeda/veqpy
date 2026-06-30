@@ -550,7 +550,6 @@ class KernelInput:
 class KernelConfig:
     """Runtime configuration for one VEQlib kernel invocation."""
 
-    fix_rho: float = 0.05
     method: str | int = "powell"
     max_residual: float = 1.0e-6
     max_evaluations: int | None = None
@@ -573,7 +572,6 @@ class KernelConfig:
         if max_evaluations < 0:
             raise ValueError("max_evaluations must be non-negative")
         return {
-            "fix_rho": float(self.fix_rho),
             "method_code": solver_method_code(self.method),
             "max_residual": float(self.max_residual),
             "max_evaluations": max_evaluations,
@@ -595,7 +593,6 @@ class KernelConfig:
     def runtime_args(self, *, x_size: int) -> tuple[Any, ...]:
         payload = self.to_payload_dict(x_size=x_size)
         return (
-            payload["fix_rho"],
             payload["method_code"],
             payload["max_residual"],
             payload["max_evaluations"],

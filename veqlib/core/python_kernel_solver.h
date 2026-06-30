@@ -337,9 +337,6 @@ namespace veqlib_python
         input.Ip =
             optional_finite_number(constraints, "scaled_Ip", optional_finite_number(data, "scaled_Ip", input.Ip));
         input.beta = optional_finite_number(constraints, "beta", optional_finite_number(data, "beta", input.beta));
-        const double legacy_fix_rho =
-            optional_finite_number(constraints, "fix_rho", optional_finite_number(data, "fix_rho", input.fix_rho));
-        input.fix_rho = optional_finite_number(solver_config, "fix_rho", legacy_fix_rho);
 
         apply_initial_policy(input);
 
@@ -361,7 +358,6 @@ namespace veqlib_python
                                              RuntimeArrayView   scaled_current,
                                              double             scaled_Ip,
                                              double             beta,
-                                             double             fix_rho,
                                              int                method_code,
                                              double             max_residual,
                                              int                max_evaluations,
@@ -399,7 +395,6 @@ namespace veqlib_python
 
         input.Ip      = scaled_Ip;
         input.beta    = beta;
-        input.fix_rho = fix_rho;
 
         input.solver                   = solver_kind_from_runtime_method_code(method_code);
         input.max_residual             = max_residual;
@@ -607,7 +602,6 @@ namespace veqlib_python
     inline nlohmann::json solver_json(const CaseInput& input)
     {
         return {
-            {"fix_rho", input.fix_rho},
             {"method_code", solver_method_code(input.solver)},
             {"max_residual", input.max_residual},
             {"max_evaluations", input.max_evaluations},
@@ -869,7 +863,6 @@ namespace veqlib_python
                                 RuntimeArrayView   scaled_current,
                                 double             scaled_Ip,
                                 double             beta,
-                                double             fix_rho,
                                 int                method_code,
                                 double             max_residual,
                                 int                max_evaluations,
@@ -897,7 +890,6 @@ namespace veqlib_python
                                                            scaled_current,
                                                            scaled_Ip,
                                                            beta,
-                                                           fix_rho,
                                                            method_code,
                                                            max_residual,
                                                            max_evaluations,
@@ -1086,9 +1078,8 @@ namespace veqlib_python
             const CaseInput& now = context_->input;
             return old.a == now.a && old.R0 == now.R0 && old.Z0 == now.Z0 && old.B0 == now.B0 &&
                    old.ka == now.ka && old.c0_offset == now.c0_offset && old.s1_offset == now.s1_offset &&
-                   old.fix_rho == now.fix_rho && same_offsets(old.c_offsets, now.c_offsets) &&
-                   same_offsets(old.s_offsets, now.s_offsets) && same_array(old.heat, now.heat) &&
-                   same_array(old.current, now.current);
+                   same_offsets(old.c_offsets, now.c_offsets) && same_offsets(old.s_offsets, now.s_offsets) &&
+                   same_array(old.heat, now.heat) && same_array(old.current, now.current);
         }
 
         void fill_certified_result(SolveResult&                                   result,

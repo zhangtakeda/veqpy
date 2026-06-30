@@ -168,9 +168,8 @@ def _kernel_input_from_operator(
     )
 
 
-def _kernel_config_from_config(config: Any, *, x_size: int, fix_rho: float) -> KernelConfig:
+def _kernel_config_from_config(config: Any, *, x_size: int) -> KernelConfig:
     return KernelConfig(
-        fix_rho=fix_rho,
         method=NATIVE_SOLVER_METHOD,
         max_residual=float(config.max_residual),
         max_evaluations=int(REFERENCE_SOLVER_MAXFEV),
@@ -274,7 +273,6 @@ def _case_from_signature(
     kernel_config = _kernel_config_from_config(
         benchmark.CONFIG,
         x_size=x_size,
-        fix_rho=float(operator.fix_rho),
     )
 
     def measure_py(*, warmup: int, repeat: int) -> dict[str, Any]:

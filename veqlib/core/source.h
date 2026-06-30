@@ -33,6 +33,8 @@ namespace source::detail
 
     inline constexpr size_t pj2_psin_uniform_fixed_point_max_iter = 16;
     inline constexpr double pj2_psin_uniform_fixed_point_max_residual = 1.0e-10;
+    // Fixed legacy cutoff: radial nodes with rho below this value use axis-regularized profiles.
+    inline constexpr double axis_fix_rho = 0.05;
 
     constexpr size_t clipped_stencil_size(size_t sample_count) noexcept
     {
@@ -62,10 +64,10 @@ namespace source::detail
     };
 
     template <typename GridType>
-    constexpr size_t axis_fix_count(double fix_rho) noexcept
+    constexpr size_t axis_fix_count() noexcept
     {
         size_t count = 0;
-        while (count < GridType::radial_nodes && GridType::nodes[count] < fix_rho)
+        while (count < GridType::radial_nodes && GridType::nodes[count] < axis_fix_rho)
             ++count;
         return count;
     }

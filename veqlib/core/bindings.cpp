@@ -24,7 +24,6 @@ NB_MODULE(veqlib_ext, module)
              nb::arg("scaled_current"),
              nb::arg("scaled_Ip"),
              nb::arg("beta"),
-             nb::arg("fix_rho"),
              nb::arg("method_code"),
              nb::arg("max_residual"),
              nb::arg("max_evaluations"),

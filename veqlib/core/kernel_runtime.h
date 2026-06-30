@@ -59,7 +59,6 @@ namespace veqlib_kernel_api
         {
             KernelOperator::Setup setup{};
             setup.profile_params = profile_params_for_case(input);
-            setup.fix_rho        = input.fix_rho;
             for (size_t i = 0; i < KernelSource::sample_count; ++i)
             {
                 setup.heat[i]    = input.heat[i];

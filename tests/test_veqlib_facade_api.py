@@ -147,7 +147,7 @@ def test_kernel_dry_run_payload_and_python_owned_result_snapshot(tmp_path: Path)
     assert isinstance(handle, Kernel)
     assert handle.x_size == 9
     assert payload["case_name"] == "payload-smoke"
-    assert payload["solver"]["fix_rho"] == 0.05
+    assert "fix_rho" not in payload["solver"]
     assert payload["solver"]["max_evaluations"] == 81
 
     raw_x = np.ones(3, dtype=np.float64)

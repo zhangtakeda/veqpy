@@ -315,10 +315,8 @@ def _kernel_config_from_config(
     *,
     method: int,
     x_size: int,
-    fix_rho: float,
 ) -> KernelConfig:
     return KernelConfig(
-        fix_rho=fix_rho,
         method=method,
         max_residual=float(config.max_residual),
         max_evaluations=int(x_size) ** 2,
@@ -353,7 +351,6 @@ def _runtime_case(benchmark: ModuleType, spec: Any, topology: Topology) -> Runti
         benchmark.CONFIG,
         method=method,
         x_size=int(x0.size),
-        fix_rho=float(operator.fix_rho),
     )
 
     def measure_py(*, warmup: int, repeat: int) -> dict[str, Any]:

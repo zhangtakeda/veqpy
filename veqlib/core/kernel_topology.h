@@ -194,7 +194,6 @@ namespace veqlib_kernel_api
             std::array<double, KernelShape::M_max + 1>     s_offsets{};
             double                                         Ip                       = 3.7699111867885415;
             double                                         beta                     = std::numeric_limits<double>::quiet_NaN();
-            double                                         fix_rho                  = 0.05;
             double                                         max_residual             = veqpy_max_residual;
             double                                         accepted_residual_factor = veqpy_accepted_residual_factor;
             double                                         accepted_residual_floor  = veqpy_accepted_residual_floor;

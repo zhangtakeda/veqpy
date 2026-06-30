@@ -25,7 +25,6 @@ namespace operators::detail
     struct PfPsinUniformIpSetup
     {
         ProfileRuntimeParams<Shape>               profile_params{};
-        double                                    fix_rho = 0.0;
         Vector<double, SourceShape::sample_count> heat{};
         Vector<double, SourceShape::sample_count> current{};
     };
@@ -319,7 +318,7 @@ namespace operators::detail
         {
             KernelPlan out{};
             out.profile_params = setup.profile_params;
-            out.n_axis_fix     = axis_fix_count<GridType>(setup.fix_rho);
+            out.n_axis_fix     = axis_fix_count<GridType>();
             out.fixed_profiles.refresh_fixed(out.profile_params);
             return out;
         }
