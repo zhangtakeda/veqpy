@@ -2,19 +2,29 @@
 Module: math.calculus
 
 Role:
-- Build radial calculus matrices.
-- Own the registry that selects base integration/differentiation schemes.
+- Build radial prefix-integration and differentiation matrices.
+- Own the registry that selects base radial calculus schemes.
 
 Public API:
 - make_calculus
+- apply_differentiation
+- apply_accumulation
 
-Notes:
-- Calculus matrices are reusable linear operators on radial nodes.  They do not
-  know whether a field is geometry, source, or diagnostic data.
-- Accumulators are prefix integrals from the magnetic-axis-side origin, with the
-  additive constant fixed by the value-at-zero constraint.
+Design notes:
+- ``make_calculus(nodes)`` returns ``(accumulator, differentiator)`` for fields
+  sampled on a one-dimensional radial node set.  These matrices are reusable
+  linear operators; they do not know whether a field represents geometry,
+  source data, diagnostics, or a residual ingredient.
+- The accumulator is a prefix integral from the magnetic-axis-side origin.  Its
+  additive constant is fixed by the value-at-zero convention so integrating a
+  derivative reconstructs a profile up to that boundary value.
+- The default ``spectral`` scheme uses compact finite differences on uniform
+  nodes and global barycentric/spectral matrices on nonuniform nodes.  Additional
+  compact finite-difference schemes are registered as ``compact``/``cfd33``,
+  ``cfd35``, and ``cfd55``.
+- Source-route meaning, profile ownership, and solver policy are outside this
+  module; callers decide which fields to differentiate or accumulate.
 """
-
 from __future__ import annotations
 
 import math

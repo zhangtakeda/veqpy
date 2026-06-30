@@ -2,8 +2,8 @@
 Module: math.interpolate
 
 Role:
-- Provide pure interpolation matrix builders.
-- Own source-interpolation scheme normalization and coefficient/matrix builders.
+- Build pure one-dimensional interpolation weights and matrices.
+- Normalize source-interpolation scheme names used by operator setup.
 
 Public API:
 - barycentric_log_weights
@@ -13,13 +13,19 @@ Public API:
 - build_uniform_source_interpolation_coefficients
 - build_uniform_source_interpolation_matrix
 
-Notes:
-- Matrices use source nodes as columns and evaluation nodes as rows.
-- This module only remaps normalized one-dimensional source parameters.  Route
-  meaning and constraint selection live in operator.source_plan / source kernels.
-- ``SOURCE_INTERP_DEFAULT`` is the single package default for source remapping.
+Design notes:
+- Interpolation matrices use source nodes as columns and evaluation nodes as
+  rows.  Multiplying a matrix by source samples evaluates the remapped samples at
+  the target nodes.
+- This module only remaps normalized one-dimensional parameters.  It does not
+  define the physical meaning of a source route, choose an ``Ip``/``beta``
+  constraint, or repair profile ownership; those decisions live in operator
+  source planning and source kernels.
+- Uniform-source helpers support the package source-remapping choices:
+  ``barycentric`` (default local barycentric stencil), ``not-a-knot`` spline,
+  ``linear``, ``quadratic``, and ``cubic``.  Environment and user spellings are
+  normalized to these registry keys through ``normalize_source_interpolation_kind``.
 """
-
 from __future__ import annotations
 
 import os

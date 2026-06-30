@@ -2,21 +2,30 @@
 Module: base.reactive
 
 Role:
-- Provide reactive caching and pull-based dependency freshness checks.
-- Infer property dependencies from property AST, with optional explicit
-  dependencies through ``depends_on``.
+- Provide reactive caching and pull-based dependency freshness checks for model
+  objects and solved snapshots.
+- Keep public objects in a minimal-root-state form while rebuilding derived
+  quantities lazily from formulas.
 
 Public API:
 - Reactive
 - depends_on
 
-Notes:
-- Dependencies are inferred from the property AST by default.
-- Dependencies that cannot be inferred statically can be declared with ``depends_on``.
-- Root writes are O(1): setting a root only bumps its version.
-- Derived reads validate cached values by comparing dependency version tokens.
+Design notes:
+- Subclasses declare independent root fields in ``root_properties``.  Assigning
+  a root value only updates that field and bumps a version token; it does not
+  walk the dependency graph or eagerly recompute downstream properties.
+- Derived ``@property`` values are wrapped at class creation time.  Dependencies
+  are inferred from the property AST when possible, and non-obvious dependencies
+  can be declared explicitly with ``depends_on``.
+- Derived reads compare cached dependency tokens and recompute only when a direct
+  dependency changed.  If a dependency value is itself ``Reactive``, the nested
+  object's revision participates in the token so child root writes invalidate
+  parent-derived values that depend on that child.
+- ``Reactive`` is intentionally not used for operator hot paths.  Runtime solver
+  state uses explicit workspaces and in-place arrays; snapshots use this formula
+  system because they need interpretable, serializable, on-demand diagnostics.
 """
-
 from __future__ import annotations
 
 import ast

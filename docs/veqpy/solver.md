@@ -29,16 +29,16 @@ later warm starts and `build_equilibrium()` use.
 
 Initial values are chosen by priority:
 
-| Source | Behavior |
-| ------ | -------- |
-| Explicit `x0` | Validated by the operator, copied into `Solver.x0`, and used for this solve |
-| `initial_policy="warm"` | Reuses the current solver-owned `Solver.x0` |
-| `initial_policy="zeros"` | Uses a zero packed vector |
-| `initial_policy="geometric"` | Uses geometric shape/axis estimates without source/profile refinement |
-| `initial_policy="geometric-refined"` | Adds source-implied low-order active-profile seeds to the geometric estimate |
-| `initial_policy="legacy-geometric"` | Uses the legacy `0.66 * a / R0` axis-shift estimate and geometric shaping terms |
-| `initial_policy="auto"` | Uses zeros below the boundary curve-strain threshold, otherwise `geometric-refined` |
-| Default (`initial_policy=None`) | Uses the operator zero state |
+| Source                               | Behavior                                                                            |
+| ------------------------------------ | ----------------------------------------------------------------------------------- |
+| Explicit `x0`                        | Validated by the operator, copied into `Solver.x0`, and used for this solve         |
+| `initial_policy="warm"`              | Reuses the current solver-owned `Solver.x0`                                         |
+| `initial_policy="zeros"`             | Uses a zero packed vector                                                           |
+| `initial_policy="geometric"`         | Uses geometric shape/axis estimates without source/profile refinement               |
+| `initial_policy="geometric-refined"` | Adds source-implied low-order active-profile seeds to the geometric estimate        |
+| `initial_policy="legacy-geometric"`  | Uses the legacy `0.66 * a / R0` axis-shift estimate and geometric shaping terms     |
+| `initial_policy="auto"`              | Uses zeros below the boundary curve-strain threshold, otherwise `geometric-refined` |
+| Default (`initial_policy=None`)      | Uses the operator zero state                                                        |
 
 The geometric initializer is meant as a cheap geometry-based guess for nested
 flux surfaces. It delegates to the operator's boundary-slope estimate: active
@@ -97,12 +97,12 @@ the optimizer.
 
 Current modes are:
 
-| mode | Meaning |
-| ---- | ------- |
-| `none` | Use the raw residual directly |
-| `fast` / `block_rms` | Scale each active residual block by its initial RMS, with a floor of 1 |
+| mode                                   | Meaning                                                                             |
+| -------------------------------------- | ----------------------------------------------------------------------------------- |
+| `none`                                 | Use the raw residual directly                                                       |
+| `fast` / `block_rms`                   | Scale each active residual block by its initial RMS, with a floor of 1              |
 | `balance` / `balanced` / `block_huber` | Build robust block scales using Huber-style RMS, a floor, and a maximum scale ratio |
-| `safe` / `block_sensitivity` | Combine robust block amplitude with finite-difference sensitivity probes |
+| `safe` / `block_sensitivity`           | Combine robust block amplitude with finite-difference sensitivity probes            |
 
 The default config uses `fast`. Passing `residual_normalization=None` resolves
 to the same package default. For `hybr`, enabling normalization also tightens
@@ -119,11 +119,11 @@ collocation stage disables fallback and uses `collocation_method`,
 
 `collocation_weight` selects the polish objective:
 
-| weight | Objective |
-| ------ | --------- |
-| `0` | Skip the collocation objective and keep the variational solution |
+| weight   | Objective                                                                                                               |
+| -------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `0`      | Skip the collocation objective and keep the variational solution                                                        |
 | `(0, 1)` | Minimize a blended vector: coefficient-space distance from the variational solution plus the point-collocation residual |
-| `1` | Optimize only the point-collocation residual |
+| `1`      | Optimize only the point-collocation residual                                                                            |
 
 The blended objective keeps the polish local in coefficient space unless the
 collocation residual has enough weight to move away from the weak-form solution.

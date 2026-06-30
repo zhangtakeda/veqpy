@@ -50,14 +50,14 @@ All routes produce the same root fields for residual assembly:
 The route only changes how these fields are reconstructed from one-dimensional
 inputs:
 
-| route | `heat_input` meaning | `current_input` meaning |
-| ----- | -------------------- | ----------------------- |
-| `PF` | pressure-gradient data (`P_r` or `P_psi`) | toroidal-field source (`FF'`) |
-| `PP` | pressure-gradient data | normalized flux-gradient driver `psin_r` |
-| `PI` | pressure-gradient data | enclosed toroidal current `I_tor` |
-| `PJ1` | pressure-gradient data | toroidal current density `j_tor` |
-| `PJ2` | pressure-gradient data | parallel current density `j_parallel`, using the current `F` profile |
-| `PQ` | pressure-gradient data | safety factor `q` |
+| route | `heat_input` meaning                      | `current_input` meaning                                              |
+| ----- | ----------------------------------------- | -------------------------------------------------------------------- |
+| `PF`  | pressure-gradient data (`P_r` or `P_psi`) | toroidal-field source (`FF'`)                                        |
+| `PP`  | pressure-gradient data                    | normalized flux-gradient driver `psin_r`                             |
+| `PI`  | pressure-gradient data                    | enclosed toroidal current `I_tor`                                    |
+| `PJ1` | pressure-gradient data                    | toroidal current density `j_tor`                                     |
+| `PJ2` | pressure-gradient data                    | parallel current density `j_parallel`, using the current `F` profile |
+| `PQ`  | pressure-gradient data                    | safety factor `q`                                                    |
 
 `coordinate="rho"` means the source samples are parameterized by the radial
 label. `coordinate="psin"` means the samples are parameterized by normalized
@@ -109,12 +109,12 @@ when it preserves that packed topology.
 
 One residual call has four main stages:
 
-| Stage | Role |
-| ----- | ---- |
-| profile | Refresh active profiles from packed $x$ |
-| geometry | Compute geometry fields and flux-surface averages from shape profiles |
-| source | Reconstruct `psin`, pressure, field, and current-related source fields from the selected route |
-| residual | Assemble the Grad--Shafranov residual and project it onto each active coefficient block |
+| Stage    | Role                                                                                           |
+| -------- | ---------------------------------------------------------------------------------------------- |
+| profile  | Refresh active profiles from packed $x$                                                        |
+| geometry | Compute geometry fields and flux-surface averages from shape profiles                          |
+| source   | Reconstruct `psin`, pressure, field, and current-related source fields from the selected route |
+| residual | Assemble the Grad--Shafranov residual and project it onto each active coefficient block        |
 
 `Operator.__call__(x)` returns the variational/Galerkin residual. Each residual
 block corresponds to one active profile block and uses the same basis ordering

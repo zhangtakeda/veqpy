@@ -2,14 +2,24 @@
 Module: math.quadrature
 
 Role:
-- Provide pure quadrature node/weight builders.
+- Build pure radial quadrature nodes and weights for the unit interval.
 
-Notes:
-- Builders return nodes on the unit interval ``[0, 1]`` and weights scaled
-  for integration over that same interval.
-- Runtime Numba kernels stay outside this pure-Python construction module.
+Public API:
+- make_quadrature
+- quadrature_generator
+
+Design notes:
+- Builders return ``(rho, weights)`` on ``[0, 1]`` with weights already scaled
+  for integration over that interval.  ``Grid`` combines these radial weights
+  with the uniform poloidal rule when integrating 2D fields.
+- Available schemes are registered by name: ``legendre`` (default), ``lobatto``,
+  ``radau``, ``chebyshev``, and ``uniform``.  The scheme choice controls node
+  placement and radial integration accuracy; it does not select interpolation,
+  differentiation, source-route semantics, or solver behavior.
+- This module is pure Python setup code.  Runtime Numba kernels consume the
+  arrays produced through ``Grid`` or workspace snapshots; they do not call the
+  quadrature builders directly.
 """
-
 from __future__ import annotations
 
 from collections.abc import Callable

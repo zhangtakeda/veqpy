@@ -6,13 +6,13 @@ The main source files live in `veqpy/model/`.
 
 ## Objects
 
-| Object | Responsibility |
-| ------ | -------------- |
-| `Grid` | Radial/angular discretization, quadrature weights, differentiation/integration matrices, and basis tables |
-| `Profile` | Parameterized representation of a one-dimensional radial profile |
-| `Boundary` | Fixed-boundary geometry parameters, including fitting from a GEQDSK boundary |
-| `Geqdsk` | GEQDSK data loading, storage, and conversion |
-| `Equilibrium` | Solved continuous equilibrium snapshot and diagnostic interface |
+| Object        | Responsibility                                                                                            |
+| ------------- | --------------------------------------------------------------------------------------------------------- |
+| `Grid`        | Radial/angular discretization, quadrature weights, differentiation/integration matrices, and basis tables |
+| `Profile`     | Parameterized representation of a one-dimensional radial profile                                          |
+| `Boundary`    | Fixed-boundary geometry parameters, including fitting from a GEQDSK boundary                              |
+| `Geqdsk`      | GEQDSK data loading, storage, and conversion                                                              |
+| `Equilibrium` | Solved continuous equilibrium snapshot and diagnostic interface                                           |
 
 `Profile` represents a one-dimensional radial profile with scale, power, envelope, offset, and optional Chebyshev coefficients. Operator setup lowers active profile topology to flat arrays; `Profile` remains on the model side for `Equilibrium.shape_profiles` and other serializable snapshots.
 

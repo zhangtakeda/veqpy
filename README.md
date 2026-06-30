@@ -1,8 +1,3 @@
-<p align="right">
-  <a href="README.md">English</a> |
-  <a href="docs/README_CN.md">中文</a>
-</p>
-
 <p>
   <img
     align="left"
@@ -221,30 +216,17 @@ paired with VEQPy correctness comparison.
 
 ## Implementation Documentation
 
-Design patterns and model layer:
+User-facing architecture notes:
 
-- [[reactive.md]](docs/details/reactive.md): minimal root state, formula-derived properties,
-  lazy dependency validation, and snapshot consistency.
-- [[registry.md]](docs/details/registry.md): registry-backed method families, source-route
-  coordinate structure, and dispatch boundaries.
-- [[serial.md]](docs/details/serial.md): root-state serialization, JSON/pickle handlers,
-  and persistence boundaries.
-- [[model.md]](docs/details/model.md): responsibilities, snapshot boundaries, and diagnostic
+- [[model.md]](docs/veqpy/model.md): responsibilities, snapshot boundaries, and diagnostic
   interfaces for `Grid`, `Profile`, `Boundary`, `Geqdsk`, and `Equilibrium`.
-
-Hot-path operator and solver:
-
-- [[operator.md]](docs/details/operator.md): packed layout, build plan, stage pipeline,
+- [[operator.md]](docs/veqpy/operator.md): source routes, packed state, stage pipeline,
   and runtime/snapshot separation.
-- [[solver.md]](docs/details/solver.md): nonlinear solve lifecycle, fallback behavior,
+- [[solver.md]](docs/veqpy/solver.md): nonlinear solve lifecycle, fallback behavior,
   residual normalization, and collocation polish.
 
-Numerical construction:
-
-- [[interpolation.md]](docs/details/interpolation.md): one-dimensional source-data remapping.
-- [[quadrature.md]](docs/details/quadrature.md): semantics of radial quadrature schemes.
-- [[calculus.md]](docs/details/calculus.md): scheme boundaries for radial differentiation and
-  integration matrices.
+Low-level base/math design notes for `Reactive`, `Serial`, `Registry`, interpolation,
+quadrature, and calculus now live in the corresponding source module headers.
 
 ## Paper and Reproducibility Resources
 
