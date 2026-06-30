@@ -3,7 +3,7 @@ Module: model.problem
 
 Role:
 - Define the validated fixed-boundary equilibrium problem consumed by Operator.
-- Normalize source-route spelling, profile coefficients, boundary, source-array
+- Normalize source-route spelling, active profile topology, boundary, source-array
   shape, and optional constraint sentinels without applying runtime unit scaling.
 
 Public API:
@@ -27,7 +27,6 @@ from rich.tree import Tree
 
 from veqpy.base import Serial
 from veqpy.model.boundary import Boundary
-from veqpy.model.profile import Profile
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,7 +35,7 @@ class Problem(Serial):
 
     route: str
     coordinate: str
-    profiles: dict[str, Profile]
+    active_profiles: dict[str, int]
     boundary: Boundary
     heat_input: np.ndarray
     current_input: np.ndarray
@@ -60,7 +59,11 @@ class Problem(Serial):
         object.__setattr__(self, "coordinate", coordinate)
         object.__setattr__(self, "nodes", nodes)
 
-        object.__setattr__(self, "profiles", _normalize_profiles(self.profiles))
+        object.__setattr__(
+            self,
+            "active_profiles",
+            _normalize_active_profiles(self.active_profiles),
+        )
         object.__setattr__(self, "boundary", _coerce_boundary(self.boundary))
         object.__setattr__(
             self, "heat_input", _readonly_array(_as_1d_array(self.heat_input, name="heat_input"))
@@ -86,6 +89,7 @@ class Problem(Serial):
         tree.add(f"route: {self.route}")
         tree.add(f"coordinate: {self.coordinate}")
         tree.add(f"nodes: {self.nodes}")
+        tree.add(f"active_profiles: {dict(self.active_profiles)}")
         tree.add(
             f"heat_input: shape={self.heat_input.shape}, "
             f"min={float(np.min(self.heat_input)):.3f}, max={float(np.max(self.heat_input)):.3f}"
@@ -178,14 +182,21 @@ def _coerce_boundary(boundary: Boundary | dict[str, object]) -> Boundary:
     raise TypeError(f"boundary must be Boundary or dict, got {type(boundary).__name__}")
 
 
-def _normalize_profiles(profiles: dict[str, Profile]) -> dict[str, Profile]:
-    normalized: dict[str, Profile] = {}
-    for name, profile in profiles.items():
+def _normalize_active_profiles(active_profiles: dict[str, int]) -> dict[str, int]:
+    normalized: dict[str, int] = {}
+    for name, length in active_profiles.items():
         if not isinstance(name, str):
             raise TypeError(f"profile names must be str, got {type(name).__name__}")
-        if not isinstance(profile, Profile):
-            raise TypeError(f"{name} profile must be Profile, got {type(profile).__name__}")
-        normalized[name] = profile.copy()
+        if isinstance(length, bool) or not isinstance(length, (int, np.integer)):
+            raise TypeError(
+                f"{name} active profile length must be int, got {type(length).__name__}"
+            )
+        length_int = int(length)
+        if length_int <= 0:
+            raise ValueError(f"{name} active profile length must be positive, got {length_int}")
+        normalized[name] = length_int
+    if not normalized:
+        raise ValueError("At least one active profile is required")
     return normalized
 
 

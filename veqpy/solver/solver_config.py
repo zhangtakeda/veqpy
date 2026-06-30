@@ -67,7 +67,9 @@ SUPPORTED_METHODS: dict[str, OptimizeMethod] = {
 DEFAULT_VARIATIONAL_METHOD = "hybr"
 DEFAULT_COLLOCATION_METHOD = "lm"
 DEFAULT_VARIATIONAL_FALLBACK_METHODS = ("lm",)
-SUPPORTED_INITIAL_POLICIES = frozenset(("zeros", "warm", "homothetic"))
+SUPPORTED_INITIAL_POLICIES = frozenset(
+    ("zeros", "warm", "geometric", "geometric-refined", "legacy-geometric", "auto")
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,7 +79,7 @@ class SolverConfig:
     method: str | None = None
     max_residual: float = 1e-6
     max_evaluations: int = 1000
-    initial_policy: str | None = None
+    initial_policy: str | None = "auto"
     enable_fallback: bool = True
     fallback_methods: tuple[str, ...] | list[str] | None = field(default=None)
     enable_verbose: bool = False
@@ -147,13 +149,13 @@ class SolverConfig:
             )
         max_residual = float(self.max_residual)
         max_evaluations = int(self.max_evaluations)
-        initial_policy = None if self.initial_policy is None else str(self.initial_policy).lower()
+        initial_policy = (
+            None if self.initial_policy is None else str(self.initial_policy).strip().lower()
+        )
         if initial_policy == "zero":
             initial_policy = "zeros"
-        if initial_policy == "warmstart":
+        if initial_policy in ("warmstart", "warm-start"):
             initial_policy = "warm"
-        # Accept the common aliases above, then store only the canonical policy
-        # strings consumed by Solver._build_initial_state.
         if initial_policy is not None and initial_policy not in SUPPORTED_INITIAL_POLICIES:
             supported = ", ".join(sorted(SUPPORTED_INITIAL_POLICIES))
             raise ValueError(

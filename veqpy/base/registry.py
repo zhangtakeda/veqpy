@@ -2,17 +2,24 @@
 Module: base.registry
 
 Role:
-- Provide small decorator-backed registries.
+- Provide a small decorator-backed registry for finite method families.
 
 Public API:
 - Registry
 
-Notes:
-- This generalizes decorators shaped like ``read_serializer(*exts)``:
-  calling the decorator with one or more keys returns a wrapper that stores
-  the decorated function in a mapping table and returns the function unchanged.
+Design notes:
+- ``Registry`` generalizes decorators shaped like ``read_serializer(*exts)``:
+  calling the registry with one or more keys returns a wrapper that stores the
+  decorated callable under each normalized key and then returns the callable
+  unchanged.
+- Keys and values are runtime-checked against the declared key/value types.  The
+  mapping is exposed through a read-only ``MappingProxyType`` view so callers can
+  inspect registered methods without mutating the table directly.
+- Registries are appropriate for enumerable construction choices such as
+  serializers, quadrature schemes, calculus schemes, interpolation schemes, and
+  source-route dispatch tables.  They provide naming and lookup; they do not
+  decide whether a numerical or physical method is appropriate for a problem.
 """
-
 from __future__ import annotations
 
 from collections.abc import Callable, Hashable, Iterator, Mapping

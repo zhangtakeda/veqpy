@@ -5,7 +5,7 @@ Role:
 - Bind executable profile-stage callables from preallocated workspace arrays.
 
 Notes:
-- Profile object construction and refresh semantics live in ``veqpy.operator.profile_runtime``.
+- Profile metadata is already flattened before this binding is built.
 - Numerical kernels remain in ``veqpy.engine``.
 """
 

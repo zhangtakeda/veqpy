@@ -2,19 +2,29 @@
 Module: base.serial
 
 Role:
-- Provide the shared serialization framework.
-- Handle JSON, Pickle, and nested object serialization.
+- Provide the shared persistence framework for public root-state objects.
+- Handle JSON, Pickle, numpy arrays, nested ``Serial`` objects, and type-tagged
+  reconstruction through one registry-backed path.
 
 Public API:
 - Serial
 - read_serializer
 - write_serializer
 
-Notes:
-- Subclasses declare serializable fields through ``serial_attributes()``.
-- Dataclasses can infer serializable field types by default.
+Design notes:
+- Subclasses declare persistent fields through ``serial_attributes()``.  Dataclass
+  subclasses can infer those fields from annotations, while non-dataclass models
+  normally provide the schema explicitly.
+- Files store independent root state, not derived caches.  Runtime workspaces,
+  engine temporaries, residual buffers, and other hot-path arrays must stay out
+  of ``serial_attributes()`` so serialization remains stable across internal
+  performance changes.
+- ``load`` creates a new object from a file.  ``read`` mutates an existing object
+  from a compatible file payload.  ``write`` emits the root-state representation.
+- ``Serial`` pairs with ``Reactive``: files persist the minimal state, and loaded
+  objects rebuild derived quantities through formulas instead of replaying stale
+  cache contents.
 """
-
 from __future__ import annotations
 
 import inspect

@@ -37,9 +37,11 @@ dist/
 /*.md
 !README.md
 /*.pdf
+AGENTS.md
 
 # Root-only scratch tools stay local; benchmark generators live under tests/.
 /tools/
+worklog/
 
 # Local environments
 .*
@@ -64,12 +66,14 @@ tests/_outputs/
 tests/demo/
 tests/benchmark/
 
-# Example outputs, if examples/ is introduced.
-examples/
+# Example source is trackable; generated outputs stay local.
 outputs/
 tmp/
+veqlib/artifact/
 
 # Root-only manuscript scratch/artifact directories.
 /figures/
 /references/
-/scripts/
+# /scripts/
+/benchmarks/results/
+/docs_cn/

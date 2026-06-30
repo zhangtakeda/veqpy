@@ -27,7 +27,7 @@ import numpy as np
 from numba import njit
 
 import veqpy.engine.backend_abi as backend_abi
-from veqpy.engine.numba_geometry import update_geometry_hot
+from veqpy.engine.numba_geometry import update_geometry_hot_auto
 from veqpy.engine.numba_profile import update_profiles_packed_bulk
 from veqpy.engine.numba_residual import (
     run_residual_blocks_packed_precomputed_auto,
@@ -128,7 +128,7 @@ def _refresh_hot_runtime(
         hot_runtime_binding.c_active_order,
         hot_runtime_binding.s_active_order,
     )
-    update_geometry_hot(
+    update_geometry_hot_auto(
         hot_runtime_binding.geometry_surface_fields,
         hot_runtime_binding.geometry_radial_fields,
         hot_runtime_binding.a,

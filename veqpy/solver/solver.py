@@ -52,6 +52,28 @@ _X_SCALE_FOURIER_PROFILE_PRIOR = 5.0e-2
 _X_SCALE_F_PROFILE_PRIOR = 2.5e-1
 _X_SCALE_KAPPA_PROFILE_PRIOR = 1.0
 _X_SCALE_OFFSETLESS_PROFILES = frozenset({"h", "v", "psin"})
+_AUTO_CURVE_STRAIN_THRESHOLD = 0.20
+_AUTO_CURVE_STRAIN_SAMPLES = 32
+_AUTO_CURVE_STRAIN_MAX_ORDER = 32
+_AUTO_CURVE_STRAIN_THETA = np.linspace(
+    0.0,
+    2.0 * np.pi,
+    _AUTO_CURVE_STRAIN_SAMPLES,
+    endpoint=False,
+    dtype=np.float64,
+)
+_AUTO_CURVE_STRAIN_SIN_THETA = np.sin(_AUTO_CURVE_STRAIN_THETA)
+_AUTO_CURVE_STRAIN_COS_THETA = np.cos(_AUTO_CURVE_STRAIN_THETA)
+_AUTO_CURVE_STRAIN_ORDERS = np.arange(
+    1,
+    _AUTO_CURVE_STRAIN_MAX_ORDER + 1,
+    dtype=np.float64,
+)
+_AUTO_CURVE_STRAIN_ORDER_THETA = (
+    _AUTO_CURVE_STRAIN_ORDERS[:, np.newaxis] * _AUTO_CURVE_STRAIN_THETA[np.newaxis, :]
+)
+_AUTO_CURVE_STRAIN_SIN_ORDER_THETA = np.sin(_AUTO_CURVE_STRAIN_ORDER_THETA)
+_AUTO_CURVE_STRAIN_COS_ORDER_THETA = np.cos(_AUTO_CURVE_STRAIN_ORDER_THETA)
 
 
 class Solver:
@@ -69,7 +91,7 @@ class Solver:
         self.config = SolverConfig() if config is None else config
         self.result: SolverResult | None = None
         self.history: list[SolverRecord] = []
-        self.x0 = self.operator.encode_initial_state()
+        self.x0 = self.operator.zero_state()
 
     def reset(self) -> None:
         """Zero the solver-owned x0 in place."""
@@ -81,10 +103,15 @@ class Solver:
 
         self.history.clear()
 
-    def replace_case(self, case: Problem) -> None:
-        """Replace the case with a compatible one."""
+    def replace_problem(self, problem: Problem) -> None:
+        """Replace the problem with a compatible one."""
 
-        self.operator.replace_case(case)
+        self.operator.replace_problem(problem)
+
+    def replace_case(self, case: Problem) -> None:
+        """Compatibility alias for ``replace_problem``."""
+
+        self.replace_problem(case)
 
     def solve(
         self,
@@ -113,6 +140,7 @@ class Solver:
     ) -> np.ndarray:
         """Execute one solve and return the converged packed x."""
 
+        call_started = perf_counter()
         solve_config = self._resolve_solve_config(
             method=method,
             max_residual=max_residual,
@@ -137,6 +165,7 @@ class Solver:
         )
         _validate_stage_solve_config(solve_config, residual_kind="variational")
 
+        solve_started = perf_counter()
         if x0 is not None:
             self.x0 = self.operator.coerce_x(x0).copy()
         elif solve_config.initial_policy == "warm":
@@ -151,7 +180,6 @@ class Solver:
 
         x_guess = self.x0.copy()
 
-        started = perf_counter()
         if solve_config.enable_collocation:
             (
                 x_opt,
@@ -181,7 +209,6 @@ class Solver:
                 residual_kind="variational",
                 x0_was_provided=x0 is not None,
             )
-        elapsed = (perf_counter() - started) * 1e6
 
         x_final = self.operator.coerce_x(x_opt)
         residual_final_exc = None
@@ -208,6 +235,7 @@ class Solver:
                 f"{type(residual_final_exc).__name__}: {residual_final_exc}]"
             )
 
+        elapsed = (perf_counter() - solve_started) * 1e6
         self.result = SolverResult(
             x0=x_guess,
             x=x_final,
@@ -218,21 +246,25 @@ class Solver:
             jacobian_evaluations=int(jacobian_evaluations),
             iterations=int(iterations),
             elapsed=elapsed,
+            total_elapsed=elapsed,
         )
-
-        record = SolverRecord(
-            case_snapshot=self.operator.case.copy(),
-            config_snapshot=solve_config,
-            result_snapshot=self.result,
-        )
-
-        if solve_config.enable_verbose:
-            Console().print(record)
-
-        if solve_config.enable_history:
-            self.history.append(record)
 
         self.x0 = x_final.copy()
+        self.result = replace(self.result, total_elapsed=(perf_counter() - call_started) * 1e6)
+
+        if solve_config.enable_verbose or solve_config.enable_history:
+            record = SolverRecord(
+                problem_snapshot=self.operator.problem.copy(),
+                config_snapshot=solve_config,
+                result_snapshot=self.result,
+            )
+
+            if solve_config.enable_verbose:
+                Console().print(record)
+
+            if solve_config.enable_history:
+                self.history.append(record)
+
         return x_final
 
     def build_coeffs(
@@ -324,6 +356,12 @@ class Solver:
             overrides["collocation_max_residual"] = float(collocation_max_residual)
         if collocation_max_evaluations is not None:
             overrides["collocation_max_evaluations"] = int(collocation_max_evaluations)
+        if overrides:
+            overrides = {
+                name: value
+                for name, value in overrides.items()
+                if value != getattr(self.config, name)
+            }
         if not overrides:
             return self.config
         return replace(self.config, **overrides)
@@ -470,34 +508,37 @@ class Solver:
             tuple[str, tuple[np.ndarray, bool, str, int, int, int, float] | None, Exception | None]
         ] = []
 
-        attempt_plans = self._build_attempt_plans(
-            x_guess,
+        x_initial = self.operator.coerce_x(x_guess).copy()
+        label = self._display_attempt_label(
+            solve_config,
+            start_kind=self._display_start_kind(
+                x_initial,
+                solve_config=solve_config,
+                x0_was_provided=x0_was_provided,
+            ),
+        )
+        result, error = self._try_solve_attempt(
+            x_initial,
             solve_config=solve_config,
             residual_kind=residual_kind,
-            x0_was_provided=x0_was_provided,
         )
+        attempts.append((label, result, error))
+        if self._attempt_succeeded(result, error):
+            if result is None:
+                raise RuntimeError("Solve attempt succeeded without a result")
+            return result
 
-        for idx, attempt_plan in enumerate(attempt_plans):
-            label, x_attempt_guess, attempt_config = attempt_plan
-            result, error = self._try_solve_attempt(
-                x_attempt_guess,
-                solve_config=attempt_config,
-                residual_kind=residual_kind,
+        seen_methods = {solve_config.method}
+        fallback_methods = () if not solve_config.enable_fallback else solve_config.fallback_methods
+        for fallback_method in fallback_methods:
+            if fallback_method in seen_methods:
+                continue
+            seen_methods.add(fallback_method)
+            fallback_config = replace(solve_config, method=fallback_method)
+            next_label = self._display_attempt_label(
+                fallback_config,
+                start_kind="warm-fallback",
             )
-            attempts.append((label, result, error))
-            if self._attempt_succeeded(result, error):
-                if result is None:
-                    raise RuntimeError("Solve attempt succeeded without a result")
-                if idx == 0:
-                    return result
-                # For fallback success, preserve every prior attempt in the
-                # message and aggregate counters so diagnostics match total work.
-                return self._finalize_attempts(attempts)
-
-            if idx + 1 >= len(attempt_plans):
-                break
-
-            next_label = attempt_plans[idx + 1][0]
             failure = self._format_attempt_failure(
                 method=label,
                 result=result,
@@ -513,52 +554,21 @@ class Solver:
                     stacklevel=2,
                 )
 
-        return self._finalize_attempts(attempts)
-
-    def _build_attempt_plans(
-        self,
-        x_guess: np.ndarray,
-        *,
-        solve_config: SolverConfig,
-        residual_kind: str,
-        x0_was_provided: bool,
-    ) -> list[tuple[str, np.ndarray, SolverConfig]]:
-        x_initial = self.operator.coerce_x(x_guess).copy()
-        # All attempts start from the same physical state.  This makes method
-        # comparisons meaningful and avoids carrying a failed method's possibly
-        # invalid source fixed-point state into the next attempt.
-        attempt_plans = [
-            (
-                self._display_attempt_label(
-                    solve_config,
-                    start_kind=self._display_start_kind(
-                        x_initial,
-                        solve_config=solve_config,
-                        x0_was_provided=x0_was_provided,
-                    ),
-                ),
+            label = next_label
+            result, error = self._try_solve_attempt(
                 x_initial,
-                solve_config,
+                solve_config=fallback_config,
+                residual_kind=residual_kind,
             )
-        ]
+            attempts.append((label, result, error))
+            if self._attempt_succeeded(result, error):
+                if result is None:
+                    raise RuntimeError("Solve attempt succeeded without a result")
+                # For fallback success, preserve every prior attempt in the
+                # message and aggregate counters so diagnostics match total work.
+                return self._finalize_attempts(attempts)
 
-        seen_methods = {solve_config.method}
-        fallback_methods = () if not solve_config.enable_fallback else solve_config.fallback_methods
-        for fallback_method in fallback_methods:
-            if fallback_method in seen_methods:
-                continue
-            seen_methods.add(fallback_method)
-            fallback_config = replace(solve_config, method=fallback_method)
-            attempt_plans.append(
-                (
-                    self._display_attempt_label(fallback_config, start_kind="warm-fallback"),
-                    # Fallbacks compare methods from the same physical initial
-                    # state, not from the failed method's terminal iterate.
-                    x_initial.copy(),
-                    fallback_config,
-                )
-            )
-        return attempt_plans
+        return self._finalize_attempts(attempts)
 
     def _try_solve_attempt(
         self,
@@ -682,8 +692,14 @@ class Solver:
     ) -> str:
         if x0_was_provided or solve_config.initial_policy == "warm":
             return "warm-start"
-        if solve_config.initial_policy == "homothetic":
-            return "homothetic-start"
+        if solve_config.initial_policy == "geometric":
+            return "geometric-start"
+        if solve_config.initial_policy == "geometric-refined":
+            return "geometric-refined-start"
+        if solve_config.initial_policy == "legacy-geometric":
+            return "legacy-geometric-start"
+        if solve_config.initial_policy == "auto":
+            return "auto-start"
         if solve_config.initial_policy == "zeros":
             return "zero-start"
         x_eval = self.operator.coerce_x(x_guess)
@@ -802,11 +818,7 @@ class Solver:
         message = str(opt.message)
         if not bool(opt.success) and accepted:
             message = f"{message} [accepted by residual]"
-        if (
-            bool(opt.success)
-            and not accepted
-            and residual_kind == "variational"
-        ):
+        if bool(opt.success) and not accepted and residual_kind == "variational":
             message = f"{message} [rejected by residual={residual_norm:.6e}]"
         return (
             x_opt,
@@ -979,7 +991,6 @@ class Solver:
             x_guess,
             solve_config=solve_config,
             residual_kind="variational",
-            legacy_transform="linear",
             balanced_scope=balanced_scope,
             initial_residual=initial_residual if balanced_scope == "block" else None,
         )
@@ -1021,7 +1032,6 @@ class Solver:
         *,
         solve_config: SolverConfig,
         residual_kind: str,
-        legacy_transform: str = "linear",
         balanced_scope: str = "block",
         initial_residual: np.ndarray | None = None,
     ) -> tuple[
@@ -1033,9 +1043,7 @@ class Solver:
         if mode == "none":
             return None, None
         if _mode_is_block_rms(mode):
-            return self._build_legacy_residual_transform_wrapper(
-                x_guess, transform=legacy_transform
-            )
+            return self._build_legacy_residual_transform_wrapper(x_guess)
         return self._build_balanced_residual_transform_wrapper(
             x_guess,
             solve_config=solve_config,
@@ -1049,8 +1057,6 @@ class Solver:
     def _build_legacy_residual_transform_wrapper(
         self,
         x_guess: np.ndarray,
-        *,
-        transform: str,
     ) -> tuple[
         Callable[[np.ndarray], np.ndarray] | None, Callable[[np.ndarray], np.ndarray] | None
     ]:
@@ -1084,8 +1090,6 @@ class Solver:
                 if scale is None:
                     scale = np.ones_like(raw_buffer)
             np.divide(raw_buffer, scale, out=scaled_buffer)
-            if transform == "asinh":
-                np.arcsinh(scaled_buffer, out=scaled_buffer)
             return scaled_buffer.copy()
 
         def get_raw_residual(x: np.ndarray) -> np.ndarray:
@@ -1156,9 +1160,7 @@ class Solver:
                 x_scale=_build_x_block_scale_vector(self.operator, x_scale_guess),
                 probe_count=int(solve_config.residual_normalization_probe_count),
                 probe_step=float(solve_config.residual_normalization_probe_step),
-                sensitivity_lambda=float(
-                    solve_config.residual_normalization_sensitivity_lambda
-                ),
+                sensitivity_lambda=float(solve_config.residual_normalization_sensitivity_lambda),
             )
 
         if initial_residual is None and not _mode_is_block_rms(mode):
@@ -1234,6 +1236,7 @@ class Solver:
             return None, x_eval, None
 
         inv_scale = 1.0 / x_scale
+        x_buffer = np.empty_like(x_eval)
 
         def map_z_to_x(z: np.ndarray) -> np.ndarray:
             z_eval = np.asarray(z, dtype=np.float64)
@@ -1241,7 +1244,8 @@ class Solver:
                 raise ValueError(f"Expected z to have shape {x_eval.shape}, got {z_eval.shape}")
             # Root solvers operate in z-space for conditioning, but all operator
             # kernels must see the original packed x coordinates.
-            return self.operator.coerce_x(z_eval * x_scale)
+            np.multiply(z_eval, x_scale, out=x_buffer)
+            return x_buffer
 
         return map_z_to_x, x_eval * inv_scale, map_z_to_x
 
@@ -1278,20 +1282,18 @@ class Solver:
         normalizer_applied = False
 
         if residual_kind == "variational":
-            legacy_transform = "asinh" if solve_config.method == "lm" else "linear"
             normalized_fun, get_raw_residual = self._build_normalized_residual_wrapper(
                 x_guess,
                 solve_config=solve_config,
                 residual_kind=residual_kind,
-                legacy_transform=legacy_transform,
             )
             if normalized_fun is not None:
                 least_squares_fun = normalized_fun
                 normalizer_applied = True
                 if solve_config.method == "lm":
-                    # LM already uses the transformed residual scale; x_scale=1
-                    # prevents SciPy from layering a second heuristic scale on
-                    # top of the solver's block-aware coefficient scale.
+                    # LM already sees a fixed block-normalized objective;
+                    # x_scale=1 prevents SciPy from layering a separate
+                    # heuristic variable scale onto that calibrated residual.
                     kwargs["x_scale"] = 1.0
 
         if (
@@ -1454,14 +1456,91 @@ def _build_initial_state(operator: Operator, solve_config: SolverConfig) -> np.n
 
     initial_policy = solve_config.initial_policy
     if initial_policy is None:
-        return operator.encode_initial_state()
+        return operator.zero_state()
     if initial_policy == "zeros":
         return np.zeros(operator.x_size, dtype=np.float64)
-    if initial_policy == "homothetic":
+    if initial_policy == "geometric":
+        return operator.build_boundary_slope_initial_state(include_active_psin=False)
+    if initial_policy == "geometric-refined":
         return operator.build_boundary_slope_initial_state()
+    if initial_policy == "legacy-geometric":
+        return operator.build_legacy_boundary_slope_initial_state()
+    if initial_policy == "auto":
+        if _boundary_curve_strain(operator.problem.boundary) >= _AUTO_CURVE_STRAIN_THRESHOLD:
+            return operator.build_boundary_slope_initial_state()
+        return np.zeros(operator.x_size, dtype=np.float64)
     if initial_policy == "warm":
         raise RuntimeError("_build_initial_state('warm') needs the current solver x0")
     raise ValueError(f"Unsupported initial_policy {initial_policy!r}")
+
+
+def _boundary_curve_strain(boundary: object) -> float:
+    c_offsets = _boundary_offset_array(getattr(boundary, "c_offsets", None))
+    s_offsets = _boundary_offset_array(getattr(boundary, "s_offsets", None))
+    if c_offsets is None or s_offsets is None:
+        return float("inf")
+    has_c_shape = c_offsets.size > 0 and bool(np.any(c_offsets != 0.0))
+    has_s_shape = s_offsets.size > 1 and bool(np.any(s_offsets[1:] != 0.0))
+    if not has_c_shape and not has_s_shape:
+        return 0.0
+
+    try:
+        kappa = abs(float(getattr(boundary, "ka", 1.0)))
+    except (TypeError, ValueError):
+        return float("inf")
+    if not np.isfinite(kappa):
+        return float("inf")
+
+    theta = _AUTO_CURVE_STRAIN_THETA
+    eta = np.zeros_like(_AUTO_CURVE_STRAIN_THETA)
+    eta_prime = np.zeros_like(_AUTO_CURVE_STRAIN_THETA)
+    if c_offsets.size:
+        eta += c_offsets[0]
+
+    c_fast_count = min(max(c_offsets.size - 1, 0), _AUTO_CURVE_STRAIN_MAX_ORDER)
+    if c_fast_count:
+        c_tail = c_offsets[1 : c_fast_count + 1]
+        eta += c_tail @ _AUTO_CURVE_STRAIN_COS_ORDER_THETA[:c_fast_count]
+        eta_prime -= (
+            _AUTO_CURVE_STRAIN_ORDERS[:c_fast_count] * c_tail
+        ) @ _AUTO_CURVE_STRAIN_SIN_ORDER_THETA[:c_fast_count]
+    for order in range(c_fast_count + 1, c_offsets.size):
+        order_theta = float(order) * theta
+        eta += c_offsets[order] * np.cos(order_theta)
+        eta_prime -= float(order) * c_offsets[order] * np.sin(order_theta)
+
+    s_fast_count = min(max(s_offsets.size - 1, 0), _AUTO_CURVE_STRAIN_MAX_ORDER)
+    if s_fast_count:
+        s_tail = s_offsets[1 : s_fast_count + 1]
+        eta += s_tail @ _AUTO_CURVE_STRAIN_SIN_ORDER_THETA[:s_fast_count]
+        eta_prime += (
+            _AUTO_CURVE_STRAIN_ORDERS[:s_fast_count] * s_tail
+        ) @ _AUTO_CURVE_STRAIN_COS_ORDER_THETA[:s_fast_count]
+    for order in range(s_fast_count + 1, s_offsets.size):
+        order_theta = float(order) * theta
+        eta += s_offsets[order] * np.sin(order_theta)
+        eta_prime += float(order) * s_offsets[order] * np.cos(order_theta)
+
+    speed_boundary = np.sqrt(
+        (np.sin(theta + eta) * (1.0 + eta_prime)) ** 2 + (kappa * _AUTO_CURVE_STRAIN_COS_THETA) ** 2
+    )
+    speed_ellipse = np.sqrt(
+        _AUTO_CURVE_STRAIN_SIN_THETA**2 + (kappa * _AUTO_CURVE_STRAIN_COS_THETA) ** 2
+    )
+    strain = (speed_boundary - speed_ellipse) / np.maximum(speed_ellipse, 1.0e-12)
+    return float(np.sqrt(np.mean(strain * strain)))
+
+
+def _boundary_offset_array(value: object) -> np.ndarray | None:
+    if value is None:
+        return np.zeros(1, dtype=np.float64)
+    try:
+        offsets = np.asarray(value, dtype=np.float64).reshape(-1)
+    except (TypeError, ValueError):
+        return None
+    if offsets.size == 0 or not bool(np.all(np.isfinite(offsets))):
+        return None
+    return offsets
 
 
 def _residual_within_acceptance(residual_norm: float | None, solve_config: SolverConfig) -> bool:
@@ -1522,11 +1601,7 @@ def _build_x_block_scale_vector(operator, x_guess: np.ndarray) -> np.ndarray | N
             return None
         block_guess = x_eval[coeff_indices]
         guess_rms = float(np.linalg.norm(block_guess) / np.sqrt(length))
-        offset_scale = (
-            0.0
-            if profile_name in _X_SCALE_OFFSETLESS_PROFILES
-            else abs(float(offset))
-        )
+        offset_scale = 0.0 if profile_name in _X_SCALE_OFFSETLESS_PROFILES else abs(float(offset))
         profile_scale = abs(float(profile_scale))
         profile_prior = _x_scale_profile_prior(profile_name)
         if abs(profile_scale - 1.0) <= 1.0e-12:

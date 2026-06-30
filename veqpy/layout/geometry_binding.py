@@ -16,7 +16,7 @@ from collections.abc import Callable
 
 import numpy as np
 
-from veqpy.engine.numba_geometry import update_geometry_hot
+from veqpy.engine.numba_geometry import update_geometry_hot_auto
 from veqpy.engine.numba_source import update_fourier_family_fields
 
 
@@ -63,9 +63,9 @@ def build_geometry_stage_runner(
             c_effective_order,
             s_effective_order,
         )
-        # update_geometry_hot overwrites all surface/radial rows, so callers can
+        # update_geometry_hot_auto overwrites all surface/radial rows, so callers can
         # reuse the same workspace without clearing it between residual calls.
-        update_geometry_hot(
+        update_geometry_hot_auto(
             surface_fields,
             radial_fields,
             a,
