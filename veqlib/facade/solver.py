@@ -1,3 +1,10 @@
+"""Low-level VEQlib solver facade around a thread-owned C++ workspace.
+
+Most callers should use ``veqlib.facade.Kernel``. This layer stays close to the
+nanobind surface for benchmark harnesses and lifecycle tests that need explicit
+``set_kernel_runtime`` / ``solve_direct`` control.
+"""
+
 from __future__ import annotations
 
 import threading

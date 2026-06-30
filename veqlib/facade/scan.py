@@ -1,3 +1,11 @@
+"""JSON payload helpers for legacy/debug continuation scans.
+
+The production hot path uses typed runtime arguments and ``set_kernel_runtime``.
+This module exists for payload-sequence experiments that rewrite solver policy
+fields in already-formed JSON payloads without taking ownership of native result
+arrays.
+"""
+
 from __future__ import annotations
 
 import copy

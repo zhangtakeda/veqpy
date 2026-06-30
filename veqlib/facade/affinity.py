@@ -1,3 +1,10 @@
+"""CPU affinity helpers for short VEQlib native calls.
+
+Pinning is intentionally a scoped runtime policy, not part of artifact identity.
+Nested calls are tracked per Python thread so benchmark loops can pin once
+around many native solves without fighting lower-level facade calls.
+"""
+
 from __future__ import annotations
 
 import os

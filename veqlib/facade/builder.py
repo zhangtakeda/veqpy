@@ -1,3 +1,11 @@
+"""Artifact planning, build, and cache metadata for VEQlib kernels.
+
+Artifact identity is a setup-time contract: topology, build options, toolchain
+ABI, and source digests participate, while runtime boundary/input/config values
+do not. This keeps repeated case solves on one topology independent from CMake
+artifact lifecycle details.
+"""
+
 from __future__ import annotations
 
 import base64

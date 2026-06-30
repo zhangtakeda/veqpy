@@ -1,3 +1,11 @@
+"""Typed VEQlib facade values lowered to the native kernel ABI.
+
+The dataclasses in this module canonicalize topology/build/runtime inputs into
+stable Python objects before ``kernel.py`` lowers them to C++ scalars, enum
+codes, and 1D C-contiguous ``float64`` arrays. They are VEQlib contracts, not
+VEQPy operator/source-plan adapters.
+"""
+
 from __future__ import annotations
 
 import base64
@@ -16,6 +24,8 @@ from .options import (
 )
 
 _KERNEL_TOPOLOGY_KEY_LENGTH = 32
+# These integer wire values mirror the generated C++ ABI enum contract.
+# Changing them is a cross-language compatibility change, not a Python refactor.
 _SOURCE_ROUTE_CODES = {
     "PF": 1,
     "PP": 2,

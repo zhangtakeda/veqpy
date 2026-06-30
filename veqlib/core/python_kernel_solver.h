@@ -851,6 +851,9 @@ namespace veqlib_python
             apply_runtime_case(std::move(next_input), data.dump());
         }
 
+        // Typed runtime setter used by the Python facade hot path.  The facade
+        // normalizes arrays to 1D float64/C-contiguous views; this C++ boundary
+        // remains authoritative for topology-dependent lengths and enum validity.
         void set_kernel_runtime(const std::string& case_name,
                                 double             a,
                                 double             R0,

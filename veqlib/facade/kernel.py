@@ -1,3 +1,11 @@
+"""High-level Python handle for topology-specific VEQlib kernels.
+
+This module owns the user-facing ``Kernel`` lifecycle: artifact resolution,
+typed ``KernelBoundary``/``KernelInput``/``KernelConfig`` runtime calls, and
+Python-owned result snapshots. It deliberately does not translate VEQPy
+``Operator`` objects or make benchmark adapters part of the VEQlib ABI.
+"""
+
 from __future__ import annotations
 
 import json
@@ -86,6 +94,9 @@ class Kernel:
         self.history.append(self.result)
         return self.result
 
+    # Raw numerical APIs intentionally do not expose solve policy.  The default
+    # KernelConfig below only installs the native current-case context required
+    # before residual/JVP/Jacobian kernels run.
     def residual(self, x: Any, boundary: KernelBoundary, input: KernelInput) -> np.ndarray:
         out = np.empty(self.x_size, dtype=np.float64)
         self.residual_into(out, x, boundary, input)

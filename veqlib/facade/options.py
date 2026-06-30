@@ -1,3 +1,9 @@
+"""Python mirrors of VEQlib C++ ABI option codes.
+
+Strings are a facade convenience only; native kernels consume integer enum
+codes. Keep these constants synchronized with ``veqlib/core/abi_enums.h``.
+"""
+
 from __future__ import annotations
 
 from typing import Final

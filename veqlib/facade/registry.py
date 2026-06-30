@@ -1,3 +1,11 @@
+"""Native module registry and thread-owned VEQlib solver wrappers.
+
+The registry caches loaded topology artifacts at process scope, but each
+``KernelSolver`` wrapper owns mutable C++ workspace and is guarded by the Python
+thread that created it. Sharing artifacts is allowed; sharing solver workspace
+across threads is not.
+"""
+
 from __future__ import annotations
 
 import importlib.util
