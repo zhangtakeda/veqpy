@@ -32,24 +32,31 @@ from config import (
     SAVE_DPI,
     SAVE_TRANSPARENT,
     SCIENTIFIC_DECIMALS,
+    SCRIPT_CONSOLE,
     SINGLE_COLUMN_WIDTH,
     TICK_LABEL_SIZE,
     TITLE_FONT_SIZE,
     apply_plot_style,
     data_path,
     figure_path,
+    format_script_sci,
     load_equilibrium_json,
     load_reduced_equilibrium_manifest,
     load_reference_equilibrium_manifest,
+    make_script_table,
     manifest_entry,
     metadata_float,
     metadata_int,
     normalize_signature,
+    print_output_table,
+    print_script_config,
+    print_script_table,
     read_geqdsk,
     reduced_equilibrium_json_path,
     reference_manifest_entry,
     save_figure_outputs,
     scaled_font_size,
+    script_progress,
     signature_from_metadata,
 )
 from matplotlib import colors, ticker
@@ -64,9 +71,9 @@ RESIDUAL_CACHE_VERSION = 10
 CASE_KEYS_TO_RUN = "all"
 
 EXTERNAL_REFERENCE_LABELS = {
-    "solovev": "GEQDSK",
-    "chease": "GEQDSK",
-    "efit": "GEQDSK",
+    "solovev": "G-EQDSK",
+    "chease": "G-EQDSK",
+    "efit": "G-EQDSK",
 }
 CONFIG_CMAP = "magma"
 LOG_RESIDUAL_FLOOR = -5.0
@@ -591,6 +598,31 @@ def print_residual_norm_latex_table(rows: list[dict[str, object]]) -> None:
     print(build_residual_norm_latex_table(rows))
 
 
+def print_residual_norm_summary(rows: list[dict[str, object]]) -> None:
+    residual_symbol = "G_std" if USE_STANDARD_GS_RESIDUAL else "G"
+    table = make_script_table(
+        "projected and pointwise Grad-Shafranov residual diagnostics",
+        [
+            ("Case", "left"),
+            ("epsilon_proj", "right"),
+            (f"RMS_all({residual_symbol})", "right"),
+            (f"RMS_<0.8({residual_symbol})", "right"),
+            (f"RMS_>=0.8({residual_symbol})", "right"),
+            (f"|{residual_symbol}|_max", "right"),
+        ],
+    )
+    for row in rows:
+        table.add_row(
+            str(row["case_params"]),
+            format_script_sci(row["epsilon_proj"]),
+            format_script_sci(row["G_rms"]),
+            format_script_sci(row["G_rms_interior"]),
+            format_script_sci(row["G_rms_edge"]),
+            format_script_sci(row["G_max"]),
+        )
+    print_script_table(SCRIPT_CONSOLE, table)
+
+
 def periodic_surface_arrays(
     sample: ResidualSample, values: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -746,7 +778,7 @@ def plot_radial_panel(
             None,
             0.0,
         ),
-        "GEQDSK": (
+        "G-EQDSK": (
             "-",
             "#000000",
             EXTERNAL_RADIAL_LINE_WIDTH,
@@ -756,7 +788,7 @@ def plot_radial_panel(
         ),
     }
     zorder_by_label = {
-        "GEQDSK": 1.0,
+        "G-EQDSK": 1.0,
         "Ref": 1.5,
         "Low": 2.0,
         "Medium": 2.5,
@@ -1000,7 +1032,7 @@ def plot_shape_comparison_panel(
                 ls=SHAPE_TARGET_LINESTYLE,
                 alpha=1.0,
                 zorder=2,
-                label="GEQDSK" if show_legend and level == SHAPE_SURFACE_LEVELS[-1] else None,
+                label="G-EQDSK" if show_legend and level == SHAPE_SURFACE_LEVELS[-1] else None,
             )
         if sample_r.size:
             ax.plot(
@@ -1190,7 +1222,7 @@ def build_compact_figure(case_samples: dict[str, list[ResidualSample]]) -> plt.F
             color=COMPACT_REFERENCE_COLOR,
             lw=SHAPE_LINE_WIDTH * SHAPE_TARGET_LINE_WIDTH_SCALE,
             ls=SHAPE_TARGET_LINESTYLE,
-            label="GEQDSK",
+            label="G-EQDSK",
         ),
         Line2D(
             [0],
@@ -1217,31 +1249,56 @@ def build_compact_figure(case_samples: dict[str, list[ResidualSample]]) -> plt.F
 def main() -> None:
     apply_plot_style()
     selected_cases = CASE_KEYS if CASE_KEYS_TO_RUN == "all" else tuple(CASE_KEYS_TO_RUN)
-    case_samples = load_case_samples_from_equilibrium_jsons(
-        selected_cases,
+    print_script_config(
+        SCRIPT_CONSOLE,
+        "figure 08 / table 06: residual distribution",
+        (
+            ("cases", len(selected_cases)),
+            ("configs", ", ".join(CONFIG_LABELS)),
+            ("residual", "standard GS" if USE_STANDARD_GS_RESIDUAL else "transformed"),
+        ),
     )
-
-    fig = build_figure(case_samples)
-    save_figure_outputs(
-        fig,
-        png_path=PNG_PATH,
-        pdf_path=PDF_PATH,
-        dpi=SAVE_DPI,
-        transparent=SAVE_TRANSPARENT,
-    )
-    plt.close(fig)
-    if COMPACT_PNG_PATH is not None:
-        compact_fig = build_compact_figure(case_samples)
-        save_figure_outputs(
-            compact_fig,
-            png_path=COMPACT_PNG_PATH,
-            pdf_path=None,
+    with script_progress(SCRIPT_CONSOLE) as progress:
+        total = 4 if COMPACT_PNG_PATH is not None else 3
+        task = progress.add_task("", total=total, current="load samples", phase="[cyan]run[/]")
+        case_samples = load_case_samples_from_equilibrium_jsons(
+            selected_cases,
+        )
+        progress.update(task, advance=1, current="main figure", phase="[cyan]run[/]")
+        fig = build_figure(case_samples)
+        saved_paths = save_figure_outputs(
+            fig,
+            png_path=PNG_PATH,
+            pdf_path=PDF_PATH,
             dpi=SAVE_DPI,
             transparent=SAVE_TRANSPARENT,
         )
-        plt.close(compact_fig)
-    rows = residual_norm_rows(case_samples)
-    print_residual_norm_latex_table(rows)
+        plt.close(fig)
+        progress.update(task, advance=1, current="compact figure", phase="[cyan]run[/]")
+        compact_saved_paths: list[str] = []
+        if COMPACT_PNG_PATH is not None:
+            compact_fig = build_compact_figure(case_samples)
+            compact_saved_paths = save_figure_outputs(
+                compact_fig,
+                png_path=COMPACT_PNG_PATH,
+                pdf_path=None,
+                dpi=SAVE_DPI,
+                transparent=SAVE_TRANSPARENT,
+            )
+            plt.close(compact_fig)
+            progress.update(task, advance=1, current="table", phase="[cyan]run[/]")
+        rows = residual_norm_rows(case_samples)
+        progress.update(task, advance=1, current="table", phase="[green]done[/]")
+    print_residual_norm_summary(rows)
+    output_rows = [
+        ("Figure 08", path, "Sampled standard-form residual distribution")
+        for path in saved_paths
+    ]
+    output_rows.extend(
+        ("Figure 08 compact", path, "Compact G-EQDSK vs VEQ shape comparison")
+        for path in compact_saved_paths
+    )
+    print_output_table(SCRIPT_CONSOLE, output_rows)
 
 
 if __name__ == "__main__":

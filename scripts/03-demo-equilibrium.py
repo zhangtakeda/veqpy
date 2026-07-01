@@ -16,10 +16,17 @@ from config import (
     MU0,
     SAVE_DPI,
     SAVE_TRANSPARENT,
+    SCRIPT_CONSOLE,
     active_profiles_from_coeffs,
     demo_psin_reference_profiles,
     figure_path,
+    format_script_sci,
+    make_script_table,
+    print_output_table,
+    print_script_config,
+    print_script_table,
     save_figure_outputs,
+    script_progress,
 )
 
 from veqpy.model import Boundary, Grid, Problem
@@ -96,21 +103,46 @@ def build_equilibrium_figure(equilibrium) -> plt.Figure:
 
 
 def main() -> None:
-    equilibrium = solve_reference_equilibrium()
-    fig = build_equilibrium_figure(equilibrium)
-
-    saved_paths = save_figure_outputs(
-        fig,
-        png_path=PNG_PATH,
-        pdf_path=PDF_PATH,
-        dpi=SAVE_DPI,
-        transparent=SAVE_TRANSPARENT,
-        facecolor=FIGURE_FACE_COLOR,
+    print_script_config(
+        SCRIPT_CONSOLE,
+        "figure 03: controlled PF reference equilibrium",
+        (
+            ("route", "PF(psin, uniform)"),
+            ("solve grid", f"{GRID.Nr}x{GRID.Nt}"),
+            ("snapshot grid", f"{SNAPSHOT_GRID.Nr}x{SNAPSHOT_GRID.Nt}"),
+        ),
     )
+    with script_progress(SCRIPT_CONSOLE) as progress:
+        task = progress.add_task("", total=3, current="solve", phase="[cyan]run[/]")
+        equilibrium = solve_reference_equilibrium()
+        progress.update(task, advance=1, current="plot", phase="[cyan]run[/]")
+        fig = build_equilibrium_figure(equilibrium)
+        progress.update(task, advance=1, current="save", phase="[cyan]run[/]")
+
+        saved_paths = save_figure_outputs(
+            fig,
+            png_path=PNG_PATH,
+            pdf_path=PDF_PATH,
+            dpi=SAVE_DPI,
+            transparent=SAVE_TRANSPARENT,
+            facecolor=FIGURE_FACE_COLOR,
+        )
+        progress.update(task, advance=1, current="save", phase="[green]done[/]")
     plt.close(fig)
 
-    for path in saved_paths:
-        print(f"saved: {path}")
+    summary = make_script_table(
+        "controlled PF reference equilibrium",
+        [("quantity", "left"), ("value", "right")],
+    )
+    q95 = float(np.interp(0.95, np.asarray(equilibrium.psin), np.asarray(equilibrium.q)))
+    summary.add_row("Ip [A]", format_script_sci(float(equilibrium.Ip)))
+    summary.add_row("beta_t", format_script_sci(float(equilibrium.beta_t)))
+    summary.add_row("q95", format_script_sci(q95))
+    print_script_table(SCRIPT_CONSOLE, summary)
+    print_output_table(
+        SCRIPT_CONSOLE,
+        [("Figure 03", path, "Controlled PF reference equilibrium") for path in saved_paths],
+    )
 
 
 if __name__ == "__main__":

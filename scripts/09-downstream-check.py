@@ -35,23 +35,29 @@ from config import (
     PLOT_TICK_RIGHT,
     PLOT_TICK_TOP,
     REDUCED_CONFIG_LABELS,
-    REFERENCE_LABELS,
     SAVE_DPI,
     SAVE_TRANSPARENT,
     SCIENTIFIC_DECIMALS,
+    SCRIPT_CONSOLE,
     TICK_LABEL_FONT_SIZE,
     TITLE_FONT_SIZE,
     apply_plot_style,
     figure_path,
+    format_script_sci,
     load_equilibrium_json,
     load_reduced_equilibrium_manifest,
+    make_script_table,
     manifest_entry,
     metadata_float,
     metadata_int,
+    print_output_table,
+    print_script_config,
+    print_script_table,
     read_geqdsk,
     reduced_equilibrium_json_path,
     save_figure_outputs,
     scaled_font_size,
+    script_progress,
 )
 from scipy.interpolate import RegularGridInterpolator
 
@@ -61,6 +67,7 @@ PNG_PATH = figure_path("09-downstream-check.png")
 PDF_PATH = None
 
 LEVEL_LABELS = REDUCED_CONFIG_LABELS
+GEQDSK_DISPLAY_LABEL = "G-EQDSK"
 LEGEND_LABEL_SPACING = 0.15
 RADIAL_LINE_WIDTH = 1.4
 EXTERNAL_RADIAL_LINE_WIDTH = 0.75 * RADIAL_LINE_WIDTH
@@ -425,6 +432,29 @@ def latex_error_table(case_results: list[tuple[str, list[TransportResult]]]) -> 
     return "\n".join(lines)
 
 
+def print_transport_error_summary(case_results: list[tuple[str, list[TransportResult]]]) -> None:
+    table = make_script_table(
+        "propagated temperature-profile RMS errors and scalar errors",
+        [
+            ("Case", "left"),
+            ("RMS(delta_T)", "right"),
+            ("Delta_W", "right"),
+            ("Delta_beta_t", "right"),
+        ],
+    )
+    for _case_key, results in case_results:
+        reference = results[0]
+        x = reference.geometry.x
+        for result in results[1:]:
+            table.add_row(
+                result.label,
+                format_script_sci(rel_rms(reference.temperature, result.temperature, x)),
+                format_script_sci(rel_abs(reference.thermal_energy, result.thermal_energy)),
+                format_script_sci(rel_abs(reference.beta_proxy, result.beta_proxy)),
+            )
+    print_script_table(SCRIPT_CONSOLE, table)
+
+
 def style_axis(ax: plt.Axes) -> None:
     ax.title.set_fontsize(scaled_font_size(TITLE_FONT_SIZE))
     ax.xaxis.label.set_fontsize(scaled_font_size(AXIS_LABEL_FONT_SIZE))
@@ -631,7 +661,7 @@ def plot_results(
 
 def prepare_case_reference(case_key: str, x_eval: np.ndarray) -> TransportGeometry:
     geqdsk = read_geqdsk(CASE_REFERENCE_GFILES[case_key])
-    return geqdsk_transport_geometry(geqdsk, x_eval, label=REFERENCE_LABELS[case_key])
+    return geqdsk_transport_geometry(geqdsk, x_eval, label=GEQDSK_DISPLAY_LABEL)
 
 
 def load_reduced_transport_geometries(
@@ -686,19 +716,46 @@ def solve_case_results(
 
 
 def main() -> None:
-    manifest = load_reduced_equilibrium_manifest()
+    print_script_config(
+        SCRIPT_CONSOLE,
+        "figure 09 / table 07: downstream geometry check",
+        (
+            ("cases", len(CASE_KEYS)),
+            ("configs", ", ".join(REDUCED_CONFIG_LABELS)),
+            ("eval points", EVAL_POINTS),
+        ),
+    )
+    with script_progress(SCRIPT_CONSOLE) as progress:
+        total = len(CASE_KEYS) + 3
+        task = progress.add_task("", total=total, current="load manifest", phase="[cyan]run[/]")
+        manifest = load_reduced_equilibrium_manifest()
+        progress.update(task, advance=1, current="solve cases", phase="[cyan]solve[/]")
 
-    x_eval = np.linspace(0.0, 1.0, EVAL_POINTS, dtype=np.float64)
-    x_eval[0] = X_FLOOR
+        x_eval = np.linspace(0.0, 1.0, EVAL_POINTS, dtype=np.float64)
+        x_eval[0] = X_FLOOR
 
-    case_results = [
-        (case_key, solve_case_results(manifest, case_key, x_eval)) for case_key in CASE_KEYS
-    ]
-    saved_paths = plot_results(case_results, PNG_PATH, PDF_PATH)
+        case_results = []
+        for case_key in CASE_KEYS:
+            progress.update(task, current=CASE_LABELS[case_key], phase="[cyan]solve[/]")
+            case_results.append((case_key, solve_case_results(manifest, case_key, x_eval)))
+            progress.update(task, advance=1, current=CASE_LABELS[case_key], phase="[cyan]solve[/]")
+        progress.update(task, current="plot", phase="[cyan]run[/]")
+        saved_paths = plot_results(case_results, PNG_PATH, PDF_PATH)
+        progress.update(task, advance=1, current="table", phase="[cyan]run[/]")
+        progress.update(task, advance=1, current="table", phase="[green]done[/]")
 
-    for path in saved_paths:
-        print(f"wrote {path}")
-    print(latex_error_table(case_results))
+    print_transport_error_summary(case_results)
+    print_output_table(
+        SCRIPT_CONSOLE,
+        [
+            (
+                "Figure 09",
+                path,
+                "Sensitivity of a one-dimensional heat-diffusion solution",
+            )
+            for path in saved_paths
+        ],
+    )
 
 
 if __name__ == "__main__":

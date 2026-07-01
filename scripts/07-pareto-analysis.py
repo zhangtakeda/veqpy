@@ -11,7 +11,6 @@ import json
 import multiprocessing
 import os
 import random
-import sys
 import time
 from dataclasses import asdict, dataclass
 from functools import lru_cache
@@ -55,6 +54,7 @@ from config import (
     SAVE_DPI,
     SAVE_TRANSPARENT,
     SCIENTIFIC_DECIMALS,
+    SCRIPT_CONSOLE,
     SOLVER_INITIAL_POLICY,
     TICK_LABEL_FONT_SIZE,
     TITLE_FONT_SIZE,
@@ -63,9 +63,16 @@ from config import (
     build_geqdsk_boundary,
     coefficients_from_profile_coeffs,
     figure_path,
+    format_script_float,
+    format_script_sci,
+    make_script_table,
+    print_output_table,
+    print_script_config,
+    print_script_table,
     read_geqdsk,
     save_figure_outputs,
     scaled_font_size,
+    script_progress,
 )
 from config import (
     as_float64_array as _as_float64_array,
@@ -548,10 +555,17 @@ class ParetoProgressDisplay:
         self.states = {
             case_key: CaseProgressState(label=CASE_LABELS[case_key]) for case_key in self.case_keys
         }
-        self._interactive = bool(getattr(sys.stdout, "isatty", lambda: False)())
-        self._rendered_once = False
-        self._last_render_monotonic = 0.0
-        self._min_render_interval_s = 0.75
+        self._progress_context = script_progress(SCRIPT_CONSOLE)
+        self._progress = self._progress_context.__enter__()
+        self._task_ids: dict[str, int] = {
+            case_key: self._progress.add_task(
+                "",
+                total=1,
+                current=CASE_LABELS[case_key],
+                phase="[dim]pending[/]",
+            )
+            for case_key in self.case_keys
+        }
 
     def preparing(self, case_key: str) -> None:
         state = self.states[case_key]
@@ -559,6 +573,11 @@ class ParetoProgressDisplay:
         state.message = "preparing reference"
         state.started_monotonic = time.monotonic()
         state.elapsed_seconds = 0.0
+        self._progress.update(
+            self._task_ids[case_key],
+            current=state.label,
+            phase="[cyan]prepare[/]",
+        )
 
     def start_case(
         self,
@@ -576,13 +595,18 @@ class ParetoProgressDisplay:
         state.message = "running" if state.completed < state.total else "done"
         state.started_monotonic = time.monotonic()
         state.elapsed_seconds = 0.0
-        self._render(force=True)
+        self._progress.update(
+            self._task_ids[case_key],
+            total=max(int(total), 1),
+            completed=int(completed),
+            current=state.label,
+            phase="[cyan]solve[/]" if state.completed < state.total else "[green]done[/]",
+        )
 
     def set_total(self, case_key: str, *, total: int) -> None:
         state = self.states[case_key]
         state.total = int(total)
-        if self._rendered_once:
-            self._render(force=False)
+        self._progress.update(self._task_ids[case_key], total=max(int(total), 1))
 
     def update(
         self,
@@ -601,7 +625,13 @@ class ParetoProgressDisplay:
             state.message = "running"
         if state.started_monotonic is not None:
             state.elapsed_seconds = max(0.0, time.monotonic() - float(state.started_monotonic))
-        self._render(force=False)
+        phase = "[yellow]skip[/]" if skipped else "[cyan]solve[/]"
+        self._progress.update(
+            self._task_ids[case_key],
+            advance=1,
+            current=state.label,
+            phase=phase,
+        )
 
     def finish_case(self, case_key: str) -> None:
         state = self.states[case_key]
@@ -610,34 +640,15 @@ class ParetoProgressDisplay:
         state.message = "done"
         if state.started_monotonic is not None:
             state.elapsed_seconds = max(0.0, time.monotonic() - float(state.started_monotonic))
-        self._render(force=True)
+        self._progress.update(
+            self._task_ids[case_key],
+            completed=max(int(state.total), int(state.completed), 1),
+            current=state.label,
+            phase="[green]done[/]",
+        )
 
     def close(self) -> None:
-        if self._rendered_once:
-            sys.stdout.write("\n")
-            sys.stdout.flush()
-
-    def _render(self, *, force: bool) -> None:
-        if not self._interactive and not force:
-            return
-        now = time.monotonic()
-        if (
-            self._interactive
-            and not force
-            and self._rendered_once
-            and (now - self._last_render_monotonic) < self._min_render_interval_s
-        ):
-            return
-        lines = [self._format_line(case_key) for case_key in self.case_keys]
-        if self._interactive and self._rendered_once:
-            sys.stdout.write(f"\x1b[{len(lines)}F")
-        if self._interactive:
-            sys.stdout.write("".join(f"\x1b[2K{line}\n" for line in lines))
-        else:
-            sys.stdout.write("\n".join(lines) + "\n")
-        sys.stdout.flush()
-        self._rendered_once = True
-        self._last_render_monotonic = now
+        self._progress_context.__exit__(None, None, None)
 
     def _format_line(self, case_key: str) -> str:
         state = self.states[case_key]
@@ -996,8 +1007,8 @@ def load_validated_precomputed_reference(case_key: str) -> PrecomputedReference:
             f"tolerance={REFERENCE_VALIDATION_ATOL:.{SCIENTIFIC_DECIMALS}e}."
         )
     if os.environ.get(REFERENCE_CHECK_SUPPRESS_ENV) != "1":
-        print(
-            f"[pareto] Figure 06 reference check {CASE_LABELS[case_key]}: "
+        SCRIPT_CONSOLE.print(
+            f"[cyan]Figure 06 reference check[/] {CASE_LABELS[case_key]}: "
             f"max |delta|={validation_error:.{SCIENTIFIC_DECIMALS}e}"
         )
     return PrecomputedReference(
@@ -2784,11 +2795,6 @@ def compute_selected_external_shape_errors(
             test_nt=test_nt,
         )
         errors[key] = external_reference_shape_error(reference, equilibrium)
-        normalized_error = float(errors[key]) / max(float(reference.reference_a), 1.0e-12)
-        print(
-            f"[pareto] {CASE_LABELS[case_key]} GEQDSK-file shape error E_gqdsk/a: "
-            f"{normalized_error:.{SCIENTIFIC_DECIMALS}e}"
-        )
     return errors
 
 
@@ -2878,10 +2884,6 @@ def write_representative_reduced_equilibria(
                     "source": sample_signature_key(case_key, sample.signature),
                 }
             )
-            print(
-                f"[pareto] wrote {CASE_LABELS[case_key]} {config_label} "
-                f"reduced equilibrium: {output_path}"
-            )
 
     manifest = {
         "signature_version": FULL_SWEEP_SIGNATURE_VERSION
@@ -2901,7 +2903,6 @@ def write_representative_reduced_equilibria(
         os.makedirs(manifest_dir, exist_ok=True)
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2)
-    print(f"[pareto] wrote reduced-equilibrium manifest: {manifest_path}")
     return manifest
 
 
@@ -3088,9 +3089,9 @@ def sample_case(
                         _, record = futures[future]
                         pending_records.pop(int(idx), None)
                         if error_message is not None:
-                            print(
-                                f"[pareto] worker skipped {case_key} "
-                                f"{record.sweep_step}: {error_message}"
+                            SCRIPT_CONSOLE.print(
+                                f"[yellow]worker skipped[/] {case_key} {record.sweep_step}: "
+                                f"{error_message}"
                             )
                         if sample is not None:
                             samples_by_index[idx] = sample
@@ -3104,8 +3105,8 @@ def sample_case(
                                 skipped=bool(skipped),
                             )
             except concurrent.futures.process.BrokenProcessPool as exc:
-                print(
-                    f"[pareto] {case_key} process pool failed ({exc}); "
+                SCRIPT_CONSOLE.print(
+                    f"[yellow]{case_key} process pool failed[/] ({exc}); "
                     f"falling back to serial for {len(pending_records)} remaining cases"
                 )
                 for idx, record in sorted(pending_records.items()):
@@ -3640,14 +3641,45 @@ def print_fastest_config_table_body(
     reference_a_by_case: dict[str, float] | None = None,
     selected_config_rows: list[tuple[str, float, Sample | None]] | None = None,
 ) -> None:
-    print(
-        build_fastest_config_latex_table(
-            samples_by_case,
-            external_shape_errors,
-            reference_a_by_case,
-            selected_config_rows=selected_config_rows,
-        )
+    external_shape_errors = external_shape_errors or {}
+    reference_a_by_case = reference_a_by_case or {}
+    config_rows = selected_config_rows or fastest_standard_config_rows(
+        samples_by_case, reference_a_by_case
     )
+    table = make_script_table(
+        "selected non-dominated reduced representations",
+        [
+            ("Case", "left"),
+            ("Time [ms]", "right"),
+            ("Nfev", "right"),
+            ("E_ref/a", "right"),
+            ("E_geqdsk/a", "right"),
+            ("Core", "left"),
+            ("Cos", "left"),
+            ("Sin", "left"),
+        ],
+    )
+    for case_key, _threshold, sample in config_rows:
+        case_label = CASE_LABELS[case_key]
+        if sample is None:
+            table.add_row(case_label, "--", "--", "--", "--", "--", "--", "--")
+            continue
+        core_tuple, c_tuple, s_tuple = signature_group_tuples(sample)
+        external_error = external_shape_errors.get(
+            sample_signature_key(case_key, sample.signature), float("nan")
+        )
+        normalizer = reference_a_by_case.get(case_key, float("nan"))
+        table.add_row(
+            f"{case_label} ({int(sample.parameter_count)})",
+            format_script_float(float(sample.elapsed_ms)),
+            str(int(sample.nfev)),
+            format_script_sci(float(sample.aggregate_rel_error) / max(float(normalizer), 1.0e-12)),
+            format_script_sci(float(external_error) / max(float(normalizer), 1.0e-12)),
+            str(core_tuple) if core_tuple else "--",
+            str(c_tuple) if c_tuple else "--",
+            str(s_tuple) if s_tuple else "--",
+        )
+    print_script_table(SCRIPT_CONSOLE, table)
 
 
 def describe_frontier(
@@ -3905,36 +3937,41 @@ def _print_case_frontier_summary(
     representative: Sample | None,
     normalizer_m: float,
 ) -> None:
-    print(
-        f"[pareto] {CASE_LABELS[case_key]} time frontier: "
-        f"{describe_frontier(time_frontier, x_kind='time_ms', normalizer_m=normalizer_m)}"
+    table = make_script_table(
+        f"{CASE_LABELS[case_key]} Pareto frontier summary",
+        [("frontier", "left"), ("summary", "left")],
+    )
+    table.add_row(
+        "time",
+        describe_frontier(time_frontier, x_kind="time_ms", normalizer_m=normalizer_m),
     )
     if representative is None:
-        print(
-            f"[pareto] {CASE_LABELS[case_key]} representative case "
-            f"(target E_ref/a={REPRESENTATIVE_ERROR_THRESHOLD:.0e}): none"
+        table.add_row(
+            "representative",
+            f"target E_ref/a={REPRESENTATIVE_ERROR_THRESHOLD:.0e}: none",
         )
     else:
         representative_error = normalized_shape_error(representative, normalizer_m)
         relation = (
             "<=" if representative_error <= REPRESENTATIVE_ERROR_THRESHOLD else "closest above"
         )
-        print(
-            f"[pareto] {CASE_LABELS[case_key]} representative case "
-            f"(target E_ref/a={REPRESENTATIVE_ERROR_THRESHOLD:.0e}, {relation}): "
+        table.add_row(
+            "representative",
+            f"target E_ref/a={REPRESENTATIVE_ERROR_THRESHOLD:.0e}, {relation}: "
             f"({format_frontier_x(float(representative.elapsed_ms), kind='time_ms')}, "
             f"{format_frontier_y(representative_error)}), "
             f"parameters={int(representative.parameter_count)}, "
-            f"signature={format_signature(representative.signature)}"
+            f"signature={format_signature(representative.signature)}",
         )
-    print(
-        f"[pareto] {CASE_LABELS[case_key]} parameter frontier: ",
+    table.add_row(
+        "parameter",
         describe_frontier(
             parameter_frontier,
             x_kind="parameter_count",
             normalizer_m=normalizer_m,
         ),
     )
+    print_script_table(SCRIPT_CONSOLE, table)
 
 
 def _plot_time_case(
@@ -4612,11 +4649,22 @@ def main() -> None:
     json_stem = str(DEFAULT_JSON_STEM)
     sweep_mode = str(RUN_SWEEP_MODE)
     cache_enabled = sweep_mode == "full"
+    print_script_config(
+        SCRIPT_CONSOLE,
+        "figure 07 / table 05: Pareto analysis",
+        (
+            ("mode", sweep_mode),
+            ("backend", RUN_BACKEND),
+            ("test grid", f"{RUN_TEST_NR}x{RUN_TEST_NT}"),
+            ("cases", len(CASE_KEYS)),
+            ("repeat", RUN_REPEAT_COUNT),
+        ),
+    )
     if sweep_mode == "full" and not bool(RUN_RECOMPUTE_FULL):
         all_samples, frontiers = load_plot_data_bundle(json_stem, sweep_mode)
         if all_samples is not None and frontiers is not None:
-            print(
-                "[pareto] loaded plot data from "
+            SCRIPT_CONSOLE.print(
+                "[cyan]loaded plot data:[/] "
                 f"{json_stem}_{sweep_mode}_{{solovev,chease,efit}}.json"
             )
             reference_a_by_case = compute_reference_a_by_case(backend=RUN_BACKEND)
@@ -4638,20 +4686,40 @@ def main() -> None:
                 RUN_TEST_NT,
                 RUN_BACKEND,
             )
-            write_representative_reduced_equilibria_from_cache(
+            manifest = write_representative_reduced_equilibria_from_cache(
                 json_stem,
                 sweep_mode,
                 backend=RUN_BACKEND,
                 test_nr=RUN_TEST_NR,
                 test_nt=RUN_TEST_NT,
             )
+            print_output_table(
+                SCRIPT_CONSOLE,
+                [
+                    ("Figure 07", PNG_PATH, "Accuracy-cost fronts and reduced surfaces"),
+                    (
+                        "reduced manifest",
+                        REDUCED_EQUILIBRIUM_MANIFEST_PATH,
+                        f"{len(manifest['entries'])} reduced equilibria",
+                    ),
+                    *(
+                        ("reduced equilibrium", entry["path"], entry["config_label"])
+                        for entry in manifest["entries"]
+                    ),
+                ],
+            )
             return
         expected = ", ".join(
             json_output_path(json_stem, case_key, sweep_mode) for case_key in CASE_KEYS
         )
-        print(f"[pareto] missing or stale full Pareto JSON bundle; recomputing: {expected}")
+        SCRIPT_CONSOLE.print(
+            "[yellow]missing or stale full Pareto JSON bundle; recomputing:[/] "
+            f"{expected}"
+        )
     elif sweep_mode == "partial":
-        print("[pareto] partial mode reruns selected 3x3 configs without Pareto cache I/O")
+        SCRIPT_CONSOLE.print(
+            "[cyan]partial mode:[/] reruns selected 3x3 configs without Pareto cache I/O"
+        )
 
     benchmark = load_benchmark(RUN_BACKEND)
     progress = ParetoProgressDisplay(CASE_KEYS)
@@ -4746,7 +4814,7 @@ def main() -> None:
             RUN_BACKEND,
             sweep_mode,
         )
-    write_representative_reduced_equilibria(
+    manifest = write_representative_reduced_equilibria(
         all_samples,
         backend=RUN_BACKEND,
         test_nr=RUN_TEST_NR,
@@ -4754,6 +4822,21 @@ def main() -> None:
         sweep_mode=sweep_mode,
         reference_a_by_case=reference_a_by_case,
         selected_config_rows=selected_config_rows,
+    )
+    print_output_table(
+        SCRIPT_CONSOLE,
+        [
+            ("Figure 07", PNG_PATH, "Accuracy-cost fronts and reduced surfaces"),
+            (
+                "reduced manifest",
+                REDUCED_EQUILIBRIUM_MANIFEST_PATH,
+                f"{len(manifest['entries'])} reduced equilibria",
+            ),
+            *(
+                ("reduced equilibrium", entry["path"], entry["config_label"])
+                for entry in manifest["entries"]
+            ),
+        ],
     )
 
 

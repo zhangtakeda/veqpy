@@ -27,15 +27,22 @@ from config import (
     PLOT_TICK_TOP,
     SAVE_DPI,
     SAVE_TRANSPARENT,
+    SCRIPT_CONSOLE,
     SINGLE_COLUMN_WIDTH,
     TICK_LABEL_FONT_SIZE,
     TITLE_FONT_SIZE,
     active_profiles_from_coeffs,
     apply_plot_style,
     figure_path,
+    format_script_sci,
+    make_script_table,
+    print_output_table,
+    print_script_config,
+    print_script_table,
     profile_interp,
     save_figure_outputs,
     scaled_font_size,
+    script_progress,
 )
 from config import (
     demo_psin_reference_profiles as pf_reference_profiles,
@@ -598,27 +605,38 @@ def solve_case(benchmark, reference: ReferenceData, route: str, nr: int, nt: int
 
 
 def run_regression(
-    benchmark, nr_list: list[int], test_nt: int
+    benchmark,
+    nr_list: list[int],
+    test_nt: int,
+    *,
+    progress=None,
+    task_id=None,
 ) -> tuple[ReferenceData, list[RegressionRow]]:
     reference = build_reference(benchmark)
     rows: list[RegressionRow] = []
+    total = len(ROUTES) * len(nr_list)
+    completed = 0
     for route in ROUTES:
         for nr in nr_list:
+            if progress is not None and task_id is not None:
+                progress.update(task_id, current=f"{route} Nr={nr}", phase="[cyan]solve[/]")
             try:
                 row = solve_case(benchmark, reference, route, nr, test_nt)
-            except RuntimeError as exc:
-                print(f"[{route}] Nr={nr:>2d}, Nt={test_nt:>2d}: skipped ({exc})")
+            except RuntimeError:
+                completed += 1
+                if progress is not None and task_id is not None:
+                    progress.update(
+                        task_id,
+                        advance=1,
+                        current=f"{route} Nr={nr}",
+                        phase="[yellow]skip[/]",
+                    )
                 continue
             rows.append(row)
-            print(
-                f"[{route}] Nr={nr:>2d}, Nt={test_nt:>2d}: "
-                f"elapsed={row.elapsed_us / 1000.0:.3f} ms | "
-                f"shape={row.shape_error:.3e} | "
-                f"Ip={row.ip_rel_error:.3e} | "
-                f"beta={row.beta_rel_error:.3e} | "
-                f"q95={row.q95_rel_error:.3e} | "
-                f"nfev={row.nfev:>3d}"
-            )
+            completed += 1
+            if progress is not None and task_id is not None:
+                phase = "[green]done[/]" if completed == total else "[cyan]solve[/]"
+                progress.update(task_id, advance=1, current=f"{route} Nr={nr}", phase=phase)
     return reference, rows
 
 
@@ -698,6 +716,40 @@ def print_route_consistency_latex_table(
     print(build_route_consistency_latex_table(rows, table_nr=table_nr, test_nt=test_nt))
 
 
+def print_route_consistency_summary(
+    rows: list[RegressionRow], *, table_nr: int, test_nt: int
+) -> None:
+    selected = [
+        row for row in rows if int(row.nr) == int(table_nr) and int(row.nt) == int(test_nt)
+    ]
+    selected.sort(key=lambda row: ROUTES.index(row.route))
+    if not selected:
+        available = sorted({(row.nr, row.nt) for row in rows})
+        raise ValueError(
+            f"No converged rows available for Nr={table_nr}, Nt={test_nt}. "
+            f"Available grids: {available}"
+        )
+    table = make_script_table(
+        f"profile-consistency errors at Nr=Nt={table_nr}",
+        [
+            ("Route", "left"),
+            ("E_coeff", "right"),
+            ("Delta_Ip", "right"),
+            ("Delta_beta_t", "right"),
+            ("Delta_q95", "right"),
+        ],
+    )
+    for row in selected:
+        table.add_row(
+            row.route,
+            format_script_sci(row.shape_error),
+            format_script_sci(row.ip_rel_error),
+            format_script_sci(row.beta_rel_error),
+            format_script_sci(row.q95_rel_error),
+        )
+    print_script_table(SCRIPT_CONSOLE, table)
+
+
 def build_route_regression_figure(rows: list[RegressionRow], *, test_nt: int) -> plt.Figure:
     apply_plot_style()
     fig, axes = plt.subplots(
@@ -767,22 +819,44 @@ def main() -> None:
     if int(TABLE_NR) not in nr_list:
         nr_list = sorted({*nr_list, int(TABLE_NR)})
 
-    benchmark = load_benchmark_module(BACKEND)
-    _, rows = run_regression(benchmark, nr_list, TEST_NT)
-    print_route_consistency_latex_table(rows, table_nr=int(TABLE_NR), test_nt=TEST_NT)
-
-    fig = build_route_regression_figure(rows, test_nt=TEST_NT)
-    saved_paths = save_figure_outputs(
-        fig,
-        png_path=PNG_PATH,
-        pdf_path=PDF_PATH,
-        dpi=SAVE_DPI,
-        transparent=SAVE_TRANSPARENT,
+    print_script_config(
+        SCRIPT_CONSOLE,
+        "figure 05 / table 03: multi-route consistency",
+        (
+            ("backend", BACKEND),
+            ("routes", len(ROUTES)),
+            ("Nr values", len(nr_list)),
+            ("test Nt", TEST_NT),
+        ),
     )
+    benchmark = load_benchmark_module(BACKEND)
+    with script_progress(SCRIPT_CONSOLE) as progress:
+        total = len(ROUTES) * len(nr_list) + 2
+        task = progress.add_task("", total=total, current="scan", phase="[cyan]solve[/]")
+        _, rows = run_regression(
+            benchmark,
+            nr_list,
+            TEST_NT,
+            progress=progress,
+            task_id=task,
+        )
+        progress.update(task, current="plot", phase="[cyan]run[/]")
+        fig = build_route_regression_figure(rows, test_nt=TEST_NT)
+        progress.update(task, advance=1, current="save", phase="[cyan]run[/]")
+        saved_paths = save_figure_outputs(
+            fig,
+            png_path=PNG_PATH,
+            pdf_path=PDF_PATH,
+            dpi=SAVE_DPI,
+            transparent=SAVE_TRANSPARENT,
+        )
+        progress.update(task, advance=1, current="save", phase="[green]done[/]")
     plt.close(fig)
-
-    for path in saved_paths:
-        print(f"saved: {path}")
+    print_route_consistency_summary(rows, table_nr=int(TABLE_NR), test_nt=TEST_NT)
+    print_output_table(
+        SCRIPT_CONSOLE,
+        [("Figure 05", path, "Consistency of six profile specifications") for path in saved_paths],
+    )
 
 
 if __name__ == "__main__":

@@ -27,12 +27,16 @@ from config import (
     PLOT_TICK_TOP,
     SAVE_DPI,
     SAVE_TRANSPARENT,
+    SCRIPT_CONSOLE,
     TICK_LABEL_FONT_SIZE,
     TITLE_FONT_SIZE,
     apply_plot_style,
     figure_path,
+    print_output_table,
+    print_script_config,
     save_figure_outputs,
     scaled_font_size,
+    script_progress,
 )
 from matplotlib.collections import LineCollection
 
@@ -526,4 +530,26 @@ def plot(save: bool = True, font_family: str = PLOT_FONT_FAMILY):
 
 
 if __name__ == "__main__":
-    plot()
+    print_script_config(
+        SCRIPT_CONSOLE,
+        "figure 01: shaping coefficients",
+        (
+            ("artifact", "Geometric effect of principal MXH coefficients"),
+            ("panels", SUBPLOT_ROWS * SUBPLOT_COLS),
+            ("dpi", SAVE_DPI),
+        ),
+    )
+    with script_progress(SCRIPT_CONSOLE) as progress:
+        task = progress.add_task(
+            "",
+            total=1,
+            current="render figure",
+            phase="[cyan]run[/]",
+        )
+        fig = plot()
+        progress.update(task, advance=1, current="render figure", phase="[green]done[/]")
+    plt.close(fig)
+    print_output_table(
+        SCRIPT_CONSOLE,
+        [("Figure 01", PNG_PATH, "Geometric effect of the principal MXH coefficients")],
+    )

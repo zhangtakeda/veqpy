@@ -27,6 +27,7 @@ from config import (
     MU0,
     SAVE_DPI,
     SAVE_TRANSPARENT,
+    SCRIPT_CONSOLE,
     SINGLE_COLUMN_WIDTH,
     TICK_LABEL_FONT_SIZE,
     TITLE_FONT_SIZE,
@@ -34,8 +35,14 @@ from config import (
     apply_plot_style,
     demo_psin_reference_profiles,
     figure_path,
+    format_script_sci,
+    make_script_table,
+    print_output_table,
+    print_script_config,
+    print_script_table,
     save_figure_outputs,
     scaled_font_size,
+    script_progress,
 )
 
 from veqpy.model import Boundary, Grid, Problem
@@ -237,22 +244,31 @@ def solve_case(reference: ReferenceData, nr: int, nt: int) -> HeatmapRow:
     )
 
 
-def run_scan(reference: ReferenceData, nr_list: list[int], nt_list: list[int]) -> list[HeatmapRow]:
+def run_scan(
+    reference: ReferenceData,
+    nr_list: list[int],
+    nt_list: list[int],
+    *,
+    progress=None,
+    task_id=None,
+) -> list[HeatmapRow]:
     rows: list[HeatmapRow] = []
     total = len(nr_list) * len(nt_list)
     index = 0
     for nt in nt_list:
         for nr in nr_list:
             index += 1
+            if progress is not None and task_id is not None:
+                progress.update(
+                    task_id,
+                    current=f"Nr={nr}, Nt={nt}",
+                    phase="[cyan]solve[/]",
+                )
             row = solve_case(reference, nr, nt)
             rows.append(row)
-            print(
-                f"[{index:03d}/{total:03d}] Nr={nr:>2d}, Nt={nt:>2d}: "
-                f"shape={row.shape_error:.3e} | "
-                f"Ip={row.ip_rel_error:.3e} | "
-                f"beta={row.beta_rel_error:.3e} | "
-                f"q95={row.q95_rel_error:.3e}"
-            )
+            if progress is not None and task_id is not None:
+                phase = "[green]done[/]" if index == total else "[cyan]solve[/]"
+                progress.update(task_id, advance=1, current=f"Nr={nr}, Nt={nt}", phase=phase)
     return rows
 
 
@@ -423,22 +439,72 @@ def normalized_grid_list(values: tuple[int, ...], *, name: str) -> list[int]:
     return grid_list
 
 
+def print_resolution_summary(rows: list[HeatmapRow]) -> None:
+    table = make_script_table(
+        "quadrature convergence of the controlled PF equilibrium",
+        [
+            ("metric", "left"),
+            ("min", "right"),
+            ("max", "right"),
+            ("best grid", "right"),
+            ("worst grid", "right"),
+        ],
+    )
+    labels = {
+        "shape_error": "E_coeff",
+        "ip_rel_error": "Delta_Ip",
+        "beta_rel_error": "Delta_beta_t",
+        "q95_rel_error": "Delta_q95",
+    }
+    for metric_name, _title in METRIC_SPECS:
+        ordered = sorted(rows, key=lambda row: float(getattr(row, metric_name)))
+        best = ordered[0]
+        worst = ordered[-1]
+        table.add_row(
+            labels[metric_name],
+            format_script_sci(float(getattr(best, metric_name))),
+            format_script_sci(float(getattr(worst, metric_name))),
+            f"{best.nr}x{best.nt}",
+            f"{worst.nr}x{worst.nt}",
+        )
+    print_script_table(SCRIPT_CONSOLE, table)
+
+
 def main() -> None:
     nr_list = normalized_grid_list(NR_LIST, name="NR_LIST")
     nt_list = normalized_grid_list(NT_LIST, name="NT_LIST")
-    reference = build_reference()
-    rows = run_scan(reference, nr_list, nt_list)
-    fig = build_grid_convergence_figure(rows, nr_list, nt_list)
-    saved_paths = save_figure_outputs(
-        fig,
-        png_path=PNG_PATH,
-        pdf_path=PDF_PATH,
-        dpi=SAVE_DPI,
-        transparent=SAVE_TRANSPARENT,
+    print_script_config(
+        SCRIPT_CONSOLE,
+        "figure 04: resolution dependence",
+        (
+            ("radial grids", f"{min(nr_list)}..{max(nr_list)} ({len(nr_list)})"),
+            ("poloidal grids", f"{min(nt_list)}..{max(nt_list)} ({len(nt_list)})"),
+            ("cases", len(nr_list) * len(nt_list)),
+        ),
     )
+    with script_progress(SCRIPT_CONSOLE) as progress:
+        total = 1 + len(nr_list) * len(nt_list) + 2
+        task = progress.add_task("", total=total, current="reference", phase="[cyan]run[/]")
+        reference = build_reference()
+        progress.update(task, advance=1, current="scan", phase="[cyan]solve[/]")
+        rows = run_scan(reference, nr_list, nt_list, progress=progress, task_id=task)
+        progress.update(task, current="plot", phase="[cyan]run[/]")
+        fig = build_grid_convergence_figure(rows, nr_list, nt_list)
+        progress.update(task, advance=1, current="save", phase="[cyan]run[/]")
+        saved_paths = save_figure_outputs(
+            fig,
+            png_path=PNG_PATH,
+            pdf_path=PDF_PATH,
+            dpi=SAVE_DPI,
+            transparent=SAVE_TRANSPARENT,
+        )
+        progress.update(task, advance=1, current="save", phase="[green]done[/]")
     plt.close(fig)
-    for path in saved_paths:
-        print(f"saved: {path}")
+    print_resolution_summary(rows)
+    print_output_table(
+        SCRIPT_CONSOLE,
+        [("Figure 04", path, "Quadrature convergence heatmap") for path in saved_paths],
+    )
 
 
 if __name__ == "__main__":

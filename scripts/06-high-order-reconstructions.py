@@ -34,6 +34,7 @@ from config import (
     SAVE_DPI,
     SAVE_TRANSPARENT,
     SCIENTIFIC_DECIMALS,
+    SCRIPT_CONSOLE,
     SOLVER_INITIAL_POLICY,
     TICK_LABEL_FONT_SIZE,
     TITLE_FONT_SIZE,
@@ -41,8 +42,15 @@ from config import (
     apply_plot_style,
     data_path,
     figure_path,
+    format_script_float,
+    format_script_sci,
+    make_script_table,
+    print_output_table,
+    print_script_config,
+    print_script_table,
     save_figure_outputs,
     scaled_font_size,
+    script_progress,
 )
 from contourpy import contour_generator
 from matplotlib.ticker import MultipleLocator
@@ -1490,32 +1498,6 @@ def build_case_result(case_spec: CaseSpec) -> CaseResult:
     )
 
     result = solver.result
-    if result is not None:
-        print(case_spec.title)
-        print(f"boundary fit rms: {float(fit['rms']):.{SCIENTIFIC_DECIMALS}e}")
-        print(f"solver residual: {float(result.residual_norm_final):.{SCIENTIFIC_DECIMALS}e}")
-        print(
-            "solve timing: "
-            f"median={timing.median_ms:.{FIXED_DECIMALS}f} ms, "
-            f"mean={timing.mean_ms:.{FIXED_DECIMALS}f}±"
-            f"{timing.std_ms:.{FIXED_DECIMALS}f} ms, "
-            f"range=[{timing.min_ms:.{FIXED_DECIMALS}f}, "
-            f"{timing.max_ms:.{FIXED_DECIMALS}f}] ms, "
-            f"n={timing.repeat_runs}, warmup={timing.warmup_runs}"
-        )
-        print(
-            "setup/JIT audit: "
-            f"case_setup={cost_audit.case_setup_ms:.{FIXED_DECIMALS}f} ms, "
-            f"operator_setup={cost_audit.setup_ms:.{FIXED_DECIMALS}f} ms, "
-            f"first_solve_wall={cost_audit.first_solve_wall_ms:.{FIXED_DECIMALS}f} ms, "
-            f"setup+first_solve={cost_audit.setup_jit_total_ms:.{FIXED_DECIMALS}f} ms, "
-            f"repeated_solve_median={cost_audit.repeated_solve_median_ms:.{FIXED_DECIMALS}f} ms, "
-            f"ratios operator_setup/solve={cost_audit.setup_to_solve_ratio:.{FIXED_DECIMALS}f}, "
-            f"setup+first_solve/solve={cost_audit.setup_jit_to_solve_ratio:.{FIXED_DECIMALS}f}"
-        )
-        print(f"solved Ip: {float(equilibrium.Ip):.{SCIENTIFIC_DECIMALS}e}")
-        if 1.0 in surface_metrics:
-            print(f"boundary rms distance: {surface_metrics[1.0]['rms']:.{SCIENTIFIC_DECIMALS}e}")
 
     return CaseResult(
         title=case_spec.title,
@@ -1705,6 +1687,51 @@ def print_case_summary_latex_table(case_results: list[CaseResult]) -> None:
     print(build_case_summary_latex_table(case_results))
 
 
+def _plain_table_text(value: str) -> str:
+    return (
+        value.replace("$", "")
+        .replace(r"\times", "x")
+        .replace(r"^{", "^")
+        .replace("}", "")
+    )
+
+
+def print_case_summary_table(case_results: list[CaseResult]) -> None:
+    table = make_script_table(
+        "high-order reconstruction errors normalized by a",
+        [
+            ("Case", "left"),
+            ("Params", "right"),
+            ("Time [ms]", "right"),
+            ("Nfev", "right"),
+            ("E_geqdsk/a", "right"),
+            ("E_lcfs/a", "right"),
+            ("Core", "left"),
+            ("Cos", "left"),
+            ("Sin", "left"),
+        ],
+    )
+    for case_result in case_results:
+        label = case_result.reference_label
+        table.add_row(
+            CASE_DISPLAY_NAMES.get(label, label),
+            str(int(case_result.parameter_count)),
+            format_script_float(case_result.solve_timing.median_ms),
+            str(int(case_result.nfev)),
+            format_script_sci(
+                aggregate_surface_rms_error(case_result.shape_rms_profile)
+                / max(reference_a(case_result), 1.0e-12)
+            ),
+            format_script_sci(
+                float(case_result.boundary_fit_rms) / max(reference_a(case_result), 1.0e-12)
+            ),
+            _plain_table_text(format_core_psin_tuple(case_result.case_spec)),
+            _plain_table_text(format_high_order_family_column(case_result.case_spec, "c")),
+            _plain_table_text(format_high_order_family_column(case_result.case_spec, "s")),
+        )
+    print_script_table(SCRIPT_CONSOLE, table)
+
+
 def interp_q_at_psin(equilibrium, psin_value: float) -> float:
     psin = np.asarray(equilibrium.psin, dtype=np.float64)
     q_values = np.asarray(equilibrium.q, dtype=np.float64)
@@ -1729,15 +1756,27 @@ def print_iter_parameter_comparison(case_results: list[CaseResult]) -> None:
         ("Ip [MA]", float(geqdsk.Ip) / 1.0e6, float(equilibrium.Ip) / 1.0e6),
         ("q95", q95_target, q95_veq),
     )
-    print("[ITER D-shaped] target vs VEQ parameters")
+    table = make_script_table(
+        "D-shaped target vs VEQ parameters",
+        [
+            ("quantity", "left"),
+            ("target", "right"),
+            ("VEQ", "right"),
+            ("diff", "right"),
+            ("rel", "right"),
+        ],
+    )
     for name, target, veq_value in rows:
         diff = veq_value - target
         rel = abs(diff) / max(abs(target), 1.0e-12)
-        print(
-            f"  {name}: target={target:.{FIXED_DECIMALS}f}, "
-            f"VEQ={veq_value:.{FIXED_DECIMALS}f}, "
-            f"diff={diff:.{SCIENTIFIC_DECIMALS}e}, rel={rel:.{SCIENTIFIC_DECIMALS}e}"
+        table.add_row(
+            name,
+            format_script_float(target),
+            format_script_float(veq_value),
+            format_script_sci(diff),
+            format_script_sci(rel),
         )
+    print_script_table(SCRIPT_CONSOLE, table)
 
 
 def build_compare_figure(case_results: list[CaseResult]) -> plt.Figure:
@@ -1907,29 +1946,63 @@ def build_compare_figure(case_results: list[CaseResult]) -> plt.Figure:
 
 def main() -> None:
     os.makedirs("data", exist_ok=True)
-    case_results = [build_case_result(case_spec) for case_spec in CASE_SPECS]
-    equilibrium_paths = [
-        write_reference_equilibrium_json(case_result) for case_result in case_results
-    ]
-    reference_manifest_path = write_reference_equilibrium_manifest(case_results, equilibrium_paths)
-    print_case_summary_latex_table(case_results)
-    print_iter_parameter_comparison(case_results)
-    fig = build_compare_figure(case_results)
-    saved_paths = save_figure_outputs(
-        fig,
-        png_path=PNG_PATH,
-        pdf_path=PDF_PATH,
-        dpi=SAVE_DPI,
-        transparent=SAVE_TRANSPARENT,
+    print_script_config(
+        SCRIPT_CONSOLE,
+        "figure 06 / table 04: high-order reconstructions",
+        (
+            ("cases", len(CASE_SPECS)),
+            ("solve grid", f"{SOLVE_NR}x{SOLVE_NT}"),
+            ("timing repeats", SOLVER_TIMING_REPEATS),
+        ),
     )
+    with script_progress(SCRIPT_CONSOLE) as progress:
+        total = len(CASE_SPECS) + 3
+        task = progress.add_task("", total=total, current="solve cases", phase="[cyan]run[/]")
+        case_results: list[CaseResult] = []
+        for case_spec in CASE_SPECS:
+            progress.update(
+                task,
+                current=CASE_DISPLAY_NAMES[case_spec.reference_label],
+                phase="[cyan]solve[/]",
+            )
+            case_results.append(build_case_result(case_spec))
+            progress.update(
+                task,
+                advance=1,
+                current=CASE_DISPLAY_NAMES[case_spec.reference_label],
+                phase="[cyan]solve[/]",
+            )
+        progress.update(task, current="write JSON", phase="[cyan]run[/]")
+        equilibrium_paths = [
+            write_reference_equilibrium_json(case_result) for case_result in case_results
+        ]
+        reference_manifest_path = write_reference_equilibrium_manifest(
+            case_results, equilibrium_paths
+        )
+        progress.update(task, advance=1, current="write JSON", phase="[cyan]run[/]")
+        progress.update(task, current="plot", phase="[cyan]run[/]")
+        fig = build_compare_figure(case_results)
+        progress.update(task, advance=1, current="save", phase="[cyan]run[/]")
+        saved_paths = save_figure_outputs(
+            fig,
+            png_path=PNG_PATH,
+            pdf_path=PDF_PATH,
+            dpi=SAVE_DPI,
+            transparent=SAVE_TRANSPARENT,
+        )
+        progress.update(task, advance=1, current="save", phase="[green]done[/]")
+    print_case_summary_table(case_results)
+    print_iter_parameter_comparison(case_results)
     plt.close(fig)
-
-    print(f"saved: {SAVE_GFILE_PATH}")
-    for path in equilibrium_paths:
-        print(f"saved: {path}")
-    print(f"saved: {reference_manifest_path}")
-    for path in saved_paths:
-        print(f"saved: {path}")
+    output_rows = [("Solov'ev GEQDSK", SAVE_GFILE_PATH, "Generated D-shaped exchange file")]
+    output_rows.extend(
+        ("reference equilibrium", path, "High-order VEQ state") for path in equilibrium_paths
+    )
+    output_rows.append(("reference manifest", reference_manifest_path, "High-order state index"))
+    output_rows.extend(
+        ("Figure 06", path, "High-order VEQ reconstruction comparison") for path in saved_paths
+    )
+    print_output_table(SCRIPT_CONSOLE, output_rows)
 
 
 if __name__ == "__main__":
