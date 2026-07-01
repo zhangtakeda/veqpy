@@ -47,7 +47,7 @@ _SOURCE_CONSTRAINTS_BY_ROUTE = {
     "PJ2": frozenset({"null", "Ip", "beta", "Ip_beta"}),
     "PQ": frozenset({"null", "Ip", "beta", "Ip_beta"}),
 }
-_VEQLIB_MVP_ROUTE_CONSTRAINTS = {
+_VEQLIB_NATIVE_ROUTE_CONSTRAINTS = {
     (route, coordinate, nodes): constraints
     for route, constraints in _SOURCE_CONSTRAINTS_BY_ROUTE.items()
     for coordinate in ("rho", "psin")
@@ -481,13 +481,13 @@ class KernelTopology:
             "enzyme_jacobian_batch_width": self.enzyme_jacobian_batch_width,
         }
 
-    def validate_supported_for_veqlib_mvp(self) -> None:
+    def validate_supported_for_veqlib_native(self) -> None:
         mismatches: list[str] = []
         if self.quadrature != "legendre":
             mismatches.append(f"quadrature={self.quadrature!r}")
         if self.calculus != "spectral":
             mismatches.append(f"calculus={self.calculus!r}")
-        supported = _VEQLIB_MVP_ROUTE_CONSTRAINTS.get(self.source_route_key)
+        supported = _VEQLIB_NATIVE_ROUTE_CONSTRAINTS.get(self.source_route_key)
         if supported is None or self.constraint not in supported:
             mismatches.append(
                 f"route_key={self.source_route_key!r}, constraint={self.constraint!r}"
@@ -499,7 +499,7 @@ class KernelTopology:
         if self.source_active_family != "psin" and self.psin_count > 0:
             mismatches.append("source-owned topology does not accept psin_count > 0")
         if mismatches:
-            raise TopologyError("unsupported VEQlib MVP topology: " + "; ".join(mismatches))
+            raise TopologyError("unsupported VEQlib native topology: " + "; ".join(mismatches))
 
 
 @dataclass(frozen=True, slots=True)

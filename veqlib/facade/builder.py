@@ -94,7 +94,7 @@ def build_kernel(
     """
 
     if not dry_run:
-        topology.validate_supported_for_veqlib_mvp()
+        topology.validate_supported_for_veqlib_native()
     source_dir = _default_source_dir() if source_dir is None else source_dir.resolve()
     if not source_dir.exists():
         raise KernelBuildError(f"VEQlib source directory does not exist: {source_dir}")

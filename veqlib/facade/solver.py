@@ -30,7 +30,7 @@ class VEQlibSolver:
         solver: str | int = "powell",
         pin_cpu: bool | int | None = None,
     ) -> None:
-        topology.validate_supported_for_veqlib_mvp()
+        topology.validate_supported_for_veqlib_native()
         self.topology = topology
         self.registry = registry or KernelRegistry(
             cache_root=cache_root,
