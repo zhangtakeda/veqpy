@@ -264,7 +264,7 @@ def geqdsk_standard_balance_grid(case_key: str) -> tuple[np.ndarray, np.ndarray,
 def external_reference_residual_sample(reference_equilibrium, *, case_key: str) -> ResidualSample:
     """Build the GEQDSK-file residual sample used in Figure 08.
 
-    For the analytic D-shape file this is the finite-difference residual of the
+    For the analytic D-shaped file this is the finite-difference residual of the
     generated analytic exchange grid.  For the GEQDSK-based cases, the standard
     R-Z balance residual is evaluated on the exported grid, interpolated to the
     same flux-coordinate nodes used by the VEQ diagnostics.  The manuscript

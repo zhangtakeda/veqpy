@@ -210,7 +210,7 @@ class SolovevReferenceConfig:
     triangularity: float = 0.33
     toroidal_field: float = 5.3
     # Absolute Solov'ev source/flux scale.  This leaves the dimensionless
-    # D-shape geometry unchanged while matching the ITER 15 MA/5.3 T
+    # D-shaped geometry unchanged while matching the ITER 15 MA/5.3 T
     # reference scale for this analytic fixed-boundary case.
     source_scale: float = 7.929997109778656
     axis_shift_fraction: float = 0.1
@@ -340,7 +340,7 @@ REFERENCE_CONFIG = SolovevReferenceConfig()
 
 CASE_SPECS = (
     CaseSpec(
-        title=r"$\bf{(a)}$ D-shape",
+        title=r"$\bf{(a)}$ D-shaped",
         reference_label="Solov'ev",
         case_key="solovev",
         gfile_path=SAVE_GFILE_PATH,
@@ -373,7 +373,7 @@ CASE_SPECS = (
 
 
 CASE_DISPLAY_NAMES = {
-    "Solov'ev": "D-shape",
+    "Solov'ev": "D-shaped",
     "CHEASE": "H-mode",
     "EFIT": "X-point",
 }
@@ -385,7 +385,7 @@ CASE_SOURCE_LABELS = {
 }
 
 CASE_BOUNDARY_LABELS = {
-    "Solov'ev": "D-shape",
+    "Solov'ev": "D-shaped",
     "CHEASE": "H-mode",
     "EFIT": "X-point",
 }
@@ -1642,7 +1642,7 @@ def format_high_order_family_column(case_spec: CaseSpec, prefix: str) -> str:
 
     The high-order cases all use one leading radial order 10 followed by nine
     order-5 higher harmonic families for the active sine/cosine side.  The
-    D-shape case has no cosine-side families, so its Cos entry remains absent.
+    D-shaped case has no cosine-side families, so its Cos entry remains absent.
     Keep this display fixed rather than re-inspecting the coefficient lists.
     """
     if prefix == "c" and case_spec.case_key == "solovev":
@@ -1729,7 +1729,7 @@ def print_iter_parameter_comparison(case_results: list[CaseResult]) -> None:
         ("Ip [MA]", float(geqdsk.Ip) / 1.0e6, float(equilibrium.Ip) / 1.0e6),
         ("q95", q95_target, q95_veq),
     )
-    print("[ITER D-shape] target vs VEQ parameters")
+    print("[ITER D-shaped] target vs VEQ parameters")
     for name, target, veq_value in rows:
         diff = veq_value - target
         rel = abs(diff) / max(abs(target), 1.0e-12)

@@ -111,7 +111,7 @@ RUN_CASE_WORKER_INNER_THREADS = 1
 RUN_FRONTIER_MIN_REL_IMPROVEMENT = 0.05
 RUN_RANDOM_SIGNATURE_COUNT = 5
 RUN_RANDOM_SIGNATURE_SEED = 20260407
-# Selected reduced rows target normalized shape errors E_ref/a.  D-shape has
+# Selected reduced rows target normalized shape errors E_ref/a.  D-shaped has
 # enough low-order accuracy to use a tighter Medium/High ladder than the
 # GEQDSK-derived H-mode and X-point cases.
 CASE_FASTEST_CONFIG_ERROR_THRESHOLDS = {
@@ -1548,9 +1548,9 @@ def generate_d_shape_ref_pruning_signatures(
     min_lengths: dict[str, int],
     max_lengths: dict[str, int],
 ) -> list[SignatureRecord]:
-    """Deterministically sample D-shape configs by pruning prefixes of the VEQ-ref solution.
+    """Deterministically sample D-shaped configs by pruning prefixes of the VEQ-ref solution.
 
-    The D-shape reference contains independent radial/source families
+    The D-shaped reference contains independent radial/source families
     (psin, h, k) and a contiguous sine-harmonic prefix.  A full Cartesian
     monotone-pruning sweep is too large, so this uses the complete 10x10x10
     radial grid and nine low-discrepancy sine-prefix samples per radial point.
@@ -1562,7 +1562,7 @@ def generate_d_shape_ref_pruning_signatures(
     missing_core = [name for name in required_core if name not in max_lengths]
     if missing_core:
         raise ValueError(
-            f"D-shape VEQ-ref pruning is missing required core families: {missing_core}"
+            f"D-shaped VEQ-ref pruning is missing required core families: {missing_core}"
         )
 
     records: list[SignatureRecord] = []
@@ -1572,7 +1572,7 @@ def generate_d_shape_ref_pruning_signatures(
         records,
         seen,
         strategy_name="veq_ref_prune_full",
-        sweep_step="d-shape-ref-prune-min",
+        sweep_step="D-shaped-ref-prune-min",
         signature=dict(min_lengths),
     )
 
@@ -1596,7 +1596,7 @@ def generate_d_shape_ref_pruning_signatures(
                 records,
                 seen,
                 strategy_name="veq_ref_prune_full",
-                sweep_step=f"d-shape-ref-prune-core-{psin_length}-{h_length}-{k_length}-s{local_index}",
+                sweep_step=f"D-shaped-ref-prune-core-{psin_length}-{h_length}-{k_length}-s{local_index}",
                 signature={**core_signature, **sine_signature},
             )
             sample_index += 1
@@ -1605,7 +1605,7 @@ def generate_d_shape_ref_pruning_signatures(
         records,
         seen,
         strategy_name="veq_ref_prune_full",
-        sweep_step="d-shape-ref-prune-ref",
+        sweep_step="D-shaped-ref-prune-ref",
         signature=dict(max_lengths),
     )
     append_representative_neighborhood_records(
@@ -1852,7 +1852,7 @@ def generate_general_ref_pruning_signatures(
 ) -> list[SignatureRecord]:
     """Sample H-mode/X-point configs by pruning the Figure 06 VEQ reference.
 
-    Unlike the D-shape case, these references include four core profiles and
+    Unlike the D-shaped case, these references include four core profiles and
     paired cosine/sine shaping shells.  A complete Cartesian pruning grid would
     be too large, so the core lengths and active shaping-shell prefix are
     sampled with a deterministic Halton-style sequence.  The generated set is
@@ -4502,7 +4502,7 @@ def write_json(
                     "Selected representative configurations only: three reduced-order rows per case"
                     if str(sweep_mode) == "partial"
                     else (
-                        "D-shape uses a pruned VEQ-ref lattice with independent radial/core levels "
+                        "D-shaped uses a pruned VEQ-ref lattice with independent radial levels "
                         "and stratified contiguous sine-prefix samples; H-mode/X-point use a <10k "
                         "VEQ-ref-bounded Halton core sweep with contiguous monotone "
                         "Fourier prefixes plus compact one-step neighborhoods "

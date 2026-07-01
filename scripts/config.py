@@ -115,7 +115,7 @@ LINESTYLE_C = (0, (5, 1, 1, 1, 1, 1))
 MU0 = 4.0e-7 * 3.141592653589793
 CASE_KEYS = ("solovev", "chease", "efit")
 CASE_LABELS = {
-    "solovev": "D-shape",
+    "solovev": "D-shaped",
     "chease": "H-mode",
     "efit": "X-point",
 }
