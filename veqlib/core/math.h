@@ -101,11 +101,52 @@ namespace math::detail
             return std::cos(value);
     }
 
+    template <int Order>
+    struct InverseFactorial
+    {
+        static_assert(Order >= 0, "factorial order must be non-negative");
+        static constexpr double value = InverseFactorial<Order - 1>::value / static_cast<double>(Order);
+    };
+
+    template <>
+    struct InverseFactorial<0>
+    {
+        static constexpr double value = 1.0;
+    };
+
+    template <int Power>
+    inline constexpr double taylor_coefficient_v =
+        (((Power / 2) % 2 == 0) ? 1.0 : -1.0) * InverseFactorial<Power>::value;
+
+    template <int CurrentPower, int LowestPower>
+    struct TaylorHornerStep
+    {
+        static inline double eval(double r2, double accumulator) noexcept
+        {
+            if constexpr (CurrentPower < LowestPower)
+            {
+                return accumulator;
+            }
+            else
+            {
+                return TaylorHornerStep<CurrentPower - 2, LowestPower>::eval(
+                    r2, accumulator * r2 + taylor_coefficient_v<CurrentPower>);
+            }
+        }
+    };
+
+    template <int HighestPower, int LowestPower>
+    inline double evaluate_taylor_horner(double r2) noexcept
+    {
+        static_assert(HighestPower >= LowestPower, "Taylor highest power must cover the constant/linear term");
+        static_assert(((HighestPower - LowestPower) % 2) == 0, "Taylor powers must have one parity");
+        return TaylorHornerStep<HighestPower - 2, LowestPower>::eval(r2, taylor_coefficient_v<HighestPower>);
+    }
+
     template <int SinOrder = 11, int CosOrder = (SinOrder == 0 ? 0 : SinOrder - 1)>
     inline void relaxed_sincos(double value, double& sin_value, double& cos_value) noexcept
     {
-        static_assert((SinOrder == 0 && CosOrder == 0) || (SinOrder == 11 && CosOrder == 10),
-                      "relaxed_sincos currently supports x^11/x^10 Taylor or the <0, 0> std fallback");
+        static_assert(SinOrder >= 0 && CosOrder >= 0, "relaxed_sincos orders must be non-negative");
 
         if constexpr (SinOrder == 0 && CosOrder == 0)
         {
@@ -114,6 +155,9 @@ namespace math::detail
         }
         else
         {
+            static_assert((SinOrder % 2) == 1, "relaxed_sincos sine order must be odd");
+            static_assert((CosOrder % 2) == 0, "relaxed_sincos cosine order must be even");
+
             constexpr double inv_half_pi    = 2.0 / pi;
             const double     scaled         = value * inv_half_pi;
             const int        quadrant_index = static_cast<int>(scaled + (scaled >= 0.0 ? 0.5 : -0.5));
@@ -121,20 +165,8 @@ namespace math::detail
             const double     reduced        = value - q * half_pi;
             const double     r2             = reduced * reduced;
 
-            double sin_poly          = -1.0 / 39916800.0;
-            sin_poly                 = sin_poly * r2 + 1.0 / 362880.0;
-            sin_poly                 = sin_poly * r2 - 1.0 / 5040.0;
-            sin_poly                 = sin_poly * r2 + 1.0 / 120.0;
-            sin_poly                 = sin_poly * r2 - 1.0 / 6.0;
-            sin_poly                 = sin_poly * r2 + 1.0;
-            const double sin_reduced = reduced * sin_poly;
-
-            double cos_poly          = -1.0 / 3628800.0;
-            cos_poly                 = cos_poly * r2 + 1.0 / 40320.0;
-            cos_poly                 = cos_poly * r2 - 1.0 / 720.0;
-            cos_poly                 = cos_poly * r2 + 1.0 / 24.0;
-            cos_poly                 = cos_poly * r2 - 1.0 / 2.0;
-            const double cos_reduced = cos_poly * r2 + 1.0;
+            const double sin_reduced = reduced * evaluate_taylor_horner<SinOrder, 1>(r2);
+            const double cos_reduced = evaluate_taylor_horner<CosOrder, 0>(r2);
 
             const unsigned quadrant = static_cast<unsigned>(quadrant_index) & 3U;
             const bool     odd      = (quadrant & 1U) != 0U;
