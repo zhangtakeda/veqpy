@@ -42,11 +42,11 @@ namespace source::detail
     }
 
     template <size_t SampleCount, size_t StencilSize = clipped_stencil_size(SampleCount)>
-    struct UniformSourceShape
+    struct SampledSourceShape
     {
-        static_assert(SampleCount >= 1, "uniform source requires at least one sample");
-        static_assert(StencilSize >= 1, "uniform source barycentric stencil must be positive");
-        static_assert(StencilSize <= SampleCount, "uniform source barycentric stencil exceeds sample count");
+        static_assert(SampleCount >= 1, "source samples require at least one sample");
+        static_assert(StencilSize >= 1, "source barycentric stencil must be positive");
+        static_assert(StencilSize <= SampleCount, "source barycentric stencil exceeds sample count");
 
         static constexpr size_t sample_count = SampleCount;
         static constexpr size_t stencil_size = StencilSize;
@@ -2138,7 +2138,7 @@ namespace source::detail
 namespace source
 {
     using detail::NativeSourceRuntime;
-    using detail::UniformSourceShape;
+    using detail::SampledSourceShape;
     using detail::axis_fix_count;
     using detail::root_field_count;
     using detail::root_psin;

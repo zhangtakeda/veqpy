@@ -108,7 +108,7 @@ namespace veqlib_kernel_api
                                                                              SFamilyCounts,
                                                                              LayoutProfileFirst>;
             using Grid = grid::Grid<Nr, Nt, Shape::L_max, Shape::M_max, Shape::K_max, QuadratureScheme, CalculusScheme>;
-            using Source   = source::UniformSourceShape<SourceSamples>;
+            using Source   = source::SampledSourceShape<SourceSamples>;
             using Operator = SourceOperator<Shape,
                                                      Grid,
                                                      Source,
