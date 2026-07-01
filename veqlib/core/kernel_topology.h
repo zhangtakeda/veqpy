@@ -25,7 +25,7 @@ namespace veqlib_kernel_api
         using grid::Legendre;
         using grid::Spectral;
         using config::Topology;
-        using operators::PfPsinUniformIpOperator;
+        using operators::SourceOperator;
         using std::size_t;
         using tensor::uninitialized;
 
@@ -88,7 +88,7 @@ namespace veqlib_kernel_api
                   typename CalculusScheme,
                   size_t BoundaryMmax = inferred_M_max<CFamilyCounts, SFamilyCounts>(),
                   bool   LayoutProfileFirst = false>
-        struct PfPsinUniformIpTopology
+        struct SourceKernelTopology
         {
             static constexpr size_t L_max =
                 inferred_L_max<HCount, VCount, KappaCount, PsinCount, FCount, CFamilyCounts, SFamilyCounts>();
@@ -109,7 +109,7 @@ namespace veqlib_kernel_api
                                                                              LayoutProfileFirst>;
             using Grid = grid::Grid<Nr, Nt, Shape::L_max, Shape::M_max, Shape::K_max, QuadratureScheme, CalculusScheme>;
             using Source   = source::UniformSourceShape<SourceSamples>;
-            using Operator = PfPsinUniformIpOperator<Shape,
+            using Operator = SourceOperator<Shape,
                                                      Grid,
                                                      Source,
                                                      Topology::source_route_code,
@@ -123,7 +123,7 @@ namespace veqlib_kernel_api
         constexpr auto kernel_c_counts = Topology::c_family_counts;
         constexpr auto kernel_s_counts = Topology::s_family_counts;
 
-        using KernelTopology = PfPsinUniformIpTopology<Topology::Nr,
+        using KernelTopology = SourceKernelTopology<Topology::Nr,
                                                        Topology::Nt,
                                                        Topology::source_sample_count,
                                                        Topology::h_count,

@@ -17,19 +17,19 @@ namespace operators::detail
     using profiles::ProfileRuntimeParams;
     using profiles::RuntimeProfiles;
     using residual::ResidualRuntime;
-    using source::PfPsinUniformIpSourceRuntime;
+    using source::NativeSourceRuntime;
     using source::axis_fix_count;
     using tensor::Vector;
 
     template <typename Shape, typename SourceShape>
-    struct PfPsinUniformIpSetup
+    struct SourceOperatorSetup
     {
         ProfileRuntimeParams<Shape>               profile_params{};
         Vector<double, SourceShape::sample_count> heat{};
         Vector<double, SourceShape::sample_count> current{};
     };
 
-    struct PfPsinUniformIpSolveParams
+    struct SourceOperatorSolveParams
     {
         double a    = 1.0;
         double R0   = 1.0;
@@ -48,7 +48,7 @@ namespace operators::detail
               int SourceNodesCode           = source_nodes_uniform,
               int SourceActiveFamilyCode    = source_active_psin,
               int SourceParameterizationCode = source_parameterization_identity>
-    struct PfPsinUniformIpOperator
+    struct SourceOperator
     {
         static_assert(Shape::L_max == GridType::basis_rows, "operator/profile basis rows must match");
         static_assert(Shape::K_max == GridType::rho_power_rows, "operator/profile rho rows must match");
@@ -113,11 +113,11 @@ namespace operators::detail
         using shape        = Shape;
         using grid         = GridType;
         using source_shape = SourceShape;
-        using Setup        = PfPsinUniformIpSetup<Shape, SourceShape>;
-        using SolveParams  = PfPsinUniformIpSolveParams;
+        using Setup        = SourceOperatorSetup<Shape, SourceShape>;
+        using SolveParams  = SourceOperatorSolveParams;
         using Profiles     = RuntimeProfiles<Shape, GridType>;
         using Geometry     = GeometryRuntime<GridType>;
-        using Source       = PfPsinUniformIpSourceRuntime<GridType, SourceShape>;
+        using Source       = NativeSourceRuntime<GridType, SourceShape>;
         using Residual     = ResidualRuntime<Shape, GridType>;
         using PackedVector = typename Residual::PackedVector;
 
@@ -136,7 +136,7 @@ namespace operators::detail
             Residual residual{};
         };
 
-        explicit constexpr PfPsinUniformIpOperator(const Setup& setup) noexcept : plan(make_plan(setup))
+        explicit constexpr SourceOperator(const Setup& setup) noexcept : plan(make_plan(setup))
         {
             workspace.profiles.load_fixed_from(plan.fixed_profiles);
             workspace.source_runtime.set_uniform_sources(source_span(setup.heat), source_span(setup.current));
@@ -335,7 +335,7 @@ namespace operators::detail
 
 namespace operators
 {
-    using detail::PfPsinUniformIpOperator;
-    using detail::PfPsinUniformIpSetup;
-    using detail::PfPsinUniformIpSolveParams;
+    using detail::SourceOperator;
+    using detail::SourceOperatorSetup;
+    using detail::SourceOperatorSolveParams;
 } // namespace operators

@@ -90,7 +90,7 @@ namespace source::detail
     }
 
     template <typename GridType, typename SourceShape>
-    struct PfPsinUniformIpSourceRuntime
+    struct NativeSourceRuntime
     {
         static constexpr size_t radial_nodes = GridType::radial_nodes;
         static constexpr size_t sample_count = SourceShape::sample_count;
@@ -2137,7 +2137,7 @@ namespace source::detail
 
 namespace source
 {
-    using detail::PfPsinUniformIpSourceRuntime;
+    using detail::NativeSourceRuntime;
     using detail::UniformSourceShape;
     using detail::axis_fix_count;
     using detail::root_field_count;
