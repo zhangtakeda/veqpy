@@ -21,7 +21,7 @@ namespace tensor_layout
     template <size_t K, size_t Rows, size_t Cols, size_t Lanes = native_lanes_v<double>>
     struct MultiMatvecPlan
     {
-        static_assert(K >= 1 && K <= 4, "multi-matvec plan supports one to four outputs");
+        static_assert(K >= 1 && K <= 2, "multi-matvec plan supports one or two outputs");
         static_assert(Rows >= 1, "multi-matvec plan requires at least one row");
         static_assert(Cols >= 1, "multi-matvec plan requires at least one column");
         static_assert(Lanes >= 1, "multi-matvec plan requires at least one lane");
