@@ -617,7 +617,7 @@ def _plan_row(
             "reused": bool(artifact.reused),
         }
     try:
-        topology.validate_supported_for_veqlib_mvp()
+        topology.validate_supported_for_veqlib_native()
     except TopologyError as exc:
         runtime = {"status": "blocked_unsupported_native_kernel", "reason": str(exc)}
     else:

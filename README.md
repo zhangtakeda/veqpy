@@ -155,18 +155,18 @@ representative High configuration for each GEQDSK family.
 
 | case(params)    |  VEQlib (ms) |    Numba (ms) |     speedup | solution diff |
 | --------------- | -----------: | ------------: | ----------: | ------------: |
-| D-shaped(4)     |     0.038366 |      1.103223 |     28.755x |      2.73e-09 |
-| D-shaped(5)     |     0.052353 |      1.136383 |     21.706x |      9.20e-09 |
-| **D-shaped(9)** | **0.067753** |  **1.552996** | **22.921x** |  **1.25e-08** |
-| D-shaped(75)    |     0.784600 |      6.810340 |      8.680x |      1.47e-08 |
-| H-mode(27)      |     0.235108 |      5.113339 |     21.749x |      1.89e-07 |
-| H-mode(36)      |     0.291192 |      6.740179 |     23.147x |      3.87e-08 |
-| **H-mode(60)**  | **0.562023** | **14.010330** | **24.928x** |  **1.86e-08** |
-| H-mode(130)     |     2.596726 |     43.290484 |     16.671x |      1.38e-07 |
-| X-point(19)     |     0.139611 |      2.690838 |     19.274x |      3.51e-09 |
-| X-point(29)     |     0.250460 |      3.718143 |     14.845x |      4.51e-08 |
-| **X-point(94)** | **1.346315** | **10.342658** |  **7.682x** |  **3.44e-08** |
-| X-point(130)    |     2.575587 |     22.298123 |      8.657x |      1.24e-09 |
+| D-shaped(4)     |     0.038843 |      0.988233 |     25.442x |      2.73e-09 |
+| D-shaped(5)     |     0.044019 |      1.076983 |     24.466x |      9.20e-09 |
+| **D-shaped(9)** | **0.066897** |  **1.384216** | **20.692x** |  **1.25e-08** |
+| D-shaped(75)    |     0.778386 |      6.778595 |      8.709x |      1.47e-08 |
+| H-mode(27)      |     0.220681 |      5.020843 |     22.752x |      1.89e-07 |
+| H-mode(36)      |     0.294272 |      6.077891 |     20.654x |      3.87e-08 |
+| **H-mode(60)**  | **0.551778** | **13.426837** | **24.334x** |  **3.46e-09** |
+| H-mode(130)     |     2.537298 |     42.276592 |     16.662x |      1.36e-07 |
+| X-point(19)     |     0.138631 |      2.667478 |     19.242x |      3.51e-09 |
+| X-point(29)     |     0.243494 |      3.624370 |     14.885x |      4.51e-08 |
+| **X-point(94)** | **1.315509** | **10.269229** |  **7.806x** |  **3.44e-08** |
+| X-point(130)    |     2.530054 |     21.647612 |      8.556x |      1.24e-09 |
 
 The Python facade owns the artifact lifecycle: `KernelTopology` fixes compile-time structure, `KernelBoundary`
 supplies per-case boundary geometry, `KernelInput` supplies source/constraint data,
@@ -177,7 +177,7 @@ with explicit `-D...` definitions and loads the resulting artifact through
 
 The current production boundary is narrow: route/topology planning covers the
 benchmark matrix, while native execution is gated by
-`KernelTopology.validate_supported_for_veqlib_mvp()`. Runtime values such as
+`KernelTopology.validate_supported_for_veqlib_native()`. Runtime values such as
 boundary coefficients, source arrays, `Ip`, `beta`, solver tolerances, and `x0`
 do not participate in the kernel artifact identity. The artifact cache key is
 computed from the canonical topology, build options, Python/toolchain ABI, the
