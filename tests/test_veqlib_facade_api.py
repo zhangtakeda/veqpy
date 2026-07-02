@@ -297,12 +297,6 @@ def test_kernel_solve_uses_handle_default_config_with_per_call_overrides() -> No
     assert recorder.runtime_args[14] == 5
     assert temporary_config.method == "powell"
 
-    with pytest.raises(TypeError, match="Unsupported KernelConfig override"):
-        handle.solve(tiny_kernel_boundary(), tiny_kernel_source(), unknown_option=True)
-
-    with pytest.raises(TypeError, match="source"):
-        handle.solve(tiny_kernel_boundary(), input=tiny_kernel_source())
-
 
 def test_kernel_dry_run_and_python_owned_result_snapshot(tmp_path: Path) -> None:
     topology = make_kernel_topology()

@@ -183,9 +183,9 @@ one-shot convenience path and `clean(...)` cleans artifact cache entries. The
 lower-level artifact primitive is named `prepare(topology, recipe=...)` and
 returns `PrepareResult`.
 ABI-code lowering, CPU-affinity, and cache-root helpers live in their focused
-submodules. Facade inputs use one canonical Python spelling per option; aliases
-are not part of the public contract. Python drives CMake with explicit `-D...` definitions and loads the
-resulting artifact through `veqlib.facade`.
+submodules. Facade inputs use one canonical Python spelling per option. Python
+drives CMake with explicit `-D...` definitions and loads the resulting artifact
+through `veqlib.facade`.
 
 The current production boundary is narrow: route/topology planning covers the
 benchmark matrix, while native execution is gated by the facade native-support
