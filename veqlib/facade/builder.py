@@ -26,8 +26,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
+from .identity import recipe_identity_payload, topology_identity_payload
 from .types import KernelRecipe as Recipe
 from .types import KernelTopology as Topology
+from .validation import validate_supported_for_veqlib_native
 
 GENERATOR_VERSION = "veqlib.kernel.builder.v1"
 ARTIFACT_SCHEMA = "veqlib.kernel_artifact.v1"
@@ -100,7 +102,7 @@ def prepare(
     if not isinstance(recipe, Recipe):
         raise TypeError(f"recipe must be KernelRecipe, got {type(recipe).__name__}")
     if not dry_run:
-        topology.validate_supported_for_veqlib_native()
+        validate_supported_for_veqlib_native(topology)
     source_dir = _default_source_dir() if source_dir is None else source_dir.resolve()
     if not source_dir.exists():
         raise PrepareError(f"VEQlib source directory does not exist: {source_dir}")
@@ -174,7 +176,7 @@ def prepare(
             nanobind_static=nanobind_static,
             dry_run=dry_run,
         )
-        _write_json(paths["topology_path"], topology.to_canonical_dict())
+        _write_json(paths["topology_path"], topology_identity_payload(topology))
         _write_json(paths["build_path"], metadata["build"])
         _write_kernel_py(paths["kernel_py_path"], metadata)
 
@@ -425,8 +427,8 @@ def _metadata_payload(
             "last_reused_at": None,
             "last_used_at": None,
         },
-        "topology": topology.to_canonical_dict(),
-        "recipe": recipe.to_canonical_dict(),
+        "topology": topology_identity_payload(topology),
+        "recipe": recipe_identity_payload(recipe),
         "build_identity": build_identity,
         "python_client_source_digest": _python_source_digest(),
         "common_artifacts": {
@@ -734,8 +736,8 @@ def _compute_artifact_id(
 ) -> str:
     payload = {
         "schema": ARTIFACT_SCHEMA,
-        "topology": topology.to_canonical_dict(),
-        "recipe": recipe.to_canonical_dict(),
+        "topology": topology_identity_payload(topology),
+        "recipe": recipe_identity_payload(recipe),
         "build_identity": build_identity,
     }
     data = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode(

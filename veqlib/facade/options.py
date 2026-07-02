@@ -1,7 +1,8 @@
 """Python mirrors of VEQlib C++ ABI option codes.
 
-Strings are a facade convenience only; native kernels consume integer enum
-codes. Keep these constants synchronized with ``veqlib/core/abi_enums.h``.
+Python facade inputs use canonical string tokens. Native kernels consume integer
+ABI enum codes derived from those strings. Keep these constants synchronized with
+``veqlib/core/abi_enums.h``.
 """
 
 from __future__ import annotations
@@ -61,66 +62,43 @@ RESIDUAL_NORMALIZATION_CODES: Final[dict[str, int]] = {
 }
 
 
-def solver_method_code(value: str | int) -> int:
-    code = _option_code(value, SOLVER_METHOD_CODES, "solver method")
-    if code not in (
-        SOLVER_METHOD_POWELL,
-        SOLVER_METHOD_LEVENBERG_MARQUARDT,
-        SOLVER_METHOD_NEWTON_KRYLOV,
-        SOLVER_METHOD_NEWTON_RAPHSON,
-    ):
-        raise ValueError(f"Unsupported solver method code {code!r}")
-    return code
+def normalize_solver_method(value: str) -> str:
+    return _option_token(value, SOLVER_METHOD_CODES, "solver method")
 
 
-def initial_policy_code(value: str | int) -> int:
-    code = _option_code(value, INITIAL_POLICY_CODES, "initial policy")
-    if code not in (
-        INITIAL_POLICY_COLD_ZEROS,
-        INITIAL_POLICY_COLD_GEOMETRIC,
-        INITIAL_POLICY_COLD,
-    ):
-        raise ValueError(f"Unsupported initial policy code {code!r}")
-    return code
+def normalize_initial_policy(value: str) -> str:
+    return _option_token(value, INITIAL_POLICY_CODES, "initial policy")
 
 
-def continue_policy_code(value: str | int) -> int:
-    code = _option_code(value, CONTINUE_POLICY_CODES, "continue policy")
-    if code not in (
-        CONTINUE_POLICY_COLD_ZEROS,
-        CONTINUE_POLICY_COLD_GEOMETRIC,
-        CONTINUE_POLICY_COLD,
-        CONTINUE_POLICY_WARM_FIXED,
-        CONTINUE_POLICY_WARM_PREDICT,
-        CONTINUE_POLICY_WARM_CHORD,
-        CONTINUE_POLICY_WARM,
-    ):
-        raise ValueError(f"Unsupported continue policy code {code!r}")
-    return code
+def normalize_continue_policy(value: str) -> str:
+    return _option_token(value, CONTINUE_POLICY_CODES, "continue policy")
 
 
-def residual_normalization_code(value: str | int) -> int:
-    code = _option_code(value, RESIDUAL_NORMALIZATION_CODES, "residual normalization")
-    if code not in (
-        RESIDUAL_NORMALIZATION_NONE,
-        RESIDUAL_NORMALIZATION_FAST,
-        RESIDUAL_NORMALIZATION_BALANCED,
-        RESIDUAL_NORMALIZATION_SAFE,
-    ):
-        raise ValueError(f"Unsupported residual normalization code {code!r}")
-    return code
+def normalize_residual_normalization(value: str) -> str:
+    return _option_token(value, RESIDUAL_NORMALIZATION_CODES, "residual normalization")
 
 
-def _option_code(value: str | int, table: dict[str, int], label: str) -> int:
-    if isinstance(value, int):
-        return value
-    key = _normalize_option_token(value)
-    try:
-        return table[key]
-    except KeyError as exc:
-        supported = ", ".join(sorted(table))
-        raise ValueError(f"Unsupported {label} {value!r}; supported: {supported}") from exc
+def solver_method_code(value: str) -> int:
+    return SOLVER_METHOD_CODES[normalize_solver_method(value)]
 
 
-def _normalize_option_token(value: str) -> str:
-    return value.strip()
+def initial_policy_code(value: str) -> int:
+    return INITIAL_POLICY_CODES[normalize_initial_policy(value)]
+
+
+def continue_policy_code(value: str) -> int:
+    return CONTINUE_POLICY_CODES[normalize_continue_policy(value)]
+
+
+def residual_normalization_code(value: str) -> int:
+    return RESIDUAL_NORMALIZATION_CODES[normalize_residual_normalization(value)]
+
+
+def _option_token(value: str, table: dict[str, int], label: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{label} must be a canonical string token")
+    key = value.strip().lower()
+    if key in table:
+        return key
+    supported = ", ".join(sorted(table))
+    raise ValueError(f"Unsupported {label} {value!r}; supported: {supported}")

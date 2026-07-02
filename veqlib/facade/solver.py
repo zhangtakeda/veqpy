@@ -12,10 +12,11 @@ from pathlib import Path
 from typing import Any
 
 from .builder import PrepareResult
-from .options import solver_method_code
+from .options import normalize_solver_method, solver_method_code
 from .registry import KernelRegistry, SolverThreadError, ThreadOwnedNativeSolver
 from .types import KernelRecipe as Recipe
 from .types import KernelTopology as Topology
+from .validation import validate_supported_for_veqlib_native
 
 
 class VEQlibSolver:
@@ -29,10 +30,10 @@ class VEQlibSolver:
         registry: KernelRegistry | None = None,
         cache_root: Path | None = None,
         source_dir: Path | None = None,
-        solver: str | int = "powell",
+        solver: str = "powell",
         pin_cpu: bool | int | None = None,
     ) -> None:
-        topology.validate_supported_for_veqlib_native()
+        validate_supported_for_veqlib_native(topology)
         self.topology = topology
         self.recipe = Recipe() if recipe is None else recipe
         if not isinstance(self.recipe, Recipe):
@@ -42,7 +43,8 @@ class VEQlibSolver:
             source_dir=source_dir,
             pin_cpu=pin_cpu,
         )
-        self.solver_code = solver_method_code(solver)
+        self.solver = normalize_solver_method(solver)
+        self.solver_code = solver_method_code(self.solver)
         self.pin_cpu = pin_cpu
         self._owner_thread_id = threading.get_ident()
         self._native_solver: ThreadOwnedNativeSolver | None = None
@@ -75,7 +77,7 @@ class VEQlibSolver:
             self._native_solver = self.registry.create_solver(
                 self.topology,
                 recipe=self.recipe,
-                solver=self.solver_code,
+                solver=self.solver,
                 pin_cpu=self.pin_cpu,
             )
         return self._native_solver

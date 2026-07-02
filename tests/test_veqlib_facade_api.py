@@ -17,8 +17,9 @@ from veqlib.facade import (
     KernelRecipe,
     KernelSource,
     KernelTopology,
-    SolveResult,
 )
+from veqlib.facade.abi import solve_result_from_native
+from veqlib.facade.identity import recipe_identity_payload, topology_identity_payload
 from veqlib.facade.options import (
     RESIDUAL_NORMALIZATION_BALANCED,
     SOLVER_METHOD_LEVENBERG_MARQUARDT,
@@ -42,8 +43,8 @@ def make_kernel_topology(**overrides: object) -> KernelTopology:
         "Nt": 8,
         "route": "pf",
         "coordinate": "PSIN",
-        "constraint": "ip",
         "nodes": "uniform",
+        "ip_constraint": True,
         "sample_count": 9,
     }
     params.update(overrides)
@@ -154,21 +155,21 @@ def test_veqlib_facade_root_exports_semantic_surface() -> None:
 def test_kernel_topology_and_runtime_source_is_user_facing_contract() -> None:
     topology = make_kernel_topology(c_counts=(0, 0), s_counts=(2, 0, 0), K_max=None)
     same_shape = make_kernel_topology(c_counts=(), s_counts=(2,), L_max=2, M_max=1, K_max=2)
-    family_recipe = KernelRecipe(layout="profile-first", build="release")
+    family_recipe = KernelRecipe(layout="family", build="release")
     kernel_source = tiny_kernel_source(case_name="tiny")
     kernel_boundary = tiny_kernel_boundary()
 
-    assert topology.to_canonical_dict() == same_shape.to_canonical_dict()
+    assert topology_identity_payload(topology) == topology_identity_payload(same_shape)
     assert topology.key == same_shape.key
     assert family_recipe.backend == "cxx"
     assert family_recipe.layout == "family"
     assert family_recipe.layout_profile_first is True
-    assert family_recipe.to_canonical_dict()["preset"] == "release"
+    assert recipe_identity_payload(family_recipe)["preset"] == "release"
     assert topology.route == "PF"
     assert topology.coordinate == "psin"
-    assert topology.constraint == "Ip"
+    assert topology.ip_constraint is True
     assert topology.sample_count == 9
-    assert topology.packed_size() == 9
+    assert topology.x_size == 9
 
     assert kernel_source.case_name == "tiny"
     assert kernel_boundary.a == 0.5
@@ -305,7 +306,7 @@ def test_kernel_solve_uses_handle_default_config_with_per_call_overrides() -> No
 
 def test_kernel_dry_run_and_python_owned_result_snapshot(tmp_path: Path) -> None:
     topology = make_kernel_topology()
-    recipe = KernelRecipe(build="release", layout="profile-first")
+    recipe = KernelRecipe(build="release", layout="family")
     kernel_config = KernelConfig(max_residual=4.0e-6)
     handle = facade.build(
         topology,
@@ -329,8 +330,8 @@ def test_kernel_dry_run_and_python_owned_result_snapshot(tmp_path: Path) -> None
     assert artifact.recipe is recipe
     assert artifact.topology.key == default_artifact.topology.key == topology.key
     assert artifact.artifact_id != default_artifact.artifact_id
-    assert artifact.metadata["topology"] == topology.to_canonical_dict()
-    assert artifact.metadata["recipe"] == recipe.to_canonical_dict()
+    assert artifact.metadata["topology"] == topology_identity_payload(topology)
+    assert artifact.metadata["recipe"] == recipe_identity_payload(recipe)
     assert artifact.metadata["build"]["build"] == "release"
     assert "-DVEQ_LAYOUT_PROFILE_FIRST=1" in artifact.metadata["build"]["cmake_configure"]
 
@@ -338,7 +339,7 @@ def test_kernel_dry_run_and_python_owned_result_snapshot(tmp_path: Path) -> None
     raw = np.full(3, 2.0, dtype=np.float64)
     scaled = np.full(3, 3.0, dtype=np.float64)
     alpha = np.array([4.0, 5.0], dtype=np.float64)
-    result = SolveResult.from_solve_direct(
+    result = solve_result_from_native(
         (0.25, True, 1, 2, 3, 4, 5, 6, 7, 8.0, 9.0, raw_x, raw, scaled, alpha)
     )
     raw_x[:] = 99.0

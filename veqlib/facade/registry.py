@@ -188,7 +188,7 @@ class KernelRegistry:
         topology: Topology,
         *,
         recipe: Recipe | None = None,
-        solver: str | int = "powell",
+        solver: str = "powell",
         force: bool = False,
         pin_cpu: bool | int | None = None,
     ) -> ThreadOwnedNativeSolver:
@@ -205,7 +205,7 @@ class KernelRegistry:
         topology: Topology,
         *,
         recipe: Recipe | None = None,
-        solver: str | int = "powell",
+        solver: str = "powell",
         force: bool = False,
         pin_cpu: bool | int | None = None,
     ) -> ThreadOwnedNativeSolver:

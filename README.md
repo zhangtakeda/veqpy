@@ -170,22 +170,24 @@ representative High configuration for each GEQDSK family.
 | X-point(130)    |     2.530054 |     21.647612 |      8.556x |      1.24e-09 |
 
 The package-level Python facade is intentionally semantic: users construct
-`KernelTopology` for the physical/native topology, `KernelRecipe` for packed
-backend, layout, and build options, `KernelBoundary`/`KernelSource` for runtime
-cases, and `KernelConfig` for the handle-level default solve policy.
+`KernelTopology` for the physical/native topology, including `ip_constraint` and
+`beta_constraint` boolean source constraints, `KernelRecipe` for packed backend,
+layout, and build options, `KernelBoundary`/`KernelSource` for runtime cases,
+and `KernelConfig` for the handle-level default solve policy.
 `build(..., recipe=None, config=None)` creates a reusable `Kernel` and caches
 that default policy on the handle; `Kernel.solve(...)` can use it as-is, replace
 it with a one-off `config=...`, or override individual fields such as
 `method=...` for one call. `solve(...)` is the one-shot convenience path and
 `clean(...)` cleans artifact cache entries. The lower-level artifact primitive
 is named `prepare(topology, recipe=...)` and returns `PrepareResult`.
-Option-code, CPU-affinity, and cache-root helpers live in their focused
-submodules. Python drives CMake with explicit `-D...` definitions and loads the
+ABI-code lowering, CPU-affinity, and cache-root helpers live in their focused
+submodules. Facade inputs use one canonical Python spelling per option; aliases
+are not part of the public contract. Python drives CMake with explicit `-D...` definitions and loads the
 resulting artifact through `veqlib.facade`.
 
 The current production boundary is narrow: route/topology planning covers the
-benchmark matrix, while native execution is gated by
-`KernelTopology.validate_supported_for_veqlib_native()`. The artifact cache key is
+benchmark matrix, while native execution is gated by the facade native-support
+validation helper. The artifact cache key is
 computed from the canonical topology, explicit artifact recipe, Python/toolchain
 ABI, the native CMake define contract, and a digest of implementation inputs under
 `veqlib/core` (`.h`, `.cpp`, `.in`, and `CMakeLists.txt`). Artifacts are cached

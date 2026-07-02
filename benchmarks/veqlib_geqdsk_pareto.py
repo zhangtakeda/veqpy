@@ -73,7 +73,9 @@ from veqlib.facade import (
     KernelTopology,
     VEQlibSolver,
 )
+from veqlib.facade.abi import boundary_runtime_args, config_runtime_args, source_runtime_args
 from veqlib.facade.builder import default_kernel_cache_root
+from veqlib.facade.identity import recipe_identity_payload
 
 DEFAULT_OUTPUT = REPO_ROOT / "benchmarks" / "results" / "veqlib_geqdsk.json"
 VALIDATION_ATOL = 1.0e-6
@@ -131,8 +133,8 @@ def _topology_for_case(signature: dict[str, int], case: Any, *, grid: Any) -> To
         Nt=int(grid.Nt),
         route="PF",
         coordinate="psin",
-        constraint="Ip",
         nodes="uniform",
+        ip_constraint=True,
         sample_count=int(np.asarray(case.heat_input, dtype=np.float64).size),
         M_max=m_max,
         K_max=max(2, m_max),
@@ -270,7 +272,7 @@ def _case_from_signature(
     recipe = KernelRecipe(build=build, layout="degree")
     kernel_boundary = _kernel_boundary_from_case(case)
     kernel_source = _kernel_source_from_operator(case_key, config_label, operator)
-    x_size = int(topology.packed_size())
+    x_size = int(topology.x_size)
     kernel_config = _kernel_config_from_config(
         benchmark.CONFIG,
         x_size=x_size,
@@ -349,9 +351,9 @@ def _measure_veqlib(
     def configure() -> None:
         solver.set_kernel_runtime(
             "" if case.kernel_source.case_name is None else case.kernel_source.case_name,
-            *case.kernel_boundary.runtime_args(),
-            *case.kernel_source.runtime_args(),
-            *case.kernel_config.runtime_args(x_size=case.x_size),
+            *boundary_runtime_args(case.kernel_boundary),
+            *source_runtime_args(case.kernel_source),
+            *config_runtime_args(case.kernel_config, x_size=case.x_size),
         )
 
     timing = measure_native_solver(solver, configure, warmup=warmup, repeat=repeat)
@@ -422,7 +424,7 @@ def _row(
         "signature": case.signature,
         "topology": {
             "key": case.topology.key,
-            "recipe": case.recipe.to_canonical_dict(),
+            "recipe": recipe_identity_payload(case.recipe),
             "grid": {"Nr": case.topology.Nr, "Nt": case.topology.Nt},
             "sample_count": case.topology.sample_count,
             "M_max": case.topology.M_max,

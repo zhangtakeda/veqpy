@@ -95,8 +95,8 @@ def main() -> None:
         Nt=8,
         route="PF",
         coordinate="psin",
-        constraint="Ip",
         nodes="uniform",
+        ip_constraint=True,
         sample_count=9,
     )
 

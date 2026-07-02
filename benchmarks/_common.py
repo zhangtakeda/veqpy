@@ -22,6 +22,7 @@ os.environ.setdefault("MPLCONFIGDIR", str(Path("/tmp/veqpy-mpl")))
 import numpy as np
 
 from veqlib.facade import SolveResult
+from veqlib.facade.abi import solve_result_from_native
 from veqlib.facade.affinity import pinned_cpu
 from veqpy.engine.numba_source import source_parameterization_for_route_key
 from veqpy.model import Boundary, Geqdsk, Grid, Problem
@@ -1267,7 +1268,7 @@ def measure_native_solver(
     if final_result is None:
         raise RuntimeError("native timing loop did not run")
     return NativeTiming(
-        result=SolveResult.from_solve_direct(final_result),
+        result=solve_result_from_native(final_result),
         wall_ms=wall_ms,
         inner_ms=inner_ms,
         success=success,

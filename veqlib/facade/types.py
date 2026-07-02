@@ -1,29 +1,30 @@
-"""Typed VEQlib facade values lowered to the native kernel ABI.
+"""Typed VEQlib facade values canonicalized before native ABI lowering.
 
-The dataclasses in this module canonicalize topology/build/runtime inputs into
-stable Python objects before ``kernel.py`` lowers them to C++ scalars, enum
-codes, and 1D C-contiguous ``float64`` arrays. They are VEQlib contracts, not
-external operator/source-plan adapters.
+The dataclasses in this module own stable Python data only. Construction
+normalizes Python-facing inputs and freezes derived scalar fields; separate
+facade helpers lower these objects to artifact identity payloads and nanobind
+runtime tuples.
 """
 
 from __future__ import annotations
 
-import base64
-import hashlib
-import json
-from dataclasses import dataclass, fields, replace
-from typing import Any, Self
+from dataclasses import dataclass, field, fields, replace
+from typing import Any
 
 import numpy as np
 
+from .identity import compute_topology_key
 from .options import (
     continue_policy_code,
     initial_policy_code,
+    normalize_continue_policy,
+    normalize_initial_policy,
+    normalize_residual_normalization,
+    normalize_solver_method,
     residual_normalization_code,
     solver_method_code,
 )
 
-_KERNEL_TOPOLOGY_KEY_LENGTH = 32
 # These integer wire values mirror the generated C++ ABI enum contract.
 # Changing them is a cross-language compatibility change, not a Python refactor.
 _SOURCE_ROUTE_CODES = {
@@ -35,23 +36,29 @@ _SOURCE_ROUTE_CODES = {
     "PQ": 6,
 }
 _SOURCE_COORDINATE_CODES = {"rho": 1, "psin": 2}
-_SOURCE_CONSTRAINT_CODES = {"null": 0, "Ip": 1, "beta": 2, "Ip_beta": 3}
+_SOURCE_CONSTRAINT_CODES_BY_FLAGS = {
+    (False, False): 0,
+    (True, False): 1,
+    (False, True): 2,
+    (True, True): 3,
+}
+_SOURCE_CONSTRAINT_LABELS_BY_FLAGS = {
+    (False, False): "null",
+    (True, False): "Ip",
+    (False, True): "beta",
+    (True, True): "Ip_beta",
+}
+_SOURCE_CONSTRAINT_FLAG_ORDER = ((True, True), (True, False), (False, True), (False, False))
 _SOURCE_NODES_CODES = {"uniform": 1, "grid": 2}
 _SOURCE_ACTIVE_FAMILY_CODES = {"none": 0, "psin": 1, "F": 2}
 _SOURCE_PARAMETERIZATION_CODES = {"identity": 0, "sqrt_psin": 1}
-_SOURCE_CONSTRAINTS_BY_ROUTE = {
-    "PF": frozenset({"null", "Ip", "beta"}),
-    "PP": frozenset({"null", "Ip", "beta", "Ip_beta"}),
-    "PI": frozenset({"null", "Ip", "beta", "Ip_beta"}),
-    "PJ1": frozenset({"null", "Ip", "beta", "Ip_beta"}),
-    "PJ2": frozenset({"null", "Ip", "beta", "Ip_beta"}),
-    "PQ": frozenset({"null", "Ip", "beta", "Ip_beta"}),
-}
-_VEQLIB_NATIVE_ROUTE_CONSTRAINTS = {
-    (route, coordinate, nodes): constraints
-    for route, constraints in _SOURCE_CONSTRAINTS_BY_ROUTE.items()
-    for coordinate in ("rho", "psin")
-    for nodes in ("uniform", "grid")
+_SOURCE_CONSTRAINT_FLAGS_BY_ROUTE = {
+    "PF": frozenset({(False, False), (True, False), (False, True)}),
+    "PP": frozenset(_SOURCE_CONSTRAINT_CODES_BY_FLAGS),
+    "PI": frozenset(_SOURCE_CONSTRAINT_CODES_BY_FLAGS),
+    "PJ1": frozenset(_SOURCE_CONSTRAINT_CODES_BY_FLAGS),
+    "PJ2": frozenset(_SOURCE_CONSTRAINT_CODES_BY_FLAGS),
+    "PQ": frozenset(_SOURCE_CONSTRAINT_CODES_BY_FLAGS),
 }
 _LAYOUT_CODES = {"degree": 0, "family": 1}
 _BUILD_PRESET_KWARGS: dict[str, dict[str, object]] = {
@@ -90,6 +97,7 @@ _BUILD_PRESET_KWARGS: dict[str, dict[str, object]] = {
 }
 _DEFAULT_ENZYME_JACOBIAN_BATCH_WIDTH = 0
 
+
 class TopologyError(ValueError):
     """Raised when a VEQlib kernel topology cannot be canonicalized."""
 
@@ -108,41 +116,38 @@ class KernelRecipe:
     enable_thin_lto: bool | None = None
     analysis: bool | None = None
     enzyme_jacobian_batch_width: int | None = None
+    layout_code: int = field(init=False)
+    layout_profile_first: bool = field(init=False)
 
     def __post_init__(self) -> None:
-        for name, value in self.canonical_kwargs().items():
-            object.__setattr__(self, name, value)
-
-    def canonical_kwargs(self) -> dict[str, object]:
-        build = _normalize_token(self.build, "build")
-        if build not in _BUILD_PRESET_KWARGS:
-            raise TopologyError("build must be one of fastmath, fastmath-enzyme, release, or debug")
+        build = _normalize_build(self.build)
         preset = _BUILD_PRESET_KWARGS[build]
-        return {
+        layout = _normalize_layout(self.layout)
+        normalized_values: dict[str, object] = {
             "backend": _normalize_backend(self.backend),
-            "layout": _normalize_layout(self.layout),
+            "layout": layout,
             "build": build,
             "cmake_build_type": _normalize_cmake_build_type(
                 self.cmake_build_type,
                 default=str(preset["cmake_build_type"]),
             ),
             "fp_mode": _normalize_fp_mode(self.fp_mode, default=str(preset["fp_mode"])),
-            "enable_enzyme": _canonical_bool(
+            "enable_enzyme": _canonical_bool_or_default(
                 self.enable_enzyme,
                 default=bool(preset["enable_enzyme"]),
                 name="enable_enzyme",
             ),
-            "enable_native_optimizations": _canonical_bool(
+            "enable_native_optimizations": _canonical_bool_or_default(
                 self.enable_native_optimizations,
                 default=bool(preset["enable_native_optimizations"]),
                 name="enable_native_optimizations",
             ),
-            "enable_thin_lto": _canonical_bool(
+            "enable_thin_lto": _canonical_bool_or_default(
                 self.enable_thin_lto,
                 default=bool(preset["enable_thin_lto"]),
                 name="enable_thin_lto",
             ),
-            "analysis": _canonical_bool(
+            "analysis": _canonical_bool_or_default(
                 self.analysis,
                 default=bool(preset["analysis"]),
                 name="analysis",
@@ -150,33 +155,11 @@ class KernelRecipe:
             "enzyme_jacobian_batch_width": _canonical_enzyme_jacobian_batch_width(
                 self.enzyme_jacobian_batch_width
             ),
+            "layout_code": _LAYOUT_CODES[layout],
+            "layout_profile_first": layout == "family",
         }
-
-    def to_canonical_dict(self) -> dict[str, object]:
-        return {
-            "backend": self.backend,
-            "preset": self.build,
-            "layout": {
-                "packed": self.layout,
-                "profile_first": self.layout_profile_first,
-                "code": self.layout_code,
-            },
-            "cmake_build_type": self.cmake_build_type,
-            "fp_mode": self.fp_mode,
-            "enable_enzyme": self.enable_enzyme,
-            "enable_native_optimizations": self.enable_native_optimizations,
-            "enable_thin_lto": self.enable_thin_lto,
-            "analysis": self.analysis,
-            "enzyme_jacobian_batch_width": self.enzyme_jacobian_batch_width,
-        }
-
-    @property
-    def layout_code(self) -> int:
-        return _LAYOUT_CODES[self.layout]
-
-    @property
-    def layout_profile_first(self) -> bool:
-        return self.layout == "family"
+        for name, value in normalized_values.items():
+            object.__setattr__(self, name, value)
 
 
 @dataclass(frozen=True, slots=True)
@@ -204,17 +187,6 @@ class KernelBoundary:
         s_copy.setflags(write=False)
         object.__setattr__(self, "s_offsets", s_copy)
 
-    def runtime_args(self) -> tuple[Any, ...]:
-        return (
-            self.a,
-            self.R0,
-            self.Z0,
-            self.B0,
-            self.ka,
-            np.ascontiguousarray(self.c_offsets, dtype=np.float64),
-            np.ascontiguousarray(self.s_offsets, dtype=np.float64),
-        )
-
 
 @dataclass(frozen=True, slots=True)
 class KernelTopology:
@@ -231,8 +203,9 @@ class KernelTopology:
     Nt: int
     route: str
     coordinate: str
-    constraint: str
     nodes: str
+    ip_constraint: bool = False
+    beta_constraint: bool = False
     sample_count: int | None = None
     quadrature: str = "legendre"
     calculus: str = "spectral"
@@ -240,6 +213,21 @@ class KernelTopology:
     M_max: int | None = None
     K_max: int | None = None
     key: str | None = None
+    active_profiles: tuple[tuple[str, int], ...] = field(init=False)
+    x_size: int = field(init=False)
+    source_route_key: tuple[str, str, str] = field(init=False)
+    source_route_code: int = field(init=False)
+    source_coordinate_code: int = field(init=False)
+    constraint_label: str = field(init=False)
+    source_constraint_code: int = field(init=False)
+    source_nodes_code: int = field(init=False)
+    source_active_family: str = field(init=False)
+    source_active_family_code: int = field(init=False)
+    source_parameterization: str = field(init=False)
+    source_parameterization_code: int = field(init=False)
+    source_supported_constraints: tuple[str, ...] = field(init=False)
+    source_uses_ip_constraint: bool = field(init=False)
+    source_uses_beta_constraint: bool = field(init=False)
 
     def __post_init__(self) -> None:
         profile_counts = {
@@ -267,8 +255,9 @@ class KernelTopology:
         nodes = _normalize_token(self.nodes, "nodes").lower()
         if nodes not in _SOURCE_NODES_CODES:
             raise TopologyError(f"unsupported source nodes {nodes!r}")
-        constraint = _normalize_constraint(self.constraint)
-        _validate_source_constraint(route, constraint)
+        ip_constraint = _canonical_bool(self.ip_constraint, "ip_constraint")
+        beta_constraint = _canonical_bool(self.beta_constraint, "beta_constraint")
+        _validate_source_constraint(route, ip_constraint, beta_constraint)
         quadrature = _normalize_token(self.quadrature, "quadrature").lower()
         if quadrature != "legendre":
             raise TopologyError("only legendre quadrature is supported")
@@ -289,6 +278,10 @@ class KernelTopology:
             psin_count=profile_counts["psin_count"],
             f_count=profile_counts["F_count"],
         )
+        source_parameterization = _source_parameterization(route, coordinate, nodes)
+        constraint_flags = (ip_constraint, beta_constraint)
+        constraint_label = _SOURCE_CONSTRAINT_LABELS_BY_FLAGS[constraint_flags]
+        active_profiles = _active_profiles_tuple(profile_counts, c_counts, s_counts)
         normalized_values: dict[str, Any] = {
             **profile_counts,
             "c_counts": c_counts,
@@ -297,174 +290,40 @@ class KernelTopology:
             "Nt": nt,
             "route": route,
             "coordinate": coordinate,
-            "constraint": constraint,
             "nodes": nodes,
+            "ip_constraint": ip_constraint,
+            "beta_constraint": beta_constraint,
             "sample_count": sample_count,
             "quadrature": quadrature,
             "calculus": calculus,
             "L_max": l_max,
             "M_max": m_max,
             "K_max": k_max,
+            "active_profiles": active_profiles,
+            "x_size": sum(count for _, count in active_profiles),
+            "source_route_key": (route, coordinate, nodes),
+            "source_route_code": _SOURCE_ROUTE_CODES[route],
+            "source_coordinate_code": _SOURCE_COORDINATE_CODES[coordinate],
+            "constraint_label": constraint_label,
+            "source_constraint_code": _SOURCE_CONSTRAINT_CODES_BY_FLAGS[constraint_flags],
+            "source_nodes_code": _SOURCE_NODES_CODES[nodes],
+            "source_active_family": source_active_family,
+            "source_active_family_code": _SOURCE_ACTIVE_FAMILY_CODES[source_active_family],
+            "source_parameterization": source_parameterization,
+            "source_parameterization_code": _SOURCE_PARAMETERIZATION_CODES[source_parameterization],
+            "source_supported_constraints": _supported_constraint_labels(route),
+            "source_uses_ip_constraint": ip_constraint,
+            "source_uses_beta_constraint": beta_constraint,
         }
         for name, value in normalized_values.items():
             object.__setattr__(self, name, value)
-        expected_key = self.compute_key()
+        expected_key = compute_topology_key(self)
         if self.key is not None and self.key != expected_key:
             raise TopologyError(
                 "key does not match canonical kernel topology: "
                 f"got {self.key!r}, expected {expected_key!r}"
             )
         object.__setattr__(self, "key", expected_key)
-
-    def active_profiles(self) -> dict[str, int]:
-        active: dict[str, int] = {}
-        if self.h_count > 0:
-            active["h"] = self.h_count
-        if self.v_count > 0:
-            active["v"] = self.v_count
-        if self.kappa_count > 0:
-            active["k"] = self.kappa_count
-        for order, count in enumerate(self.c_counts):
-            if count > 0:
-                active[f"c{order}"] = count
-        for order, count in enumerate(self.s_counts, start=1):
-            if count > 0:
-                active[f"s{order}"] = count
-        if self.psin_count > 0:
-            active["psin"] = self.psin_count
-        if self.F_count > 0:
-            active["F"] = self.F_count
-        return active
-
-    def packed_size(self) -> int:
-        return sum(self.active_profiles().values())
-
-    def to_canonical_dict(self) -> dict[str, Any]:
-        return {
-            "profiles": {
-                "h_count": self.h_count,
-                "v_count": self.v_count,
-                "kappa_count": self.kappa_count,
-                "psin_count": self.psin_count,
-                "F_count": self.F_count,
-                "c_counts": list(self.c_counts),
-                "s_counts": list(self.s_counts),
-                "L_max": self.L_max,
-                "M_max": self.M_max,
-                "K_max": self.K_max,
-            },
-            "grid": {
-                "Nr": self.Nr,
-                "Nt": self.Nt,
-                "quadrature": self.quadrature,
-                "calculus": self.calculus,
-            },
-            "source": self.source_policy_dict(),
-        }
-
-    def source_policy_dict(self) -> dict[str, Any]:
-        return {
-            "route_key": list(self.source_route_key),
-            "route": self.route,
-            "route_code": self.source_route_code,
-            "coordinate": self.coordinate,
-            "coordinate_code": self.source_coordinate_code,
-            "constraint": self.constraint,
-            "constraint_code": self.source_constraint_code,
-            "supported_constraints": list(self.source_supported_constraints),
-            "uses_Ip": self.source_uses_ip_constraint,
-            "uses_beta": self.source_uses_beta_constraint,
-            "nodes": self.nodes,
-            "nodes_code": self.source_nodes_code,
-            "sample_count": self.sample_count,
-            "active_family": self.source_active_family,
-            "active_family_code": self.source_active_family_code,
-            "parameterization": self.source_parameterization,
-            "parameterization_code": self.source_parameterization_code,
-        }
-
-    def to_json_bytes(self) -> bytes:
-        return json.dumps(
-            self.to_canonical_dict(),
-            ensure_ascii=False,
-            separators=(",", ":"),
-            sort_keys=True,
-        ).encode("utf-8")
-
-    def compute_key(self) -> str:
-        digest = hashlib.sha256(self.to_json_bytes()).digest()
-        encoded = base64.b32encode(digest).decode("ascii").lower().rstrip("=")
-        return encoded[:_KERNEL_TOPOLOGY_KEY_LENGTH]
-
-    @property
-    def source_route_code(self) -> int:
-        return _SOURCE_ROUTE_CODES[self.route]
-
-    @property
-    def source_route_key(self) -> tuple[str, str, str]:
-        return (self.route, self.coordinate, self.nodes)
-
-    @property
-    def source_coordinate_code(self) -> int:
-        return _SOURCE_COORDINATE_CODES[self.coordinate]
-
-    @property
-    def source_constraint_code(self) -> int:
-        return _SOURCE_CONSTRAINT_CODES[self.constraint]
-
-    @property
-    def source_nodes_code(self) -> int:
-        return _SOURCE_NODES_CODES[self.nodes]
-
-    @property
-    def source_active_family(self) -> str:
-        return _source_active_family(self.route, self.coordinate, self.nodes)
-
-    @property
-    def source_active_family_code(self) -> int:
-        return _SOURCE_ACTIVE_FAMILY_CODES[self.source_active_family]
-
-    @property
-    def source_parameterization(self) -> str:
-        return _source_parameterization(self.route, self.coordinate, self.nodes)
-
-    @property
-    def source_parameterization_code(self) -> int:
-        return _SOURCE_PARAMETERIZATION_CODES[self.source_parameterization]
-
-    @property
-    def source_supported_constraints(self) -> tuple[str, ...]:
-        ordered = ("Ip_beta", "Ip", "beta", "null")
-        supported = _SOURCE_CONSTRAINTS_BY_ROUTE[self.route]
-        return tuple(value for value in ordered if value in supported)
-
-    @property
-    def source_uses_ip_constraint(self) -> bool:
-        return self.constraint in {"Ip", "Ip_beta"}
-
-    @property
-    def source_uses_beta_constraint(self) -> bool:
-        return self.constraint in {"beta", "Ip_beta"}
-
-    def validate_supported_for_veqlib_native(self) -> None:
-        mismatches: list[str] = []
-        if self.quadrature != "legendre":
-            mismatches.append(f"quadrature={self.quadrature!r}")
-        if self.calculus != "spectral":
-            mismatches.append(f"calculus={self.calculus!r}")
-        supported = _VEQLIB_NATIVE_ROUTE_CONSTRAINTS.get(self.source_route_key)
-        if supported is None or self.constraint not in supported:
-            mismatches.append(
-                f"route_key={self.source_route_key!r}, constraint={self.constraint!r}"
-            )
-        if self.source_active_family != "F" and self.F_count > 0:
-            mismatches.append("F_count > 0 outside PJ2")
-        if self.source_active_family == "F" and self.F_count <= 0:
-            mismatches.append("PJ2 requires F_count > 0")
-        if self.source_active_family != "psin" and self.psin_count > 0:
-            mismatches.append("source-owned topology does not accept psin_count > 0")
-        if mismatches:
-            raise TopologyError("unsupported VEQlib native topology: " + "; ".join(mismatches))
 
 
 @dataclass(frozen=True, slots=True)
@@ -492,64 +351,65 @@ class KernelSource:
         case_name = None if self.case_name is None else str(self.case_name)
         object.__setattr__(self, "case_name", case_name)
 
-    def runtime_args(self) -> tuple[Any, ...]:
-        return (
-            self.scaled_heat,
-            self.scaled_current,
-            self.scaled_Ip,
-            self.beta,
-        )
-
 
 @dataclass(frozen=True, slots=True)
 class KernelConfig:
     """Runtime configuration for one VEQlib kernel invocation."""
 
-    method: str | int = "powell"
+    method: str = "powell"
     max_residual: float = 1.0e-6
     max_evaluations: int | None = None
     accepted_residual_factor: float = 10.0
     accepted_residual_floor: float = 1.0e-5
-    initial: str | int = "cold"
-    continuation: str | int = "warm"
-    norm: str | int = "fast"
+    initial: str = "cold"
+    continuation: str = "warm"
+    norm: str = "fast"
     residual_normalization_floor: float = 1.0
     residual_normalization_max_ratio: float = 1.0e6
     residual_normalization_huber_tau: float = 3.0
     residual_normalization_probe_count: int = 4
     residual_normalization_probe_step: float = 1.0e-6
     residual_normalization_sensitivity_lambda: float = 0.5
+    method_code: int = field(init=False)
+    initial_code: int = field(init=False)
+    continuation_code: int = field(init=False)
+    norm_code: int = field(init=False)
 
-    def with_overrides(self, **overrides: Any) -> Self:
-        field_names = {field.name for field in fields(self)}
-        unknown = sorted(name for name in overrides if name not in field_names)
-        if unknown:
-            names = ", ".join(unknown)
-            raise TypeError(f"Unsupported KernelConfig override(s): {names}")
-        return replace(self, **overrides)
-
-    def runtime_args(self, *, x_size: int) -> tuple[Any, ...]:
-        max_evaluations = (
-            x_size * x_size if self.max_evaluations is None else int(self.max_evaluations)
-        )
-        if max_evaluations < 0:
-            raise ValueError("max_evaluations must be non-negative")
-        return (
-            solver_method_code(self.method),
-            float(self.max_residual),
-            max_evaluations,
-            float(self.accepted_residual_factor),
-            float(self.accepted_residual_floor),
-            initial_policy_code(self.initial),
-            continue_policy_code(self.continuation),
-            residual_normalization_code(self.norm),
-            float(self.residual_normalization_floor),
-            float(self.residual_normalization_max_ratio),
-            float(self.residual_normalization_huber_tau),
-            int(self.residual_normalization_probe_count),
-            float(self.residual_normalization_probe_step),
-            float(self.residual_normalization_sensitivity_lambda),
-        )
+    def __post_init__(self) -> None:
+        method = normalize_solver_method(self.method)
+        initial = normalize_initial_policy(self.initial)
+        continuation = normalize_continue_policy(self.continuation)
+        norm = normalize_residual_normalization(self.norm)
+        max_evaluations = None
+        if self.max_evaluations is not None:
+            max_evaluations = _nonnegative_int(self.max_evaluations, "max_evaluations")
+        normalized_values: dict[str, object | None] = {
+            "method": method,
+            "max_residual": float(self.max_residual),
+            "max_evaluations": max_evaluations,
+            "accepted_residual_factor": float(self.accepted_residual_factor),
+            "accepted_residual_floor": float(self.accepted_residual_floor),
+            "initial": initial,
+            "continuation": continuation,
+            "norm": norm,
+            "residual_normalization_floor": float(self.residual_normalization_floor),
+            "residual_normalization_max_ratio": float(self.residual_normalization_max_ratio),
+            "residual_normalization_huber_tau": float(self.residual_normalization_huber_tau),
+            "residual_normalization_probe_count": _nonnegative_int(
+                self.residual_normalization_probe_count,
+                "residual_normalization_probe_count",
+            ),
+            "residual_normalization_probe_step": float(self.residual_normalization_probe_step),
+            "residual_normalization_sensitivity_lambda": float(
+                self.residual_normalization_sensitivity_lambda
+            ),
+            "method_code": solver_method_code(method),
+            "initial_code": initial_policy_code(initial),
+            "continuation_code": continue_policy_code(continuation),
+            "norm_code": residual_normalization_code(norm),
+        }
+        for name, value in normalized_values.items():
+            object.__setattr__(self, name, value)
 
 
 @dataclass(frozen=True, slots=True)
@@ -572,42 +432,15 @@ class SolveResult:
     scaled: np.ndarray
     alpha: np.ndarray
 
-    @classmethod
-    def from_solve_direct(cls, value: Any) -> Self:
-        (
-            elapsed_ms,
-            success,
-            info,
-            nfev,
-            njev,
-            callbacks,
-            jacobian_component_evaluations,
-            jvp_evaluations,
-            linear_iterations,
-            raw_norm,
-            scaled_norm,
-            x,
-            raw,
-            scaled,
-            alpha,
-        ) = value
-        return cls(
-            elapsed_ms=float(elapsed_ms),
-            success=bool(success),
-            info=int(info),
-            nfev=int(nfev),
-            njev=int(njev),
-            callbacks=int(callbacks),
-            jacobian_component_evaluations=int(jacobian_component_evaluations),
-            jvp_evaluations=int(jvp_evaluations),
-            linear_iterations=int(linear_iterations),
-            raw_norm=float(raw_norm),
-            scaled_norm=float(scaled_norm),
-            x=np.array(x, dtype=np.float64, copy=True),
-            raw=np.array(raw, dtype=np.float64, copy=True),
-            scaled=np.array(scaled, dtype=np.float64, copy=True),
-            alpha=np.array(alpha, dtype=np.float64, copy=True),
-        )
+
+def config_with_overrides(config: KernelConfig, **overrides: Any) -> KernelConfig:
+    field_names = {item.name for item in fields(config) if item.init}
+    unknown = sorted(name for name in overrides if name not in field_names)
+    if unknown:
+        names = ", ".join(unknown)
+        raise TypeError(f"Unsupported KernelConfig override(s): {names}")
+    return replace(config, **overrides)
+
 
 
 def _normalize_token(value: str, name: str) -> str:
@@ -619,44 +452,25 @@ def _normalize_token(value: str, name: str) -> str:
     return normalized
 
 
-def _normalize_constraint(value: str | None) -> str:
-    if value is None:
-        return "null"
-    normalized = _normalize_token(value, "constraint").lower().replace("-", "_")
-    mapping = {
-        "ip": "Ip",
-        "beta": "beta",
-        "ip_beta": "Ip_beta",
-        "ipbeta": "Ip_beta",
-        "null": "null",
-        "none": "null",
-    }
-    try:
-        return mapping[normalized]
-    except KeyError as exc:
-        raise TopologyError(f"unsupported constraint {value!r}") from exc
+def _normalize_build(value: str) -> str:
+    normalized = _normalize_token(value, "build").lower()
+    if normalized in _BUILD_PRESET_KWARGS:
+        return normalized
+    raise TopologyError("build must be one of fastmath, fastmath-enzyme, release, or debug")
 
 
-def _validate_source_constraint(route: str, constraint: str) -> None:
-    supported = _SOURCE_CONSTRAINTS_BY_ROUTE[route]
-    if constraint not in supported:
-        raise TopologyError(f"{route} source topology does not support constraint {constraint!r}")
+def _validate_source_constraint(route: str, ip_constraint: bool, beta_constraint: bool) -> None:
+    flags = (ip_constraint, beta_constraint)
+    if flags not in _SOURCE_CONSTRAINT_FLAGS_BY_ROUTE[route]:
+        label = _SOURCE_CONSTRAINT_LABELS_BY_FLAGS[flags]
+        raise TopologyError(f"{route} source topology does not support constraint {label!r}")
 
 
 def _normalize_layout(value: str) -> str:
-    normalized = _normalize_token(value, "layout").lower().replace("-", "_")
-    mapping = {
-        "degree": "degree",
-        "degree_first": "degree",
-        "family": "family",
-        "family_first": "family",
-        "profile": "family",
-        "profile_first": "family",
-    }
-    try:
-        return mapping[normalized]
-    except KeyError as exc:
-        raise TopologyError("layout must be degree or family") from exc
+    normalized = _normalize_token(value, "layout").lower()
+    if normalized in _LAYOUT_CODES:
+        return normalized
+    raise TopologyError("layout must be degree or family")
 
 
 def _normalize_backend(value: str) -> str:
@@ -692,6 +506,15 @@ def _validate_source_active_family(
         raise TopologyError("PJ2 source topology requires F_count > 0")
 
 
+def _supported_constraint_labels(route: str) -> tuple[str, ...]:
+    supported = _SOURCE_CONSTRAINT_FLAGS_BY_ROUTE[route]
+    return tuple(
+        _SOURCE_CONSTRAINT_LABELS_BY_FLAGS[flags]
+        for flags in _SOURCE_CONSTRAINT_FLAG_ORDER
+        if flags in supported
+    )
+
+
 def _normalize_cmake_build_type(value: str | None, *, default: str) -> str:
     if value is None:
         return default
@@ -712,12 +535,16 @@ def _normalize_fp_mode(value: str | None, *, default: str) -> str:
     return normalized
 
 
-def _canonical_bool(value: bool | None, *, default: bool, name: str) -> bool:
-    if value is None:
-        return default
+def _canonical_bool(value: bool, name: str) -> bool:
     if not isinstance(value, bool):
         raise TopologyError(f"{name} must be a bool")
     return value
+
+
+def _canonical_bool_or_default(value: bool | None, *, default: bool, name: str) -> bool:
+    if value is None:
+        return default
+    return _canonical_bool(value, name)
 
 
 def _canonical_enzyme_jacobian_batch_width(value: int | None) -> int:
@@ -798,6 +625,33 @@ def _canonical_sample_count(nodes: str, nr: int, sample_count: int | None) -> in
     if sample_count is None:
         raise TopologyError("uniform source nodes require an explicit sample_count")
     return _positive_int(sample_count, "sample_count")
+
+
+def _active_profiles_tuple(
+    profile_counts: dict[str, int],
+    c_counts: tuple[int, ...],
+    s_counts: tuple[int, ...],
+) -> tuple[tuple[str, int], ...]:
+    active: list[tuple[str, int]] = []
+    for field_name, profile_name in (
+        ("h_count", "h"),
+        ("v_count", "v"),
+        ("kappa_count", "k"),
+    ):
+        count = profile_counts[field_name]
+        if count > 0:
+            active.append((profile_name, count))
+    for order, count in enumerate(c_counts):
+        if count > 0:
+            active.append((f"c{order}", count))
+    for order, count in enumerate(s_counts, start=1):
+        if count > 0:
+            active.append((f"s{order}", count))
+    for field_name, profile_name in (("psin_count", "psin"), ("F_count", "F")):
+        count = profile_counts[field_name]
+        if count > 0:
+            active.append((profile_name, count))
+    return tuple(active)
 
 
 def _readonly_1d_or_default(

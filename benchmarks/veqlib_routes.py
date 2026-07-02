@@ -81,11 +81,10 @@ from veqlib.facade import (
     TopologyError,
     VEQlibSolver,
 )
+from veqlib.facade.abi import boundary_runtime_args, config_runtime_args, source_runtime_args
 from veqlib.facade.builder import default_kernel_cache_root, prepare
-from veqlib.facade.options import (
-    SOLVER_METHOD_LEVENBERG_MARQUARDT,
-    SOLVER_METHOD_POWELL,
-)
+from veqlib.facade.identity import recipe_identity_payload, source_policy_payload
+from veqlib.facade.validation import validate_supported_for_veqlib_native
 from veqpy.engine import backend_abi
 from veqpy.model import Boundary, Grid, Problem
 from veqpy.operator import Operator
@@ -146,14 +145,14 @@ class RuntimeCase:
     kernel_config: KernelConfig
     py_operator: Any
     py_measure: Any
-    solver_method_code: int
+    solver_method: str
     solver_engine_label: str
     x_size: int
 
 
 _SOLVER_LABELS = {
-    SOLVER_METHOD_POWELL: "veqlib-fastmath-powell",
-    SOLVER_METHOD_LEVENBERG_MARQUARDT: "veqlib-fastmath-lm",
+    "powell": "veqlib-fastmath-powell",
+    "levenberg-marquardt": "veqlib-fastmath-lm",
 }
 
 
@@ -219,15 +218,15 @@ def _spec_selector(spec: Any) -> str:
     return route_spec_selector(spec)
 
 
-def _cxx_solver_method_for_spec(spec: Any) -> int:
+def _cxx_solver_method_for_spec(spec: Any) -> str:
     if (
         str(spec.mode) == "PJ2"
         and str(spec.coordinate) == "psin"
         and str(spec.input_kind) == "grid"
         and str(spec.constraint) == "Ip"
     ):
-        return SOLVER_METHOD_LEVENBERG_MARQUARDT
-    return SOLVER_METHOD_POWELL
+        return "levenberg-marquardt"
+    return "powell"
 
 
 def _iter_route_specs(*, scope: str) -> tuple[Any, ...]:
@@ -294,6 +293,14 @@ def _sample_count_for_spec(spec: Any) -> int:
     return int(ROUTE_TEST_SOURCE_SAMPLE_COUNT)
 
 
+def _uses_ip_constraint(constraint: object) -> bool:
+    return str(constraint) in {"Ip", "Ip_beta"}
+
+
+def _uses_beta_constraint(constraint: object) -> bool:
+    return str(constraint) in {"beta", "Ip_beta"}
+
+
 def _topology_from_spec(
     spec: Any,
     *,
@@ -316,8 +323,9 @@ def _topology_from_spec(
         "Nt": int(grid.Nt),
         "route": str(spec.mode),
         "coordinate": str(spec.coordinate),
-        "constraint": str(spec.constraint),
         "nodes": str(spec.input_kind),
+        "ip_constraint": _uses_ip_constraint(spec.constraint),
+        "beta_constraint": _uses_beta_constraint(spec.constraint),
         "sample_count": _sample_count_for_spec(spec),
         "M_max": m_max,
         "K_max": max(2, m_max),
@@ -359,7 +367,7 @@ def _kernel_source_from_operator(case: Any, operator: Any, *, case_name: str) ->
 def _kernel_config_from_config(
     config: Any,
     *,
-    method: int,
+    method: str,
     x_size: int,
 ) -> KernelConfig:
     return KernelConfig(
@@ -460,7 +468,7 @@ def _runtime_case(spec: Any, topology: Topology, recipe: KernelRecipe) -> Runtim
         kernel_config=kernel_config,
         py_operator=operator,
         py_measure=measure_py,
-        solver_method_code=method,
+        solver_method=method,
         solver_engine_label=_SOLVER_LABELS[method],
         x_size=int(x0.size),
     )
@@ -477,7 +485,7 @@ def _measure_veqlib(
         case.topology,
         recipe=case.recipe,
         registry=registry,
-        solver=case.solver_method_code,
+        solver=case.solver_method,
     )
     build_start = time.perf_counter_ns()
     artifact = solver.prepare(force=False, dry_run=False)
@@ -486,9 +494,9 @@ def _measure_veqlib(
     def configure() -> None:
         solver.set_kernel_runtime(
             "" if case.kernel_source.case_name is None else case.kernel_source.case_name,
-            *case.kernel_boundary.runtime_args(),
-            *case.kernel_source.runtime_args(),
-            *case.kernel_config.runtime_args(x_size=case.x_size),
+            *boundary_runtime_args(case.kernel_boundary),
+            *source_runtime_args(case.kernel_source),
+            *config_runtime_args(case.kernel_config, x_size=case.x_size),
         )
 
     timing = measure_native_solver(solver, configure, warmup=warmup, repeat=repeat)
@@ -563,11 +571,11 @@ def _topology_payload(
     recipe: KernelRecipe,
     warnings_: tuple[str, ...],
 ) -> dict[str, Any]:
-    recipe_payload = recipe.to_canonical_dict()
+    recipe_payload = recipe_identity_payload(recipe)
     return {
         "status": "planned",
         "key": topology.key,
-        "source": topology.source_policy_dict(),
+        "source": source_policy_payload(topology),
         "layout": recipe_payload["layout"],
         "recipe": recipe_payload,
         "profile_counts": {
@@ -630,7 +638,7 @@ def _plan_row(
             "reused": bool(artifact.reused),
         }
     try:
-        topology.validate_supported_for_veqlib_native()
+        validate_supported_for_veqlib_native(topology)
     except TopologyError as exc:
         runtime = {"status": "blocked_unsupported_native_kernel", "reason": str(exc)}
     else:

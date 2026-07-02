@@ -57,6 +57,12 @@ from veqlib.facade import (
     SolveResult,
     VEQlibSolver,
 )
+from veqlib.facade.abi import (
+    boundary_runtime_args,
+    config_runtime_args,
+    solve_result_from_native,
+    source_runtime_args,
+)
 from veqlib.facade.builder import default_kernel_cache_root
 
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "benchmarks" / "results" / "veqlib_continuation"
@@ -236,11 +242,11 @@ def _run_policy_sequence_once(
         for kernel_boundary, kernel_source in runtime_points:
             solver.set_kernel_runtime(
                 "" if kernel_source.case_name is None else kernel_source.case_name,
-                *kernel_boundary.runtime_args(),
-                *kernel_source.runtime_args(),
-                *runtime_config.runtime_args(x_size=case.x_size),
+                *boundary_runtime_args(kernel_boundary),
+                *source_runtime_args(kernel_source),
+                *config_runtime_args(runtime_config, x_size=case.x_size),
             )
-            results.append(SolveResult.from_solve_direct(solver.solve_direct()))
+            results.append(solve_result_from_native(solver.solve_direct()))
     finally:
         solver.close()
     wall_ms = float(time.perf_counter_ns() - started) / 1.0e6

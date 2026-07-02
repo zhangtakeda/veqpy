@@ -14,6 +14,12 @@ from typing import Any
 
 import numpy as np
 
+from .abi import (
+    boundary_runtime_args,
+    config_runtime_args,
+    solve_result_from_native,
+    source_runtime_args,
+)
 from .affinity import pinned_cpu
 from .builder import PrepareResult
 from .registry import KernelRegistry
@@ -25,6 +31,7 @@ from .types import (
     KernelSource,
     KernelTopology,
     SolveResult,
+    config_with_overrides,
 )
 
 
@@ -59,7 +66,7 @@ class Kernel:
 
     @property
     def x_size(self) -> int:
-        return self.topology.packed_size()
+        return self.topology.x_size
 
     def prepare(self, *, force: bool = False, dry_run: bool = False) -> PrepareResult:
         return self._veqlib_solver().prepare(force=force, dry_run=dry_run)
@@ -75,7 +82,7 @@ class Kernel:
     ) -> SolveResult:
         kernel_config = self._runtime_config(config, config_overrides)
         solver = self._set_runtime(boundary, source, kernel_config, case_name=case_name)
-        self.result = SolveResult.from_solve_direct(solver.solve_direct())
+        self.result = solve_result_from_native(solver.solve_direct())
         self.history.append(self.result)
         return self.result
 
@@ -183,7 +190,7 @@ class Kernel:
     ) -> KernelConfig:
         kernel_config = self.config if config is None else self._kernel_config(config)
         if overrides:
-            kernel_config = kernel_config.with_overrides(**overrides)
+            kernel_config = config_with_overrides(kernel_config, **overrides)
         return kernel_config
 
     def _set_runtime(
@@ -200,9 +207,9 @@ class Kernel:
         solver = self._veqlib_solver()
         solver.set_kernel_runtime(
             "" if kernel_source.case_name is None else kernel_source.case_name,
-            *kernel_boundary.runtime_args(),
-            *kernel_source.runtime_args(),
-            *config.runtime_args(x_size=self.x_size),
+            *boundary_runtime_args(kernel_boundary),
+            *source_runtime_args(kernel_source),
+            *config_runtime_args(config, x_size=self.x_size),
         )
         return solver
 
