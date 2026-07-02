@@ -5,7 +5,7 @@ This is the result-and-speed comparison benchmark.  It evaluates the three
 GEQDSK-backed PF/psin/uniform/Ip cases (solovev, chease, efit) over the four
 configuration labels used by the manuscript data: Low, Medium, High, and Ref.
 The VEQlib path uses the current typed facade runtime with a ``fastmath`` build
-by default; JSON payloads are not used as runtime input.
+by default.
 """
 
 from __future__ import annotations
