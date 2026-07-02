@@ -160,6 +160,7 @@ def test_kernel_topology_and_runtime_source_is_user_facing_contract() -> None:
 
     assert topology.to_canonical_dict() == same_shape.to_canonical_dict()
     assert topology.key == same_shape.key
+    assert family_recipe.backend == "cxx"
     assert family_recipe.layout == "family"
     assert family_recipe.layout_profile_first is True
     assert family_recipe.to_canonical_dict()["preset"] == "release"

@@ -41,14 +41,12 @@ class Kernel:
         cache_root: Path | None = None,
         source_dir: Path | None = None,
         pin_cpu: bool | int | None = None,
-        backend: str = "cxx",
     ) -> None:
         self.topology = topology
         self.recipe = KernelRecipe() if recipe is None else recipe
         if not isinstance(self.recipe, KernelRecipe):
             raise TypeError(f"recipe must be KernelRecipe, got {type(self.recipe).__name__}")
         self.config = KernelConfig() if config is None else self._kernel_config(config)
-        self.backend = backend
         self.pin_cpu = pin_cpu
         self.registry = registry or KernelRegistry(
             cache_root=cache_root,
@@ -151,8 +149,6 @@ class Kernel:
         return pinned_cpu(self.pin_cpu)
 
     def _veqlib_solver(self) -> VEQlibSolver:
-        if self.backend != "cxx":
-            raise ValueError("VEQlib facade currently only supports backend='cxx'")
         if self._solver is None:
             self._solver = VEQlibSolver(
                 self.topology,

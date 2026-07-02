@@ -171,8 +171,8 @@ representative High configuration for each GEQDSK family.
 
 The package-level Python facade is intentionally semantic: users construct
 `KernelTopology` for the physical/native topology, `KernelRecipe` for packed
-layout and build options, `KernelBoundary`/`KernelSource` for runtime cases,
-and `KernelConfig` for the handle-level default solve policy.
+backend, layout, and build options, `KernelBoundary`/`KernelSource` for runtime
+cases, and `KernelConfig` for the handle-level default solve policy.
 `build(..., recipe=None, config=None)` creates a reusable `Kernel` and caches
 that default policy on the handle; `Kernel.solve(...)` can use it as-is, replace
 it with a one-off `config=...`, or override individual fields such as

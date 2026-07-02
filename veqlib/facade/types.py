@@ -98,6 +98,7 @@ class TopologyError(ValueError):
 class KernelRecipe:
     """Compile recipe and packed-layout configuration for one VEQlib kernel."""
 
+    backend: str = "cxx"
     layout: str = "degree"
     build: str = "fastmath"
     cmake_build_type: str | None = None
@@ -118,6 +119,7 @@ class KernelRecipe:
             raise TopologyError("build must be one of fastmath, fastmath-enzyme, release, or debug")
         preset = _BUILD_PRESET_KWARGS[build]
         return {
+            "backend": _normalize_backend(self.backend),
             "layout": _normalize_layout(self.layout),
             "build": build,
             "cmake_build_type": _normalize_cmake_build_type(
@@ -152,6 +154,7 @@ class KernelRecipe:
 
     def to_canonical_dict(self) -> dict[str, object]:
         return {
+            "backend": self.backend,
             "preset": self.build,
             "layout": {
                 "packed": self.layout,
@@ -654,6 +657,13 @@ def _normalize_layout(value: str) -> str:
         return mapping[normalized]
     except KeyError as exc:
         raise TopologyError("layout must be degree or family") from exc
+
+
+def _normalize_backend(value: str) -> str:
+    normalized = _normalize_token(value, "backend").lower()
+    if normalized == "cxx":
+        return normalized
+    raise TopologyError("backend must be cxx")
 
 
 def _source_active_family(route: str, coordinate: str, nodes: str) -> str:

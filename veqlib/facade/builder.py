@@ -667,6 +667,7 @@ def _native_build_contract(topology: Topology, recipe: Recipe, *, cxx: str) -> d
     kmax_limit = max(2, topology.K_max or 2)
     return {
         "schema": "veqlib.native_build_contract.v1",
+        "backend": recipe.backend,
         "cmake_build_type": recipe.cmake_build_type,
         "cxx": cxx,
         "defines": {
