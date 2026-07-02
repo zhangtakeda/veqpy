@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import sys
@@ -106,14 +105,12 @@ def test_veqlib_facade_imports_without_importing_veqpy() -> None:
     assert completed.stdout.strip() == "False"
 
 
-def test_kernel_topology_and_input_payload_are_user_facing_contracts() -> None:
+def test_kernel_topology_and_runtime_inputs_are_user_facing_contracts() -> None:
     topology = make_kernel_topology(c_counts=(0, 0), s_counts=(2, 0, 0), K_max=None)
     same_shape = make_kernel_topology(c_counts=(), s_counts=(2,), L_max=2, M_max=1, K_max=2)
     family_topology = topology.with_build(KernelBuild(layout="profile-first", build="release"))
     kernel_input = tiny_kernel_input(case_name="tiny")
     kernel_boundary = tiny_kernel_boundary()
-    payload = kernel_input.to_payload_dict()
-    boundary_payload = kernel_boundary.to_payload_dict()
 
     assert topology.to_canonical_dict() == same_shape.to_canonical_dict()
     assert topology.key == same_shape.key
@@ -124,12 +121,10 @@ def test_kernel_topology_and_input_payload_are_user_facing_contracts() -> None:
     assert topology.sample_count == 9
     assert topology.packed_size() == 9
 
-    assert payload["case_name"] == "tiny"
-    assert "boundary" not in payload
-    assert boundary_payload["a"] == 0.5
-    assert_allclose(payload["source"]["scaled_heat"], kernel_input.scaled_heat)
-    assert_allclose(payload["constraints"]["scaled_Ip"], 3.0e6 * MU0)
-    assert "fix_rho" not in payload["constraints"]
+    assert kernel_input.case_name == "tiny"
+    assert kernel_boundary.a == 0.5
+    assert_allclose(kernel_input.scaled_heat, tiny_kernel_input().scaled_heat)
+    assert kernel_input.scaled_Ip == 3.0e6 * MU0
     assert kernel_boundary.c_offsets.flags.c_contiguous
     assert kernel_boundary.s_offsets.flags.c_contiguous
     assert kernel_input.scaled_heat.flags.c_contiguous
@@ -146,19 +141,12 @@ def test_kernel_topology_and_input_payload_are_user_facing_contracts() -> None:
         )
 
 
-def test_kernel_dry_run_payload_and_python_owned_result_snapshot(tmp_path: Path) -> None:
+def test_kernel_dry_run_and_python_owned_result_snapshot(tmp_path: Path) -> None:
     topology = make_kernel_topology()
     handle = facade.build(topology, cache_root=tmp_path, dry_run=True)
-    payload = json.loads(
-        handle.payload_json(tiny_kernel_boundary(), tiny_kernel_input(case_name="payload-smoke"))
-    )
 
     assert isinstance(handle, Kernel)
     assert handle.x_size == 9
-    assert payload["case_name"] == "payload-smoke"
-    assert payload["boundary"]["a"] == 0.5
-    assert "fix_rho" not in payload["solver"]
-    assert payload["solver"]["max_evaluations"] == 81
 
     raw_x = np.ones(3, dtype=np.float64)
     raw = np.full(3, 2.0, dtype=np.float64)
@@ -178,45 +166,20 @@ def test_kernel_dry_run_payload_and_python_owned_result_snapshot(tmp_path: Path)
     assert result.alpha.flags.owndata
 
 
-class _JsonOnlySolver:
-    def __init__(self) -> None:
-        self.payloads: list[dict[str, object]] = []
+def test_json_runtime_api_is_not_exposed() -> None:
+    topology = make_kernel_topology()
+    handle = Kernel(topology)
+    boundary = tiny_kernel_boundary()
+    kernel_input = tiny_kernel_input()
 
-    def set_case_json(self, payload: str) -> None:
-        self.payloads.append(json.loads(payload))
-
-
-class _BrokenRuntimeSolver(_JsonOnlySolver):
-    def set_kernel_runtime(self, *args: object) -> None:
-        raise AttributeError("native runtime internals missing")
-
-
-def test_kernel_runtime_json_fallback_only_handles_missing_method(tmp_path: Path) -> None:
-    handle = Kernel(make_kernel_topology(), cache_root=tmp_path)
-
-    json_only = _JsonOnlySolver()
-    handle._solver = json_only
-    assert (
-        handle._set_runtime(
-            tiny_kernel_boundary(),
-            tiny_kernel_input(),
-            KernelConfig(),
-            case_name="json-fallback",
-        )
-        is json_only
-    )
-    assert json_only.payloads[0]["case_name"] == "json-fallback"
-
-    broken_runtime = _BrokenRuntimeSolver()
-    handle._solver = broken_runtime
-    with pytest.raises(AttributeError, match="native runtime internals missing"):
-        handle._set_runtime(
-            tiny_kernel_boundary(),
-            tiny_kernel_input(),
-            KernelConfig(),
-            case_name="must-propagate",
-        )
-    assert broken_runtime.payloads == []
+    assert not hasattr(handle, "payload_json")
+    assert not hasattr(boundary, "to_payload_dict")
+    assert not hasattr(kernel_input, "to_payload_dict")
+    assert not hasattr(KernelConfig(), "to_payload_dict")
+    assert not hasattr(facade, "PayloadSequenceStep")
+    assert not hasattr(facade, "payload_json_with_initial_policy")
+    assert not hasattr(facade, "payload_json_with_continue_policy")
+    assert not hasattr(facade, "solve_payload_sequence")
 
 
 @pytest.mark.slow

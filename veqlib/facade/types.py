@@ -174,17 +174,6 @@ class KernelBoundary:
         s_copy.setflags(write=False)
         object.__setattr__(self, "s_offsets", s_copy)
 
-    def to_payload_dict(self) -> dict[str, Any]:
-        return {
-            "a": self.a,
-            "R0": self.R0,
-            "Z0": self.Z0,
-            "B0": self.B0,
-            "ka": self.ka,
-            "c_offsets": self.c_offsets.tolist(),
-            "s_offsets": self.s_offsets.tolist(),
-        }
-
     def runtime_args(self) -> tuple[Any, ...]:
         return (
             self.a,
@@ -527,22 +516,6 @@ class KernelInput:
         case_name = None if self.case_name is None else str(self.case_name)
         object.__setattr__(self, "case_name", case_name)
 
-    def to_payload_dict(self) -> dict[str, Any]:
-        payload: dict[str, Any] = {
-            "source": {
-                "scaled_heat": self.scaled_heat.tolist(),
-                "scaled_current": self.scaled_current.tolist(),
-            },
-            "constraints": {},
-        }
-        if self.case_name is not None:
-            payload["case_name"] = self.case_name
-        if np.isfinite(self.scaled_Ip):
-            payload["constraints"]["scaled_Ip"] = self.scaled_Ip
-        if np.isfinite(self.beta):
-            payload["constraints"]["beta"] = self.beta
-        return payload
-
     def runtime_args(self) -> tuple[Any, ...]:
         return (
             self.scaled_heat,
@@ -571,48 +544,27 @@ class KernelConfig:
     residual_normalization_probe_step: float = 1.0e-6
     residual_normalization_sensitivity_lambda: float = 0.5
 
-    def to_payload_dict(self, *, x_size: int) -> dict[str, Any]:
+    def runtime_args(self, *, x_size: int) -> tuple[Any, ...]:
         max_evaluations = (
             x_size * x_size if self.max_evaluations is None else int(self.max_evaluations)
         )
         if max_evaluations < 0:
             raise ValueError("max_evaluations must be non-negative")
-        return {
-            "method_code": solver_method_code(self.method),
-            "max_residual": float(self.max_residual),
-            "max_evaluations": max_evaluations,
-            "accepted_residual_factor": float(self.accepted_residual_factor),
-            "accepted_residual_floor": float(self.accepted_residual_floor),
-            "initial_policy_code": initial_policy_code(self.initial),
-            "continue_policy_code": continue_policy_code(self.continuation),
-            "residual_normalization_code": residual_normalization_code(self.norm),
-            "residual_normalization_floor": float(self.residual_normalization_floor),
-            "residual_normalization_max_ratio": float(self.residual_normalization_max_ratio),
-            "residual_normalization_huber_tau": float(self.residual_normalization_huber_tau),
-            "residual_normalization_probe_count": int(self.residual_normalization_probe_count),
-            "residual_normalization_probe_step": float(self.residual_normalization_probe_step),
-            "residual_normalization_sensitivity_lambda": float(
-                self.residual_normalization_sensitivity_lambda
-            ),
-        }
-
-    def runtime_args(self, *, x_size: int) -> tuple[Any, ...]:
-        payload = self.to_payload_dict(x_size=x_size)
         return (
-            payload["method_code"],
-            payload["max_residual"],
-            payload["max_evaluations"],
-            payload["accepted_residual_factor"],
-            payload["accepted_residual_floor"],
-            payload["initial_policy_code"],
-            payload["continue_policy_code"],
-            payload["residual_normalization_code"],
-            payload["residual_normalization_floor"],
-            payload["residual_normalization_max_ratio"],
-            payload["residual_normalization_huber_tau"],
-            payload["residual_normalization_probe_count"],
-            payload["residual_normalization_probe_step"],
-            payload["residual_normalization_sensitivity_lambda"],
+            solver_method_code(self.method),
+            float(self.max_residual),
+            max_evaluations,
+            float(self.accepted_residual_factor),
+            float(self.accepted_residual_floor),
+            initial_policy_code(self.initial),
+            continue_policy_code(self.continuation),
+            residual_normalization_code(self.norm),
+            float(self.residual_normalization_floor),
+            float(self.residual_normalization_max_ratio),
+            float(self.residual_normalization_huber_tau),
+            int(self.residual_normalization_probe_count),
+            float(self.residual_normalization_probe_step),
+            float(self.residual_normalization_sensitivity_lambda),
         )
 
 

@@ -72,20 +72,11 @@ class VEQlibSolver:
     def metadata(self) -> Any:
         return self._solver().metadata()
 
-    def metadata_json(self) -> str:
-        return self._solver().metadata_json()
-
     def warmup(self, count: int = 1) -> None:
         self._solver().warmup(count)
 
-    def set_case_json(self, payload: str) -> None:
-        self._solver().set_case_json(payload)
-
     def set_kernel_runtime(self, *args: Any) -> None:
         self._solver().set_kernel_runtime(*args)
-
-    def solve_json(self) -> str:
-        return self._solver().solve_json()
 
     def solve_direct(self) -> Any:
         return self._solver().solve_direct()

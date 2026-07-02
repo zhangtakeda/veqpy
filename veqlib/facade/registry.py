@@ -71,16 +71,6 @@ class ThreadOwnedKernelSolver:
         solver = self._require_solver()
         return self._call_native(solver.metadata)
 
-    def metadata_json(self) -> str:
-        self.check_thread()
-        solver = self._require_solver()
-        return self._call_native(solver.metadata_json)
-
-    def set_case_json(self, payload: str) -> None:
-        self.check_thread()
-        solver = self._require_solver()
-        self._call_native(solver.set_case_json, payload)
-
     def set_kernel_runtime(self, *args: Any) -> None:
         self.check_thread()
         solver = self._require_solver()
@@ -90,11 +80,6 @@ class ThreadOwnedKernelSolver:
         self.check_thread()
         solver = self._require_solver()
         self._call_native(solver.warmup, count)
-
-    def solve_json(self) -> str:
-        self.check_thread()
-        solver = self._require_solver()
-        return self._call_native(solver.solve_json)
 
     def solve_direct(self) -> Any:
         self.check_thread()

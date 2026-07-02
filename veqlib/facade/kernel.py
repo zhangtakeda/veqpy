@@ -8,7 +8,6 @@ Python-owned result snapshots. It deliberately does not translate VEQPy
 
 from __future__ import annotations
 
-import json
 from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import Any
@@ -63,22 +62,6 @@ class Kernel:
 
     def build(self, *, force: bool = False, dry_run: bool = False) -> KernelArtifact:
         return self._veqlib_solver().build(force=force, dry_run=dry_run)
-
-    def payload_json(
-        self,
-        boundary: KernelBoundary,
-        input: KernelInput,
-        *,
-        config: KernelConfig | None = None,
-        case_name: str | None = None,
-    ) -> str:
-        kernel_boundary = self._kernel_boundary(boundary)
-        kernel_input = self._kernel_input(input, case_name=case_name)
-        kernel_config = KernelConfig() if config is None else config
-        payload = kernel_input.to_payload_dict()
-        payload["boundary"] = kernel_boundary.to_payload_dict()
-        payload["solver"] = kernel_config.to_payload_dict(x_size=self.x_size)
-        return json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
 
     def solve(
         self,
@@ -204,13 +187,7 @@ class Kernel:
         solver = self._veqlib_solver()
         kernel_boundary = self._kernel_boundary(boundary)
         kernel_input = self._kernel_input(input, case_name=case_name)
-        set_kernel_runtime = getattr(solver, "set_kernel_runtime", None)
-        if set_kernel_runtime is None:
-            solver.set_case_json(
-                self.payload_json(kernel_boundary, kernel_input, config=config)
-            )
-            return solver
-        set_kernel_runtime(
+        solver.set_kernel_runtime(
             "" if kernel_input.case_name is None else kernel_input.case_name,
             *kernel_boundary.runtime_args(),
             *kernel_input.runtime_args(),
