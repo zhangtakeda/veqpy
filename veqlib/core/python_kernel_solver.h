@@ -17,7 +17,6 @@
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
 #include <nanobind/stl/string.h>
-#include <nlohmann/json.hpp>
 
 #include "kernel_case.h"
 #include "kernel_runtime.h"
@@ -44,7 +43,6 @@ namespace veqlib_python
     using veqlib_kernel_api::ContinuePolicyWarmFixed;
     using veqlib_kernel_api::ContinuePolicyWarmPredict;
     using veqlib_kernel_api::ContinuePolicyWarmChord;
-    using veqlib_kernel_api::ContinuePolicyWarm;
     using veqlib_kernel_api::PackedVector;
     using veqlib_kernel_api::SolveContext;
     using veqlib_kernel_api::SolveResult;
@@ -55,12 +53,10 @@ namespace veqlib_python
     using veqlib_kernel_api::apply_cold_policy;
     using veqlib_kernel_api::apply_initial_policy;
     using veqlib_kernel_api::boundary_curve_strain;
-    using veqlib_kernel_api::json_array;
     using veqlib_kernel_api::norm2;
     using veqlib_kernel_api::residual_scale_extra_evaluations;
     using veqlib_kernel_api::profile_params_for_case;
     using veqlib_kernel_api::run_solver_once;
-    using veqlib_kernel_api::solve_result_json;
     using veqlib_kernel_api::solver_entrypoint;
     using veqlib_kernel_api::solver_info_succeeded;
     using veqlib_kernel_api::solver_jacobian;
@@ -123,128 +119,6 @@ namespace veqlib_python
         return context;
     }
 
-    inline const nlohmann::json* find_object(const nlohmann::json& data, const char* name)
-    {
-        const auto it = data.find(name);
-        if (it == data.end() || it->is_null())
-            return nullptr;
-        if (!it->is_object())
-            throw std::runtime_error(std::string{name} + " must be a JSON object");
-        return &*it;
-    }
-
-    inline const nlohmann::json* find_array_field(const nlohmann::json& data, const char* name)
-    {
-        const auto it = data.find(name);
-        if (it == data.end() || it->is_null())
-            return nullptr;
-        if (!it->is_array())
-            throw std::runtime_error(std::string{name} + " must be a JSON array");
-        return &*it;
-    }
-
-    inline bool has_array_field(const nlohmann::json& data, const char* name)
-    {
-        return find_array_field(data, name) != nullptr;
-    }
-
-    inline double finite_number(const nlohmann::json& data, const char* name)
-    {
-        const auto it = data.find(name);
-        if (it == data.end() || !it->is_number())
-            throw std::runtime_error(std::string{name} + " must be a JSON number");
-        return it->get<double>();
-    }
-
-    inline double optional_finite_number(const nlohmann::json& data, const char* name, double fallback)
-    {
-        const auto it = data.find(name);
-        if (it == data.end() || it->is_null())
-            return fallback;
-        if (!it->is_number())
-            throw std::runtime_error(std::string{name} + " must be a JSON number");
-        return it->get<double>();
-    }
-
-    inline int required_int(const nlohmann::json& data, const char* name)
-    {
-        const auto it = data.find(name);
-        if (it == data.end() || !it->is_number_integer())
-            throw std::runtime_error(std::string{name} + " must be a JSON integer");
-        return it->get<int>();
-    }
-
-    inline int optional_int(const nlohmann::json& data, const char* name, int fallback)
-    {
-        const auto it = data.find(name);
-        if (it == data.end() || it->is_null())
-            return fallback;
-        if (!it->is_number_integer())
-            throw std::runtime_error(std::string{name} + " must be a JSON integer");
-        return it->get<int>();
-    }
-
-    template <size_t N>
-    void read_exact_array(const nlohmann::json& data, const char* name, std::array<double, N>& out)
-    {
-        const auto* values = find_array_field(data, name);
-        if (values == nullptr)
-            throw std::runtime_error(std::string{name} + " is required");
-        if (values->size() != N)
-            throw std::runtime_error(std::string{name} + " length mismatch: expected " + std::to_string(N) + ", got " +
-                                     std::to_string(values->size()));
-        for (size_t i = 0; i < N; ++i)
-        {
-            if (!(*values)[i].is_number())
-                throw std::runtime_error(std::string{name} + " entries must be JSON numbers");
-            out[i] = (*values)[i].get<double>();
-        }
-    }
-
-    template <size_t N>
-    void read_optional_offset_array(const nlohmann::json&  data,
-                                    const char*            name,
-                                    std::array<double, N>& out,
-                                    bool                   sine_family)
-    {
-        const auto* values = find_array_field(data, name);
-        if (values == nullptr)
-            return;
-        if (values->size() > N)
-            throw std::runtime_error(std::string{name} + " length mismatch: expected at most " + std::to_string(N) +
-                                     ", got " + std::to_string(values->size()));
-        if (sine_family && values->size() == N - 1)
-        {
-            for (size_t i = 0; i < values->size(); ++i)
-            {
-                if (!(*values)[i].is_number())
-                    throw std::runtime_error(std::string{name} + " entries must be JSON numbers");
-                out[i + 1] = (*values)[i].get<double>();
-            }
-            return;
-        }
-        for (size_t i = 0; i < values->size(); ++i)
-        {
-            if (!(*values)[i].is_number())
-                throw std::runtime_error(std::string{name} + " entries must be JSON numbers");
-            out[i] = (*values)[i].get<double>();
-        }
-    }
-
-    inline const nlohmann::json& required_object(const nlohmann::json& data, const char* name)
-    {
-        const auto* object = find_object(data, name);
-        if (object == nullptr)
-            throw std::runtime_error(std::string{name} + " is required");
-        return *object;
-    }
-
-    inline const nlohmann::json& object_or_root(const nlohmann::json& data, const char* name)
-    {
-        const auto* object = find_object(data, name);
-        return object == nullptr ? data : *object;
-    }
-
     inline void read_exact_runtime_array(RuntimeArrayView values,
                                          const char*      name,
                                          std::array<double, KernelSource::sample_count>& out)
@@ -276,74 +150,6 @@ namespace veqlib_python
         }
         for (size_t i = 0; i < length; ++i)
             out[i] = values.data()[i];
-    }
-
-    inline CaseInput case_input_from_json(const nlohmann::json& data, SolverKind solver)
-    {
-        CaseInput input = build_inline_case(0, 0, solver);
-        if (const auto it = data.find("case_name"); it != data.end() && !it->is_null())
-        {
-            if (!it->is_string())
-                throw std::runtime_error("case_name must be a string");
-            input.case_name = it->get<std::string>();
-        }
-
-        const nlohmann::json& solver_config = required_object(data, "solver");
-        input.solver          = solver_kind_from_runtime_method_code(required_int(solver_config, "method_code"));
-        input.max_residual    = finite_number(solver_config, "max_residual");
-        input.max_evaluations = required_int(solver_config, "max_evaluations");
-        if (input.max_evaluations < 0)
-            throw std::runtime_error("solver.max_evaluations must be non-negative");
-        input.accepted_residual_factor = finite_number(solver_config, "accepted_residual_factor");
-        input.accepted_residual_floor  = finite_number(solver_config, "accepted_residual_floor");
-        input.initial_policy_code      = required_int(solver_config, "initial_policy_code");
-        validate_initial_policy_code(input.initial_policy_code);
-        input.continue_policy_code = optional_int(solver_config, "continue_policy_code", ContinuePolicyWarm);
-        validate_continue_policy_code(input.continue_policy_code);
-        input.residual_normalization_code = required_int(solver_config, "residual_normalization_code");
-        validate_residual_normalization_code(input.residual_normalization_code);
-        input.residual_normalization_floor       = finite_number(solver_config, "residual_normalization_floor");
-        input.residual_normalization_max_ratio   = finite_number(solver_config, "residual_normalization_max_ratio");
-        input.residual_normalization_huber_tau   = finite_number(solver_config, "residual_normalization_huber_tau");
-        input.residual_normalization_probe_count = required_int(solver_config, "residual_normalization_probe_count");
-        input.residual_normalization_probe_step  = finite_number(solver_config, "residual_normalization_probe_step");
-        input.residual_normalization_sensitivity_lambda =
-            finite_number(solver_config, "residual_normalization_sensitivity_lambda");
-
-        const nlohmann::json& boundary = required_object(data, "boundary");
-        input.a                        = finite_number(boundary, "a");
-        input.R0                       = finite_number(boundary, "R0");
-        input.Z0                       = optional_finite_number(boundary, "Z0", 0.0);
-        input.B0                       = finite_number(boundary, "B0");
-        input.ka                       = finite_number(boundary, "ka");
-        input.c0_offset                = optional_finite_number(boundary, "c0_offset", input.c0_offset);
-        input.s1_offset                = optional_finite_number(boundary, "s1_offset", input.s1_offset);
-        input.c_offsets.fill(0.0);
-        input.s_offsets.fill(0.0);
-        input.c_offsets[0] = input.c0_offset;
-        if constexpr (KernelShape::M_max >= 1)
-            input.s_offsets[1] = input.s1_offset;
-        read_optional_offset_array(boundary, "c_offsets", input.c_offsets, false);
-        read_optional_offset_array(boundary, "s_offsets", input.s_offsets, true);
-        input.c0_offset = input.c_offsets[0];
-        if constexpr (KernelShape::M_max >= 1)
-            input.s1_offset = input.s_offsets[1];
-
-        const nlohmann::json& source = object_or_root(data, "source");
-        read_exact_array(source, "scaled_heat", input.heat);
-        read_exact_array(source, "scaled_current", input.current);
-
-        const nlohmann::json& constraints = object_or_root(data, "constraints");
-        input.Ip =
-            optional_finite_number(constraints, "scaled_Ip", optional_finite_number(data, "scaled_Ip", input.Ip));
-        input.beta = optional_finite_number(constraints, "beta", optional_finite_number(data, "beta", input.beta));
-
-        apply_initial_policy(input);
-
-        input.x_scale = build_x_block_scale_vector<KernelShape>(input.x0, profile_params_for_case(input));
-        input.residual_scale.fill(1.0);
-
-        return input;
     }
 
     inline CaseInput case_input_from_runtime(const std::string& case_name,
@@ -599,26 +405,6 @@ namespace veqlib_python
         context.initial_residual_evaluations = 1 + residual_scale_extra_evaluations(context.input);
     }
 
-    inline nlohmann::json solver_json(const CaseInput& input)
-    {
-        return {
-            {"method_code", solver_method_code(input.solver)},
-            {"max_residual", input.max_residual},
-            {"max_evaluations", input.max_evaluations},
-            {"accepted_residual_factor", input.accepted_residual_factor},
-            {"accepted_residual_floor", input.accepted_residual_floor},
-            {"initial_policy_code", input.initial_policy_code},
-            {"continue_policy_code", input.continue_policy_code},
-            {"residual_normalization_code", input.residual_normalization_code},
-            {"residual_normalization_floor", input.residual_normalization_floor},
-            {"residual_normalization_max_ratio", input.residual_normalization_max_ratio},
-            {"residual_normalization_huber_tau", input.residual_normalization_huber_tau},
-            {"residual_normalization_probe_count", input.residual_normalization_probe_count},
-            {"residual_normalization_probe_step", input.residual_normalization_probe_step},
-            {"residual_normalization_sensitivity_lambda", input.residual_normalization_sensitivity_lambda},
-        };
-    }
-
     constexpr const char* source_route_name() noexcept
     {
         switch (Topology::source_route_code)
@@ -687,53 +473,6 @@ namespace veqlib_python
     {
         return std::string{source_route_name()} + "/" + source_coordinate_name() + "/" + source_nodes_name() + "/" +
                source_constraint_name();
-    }
-
-    inline nlohmann::json case_prefix_json(SolveContext& context)
-    {
-        const CaseInput& input = context.input;
-
-        return {
-            {"case_name", input.case_name},
-            {"route", source_route_label()},
-            {"source_topology",
-             {
-                 {"route", source_route_name()},
-                 {"coordinate", source_coordinate_name()},
-                 {"nodes", source_nodes_name()},
-                 {"constraint", source_constraint_name()},
-             }},
-            {"x_size", KernelShape::x_size},
-            {"grid",
-             {
-                 {"Nr", KernelGrid::radial_nodes},
-                 {"Nt", KernelGrid::theta_rows},
-                 {"L_max", KernelShape::L_max},
-                 {"M_max", KernelShape::M_max},
-                 {"K_max", KernelShape::K_max},
-                 {"quadrature_scheme", "legendre"},
-                 {"calculus_scheme", "spectral"},
-             }},
-            {"boundary",
-             {
-                 {"a", input.a},
-                 {"R0", input.R0},
-                 {"Z0", input.Z0},
-                 {"B0", input.B0},
-                 {"ka", input.ka},
-                 {"c0_offset", input.c0_offset},
-                 {"s1_offset", input.s1_offset},
-                 {"c_offsets", json_array(input.c_offsets)},
-                 {"s_offsets", json_array(input.s_offsets)},
-             }},
-            {"solver", solver_json(input)},
-            {"source",
-             {
-                 {"scaled_heat", json_array(input.heat)},
-                 {"scaled_current", json_array(input.current)},
-             }},
-            {"constraints", {{"scaled_Ip", input.Ip}, {"beta", input.beta}}},
-        };
     }
 
     inline PackedArrayView packed_view(const double* data, nb::handle owner)
@@ -815,7 +554,7 @@ namespace veqlib_python
         layout["profile_first"] = Topology::layout_profile_first;
         out["layout"]        = layout;
         out["solver"]        = solver;
-        out["case_mutation"] = "json_payload_from_topology";
+        out["case_mutation"] = "typed_runtime";
         return out;
     }
 
@@ -828,28 +567,6 @@ namespace veqlib_python
         }
 
         nb::dict metadata() const { return topology_metadata_dict(context_->input); }
-
-        std::string metadata_json() const { return case_prefix_json(*context_).dump(2); }
-
-        void set_case_json(const std::string& payload)
-        {
-            if (payload.empty())
-            {
-                last_case_json_ = "{}";
-                return;
-            }
-            const nlohmann::json data = nlohmann::json::parse(payload);
-            if (!data.is_object())
-                throw std::runtime_error("KernelSolver.set_case_json expects a JSON object");
-            if (data.empty())
-            {
-                last_case_json_ = data.dump();
-                return;
-            }
-
-            CaseInput next_input = case_input_from_json(data, solver_);
-            apply_runtime_case(std::move(next_input), data.dump());
-        }
 
         // Typed runtime setter used by the Python facade hot path.  The facade
         // normalizes arrays to 1D float64/C-contiguous views; this C++ boundary
@@ -907,7 +624,7 @@ namespace veqlib_python
                                                            residual_normalization_probe_count,
                                                            residual_normalization_probe_step,
                                                            residual_normalization_sensitivity_lambda);
-            apply_runtime_case(std::move(next_input), "{}");
+            apply_runtime_case(std::move(next_input));
         }
 
         void warmup(size_t count)
@@ -932,28 +649,6 @@ namespace veqlib_python
                 context_->input.x0,
                 profile_params_for_case(context_->input));
             refresh_initial_residual_scale(*context_);
-        }
-
-        std::string solve_json()
-        {
-            const auto started = std::chrono::steady_clock::now();
-            last_result_       = solve_current_case();
-            has_last_result_   = true;
-            if (accepted_result_succeeded(last_result_))
-                record_accepted_result(last_result_, false);
-            const auto elapsed = std::chrono::steady_clock::now() - started;
-            last_elapsed_ms_   = std::chrono::duration<double, std::milli>(elapsed).count();
-
-            const nlohmann::json report = {
-                {"schema", "veqlib.kernel.solve_result.v1"},
-                {"route", source_route_label()},
-                {"x_size", KernelShape::x_size},
-                {"solver", solver_json(context_->input)},
-                {"elapsed_ms", last_elapsed_ms_},
-                {"final", solve_result_json(last_result_)},
-                {"success", last_result_.accepted && solver_info_succeeded(context_->input.solver, last_result_.info)},
-            };
-            return report.dump(2);
         }
 
         nb::tuple solve_direct()
@@ -1385,7 +1080,7 @@ namespace veqlib_python
             has_latest_input_    = true;
         }
 
-        void apply_runtime_case(CaseInput next_input, std::string last_case_json)
+        void apply_runtime_case(CaseInput next_input)
         {
             bool should_refine_cold = true;
             int  cold_policy_code   = next_input.initial_policy_code;
@@ -1413,8 +1108,7 @@ namespace veqlib_python
             if (should_refine_cold)
                 refine_cold_initial_state(*next_context, cold_policy_code);
             refresh_initial_residual_scale(*next_context);
-            context_        = std::move(next_context);
-            last_case_json_ = std::move(last_case_json);
+            context_ = std::move(next_context);
         }
 
         SolverKind                    solver_;
@@ -1429,7 +1123,6 @@ namespace veqlib_python
         bool                          has_previous_solution_ = false;
         bool                          has_latest_solution_ = false;
         bool                          has_latest_input_ = false;
-        std::string                   last_case_json_  = "{}";
         double                        last_elapsed_ms_ = 0.0;
     };
 

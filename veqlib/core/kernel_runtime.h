@@ -16,7 +16,6 @@ extern int enzyme_const;
 extern int enzyme_dupv;
 extern int enzyme_width;
 #endif
-#include <nlohmann/json.hpp>
 
 #include "kernel_case.h"
 #include "math.h"
@@ -637,47 +636,6 @@ namespace veqlib_kernel_api
             if (context.input.solver == SolverKind::Powell)
                 return run_nonlinear_policy_once<nonlinear::Powell>(context);
             throw std::runtime_error("unsupported solver kind");
-        }
-
-        nlohmann::json solve_result_json(const SolveResult& result)
-        {
-            return {
-                {"accepted_by_veqpy", result.accepted},
-                {"x", json_array(result.x)},
-                {"raw_residual", json_array(result.raw)},
-                {"scaled_residual", json_array(result.scaled)},
-                {"alpha", json_array(result.alpha)},
-                {"raw_norm", result.raw_norm},
-                {"scaled_norm", result.scaled_norm},
-                {"info", result.info},
-                {"nfev", result.nfev},
-                {"solver_nfev", result.solver_nfev},
-                {"njev", result.njev},
-                {"callback_evaluations", result.callbacks},
-                {"jacobian_component_evaluations", result.jacobian_component_evaluations},
-                {"jvp_evaluations", result.jvp_evaluations},
-                {"linear_iterations", result.linear_iterations},
-                {"accepted_by", result.accepted_by},
-                {"fast_path", result.fast_path},
-                {"fallback_used", result.fallback_used},
-                {"fallback_reason", result.fallback_reason},
-                {"cert_threshold", result.cert_threshold},
-                {"initial_raw_norm", result.initial_raw_norm},
-                {"fast_path_raw_norm", result.fast_path_raw_norm},
-                {"initial_residual_evaluations", result.initial_residual_evaluations},
-                {"certification_residual_evaluations", result.certification_residual_evaluations},
-                {"total_raw_residual_evaluations", result.total_raw_residual_evaluations},
-                {"callback_timing_ms",
-                 {
-                     {"residual_total", result.residual_callback_ms},
-                     {"residual_kernel", result.residual_kernel_ms},
-                     {"residual_scale", result.residual_scale_ms},
-                     {"final_residual", result.final_residual_ms},
-                     {"jacobian_total", result.jacobian_callback_ms},
-                     {"jvp_total", result.jvp_callback_ms},
-                     {"linear_solve", result.linear_solve_ms},
-                 }},
-            };
         }
 
     } // namespace

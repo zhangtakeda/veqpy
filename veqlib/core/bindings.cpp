@@ -8,8 +8,6 @@ NB_MODULE(veqlib_ext, module)
         .def(nb::init<int>(),
              nb::arg("solver_code") = static_cast<int>(veqlib_kernel_api::SolverMethodPowell))
         .def("metadata", &veqlib_python::KernelSolver::metadata)
-        .def("metadata_json", &veqlib_python::KernelSolver::metadata_json)
-        .def("set_case_json", &veqlib_python::KernelSolver::set_case_json, nb::arg("payload"))
         .def("set_kernel_runtime",
              &veqlib_python::KernelSolver::set_kernel_runtime,
              nb::arg("case_name"),
@@ -40,7 +38,6 @@ NB_MODULE(veqlib_ext, module)
              nb::arg("residual_normalization_sensitivity_lambda"),
              "Set the full runtime case and solve policy without JSON serialization.")
         .def("warmup", &veqlib_python::KernelSolver::warmup, nb::arg("count"))
-        .def("solve_json", &veqlib_python::KernelSolver::solve_json)
         .def("solve_direct",
              &veqlib_python::KernelSolver::solve_direct,
              "Run one solve and return scalars plus read-only NumPy views without JSON serialization.")

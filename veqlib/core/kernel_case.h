@@ -9,7 +9,6 @@
 #include <limits>
 #include <stdexcept>
 
-#include <nlohmann/json.hpp>
 
 #include "kernel_topology.h"
 #include "math.h"
@@ -726,16 +725,6 @@ namespace veqlib_kernel_api
             input.residual_scale.fill(1.0);
             return input;
         }
-
-        template <typename Values>
-        nlohmann::json json_array(const Values& values)
-        {
-            nlohmann::json out = nlohmann::json::array();
-            for (double value : values)
-                out.push_back(value);
-            return out;
-        }
-
 
     } // namespace
 

@@ -282,9 +282,6 @@ function(veqlib_require_clang)
 endfunction()
 
 function(veqlib_link_dependencies target)
-    find_package(nlohmann_json CONFIG REQUIRED)
-    target_link_libraries("${target}" PRIVATE nlohmann_json::nlohmann_json)
-
     if(VEQLIB_GCEM_ROOT)
         list(PREPEND CMAKE_PREFIX_PATH "${VEQLIB_GCEM_ROOT}")
     endif()
@@ -399,6 +396,11 @@ function(veqlib_enable_strict_conversions target)
             -Werror=literal-conversion
             -Werror=shorten-64-to-32
     )
+endfunction()
+
+function(veqlib_link_json_dependency target)
+    find_package(nlohmann_json CONFIG REQUIRED)
+    target_link_libraries("${target}" PRIVATE nlohmann_json::nlohmann_json)
 endfunction()
 
 function(veqlib_enable_constexpr_budget target)
@@ -567,6 +569,7 @@ endif()
 
 add_executable(veqlib_stage_benchmark stage_benchmark.cpp ${VEQLIB_COMMON_SOURCES})
 veqlib_configure_target(veqlib_stage_benchmark)
+veqlib_link_json_dependency(veqlib_stage_benchmark)
 target_compile_definitions(
     veqlib_stage_benchmark
     PRIVATE
