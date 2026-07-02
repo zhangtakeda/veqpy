@@ -2,7 +2,7 @@
 
 This module owns the user-facing ``Kernel`` lifecycle: artifact resolution,
 typed ``KernelBoundary``/``KernelInput``/``KernelConfig`` runtime calls, and
-Python-owned result snapshots. It deliberately does not translate VEQPy
+Python-owned result snapshots. It deliberately does not translate external
 ``Operator`` objects or make benchmark adapters part of the VEQlib ABI.
 """
 

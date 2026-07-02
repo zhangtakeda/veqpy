@@ -3,7 +3,7 @@
 The dataclasses in this module canonicalize topology/build/runtime inputs into
 stable Python objects before ``kernel.py`` lowers them to C++ scalars, enum
 codes, and 1D C-contiguous ``float64`` arrays. They are VEQlib contracts, not
-VEQPy operator/source-plan adapters.
+external operator/source-plan adapters.
 """
 
 from __future__ import annotations

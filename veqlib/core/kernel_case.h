@@ -36,14 +36,14 @@ namespace veqlib_kernel_api
         {
             if (profile_id == Shape::h_profile_id || profile_id == Shape::v_profile_id ||
                 profile_id == Shape::psin_profile_id)
-                return veqpy_core_profile_prior;
+                return default_core_profile_prior;
             if (profile_id == Shape::kappa_profile_id)
-                return veqpy_kappa_profile_prior;
+                return default_kappa_profile_prior;
             if (is_c_profile_id<Shape>(profile_id) || is_s_profile_id<Shape>(profile_id))
-                return veqpy_fourier_profile_prior;
+                return default_fourier_profile_prior;
             if (profile_id == Shape::F_profile_id)
-                return veqpy_F_profile_prior;
-            return veqpy_F_profile_prior;
+                return default_F_profile_prior;
+            return default_F_profile_prior;
         }
 
         template <typename Shape>
@@ -103,7 +103,7 @@ namespace veqlib_kernel_api
                 if (std::abs(profile_scale - 1.0) <= 1.0e-12)
                     profile_scale = prior;
                 const double block_scale =
-                    std::max({offset_scale, profile_scale, prior, guess_rms, veqpy_x_scale_floor});
+                    std::max({offset_scale, profile_scale, prior, guess_rms, default_x_scale_floor});
 
                 for (size_t degree = 0; degree < length; ++degree)
                 {

@@ -147,24 +147,24 @@ namespace veqlib_kernel_api
         static_assert(CompiledShape::M_max == Topology::M_max);
         static_assert(CompiledShape::K_max == Topology::K_max);
 
-        constexpr double veqpy_max_residual              = 1.0e-6;
-        constexpr int    veqpy_requested_max_evaluations = 1000;
-        constexpr int    veqpy_maxfev   = veqpy_requested_max_evaluations > 500 ? veqpy_requested_max_evaluations : 500;
-        constexpr double veqpy_hybr_eps = 1.0e-6;
-        constexpr double veqpy_hybr_factor              = 1.0;
-        constexpr int    veqpy_hybr_mode                = 1;
-        constexpr int    veqpy_hybr_nprint              = 0;
-        constexpr double veqpy_lm_eps                   = 0.0;
-        constexpr double veqpy_lm_factor                = 100.0;
-        constexpr int    veqpy_lm_mode                  = 2;
-        constexpr int    veqpy_lm_nprint                = 0;
-        constexpr double veqpy_accepted_residual_factor = 10.0;
-        constexpr double veqpy_accepted_residual_floor  = 1.0e-5;
-        constexpr double veqpy_x_scale_floor            = 1.0e-2;
-        constexpr double veqpy_core_profile_prior       = 1.5e-1;
-        constexpr double veqpy_fourier_profile_prior    = 5.0e-2;
-        constexpr double veqpy_F_profile_prior          = 2.5e-1;
-        constexpr double veqpy_kappa_profile_prior      = 1.0;
+        constexpr double default_max_residual              = 1.0e-6;
+        constexpr int    default_requested_max_evaluations = 1000;
+        constexpr int    default_maxfev   = default_requested_max_evaluations > 500 ? default_requested_max_evaluations : 500;
+        constexpr double default_hybr_eps = 1.0e-6;
+        constexpr double default_hybr_factor              = 1.0;
+        constexpr int    default_hybr_mode                = 1;
+        constexpr int    default_hybr_nprint              = 0;
+        constexpr double default_lm_eps                   = 0.0;
+        constexpr double default_lm_factor                = 100.0;
+        constexpr int    default_lm_mode                  = 2;
+        constexpr int    default_lm_nprint                = 0;
+        constexpr double default_accepted_residual_factor = 10.0;
+        constexpr double default_accepted_residual_floor  = 1.0e-5;
+        constexpr double default_x_scale_floor            = 1.0e-2;
+        constexpr double default_core_profile_prior       = 1.5e-1;
+        constexpr double default_fourier_profile_prior    = 5.0e-2;
+        constexpr double default_F_profile_prior          = 2.5e-1;
+        constexpr double default_kappa_profile_prior      = 1.0;
 
         enum class SolverKind
         {
@@ -194,15 +194,15 @@ namespace veqlib_kernel_api
             std::array<double, CompiledShape::M_max + 1>     s_offsets{};
             double                                         Ip                       = 3.7699111867885415;
             double                                         beta                     = std::numeric_limits<double>::quiet_NaN();
-            double                                         max_residual             = veqpy_max_residual;
-            double                                         accepted_residual_factor = veqpy_accepted_residual_factor;
-            double                                         accepted_residual_floor  = veqpy_accepted_residual_floor;
+            double                                         max_residual             = default_max_residual;
+            double                                         accepted_residual_factor = default_accepted_residual_factor;
+            double                                         accepted_residual_floor  = default_accepted_residual_floor;
             double                                         residual_normalization_floor              = 1.0;
             double                                         residual_normalization_max_ratio          = 1.0e6;
             double                                         residual_normalization_huber_tau          = 3.0;
             double                                         residual_normalization_probe_step         = 1.0e-6;
             double                                         residual_normalization_sensitivity_lambda = 0.5;
-            int                                            max_evaluations = veqpy_requested_max_evaluations;
+            int                                            max_evaluations = default_requested_max_evaluations;
             int                                            residual_normalization_probe_count = 4;
             int                                            repeat                             = 10;
             int                                            warmup                             = 1;
@@ -261,10 +261,10 @@ namespace veqlib_kernel_api
             return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
         }
 
-        constexpr double veqpy_acceptance_threshold() noexcept
+        constexpr double default_acceptance_threshold() noexcept
         {
-            constexpr double scaled = veqpy_max_residual * veqpy_accepted_residual_factor;
-            return scaled > veqpy_accepted_residual_floor ? scaled : veqpy_accepted_residual_floor;
+            constexpr double scaled = default_max_residual * default_accepted_residual_factor;
+            return scaled > default_accepted_residual_floor ? scaled : default_accepted_residual_floor;
         }
 
         double acceptance_threshold(const RuntimeCase& input) noexcept

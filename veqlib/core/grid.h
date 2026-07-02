@@ -390,7 +390,7 @@ namespace grid::detail
     }
 
     // Fejer-I weights integrate ordinary functions on [-1, 1] over the open
-    // Chebyshev points used by VEQPy's "chebyshev" quadrature option.
+    // Chebyshev points used by the native "chebyshev" quadrature option.
     constexpr double fejer1_unit_weight(size_t point_index, size_t count)
     {
         const double theta = pi * (2.0 * static_cast<double>(point_index) + 1.0) / (2.0 * static_cast<double>(count));
@@ -1109,7 +1109,7 @@ namespace grid::detail
     }
 
     // Weight formulas are the classical interpolatory/Gauss family rules on
-    // [-1, 1], rescaled to VEQPy's unit interval [0, 1].
+    // [-1, 1], rescaled to the native unit interval [0, 1].
 
     struct Chebyshev
     {

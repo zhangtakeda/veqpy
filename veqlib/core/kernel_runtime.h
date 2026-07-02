@@ -543,17 +543,17 @@ namespace veqlib_kernel_api
         {
             configure_common_solver(solver_context, input);
             if constexpr (requires { solver_context.finite_difference_step; })
-                solver_context.finite_difference_step = veqpy_hybr_eps;
+                solver_context.finite_difference_step = default_hybr_eps;
             if constexpr (requires { solver_context.initial_step_bound; })
-                solver_context.initial_step_bound = veqpy_hybr_factor;
+                solver_context.initial_step_bound = default_hybr_factor;
             if constexpr (requires { solver_context.lower_bandwidth; })
                 solver_context.lower_bandwidth = static_cast<int>(CompiledShape::x_size) - 1;
             if constexpr (requires { solver_context.upper_bandwidth; })
                 solver_context.upper_bandwidth = static_cast<int>(CompiledShape::x_size) - 1;
             if constexpr (requires { solver_context.scale_mode; })
-                solver_context.scale_mode = veqpy_hybr_mode;
+                solver_context.scale_mode = default_hybr_mode;
             if constexpr (requires { solver_context.print_interval; })
-                solver_context.print_interval = veqpy_hybr_nprint;
+                solver_context.print_interval = default_hybr_nprint;
         }
 
         template <typename SolverContext>
@@ -561,13 +561,13 @@ namespace veqlib_kernel_api
         {
             configure_common_solver(solver_context, input);
             if constexpr (requires { solver_context.finite_difference_step; })
-                solver_context.finite_difference_step = veqpy_lm_eps;
+                solver_context.finite_difference_step = default_lm_eps;
             if constexpr (requires { solver_context.initial_step_bound; })
-                solver_context.initial_step_bound = veqpy_lm_factor;
+                solver_context.initial_step_bound = default_lm_factor;
             if constexpr (requires { solver_context.scale_mode; })
-                solver_context.scale_mode = veqpy_lm_mode;
+                solver_context.scale_mode = default_lm_mode;
             if constexpr (requires { solver_context.print_interval; })
-                solver_context.print_interval = veqpy_lm_nprint;
+                solver_context.print_interval = default_lm_nprint;
         }
 
         template <typename Policy>
