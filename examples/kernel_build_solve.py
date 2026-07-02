@@ -82,7 +82,7 @@ def build_source() -> KernelSource:
 def main() -> None:
     outdir = ensure_output_dir()
 
-    # 1. Choose the fixed compile-time topology for this tiny native kernel.
+    # 1. Choose the fixed native topology for this tiny native kernel.
     topology = KernelTopology(
         h_count=2,
         v_count=0,
@@ -109,7 +109,7 @@ def main() -> None:
         config=kernel_config,
         cache_root=outdir / "kernel_cache",
     )
-    artifact = kernel.compile()
+    artifact = kernel.prepare()
 
     # 3. Prepare typed runtime source data.
     kernel_boundary = build_boundary()

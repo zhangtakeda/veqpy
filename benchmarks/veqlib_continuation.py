@@ -321,7 +321,7 @@ def _measure_case(
         solver=case.kernel_config.method,
     )
     build_start = time.perf_counter_ns()
-    artifact = build_solver.compile(force=False, dry_run=False)
+    artifact = build_solver.prepare(force=False, dry_run=False)
     build_wall_ms = float(time.perf_counter_ns() - build_start) / 1.0e6
     build_solver.close()
 

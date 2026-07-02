@@ -1,6 +1,6 @@
-"""Compile planning, build, and cache metadata for VEQlib kernels.
+"""Artifact preparation, build, and cache metadata for VEQlib kernels.
 
-Artifact identity is a setup-time contract: topology, compile recipe, toolchain
+Artifact identity is a setup-time contract: topology, artifact recipe, toolchain
 ABI, and source digests define reusable native modules. Runtime
 boundary/input/config values stay on the per-case solve path, keeping repeated
 case solves on one topology independent from CMake artifact lifecycle details.
@@ -37,12 +37,12 @@ NANOBIND_STATIC_SCHEMA = "veqlib.nanobind_static_artifact.v1"
 VEQLIB_CXX = "clang++-18"
 
 
-class CompileError(RuntimeError):
-    """Raised when a VEQlib kernel artifact cannot be planned or compiled."""
+class PrepareError(RuntimeError):
+    """Raised when a VEQlib kernel artifact cannot be planned or built."""
 
 
 @dataclass(frozen=True, slots=True)
-class CompileResult:
+class PrepareResult:
     """Resolved on-disk VEQlib kernel artifact."""
 
     topology: Topology
@@ -81,7 +81,7 @@ def default_kernel_cache_root() -> Path:
     return _veqlib_root() / "artifact"
 
 
-def compile(
+def prepare(
     topology: Topology,
     *,
     recipe: Recipe | None = None,
@@ -89,7 +89,7 @@ def compile(
     source_dir: Path | None = None,
     force: bool = False,
     dry_run: bool = False,
-) -> CompileResult:
+) -> PrepareResult:
     """Resolve, optionally build, and record a VEQlib artifact for ``topology``/``recipe``.
 
     ``dry_run=True`` writes the same planning metadata and CMake arguments but does not invoke
@@ -103,7 +103,7 @@ def compile(
         topology.validate_supported_for_veqlib_native()
     source_dir = _default_source_dir() if source_dir is None else source_dir.resolve()
     if not source_dir.exists():
-        raise CompileError(f"VEQlib source directory does not exist: {source_dir}")
+        raise PrepareError(f"VEQlib source directory does not exist: {source_dir}")
 
     cxx = VEQLIB_CXX
     build_identity = _build_identity(topology, recipe, source_dir=source_dir, cxx=cxx)
@@ -128,7 +128,7 @@ def compile(
             metadata = _read_json(paths["metadata_path"])
             _stamp_artifact_metadata(metadata, "last_reused_at")
             _write_json(paths["metadata_path"], metadata)
-            return CompileResult(
+            return PrepareResult(
                 topology=topology,
                 recipe=recipe,
                 artifact_id=artifact_id,
@@ -195,7 +195,7 @@ def compile(
             built = True
 
         _write_json(paths["metadata_path"], metadata)
-        return CompileResult(
+        return PrepareResult(
             topology=topology,
             recipe=recipe,
             artifact_id=artifact_id,
@@ -279,7 +279,7 @@ def clean(
     )
 
 
-def touch_artifact_used(artifact: CompileResult) -> None:
+def touch_artifact_used(artifact: PrepareResult) -> None:
     """Update the advisory ``last_used_at`` timestamp for a built artifact."""
 
     lock_path = _artifact_lock_path(artifact.root_dir, artifact.artifact_id)
@@ -350,7 +350,7 @@ def _artifact_lock_path(root_dir: Path, artifact_id: str) -> Path:
 def _stamp_artifact_metadata(metadata: dict[str, Any], field: str) -> None:
     artifact = metadata.setdefault("artifact", {})
     if not isinstance(artifact, dict):
-        raise CompileError("artifact metadata must be a JSON object")
+        raise PrepareError("artifact metadata must be a JSON object")
     artifact[field] = _utc_now_iso()
 
 
@@ -577,7 +577,7 @@ def _get_or_build_nanobind_static(
         _run_logged(configure, configure_log_path, cwd=root_dir)
         _run_logged(build_command, build_log_path, cwd=root_dir)
         if not archive_path.exists():
-            raise CompileError(f"nanobind static build did not produce {archive_path}")
+            raise PrepareError(f"nanobind static build did not produce {archive_path}")
         metadata = {
             **payload,
             "status": "built",
@@ -801,7 +801,7 @@ def _default_build_parallel_jobs() -> int:
 def _copy_extension(build_dir: Path, destination: Path) -> None:
     candidates = sorted(build_dir.glob("veqlib_ext*.so"))
     if not candidates:
-        raise CompileError(f"CMake build did not produce veqlib_ext*.so in {build_dir}")
+        raise PrepareError(f"CMake build did not produce veqlib_ext*.so in {build_dir}")
     shutil.copy2(candidates[0], destination)
 
 
@@ -819,7 +819,7 @@ def _run_logged(command: list[str], log_path: Path, *, cwd: Path) -> None:
         f"# started {started}\n# cwd {cwd}\n# command {' '.join(command)}\n\n{completed.stdout}"
     )
     if completed.returncode != 0:
-        raise CompileError(
+        raise PrepareError(
             f"command failed with exit code {completed.returncode}; see {log_path}: "
             + " ".join(command)
         )
@@ -901,7 +901,7 @@ def _read_json(path: Path) -> dict[str, Any]:
     with path.open("rb") as handle:
         data = json.load(handle)
     if not isinstance(data, dict):
-        raise CompileError(f"expected JSON object in {path}")
+        raise PrepareError(f"expected JSON object in {path}")
     return data
 
 

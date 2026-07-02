@@ -15,7 +15,7 @@ from typing import Any
 import numpy as np
 
 from .affinity import pinned_cpu
-from .builder import CompileResult
+from .builder import PrepareResult
 from .registry import KernelRegistry
 from .solver import VEQlibSolver
 from .types import (
@@ -61,8 +61,8 @@ class Kernel:
     def x_size(self) -> int:
         return self.topology.packed_size()
 
-    def compile(self, *, force: bool = False, dry_run: bool = False) -> CompileResult:
-        return self._veqlib_solver().compile(force=force, dry_run=dry_run)
+    def prepare(self, *, force: bool = False, dry_run: bool = False) -> PrepareResult:
+        return self._veqlib_solver().prepare(force=force, dry_run=dry_run)
 
     def solve(
         self,
@@ -274,7 +274,7 @@ def build(
     force: bool = False,
     dry_run: bool = False,
 ) -> Kernel:
-    """Create a kernel handle, cache its default config, and compile its artifact."""
+    """Create a kernel handle, cache its default config, and prepare its artifact."""
 
     kernel = Kernel(
         topology,
@@ -285,7 +285,7 @@ def build(
         source_dir=source_dir,
         pin_cpu=pin_cpu,
     )
-    kernel.compile(force=force, dry_run=dry_run)
+    kernel.prepare(force=force, dry_run=dry_run)
     return kernel
 
 
@@ -304,7 +304,7 @@ def solve(
     case_name: str | None = None,
     **config_overrides: Any,
 ) -> SolveResult:
-    """Compile a short-lived kernel, solve one case, and close its private workspace."""
+    """Prepare a short-lived kernel, solve one case, and close its private workspace."""
 
     kernel = Kernel(
         topology,
@@ -316,7 +316,7 @@ def solve(
         pin_cpu=pin_cpu,
     )
     try:
-        kernel.compile(force=force, dry_run=False)
+        kernel.prepare(force=force, dry_run=False)
         return kernel.solve(boundary, source, case_name=case_name, **config_overrides)
     finally:
         kernel.close()

@@ -96,7 +96,7 @@ class TopologyError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class KernelRecipe:
-    """Compile recipe and packed-layout configuration for one VEQlib kernel."""
+    """Artifact recipe and packed-layout configuration for one VEQlib kernel."""
 
     backend: str = "cxx"
     layout: str = "degree"
@@ -218,7 +218,7 @@ class KernelBoundary:
 
 @dataclass(frozen=True, slots=True)
 class KernelTopology:
-    """Native VEQlib compile-time topology independent from artifact recipe."""
+    """VEQlib native topology independent from artifact recipe."""
 
     h_count: int
     v_count: int

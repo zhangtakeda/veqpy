@@ -8,10 +8,10 @@ from __future__ import annotations
 
 from .builder import (
     CleanResult,
-    CompileError,
-    CompileResult,
+    PrepareError,
+    PrepareResult,
     clean,
-    compile,
+    prepare,
 )
 from .kernel import Kernel, build, solve
 from .registry import KernelLoadError, KernelRegistry, LoadedKernel, SolverThreadError
@@ -28,10 +28,10 @@ from .types import (
 
 __all__ = [
     "Kernel",
-    "CompileResult",
+    "PrepareResult",
     "KernelBoundary",
     "KernelRecipe",
-    "CompileError",
+    "PrepareError",
     "CleanResult",
     "KernelConfig",
     "KernelSource",
@@ -44,7 +44,7 @@ __all__ = [
     "TopologyError",
     "VEQlibSolver",
     "build",
-    "compile",
+    "prepare",
     "clean",
     "solve",
 ]

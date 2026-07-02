@@ -343,7 +343,7 @@ def _measure_veqlib(
         solver=NATIVE_SOLVER_METHOD,
     )
     build_start = time.perf_counter_ns()
-    artifact = solver.compile(force=False, dry_run=False)
+    artifact = solver.prepare(force=False, dry_run=False)
     build_wall_ms = float(time.perf_counter_ns() - build_start) / 1.0e6
 
     def configure() -> None:

@@ -129,10 +129,10 @@ def test_veqlib_facade_imports_without_importing_veqpy() -> None:
 def test_veqlib_facade_root_exports_semantic_surface() -> None:
     assert facade.__all__ == [
         "Kernel",
-        "CompileResult",
+        "PrepareResult",
         "KernelBoundary",
         "KernelRecipe",
-        "CompileError",
+        "PrepareError",
         "CleanResult",
         "KernelConfig",
         "KernelSource",
@@ -145,7 +145,7 @@ def test_veqlib_facade_root_exports_semantic_surface() -> None:
         "TopologyError",
         "VEQlibSolver",
         "build",
-        "compile",
+        "prepare",
         "clean",
         "solve",
     ]
@@ -314,8 +314,8 @@ def test_kernel_dry_run_and_python_owned_result_snapshot(tmp_path: Path) -> None
         cache_root=tmp_path,
         dry_run=True,
     )
-    artifact = facade.compile(topology, recipe=recipe, cache_root=tmp_path, dry_run=True)
-    default_artifact = facade.compile(
+    artifact = facade.prepare(topology, recipe=recipe, cache_root=tmp_path, dry_run=True)
+    default_artifact = facade.prepare(
         topology,
         recipe=KernelRecipe(build="fastmath", layout="degree"),
         cache_root=tmp_path,
@@ -357,7 +357,7 @@ def test_kernel_python_build_and_solve_native_flow(tmp_path: Path) -> None:
     topology = make_kernel_topology()
     handle = Kernel(topology, recipe=KernelRecipe(build="fastmath"), cache_root=tmp_path)
 
-    artifact = handle.compile()
+    artifact = handle.prepare()
     assert artifact.built is True
     assert artifact.shared_library_path.exists()
 

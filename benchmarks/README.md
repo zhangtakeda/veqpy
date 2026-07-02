@@ -2,7 +2,7 @@
 
 This directory contains VEQPy/VEQlib benchmark entry points for route semantics, GEQDSK cases, native C++/nanobind kernels, and continuation policies.
 
-Runtime tables report median solve/runtime time only. VEQlib artifact compile time is not included in `Cxx ms`; full build metadata and samples are in the JSON outputs.
+Runtime tables report median solve/runtime time only. VEQlib artifact build time is not included in `Cxx ms`; full build metadata and samples are in the JSON outputs.
 
 ## Environment
 

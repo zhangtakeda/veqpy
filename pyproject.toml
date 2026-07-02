@@ -82,7 +82,7 @@ testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-p no:cacheprovider"
 markers = [
-    "slow: tests that may compile kernels or run nonlinear solves",
+    "slow: tests that may build kernels or run nonlinear solves",
     "examples: tests that execute user-facing example scripts",
     "paper: manuscript reproduction artifact checks",
 ]

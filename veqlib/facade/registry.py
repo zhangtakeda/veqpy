@@ -17,8 +17,8 @@ from types import ModuleType
 from typing import Any
 
 from .affinity import cpu_pin_scope_active, pinned_cpu
-from .builder import CompileResult, touch_artifact_used
-from .builder import compile as compile_kernel
+from .builder import PrepareResult, touch_artifact_used
+from .builder import prepare as prepare_kernel
 from .options import solver_method_code
 from .types import KernelRecipe as Recipe
 from .types import KernelTopology as Topology
@@ -40,7 +40,7 @@ class SolverClosedError(RuntimeError):
 class LoadedKernel:
     """A process-cached nanobind module and its artifact metadata."""
 
-    artifact: CompileResult
+    artifact: PrepareResult
     module: ModuleType
 
 
@@ -147,15 +147,15 @@ class KernelRegistry:
         self._thread_local = threading.local()
         self._lock = threading.RLock()
 
-    def get_or_compile(
+    def prepare_artifact(
         self,
         topology: Topology,
         *,
         recipe: Recipe | None = None,
         force: bool = False,
         dry_run: bool = False,
-    ) -> CompileResult:
-        return compile_kernel(
+    ) -> PrepareResult:
+        return prepare_kernel(
             topology,
             recipe=recipe,
             cache_root=self.cache_root,
@@ -171,7 +171,7 @@ class KernelRegistry:
         recipe: Recipe | None = None,
         force: bool = False,
     ) -> LoadedKernel:
-        artifact = self.get_or_compile(topology, recipe=recipe, force=force, dry_run=False)
+        artifact = self.prepare_artifact(topology, recipe=recipe, force=force, dry_run=False)
         with self._lock:
             cached = self._modules.get(artifact.artifact_id)
             if cached is not None and not force:
@@ -232,7 +232,7 @@ class KernelRegistry:
         return solvers
 
 
-def _load_artifact_module(artifact: CompileResult) -> ModuleType:
+def _load_artifact_module(artifact: PrepareResult) -> ModuleType:
     if not artifact.shared_library_path.exists():
         raise KernelLoadError(f"VEQlib shared library is missing: {artifact.shared_library_path}")
     module_name = _module_name_for_artifact(artifact.artifact_id)

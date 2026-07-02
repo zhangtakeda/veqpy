@@ -178,7 +178,7 @@ that default policy on the handle; `Kernel.solve(...)` can use it as-is, replace
 it with a one-off `config=...`, or override individual fields such as
 `method=...` for one call. `solve(...)` is the one-shot convenience path and
 `clean(...)` cleans artifact cache entries. The lower-level artifact primitive
-is named `compile(topology, recipe=...)` and returns `CompileResult`.
+is named `prepare(topology, recipe=...)` and returns `PrepareResult`.
 Option-code, CPU-affinity, and cache-root helpers live in their focused
 submodules. Python drives CMake with explicit `-D...` definitions and loads the
 resulting artifact through `veqlib.facade`.
@@ -186,7 +186,7 @@ resulting artifact through `veqlib.facade`.
 The current production boundary is narrow: route/topology planning covers the
 benchmark matrix, while native execution is gated by
 `KernelTopology.validate_supported_for_veqlib_native()`. The artifact cache key is
-computed from the canonical topology, explicit compile recipe, Python/toolchain
+computed from the canonical topology, explicit artifact recipe, Python/toolchain
 ABI, the native CMake define contract, and a digest of implementation inputs under
 `veqlib/core` (`.h`, `.cpp`, `.in`, and `CMakeLists.txt`). Artifacts are cached
 under `veqlib/artifact/` by default, or under `VEQLIB_KERNEL_CACHE` when set.

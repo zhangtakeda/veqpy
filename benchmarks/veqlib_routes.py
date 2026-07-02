@@ -81,7 +81,7 @@ from veqlib.facade import (
     TopologyError,
     VEQlibSolver,
 )
-from veqlib.facade.builder import compile, default_kernel_cache_root
+from veqlib.facade.builder import default_kernel_cache_root, prepare
 from veqlib.facade.options import (
     SOLVER_METHOD_LEVENBERG_MARQUARDT,
     SOLVER_METHOD_POWELL,
@@ -480,7 +480,7 @@ def _measure_veqlib(
         solver=case.solver_method_code,
     )
     build_start = time.perf_counter_ns()
-    artifact = solver.compile(force=False, dry_run=False)
+    artifact = solver.prepare(force=False, dry_run=False)
     build_wall_ms = float(time.perf_counter_ns() - build_start) / 1.0e6
 
     def configure() -> None:
@@ -616,7 +616,7 @@ def _plan_row(
 
     topology_payload = _topology_payload(topology, kernel_recipe, warning_messages)
     if not skip_artifact_dry_run:
-        artifact = compile(
+        artifact = prepare(
             topology,
             recipe=kernel_recipe,
             cache_root=cache_root,
