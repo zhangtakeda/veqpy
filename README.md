@@ -168,9 +168,14 @@ representative High configuration for each GEQDSK family.
 | **X-point(94)** | **1.315509** | **10.269229** |  **7.806x** |  **3.44e-08** |
 | X-point(130)    |     2.530054 |     21.647612 |      8.556x |      1.24e-09 |
 
-The Python facade owns the artifact lifecycle: `KernelTopology` fixes compile-time structure, `KernelBoundary`
-supplies per-case boundary geometry, `KernelInput` supplies source/constraint data,
-and `KernelConfig` supplies runtime solve/operator configuration.
+The package-level Python facade is intentionally semantic: users construct
+`KernelTopology`/`KernelBuild` for artifact structure,
+`KernelBoundary`/`KernelInput`/`KernelConfig` for runtime cases, create a reusable
+`Kernel` with `build(...)`, and call `Kernel.solve(...)` plus residual/JVP/Jacobian
+diagnostic methods. `solve(...)` is the one-shot convenience path and `clean(...)`
+cleans artifact cache entries. The lower-level artifact primitive is named
+`build_artifact(...)` and returns `KernelArtifact`; option-code, CPU-affinity, and
+cache-root helpers remain in their submodules instead of the package root.
 Manual CMake presets are not part of the supported workflow; Python calls CMake
 with explicit `-D...` definitions and loads the resulting artifact through
 `veqlib.facade`.

@@ -56,8 +56,8 @@ from veqlib.facade import (
     KernelRegistry,
     KernelResult,
     VEQlibSolver,
-    default_kernel_cache_root,
 )
+from veqlib.facade.builder import default_kernel_cache_root
 
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "benchmarks" / "results" / "veqlib_continuation"
 UPDATE_CHOICES = ("ip", "boundary", "source", "mixed")

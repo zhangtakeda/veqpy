@@ -113,6 +113,40 @@ def test_veqlib_facade_imports_without_importing_veqpy() -> None:
     assert completed.stdout.strip() == "False"
 
 
+def test_veqlib_facade_root_exports_semantic_surface() -> None:
+    assert facade.__all__ == [
+        "Kernel",
+        "KernelArtifact",
+        "KernelBoundary",
+        "KernelBuild",
+        "KernelBuildError",
+        "KernelCleanResult",
+        "KernelConfig",
+        "KernelInput",
+        "KernelLoadError",
+        "KernelRegistry",
+        "KernelResult",
+        "KernelTopology",
+        "LoadedKernel",
+        "SolverThreadError",
+        "TopologyError",
+        "VEQlibSolver",
+        "build",
+        "build_artifact",
+        "clean",
+        "solve",
+    ]
+    for helper in (
+        "build_kernel",
+        "default_kernel_cache_root",
+        "pinned_cpu",
+        "current_cpu_affinity",
+        "solver_method_code",
+        "SOLVER_METHOD_POWELL",
+    ):
+        assert not hasattr(facade, helper)
+
+
 def test_kernel_topology_and_runtime_inputs_are_user_facing_contracts() -> None:
     topology = make_kernel_topology(c_counts=(0, 0), s_counts=(2, 0, 0), K_max=None)
     same_shape = make_kernel_topology(c_counts=(), s_counts=(2,), L_max=2, M_max=1, K_max=2)

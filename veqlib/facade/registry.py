@@ -17,7 +17,7 @@ from types import ModuleType
 from typing import Any
 
 from .affinity import cpu_pin_scope_active, pinned_cpu
-from .builder import KernelArtifact, build_kernel, touch_artifact_used
+from .builder import KernelArtifact, build_artifact, touch_artifact_used
 from .options import solver_method_code
 from .types import KernelTopology as Topology
 
@@ -153,7 +153,7 @@ class KernelRegistry:
         force: bool = False,
         dry_run: bool = False,
     ) -> KernelArtifact:
-        return build_kernel(
+        return build_artifact(
             topology,
             cache_root=self.cache_root,
             source_dir=self.source_dir,

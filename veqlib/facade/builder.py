@@ -79,7 +79,7 @@ def default_kernel_cache_root() -> Path:
     return _veqlib_root() / "artifact"
 
 
-def build_kernel(
+def build_artifact(
     topology: Topology,
     *,
     cache_root: Path | None = None,

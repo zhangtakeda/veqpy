@@ -72,8 +72,8 @@ from veqlib.facade import (
     KernelRegistry,
     KernelTopology,
     VEQlibSolver,
-    default_kernel_cache_root,
 )
+from veqlib.facade.builder import default_kernel_cache_root
 
 DEFAULT_OUTPUT = REPO_ROOT / "benchmarks" / "results" / "veqlib_geqdsk.json"
 VALIDATION_ATOL = 1.0e-6

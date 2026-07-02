@@ -21,7 +21,8 @@ os.environ.setdefault("MPLCONFIGDIR", str(Path("/tmp/veqpy-mpl")))
 
 import numpy as np
 
-from veqlib.facade import KernelResult, pinned_cpu
+from veqlib.facade import KernelResult
+from veqlib.facade.affinity import pinned_cpu
 from veqpy.engine.numba_source import source_parameterization_for_route_key
 from veqpy.model import Boundary, Geqdsk, Grid, Problem
 from veqpy.operator import (

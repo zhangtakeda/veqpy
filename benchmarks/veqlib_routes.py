@@ -72,8 +72,6 @@ from benchmarks._common import (
     write_json,
 )
 from veqlib.facade import (
-    SOLVER_METHOD_LEVENBERG_MARQUARDT,
-    SOLVER_METHOD_POWELL,
     KernelBoundary,
     KernelBuild,
     KernelConfig,
@@ -82,8 +80,11 @@ from veqlib.facade import (
     KernelTopology,
     TopologyError,
     VEQlibSolver,
-    build_kernel,
-    default_kernel_cache_root,
+)
+from veqlib.facade.builder import build_artifact, default_kernel_cache_root
+from veqlib.facade.options import (
+    SOLVER_METHOD_LEVENBERG_MARQUARDT,
+    SOLVER_METHOD_POWELL,
 )
 from veqpy.engine import backend_abi
 from veqpy.model import Boundary, Grid, Problem
@@ -604,7 +605,7 @@ def _plan_row(
 
     topology_payload = _topology_payload(topology, warning_messages)
     if not skip_artifact_dry_run:
-        artifact = build_kernel(
+        artifact = build_artifact(
             topology,
             cache_root=cache_root,
             source_dir=source_dir,
