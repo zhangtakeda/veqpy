@@ -54,7 +54,7 @@ and easier to reuse than full solver-native equilibrium or reconstruction pipeli
   snapshots on `Equilibrium`. `Grid` and `Equilibrium` use reactive derived properties
   to lazily reconstruct geometry and physics diagnostics by formula.
 - **Experimental VEQlib bridge**: `veqlib.facade` exposes a C++-aligned
-  `KernelTopology + KernelBoundary + KernelInput + KernelConfig` API and builds/loads
+  `KernelTopology + KernelBoundary + KernelSource + KernelConfig` API and builds/loads
   optional topology-specific VEQlib C++/nanobind kernels for the current MVP path.
   This is an optional acceleration path; the standard Python/Numba solver remains
   the default.
@@ -170,7 +170,7 @@ representative High configuration for each GEQDSK family.
 
 The package-level Python facade is intentionally semantic: users construct
 `KernelTopology`/`KernelRecipe` for artifact structure,
-`KernelBoundary`/`KernelInput` for runtime cases, and `KernelConfig` for the
+`KernelBoundary`/`KernelSource` for runtime cases, and `KernelConfig` for the
 handle-level default solve policy. `build(..., recipe=None, config=None)` creates a reusable
 `Kernel` and caches that default policy on the handle; `Kernel.solve(...)` can
 use it as-is, replace it with a one-off `config=...`, or override individual

@@ -52,8 +52,8 @@ from benchmarks.veqlib_geqdsk_pareto import GeqdskConfigCase, _make_cases
 from veqlib.facade import (
     KernelBoundary,
     KernelConfig,
-    KernelInput,
     KernelRegistry,
+    KernelSource,
     SolveResult,
     VEQlibSolver,
 )
@@ -82,7 +82,7 @@ UPDATE_LABELS = {
     "mixed": "C4 mixed",
 }
 REPORT_TABLE_BOX = box.Box("    \n    \n ── \n    \n ── \n ── \n    \n ── \n")
-RuntimePoint = tuple[KernelBoundary, KernelInput]
+RuntimePoint = tuple[KernelBoundary, KernelSource]
 
 
 def _console() -> Console:
@@ -99,16 +99,16 @@ def _scan_offsets(*, points: int, relative_span: float) -> list[float]:
     return [float(lower + step * index) for index in range(points)]
 
 
-def _with_case_suffix(kernel_input: KernelInput, suffix: str) -> KernelInput:
-    case_name = kernel_input.case_name or "case"
-    return replace(kernel_input, case_name=f"{case_name}-{suffix}")
+def _with_case_suffix(kernel_source: KernelSource, suffix: str) -> KernelSource:
+    case_name = kernel_source.case_name or "case"
+    return replace(kernel_source, case_name=f"{case_name}-{suffix}")
 
 
-def _scale_ip(kernel_input: KernelInput, offset: float, *, strength: float = 1.0) -> KernelInput:
-    scaled_ip = float(kernel_input.scaled_Ip)
+def _scale_ip(kernel_source: KernelSource, offset: float, *, strength: float = 1.0) -> KernelSource:
+    scaled_ip = float(kernel_source.scaled_Ip)
     if not np.isfinite(scaled_ip):
         raise ValueError("ip continuation update requires finite scaled_Ip")
-    return replace(kernel_input, scaled_Ip=float(scaled_ip * (1.0 + strength * offset)))
+    return replace(kernel_source, scaled_Ip=float(scaled_ip * (1.0 + strength * offset)))
 
 
 def _scaled_boundary_array(
@@ -161,21 +161,21 @@ def _scaled_source_array(
 
 
 def _scale_source(
-    kernel_input: KernelInput,
+    kernel_source: KernelSource,
     offset: float,
     *,
     strength: float = 1.0,
-) -> KernelInput:
+) -> KernelSource:
     return replace(
-        kernel_input,
+        kernel_source,
         scaled_heat=_scaled_source_array(
-            kernel_input.scaled_heat,
+            kernel_source.scaled_heat,
             offset,
             strength=strength,
             sign=1.0,
         ),
         scaled_current=_scaled_source_array(
-            kernel_input.scaled_current,
+            kernel_source.scaled_current,
             offset,
             strength=strength,
             sign=-0.7,
@@ -183,22 +183,22 @@ def _scale_source(
     )
 
 
-def _input_with_update(
+def _source_with_update(
     base_boundary: KernelBoundary,
-    base_input: KernelInput,
+    base_source: KernelSource,
     update: str,
     offset: float,
 ) -> RuntimePoint:
     boundary = base_boundary
     if update == "ip":
-        updated = _scale_ip(base_input, offset)
+        updated = _scale_ip(base_source, offset)
     elif update == "boundary":
-        updated = base_input
+        updated = base_source
         boundary = _scale_boundary(base_boundary, offset)
     elif update == "source":
-        updated = _scale_source(base_input, offset)
+        updated = _scale_source(base_source, offset)
     elif update == "mixed":
-        updated = _scale_ip(base_input, offset, strength=0.5)
+        updated = _scale_ip(base_source, offset, strength=0.5)
         boundary = _scale_boundary(base_boundary, offset, strength=0.5)
         updated = _scale_source(updated, offset, strength=0.5)
     else:
@@ -217,7 +217,7 @@ def _initial_policy_for_policy(policy: str) -> str:
 
 def _run_policy_sequence_once(
     case: GeqdskConfigCase,
-    inputs: list[RuntimePoint],
+    runtime_points: list[RuntimePoint],
     *,
     registry: KernelRegistry,
     policy: str,
@@ -228,11 +228,11 @@ def _run_policy_sequence_once(
     started = time.perf_counter_ns()
     results: list[SolveResult] = []
     try:
-        for kernel_boundary, kernel_input in inputs:
+        for kernel_boundary, kernel_source in runtime_points:
             solver.set_kernel_runtime(
-                "" if kernel_input.case_name is None else kernel_input.case_name,
+                "" if kernel_source.case_name is None else kernel_source.case_name,
                 *kernel_boundary.runtime_args(),
-                *kernel_input.runtime_args(),
+                *kernel_source.runtime_args(),
                 *runtime_config.runtime_args(x_size=case.x_size),
             )
             results.append(SolveResult.from_solve_direct(solver.solve_direct()))
@@ -259,7 +259,7 @@ def _run_policy_sequence_once(
 
 def _measure_policy(
     case: GeqdskConfigCase,
-    inputs: list[RuntimePoint],
+    runtime_points: list[RuntimePoint],
     *,
     registry: KernelRegistry,
     repeat: int,
@@ -267,10 +267,10 @@ def _measure_policy(
     policy: str,
 ) -> dict[str, Any]:
     for _ in range(warmup):
-        _run_policy_sequence_once(case, inputs, registry=registry, policy=policy)
+        _run_policy_sequence_once(case, runtime_points, registry=registry, policy=policy)
 
     samples = [
-        _run_policy_sequence_once(case, inputs, registry=registry, policy=policy)
+        _run_policy_sequence_once(case, runtime_points, registry=registry, policy=policy)
         for _ in range(repeat)
     ]
     last = samples[-1]
@@ -305,8 +305,8 @@ def _measure_case(
     policies: tuple[str, ...],
 ) -> dict[str, Any]:
     offsets = _scan_offsets(points=points, relative_span=relative_span)
-    inputs = [
-        _input_with_update(case.kernel_boundary, case.kernel_input, update, offset)
+    runtime_points = [
+        _source_with_update(case.kernel_boundary, case.kernel_source, update, offset)
         for offset in offsets
     ]
     build_solver = VEQlibSolver(case.topology, registry=registry, solver=case.kernel_config.method)
@@ -318,7 +318,7 @@ def _measure_case(
     measurements = {
         policy: _measure_policy(
             case,
-            inputs,
+            runtime_points,
             registry=registry,
             repeat=repeat,
             warmup=warmup,

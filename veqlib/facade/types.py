@@ -492,7 +492,7 @@ class KernelTopology:
 
 
 @dataclass(frozen=True, slots=True)
-class KernelInput:
+class KernelSource:
     """Runtime source and physical constraints for one VEQlib kernel solve."""
 
     scaled_heat: np.ndarray | list[float] | tuple[float, ...]

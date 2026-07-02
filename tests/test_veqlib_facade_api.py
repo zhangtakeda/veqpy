@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import os
 import subprocess
 import sys
@@ -14,8 +15,8 @@ from veqlib.facade import (
     Kernel,
     KernelBoundary,
     KernelConfig,
-    KernelInput,
     KernelRecipe,
+    KernelSource,
     KernelTopology,
     SolveResult,
 )
@@ -74,10 +75,10 @@ def pf_reference_profiles(psin: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return current.astype(np.float64), heat.astype(np.float64)
 
 
-def tiny_kernel_input(*, case_name: str | None = None) -> KernelInput:
+def tiny_kernel_source(*, case_name: str | None = None) -> KernelSource:
     psin = np.linspace(0.0, 1.0, 9, dtype=np.float64)
     scaled_current, scaled_heat = pf_reference_profiles(psin)
-    return KernelInput(
+    return KernelSource(
         scaled_heat=scaled_heat,
         scaled_current=scaled_current,
         scaled_Ip=3.0e6 * MU0,
@@ -135,7 +136,7 @@ def test_veqlib_facade_root_exports_semantic_surface() -> None:
         "CompileError",
         "CleanResult",
         "KernelConfig",
-        "KernelInput",
+        "KernelSource",
         "KernelLoadError",
         "KernelRegistry",
         "SolveResult",
@@ -160,19 +161,37 @@ def test_veqlib_facade_root_exports_semantic_surface() -> None:
         "default_kernel_cache_root",
         "pinned_cpu",
         "current_cpu_affinity",
+        "KernelInput",
         "solver_method_code",
         "SOLVER_METHOD_POWELL",
     ):
         assert not hasattr(facade, helper)
 
 
-def test_kernel_topology_and_runtime_inputs_are_user_facing_contracts() -> None:
+def test_kernel_runtime_source_parameter_replaces_input_parameter() -> None:
+    callables = (
+        facade.solve,
+        Kernel.solve,
+        Kernel.residual,
+        Kernel.residual_into,
+        Kernel.jvp,
+        Kernel.jvp_into,
+        Kernel.jacobian,
+        Kernel.jacobian_into,
+    )
+    for callable_ in callables:
+        parameters = inspect.signature(callable_).parameters
+        assert "source" in parameters
+        assert "input" not in parameters
+
+
+def test_kernel_topology_and_runtime_source_is_user_facing_contract() -> None:
     topology = make_kernel_topology(c_counts=(0, 0), s_counts=(2, 0, 0), K_max=None)
     same_shape = make_kernel_topology(c_counts=(), s_counts=(2,), L_max=2, M_max=1, K_max=2)
     family_topology = topology.with_recipe(
         KernelRecipe(layout="profile-first", build="release")
     )
-    kernel_input = tiny_kernel_input(case_name="tiny")
+    kernel_source = tiny_kernel_source(case_name="tiny")
     kernel_boundary = tiny_kernel_boundary()
 
     assert topology.to_canonical_dict() == same_shape.to_canonical_dict()
@@ -184,21 +203,21 @@ def test_kernel_topology_and_runtime_inputs_are_user_facing_contracts() -> None:
     assert topology.sample_count == 9
     assert topology.packed_size() == 9
 
-    assert kernel_input.case_name == "tiny"
+    assert kernel_source.case_name == "tiny"
     assert kernel_boundary.a == 0.5
-    assert_allclose(kernel_input.scaled_heat, tiny_kernel_input().scaled_heat)
-    assert kernel_input.scaled_Ip == 3.0e6 * MU0
+    assert_allclose(kernel_source.scaled_heat, tiny_kernel_source().scaled_heat)
+    assert kernel_source.scaled_Ip == 3.0e6 * MU0
     assert kernel_boundary.c_offsets.flags.c_contiguous
     assert kernel_boundary.s_offsets.flags.c_contiguous
-    assert kernel_input.scaled_heat.flags.c_contiguous
-    assert kernel_input.scaled_current.flags.c_contiguous
+    assert kernel_source.scaled_heat.flags.c_contiguous
+    assert kernel_source.scaled_current.flags.c_contiguous
     assert not kernel_boundary.c_offsets.flags.writeable
     assert not kernel_boundary.s_offsets.flags.writeable
-    assert not kernel_input.scaled_heat.flags.writeable
-    assert not kernel_input.scaled_current.flags.writeable
+    assert not kernel_source.scaled_heat.flags.writeable
+    assert not kernel_source.scaled_current.flags.writeable
 
     with pytest.raises(ValueError, match="scaled_heat must be 1D"):
-        KernelInput(
+        KernelSource(
             scaled_heat=np.ones((2, 1), dtype=np.float64),
             scaled_current=np.ones(2, dtype=np.float64),
         )
@@ -210,7 +229,7 @@ def test_kernel_runtime_case_must_match_topology_before_native() -> None:
     recorder = RecordingSolver()
     handle._solver = recorder  # type: ignore[assignment]
 
-    bad_source_length = KernelInput(
+    bad_source_length = KernelSource(
         scaled_heat=np.ones(topology.sample_count - 1, dtype=np.float64),
         scaled_current=np.ones(topology.sample_count - 1, dtype=np.float64),
     )
@@ -233,7 +252,7 @@ def test_kernel_runtime_case_must_match_topology_before_native() -> None:
     with pytest.raises(ValueError, match="case does not match kernel topology: c_offsets"):
         handle._set_runtime(
             too_many_c_offsets,
-            tiny_kernel_input(),
+            tiny_kernel_source(),
             KernelConfig(),
             case_name=None,
         )
@@ -249,7 +268,7 @@ def test_kernel_runtime_case_must_match_topology_before_native() -> None:
     with pytest.raises(ValueError, match="case does not match kernel topology: s_offsets"):
         handle._set_runtime(
             too_many_s_offsets,
-            tiny_kernel_input(),
+            tiny_kernel_source(),
             KernelConfig(),
             case_name=None,
         )
@@ -257,7 +276,7 @@ def test_kernel_runtime_case_must_match_topology_before_native() -> None:
 
     handle._set_runtime(
         tiny_kernel_boundary(),
-        tiny_kernel_input(),
+        tiny_kernel_source(),
         KernelConfig(),
         case_name="override",
     )
@@ -277,7 +296,7 @@ def test_kernel_solve_uses_handle_default_config_with_per_call_overrides() -> No
     recorder = RecordingSolver(x_size=handle.x_size)
     handle._solver = recorder  # type: ignore[assignment]
 
-    handle.solve(tiny_kernel_boundary(), tiny_kernel_input(), case_name="default")
+    handle.solve(tiny_kernel_boundary(), source=tiny_kernel_source(), case_name="default")
     assert recorder.runtime_args is not None
     assert recorder.runtime_args[0] == "default"
     assert recorder.runtime_args[12] == SOLVER_METHOD_LEVENBERG_MARQUARDT
@@ -287,7 +306,7 @@ def test_kernel_solve_uses_handle_default_config_with_per_call_overrides() -> No
 
     handle.solve(
         tiny_kernel_boundary(),
-        tiny_kernel_input(),
+        tiny_kernel_source(),
         method="powell",
         max_residual=3.0e-6,
         max_evaluations=None,
@@ -302,7 +321,7 @@ def test_kernel_solve_uses_handle_default_config_with_per_call_overrides() -> No
     temporary_config = KernelConfig(method="powell", max_evaluations=5)
     handle.solve(
         tiny_kernel_boundary(),
-        tiny_kernel_input(),
+        tiny_kernel_source(),
         config=temporary_config,
         method="levenberg-marquardt",
     )
@@ -311,7 +330,10 @@ def test_kernel_solve_uses_handle_default_config_with_per_call_overrides() -> No
     assert temporary_config.method == "powell"
 
     with pytest.raises(TypeError, match="Unsupported KernelConfig override"):
-        handle.solve(tiny_kernel_boundary(), tiny_kernel_input(), unknown_option=True)
+        handle.solve(tiny_kernel_boundary(), tiny_kernel_source(), unknown_option=True)
+
+    with pytest.raises(TypeError, match="source"):
+        handle.solve(tiny_kernel_boundary(), input=tiny_kernel_source())
 
 
 def test_kernel_dry_run_and_python_owned_result_snapshot(tmp_path: Path) -> None:
@@ -351,20 +373,20 @@ def test_kernel_python_build_and_solve_native_flow(tmp_path: Path) -> None:
     assert artifact.shared_library_path.exists()
 
     kernel_boundary = tiny_kernel_boundary()
-    kernel_input = tiny_kernel_input()
+    kernel_source = tiny_kernel_source()
     result = handle.solve(
         kernel_boundary,
-        kernel_input,
+        kernel_source,
         config=KernelConfig(method="powell", initial="cold"),
     )
     assert result.success is True
     assert result.x.shape == (handle.x_size,)
     assert result.raw.shape == (handle.x_size,)
     assert result.scaled.shape == (handle.x_size,)
-    assert_allclose(handle.residual(result.x, kernel_boundary, kernel_input), result.raw)
+    assert_allclose(handle.residual(result.x, kernel_boundary, kernel_source), result.raw)
 
     residual_out = np.empty(handle.x_size, dtype=np.float64)
-    handle.residual_into(residual_out, result.x, kernel_boundary, kernel_input)
+    handle.residual_into(residual_out, result.x, kernel_boundary, kernel_source)
     assert_allclose(residual_out, result.raw)
 
     jvp_out = np.empty(handle.x_size, dtype=np.float64)
@@ -373,21 +395,21 @@ def test_kernel_python_build_and_solve_native_flow(tmp_path: Path) -> None:
         result.x,
         np.ones(handle.x_size, dtype=np.float64),
         kernel_boundary,
-        kernel_input,
+        kernel_source,
     )
     assert jvp_out.shape == (handle.x_size,)
 
     jacobian_out = np.empty((handle.x_size, handle.x_size), dtype=np.float64)
-    handle.jacobian_into(jacobian_out, result.x, kernel_boundary, kernel_input)
+    handle.jacobian_into(jacobian_out, result.x, kernel_boundary, kernel_source)
     assert jacobian_out.shape == (handle.x_size, handle.x_size)
 
     assert handle.jvp(
         result.x,
         np.ones(handle.x_size, dtype=np.float64),
         kernel_boundary,
-        kernel_input,
+        kernel_source,
     ).shape == (handle.x_size,)
-    assert handle.jacobian(result.x, kernel_boundary, kernel_input).shape == (
+    assert handle.jacobian(result.x, kernel_boundary, kernel_source).shape == (
         handle.x_size,
         handle.x_size,
     )

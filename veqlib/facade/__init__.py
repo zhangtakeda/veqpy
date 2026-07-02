@@ -19,8 +19,8 @@ from .solver import VEQlibSolver
 from .types import (
     KernelBoundary,
     KernelConfig,
-    KernelInput,
     KernelRecipe,
+    KernelSource,
     KernelTopology,
     SolveResult,
     TopologyError,
@@ -34,7 +34,7 @@ __all__ = [
     "CompileError",
     "CleanResult",
     "KernelConfig",
-    "KernelInput",
+    "KernelSource",
     "KernelLoadError",
     "KernelRegistry",
     "SolveResult",

@@ -67,9 +67,9 @@ from benchmarks._common import (
 from veqlib.facade import (
     KernelBoundary,
     KernelConfig,
-    KernelInput,
     KernelRecipe,
     KernelRegistry,
+    KernelSource,
     KernelTopology,
     VEQlibSolver,
 )
@@ -97,7 +97,7 @@ class GeqdskConfigCase:
     signature: dict[str, int]
     topology: Topology
     kernel_boundary: KernelBoundary
-    kernel_input: KernelInput
+    kernel_source: KernelSource
     kernel_config: KernelConfig
     py_operator: Any
     py_measure: Any
@@ -152,13 +152,13 @@ def _kernel_boundary_from_case(case: Any) -> KernelBoundary:
     )
 
 
-def _kernel_input_from_operator(
+def _kernel_source_from_operator(
     case_key: str,
     config_label: str,
     operator: Any,
-) -> KernelInput:
+) -> KernelSource:
     source_plan = operator.plan.source_plan
-    return KernelInput(
+    return KernelSource(
         scaled_heat=np.asarray(source_plan.scaled_heat, dtype=np.float64),
         scaled_current=np.asarray(source_plan.scaled_current, dtype=np.float64),
         scaled_Ip=float(source_plan.scaled_Ip),
@@ -268,7 +268,7 @@ def _case_from_signature(
     operator = benchmark.Operator(grid, case)
     topology = _topology_for_case(signature, case, build=build, grid=grid)
     kernel_boundary = _kernel_boundary_from_case(case)
-    kernel_input = _kernel_input_from_operator(case_key, config_label, operator)
+    kernel_source = _kernel_source_from_operator(case_key, config_label, operator)
     x_size = int(topology.packed_size())
     kernel_config = _kernel_config_from_config(
         benchmark.CONFIG,
@@ -285,7 +285,7 @@ def _case_from_signature(
         signature=dict(signature),
         topology=topology,
         kernel_boundary=kernel_boundary,
-        kernel_input=kernel_input,
+        kernel_source=kernel_source,
         kernel_config=kernel_config,
         py_operator=operator,
         py_measure=measure_py,
@@ -341,9 +341,9 @@ def _measure_veqlib(
 
     def configure() -> None:
         solver.set_kernel_runtime(
-            "" if case.kernel_input.case_name is None else case.kernel_input.case_name,
+            "" if case.kernel_source.case_name is None else case.kernel_source.case_name,
             *case.kernel_boundary.runtime_args(),
-            *case.kernel_input.runtime_args(),
+            *case.kernel_source.runtime_args(),
             *case.kernel_config.runtime_args(x_size=case.x_size),
         )
 

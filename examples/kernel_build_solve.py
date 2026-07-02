@@ -28,8 +28,8 @@ from veqlib.facade import (  # noqa: E402
     Kernel,
     KernelBoundary,
     KernelConfig,
-    KernelInput,
     KernelRecipe,
+    KernelSource,
     KernelTopology,
     SolveResult,
 )
@@ -68,10 +68,10 @@ def build_boundary() -> KernelBoundary:
     )
 
 
-def build_input() -> KernelInput:
+def build_source() -> KernelSource:
     psin = np.linspace(0.0, 1.0, 9, dtype=np.float64)
     current_input, scaled_heat = pf_reference_profiles(psin)
-    return KernelInput(
+    return KernelSource(
         scaled_heat=scaled_heat,
         scaled_current=current_input,
         scaled_Ip=3.0e6 * MU0,
@@ -111,13 +111,13 @@ def main() -> None:
     )
     artifact = kernel.compile()
 
-    # 3. Prepare typed runtime input.
+    # 3. Prepare typed runtime source data.
     kernel_boundary = build_boundary()
-    kernel_input = build_input()
+    kernel_source = build_source()
 
     # 4. Solve. Kernel.solve() uses the handle default config unless a
     #    per-call config or field override (for example method=...) is supplied.
-    result = kernel.solve(kernel_boundary, kernel_input)
+    result = kernel.solve(kernel_boundary, kernel_source)
     assert isinstance(result, SolveResult)
 
     print("VEQlib kernel build + solve demo")
