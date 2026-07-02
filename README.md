@@ -56,6 +56,8 @@ and easier to reuse than full solver-native equilibrium or reconstruction pipeli
 - **Experimental VEQlib bridge**: `veqlib.facade` exposes a C++-aligned
   `KernelTopology + KernelBoundary + KernelInput + KernelConfig` API and builds/loads
   optional topology-specific VEQlib C++/nanobind kernels for the current MVP path.
+  Runtime case injection is typed-only; JSON serialization remains a VEQPy model
+  snapshot format, not a native VEQlib runtime ABI.
   This is an optional acceleration path; the standard Python/Numba solver remains
   the default.
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import os
 import subprocess
 import sys
@@ -169,10 +170,14 @@ def test_kernel_dry_run_and_python_owned_result_snapshot(tmp_path: Path) -> None
 def test_json_runtime_api_is_not_exposed() -> None:
     topology = make_kernel_topology()
     handle = Kernel(topology)
+    solver = handle._veqlib_solver()
     boundary = tiny_kernel_boundary()
     kernel_input = tiny_kernel_input()
 
     assert not hasattr(handle, "payload_json")
+    assert not hasattr(solver, "metadata_json")
+    assert not hasattr(solver, "set_case_json")
+    assert not hasattr(solver, "solve_json")
     assert not hasattr(boundary, "to_payload_dict")
     assert not hasattr(kernel_input, "to_payload_dict")
     assert not hasattr(KernelConfig(), "to_payload_dict")
@@ -180,6 +185,7 @@ def test_json_runtime_api_is_not_exposed() -> None:
     assert not hasattr(facade, "payload_json_with_initial_policy")
     assert not hasattr(facade, "payload_json_with_continue_policy")
     assert not hasattr(facade, "solve_payload_sequence")
+    assert importlib.util.find_spec("veqlib.facade.scan") is None
 
 
 @pytest.mark.slow
