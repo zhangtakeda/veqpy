@@ -96,6 +96,7 @@ class GeqdskConfigCase:
     row_label: str
     signature: dict[str, int]
     topology: Topology
+    recipe: KernelRecipe
     kernel_boundary: KernelBoundary
     kernel_source: KernelSource
     kernel_config: KernelConfig
@@ -108,7 +109,7 @@ def _coeffs_from_signature(signature: dict[str, int]) -> dict[str, list[float] |
     return {name: [0.0] * int(length) for name, length in signature.items() if int(length) > 0}
 
 
-def _topology_for_case(signature: dict[str, int], case: Any, *, build: str, grid: Any) -> Topology:
+def _topology_for_case(signature: dict[str, int], case: Any, *, grid: Any) -> Topology:
     coeffs = _coeffs_from_signature(signature)
     boundary = case.boundary
     c_offsets = np.asarray(boundary.c_offsets, dtype=np.float64)
@@ -118,7 +119,7 @@ def _topology_for_case(signature: dict[str, int], case: Any, *, build: str, grid
         int(s_offsets.size) - 1 if s_offsets.size else 0,
         1,
     )
-    topology = KernelTopology(
+    return KernelTopology(
         h_count=profile_count(coeffs, "h"),
         v_count=profile_count(coeffs, "v"),
         kappa_count=profile_count(coeffs, "k"),
@@ -136,7 +137,6 @@ def _topology_for_case(signature: dict[str, int], case: Any, *, build: str, grid
         M_max=m_max,
         K_max=max(2, m_max),
     )
-    return topology.with_recipe(KernelRecipe(build=build, layout="degree"))
 
 
 def _kernel_boundary_from_case(case: Any) -> KernelBoundary:
@@ -266,7 +266,8 @@ def _case_from_signature(
     )
     case = build_pf_case(benchmark, reference, signature)
     operator = benchmark.Operator(grid, case)
-    topology = _topology_for_case(signature, case, build=build, grid=grid)
+    topology = _topology_for_case(signature, case, grid=grid)
+    recipe = KernelRecipe(build=build, layout="degree")
     kernel_boundary = _kernel_boundary_from_case(case)
     kernel_source = _kernel_source_from_operator(case_key, config_label, operator)
     x_size = int(topology.packed_size())
@@ -284,6 +285,7 @@ def _case_from_signature(
         row_label=f"{case_key}:{config_label.lower()}",
         signature=dict(signature),
         topology=topology,
+        recipe=recipe,
         kernel_boundary=kernel_boundary,
         kernel_source=kernel_source,
         kernel_config=kernel_config,
@@ -334,7 +336,12 @@ def _measure_veqlib(
     warmup: int,
     repeat: int,
 ) -> dict[str, Any]:
-    solver = VEQlibSolver(case.topology, registry=registry, solver=NATIVE_SOLVER_METHOD)
+    solver = VEQlibSolver(
+        case.topology,
+        recipe=case.recipe,
+        registry=registry,
+        solver=NATIVE_SOLVER_METHOD,
+    )
     build_start = time.perf_counter_ns()
     artifact = solver.compile(force=False, dry_run=False)
     build_wall_ms = float(time.perf_counter_ns() - build_start) / 1.0e6
@@ -415,6 +422,7 @@ def _row(
         "signature": case.signature,
         "topology": {
             "key": case.topology.key,
+            "recipe": case.recipe.to_canonical_dict(),
             "grid": {"Nr": case.topology.Nr, "Nt": case.topology.Nt},
             "sample_count": case.topology.sample_count,
             "M_max": case.topology.M_max,

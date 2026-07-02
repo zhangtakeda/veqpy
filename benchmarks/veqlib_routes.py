@@ -140,6 +140,7 @@ SYNTHETIC_IP = 3.0e6
 class RuntimeCase:
     spec: Any
     topology: Topology
+    recipe: KernelRecipe
     kernel_boundary: KernelBoundary
     kernel_source: KernelSource
     kernel_config: KernelConfig
@@ -262,11 +263,11 @@ def _coeff_index_for_layout(topology: Topology, *, layout: str) -> np.ndarray:
     return coeff_index
 
 
-def _packed_to_degree_layout(values: Any, topology: Topology) -> np.ndarray:
+def _packed_to_degree_layout(values: Any, topology: Topology, recipe: KernelRecipe) -> np.ndarray:
     values_arr = np.asarray(values, dtype=np.float64)
-    if topology.layout == "degree":
+    if recipe.layout == "degree":
         return values_arr.copy()
-    source_index = _coeff_index_for_layout(topology, layout=topology.layout)
+    source_index = _coeff_index_for_layout(topology, layout=recipe.layout)
     degree_index = _coeff_index_for_layout(topology, layout="degree")
     out = np.empty_like(values_arr)
     for profile_row in range(source_index.shape[0]):
@@ -299,7 +300,7 @@ def _topology_from_spec(
     build: str,
     layout: str = "degree",
     recipe: dict[str, object] | None = None,
-) -> tuple[KernelTopology, tuple[str, ...]]:
+) -> tuple[KernelTopology, KernelRecipe, tuple[str, ...]]:
     coeffs = _profile_coeffs_for_case(spec)
     grid = ROUTE_TEST_GRID
     m_max = _boundary_m_max(SYNTHETIC_BOUNDARY)
@@ -324,10 +325,11 @@ def _topology_from_spec(
     recipe_kwargs: dict[str, object] = {"build": build, "layout": layout}
     if recipe:
         recipe_kwargs.update(recipe)
+    kernel_recipe = KernelRecipe(**recipe_kwargs)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always", UserWarning)
-        topology = KernelTopology(**topology_kwargs).with_recipe(KernelRecipe(**recipe_kwargs))
-    return topology, tuple(str(item.message) for item in caught)
+        topology = KernelTopology(**topology_kwargs)
+    return topology, kernel_recipe, tuple(str(item.message) for item in caught)
 
 
 def _kernel_boundary_from_case(case: Any) -> KernelBoundary:
@@ -378,7 +380,7 @@ def _kernel_config_from_config(
     )
 
 
-def _runtime_case(spec: Any, topology: Topology) -> RuntimeCase:
+def _runtime_case(spec: Any, topology: Topology, recipe: KernelRecipe) -> RuntimeCase:
     reference = _benchmark_reference()
     coeffs = _profile_coeffs_for_case(spec)
     grid = ROUTE_TEST_GRID
@@ -452,6 +454,7 @@ def _runtime_case(spec: Any, topology: Topology) -> RuntimeCase:
     return RuntimeCase(
         spec=spec,
         topology=topology,
+        recipe=recipe,
         kernel_boundary=kernel_boundary,
         kernel_source=kernel_source,
         kernel_config=kernel_config,
@@ -470,7 +473,12 @@ def _measure_veqlib(
     warmup: int,
     repeat: int,
 ) -> dict[str, Any]:
-    solver = VEQlibSolver(case.topology, registry=registry, solver=case.solver_method_code)
+    solver = VEQlibSolver(
+        case.topology,
+        recipe=case.recipe,
+        registry=registry,
+        solver=case.solver_method_code,
+    )
     build_start = time.perf_counter_ns()
     artifact = solver.compile(force=False, dry_run=False)
     build_wall_ms = float(time.perf_counter_ns() - build_start) / 1.0e6
@@ -484,8 +492,8 @@ def _measure_veqlib(
         )
 
     timing = measure_native_solver(solver, configure, warmup=warmup, repeat=repeat)
-    native_x = _packed_to_degree_layout(timing.result.x, case.topology)
-    native_raw = _packed_to_degree_layout(timing.result.raw, case.topology)
+    native_x = _packed_to_degree_layout(timing.result.x, case.topology, case.recipe)
+    native_raw = _packed_to_degree_layout(timing.result.raw, case.topology, case.recipe)
     py_raw_at_native = np.asarray(case.py_operator.residual_var(native_x), dtype=np.float64)
     payload = timing.compact()
     payload.update(
@@ -550,16 +558,18 @@ def _reference_dofs_payload(
     }
 
 
-def _topology_payload(topology: Topology, warnings_: tuple[str, ...]) -> dict[str, Any]:
+def _topology_payload(
+    topology: Topology,
+    recipe: KernelRecipe,
+    warnings_: tuple[str, ...],
+) -> dict[str, Any]:
+    recipe_payload = recipe.to_canonical_dict()
     return {
         "status": "planned",
         "key": topology.key,
         "source": topology.source_policy_dict(),
-        "layout": {
-            "packed": topology.layout,
-            "profile_first": topology.layout_profile_first,
-            "code": topology.layout_code,
-        },
+        "layout": recipe_payload["layout"],
+        "recipe": recipe_payload,
         "profile_counts": {
             "h": topology.h_count,
             "v": topology.v_count,
@@ -584,9 +594,9 @@ def _plan_row(
     cache_root: Path,
     source_dir: Path,
     skip_artifact_dry_run: bool,
-) -> tuple[dict[str, Any], Topology | None]:
+) -> tuple[dict[str, Any], Topology | None, KernelRecipe | None]:
     try:
-        topology, warning_messages = _topology_from_spec(
+        topology, kernel_recipe, warning_messages = _topology_from_spec(
             spec,
             build=build,
             layout=layout,
@@ -601,12 +611,14 @@ def _plan_row(
                 "runtime": {"status": "skipped_invalid_topology"},
             },
             None,
+            None,
         )
 
-    topology_payload = _topology_payload(topology, warning_messages)
+    topology_payload = _topology_payload(topology, kernel_recipe, warning_messages)
     if not skip_artifact_dry_run:
         artifact = compile(
             topology,
+            recipe=kernel_recipe,
             cache_root=cache_root,
             source_dir=source_dir,
             dry_run=True,
@@ -635,18 +647,20 @@ def _plan_row(
             "runtime": runtime,
         },
         topology,
+        kernel_recipe,
     )
 
 
 def _run_supported_row(
     spec: Any,
     topology: Topology,
+    recipe: KernelRecipe,
     *,
     registry: KernelRegistry,
     warmup: int,
     repeat: int,
 ) -> dict[str, Any]:
-    case = _runtime_case(spec, topology)
+    case = _runtime_case(spec, topology, recipe)
     py = case.py_measure(warmup=warmup, repeat=repeat)
     cxx = _measure_veqlib(case, registry=registry, warmup=warmup, repeat=repeat)
     compare = _compare(cxx, py)
@@ -1157,7 +1171,7 @@ def main(argv: list[str] | None = None) -> int:
                     current=selector,
                     phase="[dim]plan[/]",
                 )
-            row, topology = _plan_row(
+            row, topology, kernel_recipe = _plan_row(
                 spec,
                 build=args.build,
                 layout=args.layout,
@@ -1169,7 +1183,7 @@ def main(argv: list[str] | None = None) -> int:
             if row["runtime"]["status"] == "ready_supported_native_kernel":
                 if args.no_run:
                     row["runtime"] = {"status": "not_requested"}
-                elif topology is not None:
+                elif topology is not None and kernel_recipe is not None:
                     if progress is not None and task_id is not None:
                         progress.update(task_id, phase="[cyan]run[/]")
                     try:
@@ -1177,6 +1191,7 @@ def main(argv: list[str] | None = None) -> int:
                             row["runtime"] = _run_supported_row(
                                 spec,
                                 topology,
+                                kernel_recipe,
                                 registry=registry,
                                 warmup=args.warmup,
                                 repeat=args.repeat,

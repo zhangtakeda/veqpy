@@ -222,7 +222,12 @@ def _run_policy_sequence_once(
     registry: KernelRegistry,
     policy: str,
 ) -> dict[str, Any]:
-    solver = VEQlibSolver(case.topology, registry=registry, solver=case.kernel_config.method)
+    solver = VEQlibSolver(
+        case.topology,
+        recipe=case.recipe,
+        registry=registry,
+        solver=case.kernel_config.method,
+    )
     solver.metadata()  # force artifact load outside the timed sequence
     runtime_config = _policy_runtime_config(case.kernel_config, policy)
     started = time.perf_counter_ns()
@@ -309,7 +314,12 @@ def _measure_case(
         _source_with_update(case.kernel_boundary, case.kernel_source, update, offset)
         for offset in offsets
     ]
-    build_solver = VEQlibSolver(case.topology, registry=registry, solver=case.kernel_config.method)
+    build_solver = VEQlibSolver(
+        case.topology,
+        recipe=case.recipe,
+        registry=registry,
+        solver=case.kernel_config.method,
+    )
     build_start = time.perf_counter_ns()
     artifact = build_solver.compile(force=False, dry_run=False)
     build_wall_ms = float(time.perf_counter_ns() - build_start) / 1.0e6

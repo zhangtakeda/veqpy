@@ -54,8 +54,9 @@ and easier to reuse than full solver-native equilibrium or reconstruction pipeli
   snapshots on `Equilibrium`. `Grid` and `Equilibrium` use reactive derived properties
   to lazily reconstruct geometry and physics diagnostics by formula.
 - **Experimental VEQlib bridge**: `veqlib.facade` exposes a C++-aligned
-  `KernelTopology + KernelBoundary + KernelSource + KernelConfig` API and builds/loads
-  optional topology-specific VEQlib C++/nanobind kernels for the current MVP path.
+  `KernelTopology + KernelRecipe + KernelBoundary + KernelSource + KernelConfig` API
+  and builds/loads optional topology-specific VEQlib C++/nanobind kernels for the
+  current MVP path.
   This is an optional acceleration path; the standard Python/Numba solver remains
   the default.
 
@@ -169,14 +170,15 @@ representative High configuration for each GEQDSK family.
 | X-point(130)    |     2.530054 |     21.647612 |      8.556x |      1.24e-09 |
 
 The package-level Python facade is intentionally semantic: users construct
-`KernelTopology`/`KernelRecipe` for artifact structure,
-`KernelBoundary`/`KernelSource` for runtime cases, and `KernelConfig` for the
-handle-level default solve policy. `build(..., recipe=None, config=None)` creates a reusable
-`Kernel` and caches that default policy on the handle; `Kernel.solve(...)` can
-use it as-is, replace it with a one-off `config=...`, or override individual
-fields such as `method=...` for one call. `solve(...)` is the one-shot
-convenience path and `clean(...)` cleans artifact cache entries. The lower-level
-artifact primitive is named `compile(...)` and returns `CompileResult`;
+`KernelTopology` for the physical/native topology, `KernelRecipe` for packed
+layout and build options, `KernelBoundary`/`KernelSource` for runtime cases,
+and `KernelConfig` for the handle-level default solve policy.
+`build(..., recipe=None, config=None)` creates a reusable `Kernel` and caches
+that default policy on the handle; `Kernel.solve(...)` can use it as-is, replace
+it with a one-off `config=...`, or override individual fields such as
+`method=...` for one call. `solve(...)` is the one-shot convenience path and
+`clean(...)` cleans artifact cache entries. The lower-level artifact primitive
+is named `compile(topology, recipe=...)` and returns `CompileResult`;
 option-code, CPU-affinity, and cache-root helpers remain in their submodules
 instead of the package root.
 Manual CMake presets are not part of the supported workflow; Python calls CMake
@@ -188,8 +190,8 @@ benchmark matrix, while native execution is gated by
 `KernelTopology.validate_supported_for_veqlib_native()`. Runtime values such as
 boundary coefficients, source arrays, `Ip`, `beta`, solver tolerances, and `x0`
 do not participate in the kernel artifact identity. The artifact cache key is
-computed from the canonical topology, compile recipe, Python/toolchain ABI, the
-native CMake define contract, and a digest of implementation inputs under
+computed from the canonical topology, explicit compile recipe, Python/toolchain
+ABI, the native CMake define contract, and a digest of implementation inputs under
 `veqlib/core` (`.h`, `.cpp`, `.in`, and `CMakeLists.txt`). Artifacts are cached
 under `veqlib/artifact/` by default, `VEQLIB_KERNEL_CACHE` when set, or legacy
 `VEQPY_KERNEL_CACHE` as fallback.
