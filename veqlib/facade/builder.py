@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
+from .types import KernelRecipe as Recipe
 from .types import KernelTopology as Topology
 
 GENERATOR_VERSION = "veqlib.kernel.builder.v1"
@@ -45,6 +46,7 @@ class CompileResult:
     """Resolved on-disk VEQlib kernel artifact."""
 
     topology: Topology
+    recipe: Recipe
     artifact_id: str
     root_dir: Path
     cmake_build_dir: Path
@@ -82,17 +84,21 @@ def default_kernel_cache_root() -> Path:
 def compile(
     topology: Topology,
     *,
+    recipe: Recipe | None = None,
     cache_root: Path | None = None,
     source_dir: Path | None = None,
     force: bool = False,
     dry_run: bool = False,
 ) -> CompileResult:
-    """Resolve, optionally build, and record a VEQlib kernel artifact for ``topology``.
+    """Resolve, optionally build, and record a VEQlib artifact for ``topology``/``recipe``.
 
     ``dry_run=True`` writes the same planning metadata and CMake arguments but does not invoke
     CMake. It is the fast validation path used before the nanobind production API is finalized.
     """
 
+    recipe = Recipe() if recipe is None else recipe
+    if not isinstance(recipe, Recipe):
+        raise TypeError(f"recipe must be KernelRecipe, got {type(recipe).__name__}")
     if not dry_run:
         topology.validate_supported_for_veqlib_native()
     source_dir = _default_source_dir() if source_dir is None else source_dir.resolve()
@@ -100,18 +106,18 @@ def compile(
         raise CompileError(f"VEQlib source directory does not exist: {source_dir}")
 
     cxx = VEQLIB_CXX
-    build_identity = _build_identity(topology, source_dir=source_dir, cxx=cxx)
-    artifact_id = _compute_artifact_id(topology, build_identity)
+    build_identity = _build_identity(topology, recipe, source_dir=source_dir, cxx=cxx)
+    artifact_id = _compute_artifact_id(topology, recipe, build_identity)
     root = (cache_root or default_kernel_cache_root()).expanduser()
     nanobind_static = _get_or_build_nanobind_static(
         root,
         cxx=cxx,
-        build=topology.build,
-        cmake_build_type=topology.cmake_build_type,
+        build=recipe.build,
+        cmake_build_type=recipe.cmake_build_type,
         dry_run=dry_run,
     )
-    root_dir = root / topology.build / artifact_id
-    lock_path = root / topology.build / f"{artifact_id}.lock"
+    root_dir = root / recipe.build / artifact_id
+    lock_path = root / recipe.build / f"{artifact_id}.lock"
     root_dir.parent.mkdir(parents=True, exist_ok=True)
 
     with _exclusive_lock(lock_path):
@@ -124,6 +130,7 @@ def compile(
             _write_json(paths["metadata_path"], metadata)
             return CompileResult(
                 topology=topology,
+                recipe=recipe,
                 artifact_id=artifact_id,
                 root_dir=root_dir,
                 cmake_build_dir=paths["cmake_build_dir"],
@@ -140,6 +147,7 @@ def compile(
         started = time.perf_counter()
         cmake_args = _cmake_configure_args(
             topology,
+            recipe,
             source_dir,
             paths["cmake_build_dir"],
             cxx,
@@ -157,6 +165,7 @@ def compile(
         ]
         metadata = _metadata_payload(
             topology=topology,
+            recipe=recipe,
             artifact_id=artifact_id,
             source_dir=source_dir,
             build_identity=build_identity,
@@ -188,6 +197,7 @@ def compile(
         _write_json(paths["metadata_path"], metadata)
         return CompileResult(
             topology=topology,
+            recipe=recipe,
             artifact_id=artifact_id,
             root_dir=root_dir,
             cmake_build_dir=paths["cmake_build_dir"],
@@ -392,6 +402,7 @@ def _directory_size(path: Path) -> int:
 def _metadata_payload(
     *,
     topology: Topology,
+    recipe: Recipe,
     artifact_id: str,
     source_dir: Path,
     build_identity: dict[str, Any],
@@ -415,13 +426,14 @@ def _metadata_payload(
             "last_used_at": None,
         },
         "topology": topology.to_canonical_dict(),
+        "recipe": recipe.to_canonical_dict(),
         "build_identity": build_identity,
         "python_client_source_digest": _python_source_digest(),
         "common_artifacts": {
             "nanobind_static": nanobind_static,
         },
         "build": {
-            "build": topology.build,
+            "build": recipe.build,
             "dry_run": dry_run,
             "source_dir": str(source_dir),
             "cmake_configure": cmake_args,
@@ -456,6 +468,7 @@ def load():
 
 def _cmake_configure_args(
     topology: Topology,
+    recipe: Recipe,
     source_dir: Path,
     build_dir: Path,
     cxx: str,
@@ -470,18 +483,18 @@ def _cmake_configure_args(
         str(source_dir),
         "-B",
         str(build_dir),
-        f"-DCMAKE_BUILD_TYPE={topology.cmake_build_type}",
+        f"-DCMAKE_BUILD_TYPE={recipe.cmake_build_type}",
         f"-DCMAKE_CXX_COMPILER={cxx}",
         f"-DPython_EXECUTABLE={sys.executable}",
         "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
-        f"-DENABLE_ENZYME={_cmake_bool(topology.enable_enzyme)}",
+        f"-DENABLE_ENZYME={_cmake_bool(recipe.enable_enzyme)}",
         "-DVEQLIB_ENABLE_PYTHON_BINDINGS=ON",
-        f"-DVEQLIB_ENABLE_NATIVE_OPTIMIZATIONS={_cmake_bool(topology.enable_native_optimizations)}",
-        f"-DVEQLIB_FP_MODE={topology.fp_mode}",
+        f"-DVEQLIB_ENABLE_NATIVE_OPTIMIZATIONS={_cmake_bool(recipe.enable_native_optimizations)}",
+        f"-DVEQLIB_FP_MODE={recipe.fp_mode}",
         f"-DVEQLIB_NB_DOMAIN=veqlib_kernel_{artifact_id}",
         f"-DVEQLIB_PREBUILT_NANOBIND_STATIC={prebuilt_nanobind_static or ''}",
-        f"-DVEQLIB_ENABLE_THIN_LTO={_cmake_bool(topology.enable_thin_lto)}",
-        f"-DVEQLIB_ANALYSIS_BUILD={_cmake_bool(topology.analysis)}",
+        f"-DVEQLIB_ENABLE_THIN_LTO={_cmake_bool(recipe.enable_thin_lto)}",
+        f"-DVEQLIB_ANALYSIS_BUILD={_cmake_bool(recipe.analysis)}",
         f"-DVEQ_NR={topology.Nr}",
         f"-DVEQ_NT={topology.Nt}",
         f"-DVEQ_SOURCE_SAMPLE_COUNT={topology.sample_count}",
@@ -500,8 +513,8 @@ def _cmake_configure_args(
         f"-DVEQ_SIN_PROFILE_COUNTS={_cmake_list(topology.s_counts)}",
         f"-DVEQ_BOUNDARY_M_MAX={topology.M_max}",
         f"-DVEQ_PROFILE_KMAX_LIMIT={kmax_limit}",
-        f"-DVEQ_LAYOUT_PROFILE_FIRST={1 if topology.layout_profile_first else 0}",
-        f"-DVEQ_ENZYME_JACOBIAN_BATCH_WIDTH={topology.enzyme_jacobian_batch_width}",
+        f"-DVEQ_LAYOUT_PROFILE_FIRST={1 if recipe.layout_profile_first else 0}",
+        f"-DVEQ_ENZYME_JACOBIAN_BATCH_WIDTH={recipe.enzyme_jacobian_batch_width}",
     ]
 
 
@@ -643,7 +656,7 @@ nanobind_build_library(nanobind-static AS_SYSINCLUDE)
 """
 
 
-def _native_build_contract(topology: Topology, *, cxx: str) -> dict[str, Any]:
+def _native_build_contract(topology: Topology, recipe: Recipe, *, cxx: str) -> dict[str, Any]:
     """Return the Python-emitted native contract that participates in artifact identity.
 
     Python facade/helper source changes should not force a native rebuild by themselves.
@@ -654,15 +667,15 @@ def _native_build_contract(topology: Topology, *, cxx: str) -> dict[str, Any]:
     kmax_limit = max(2, topology.K_max or 2)
     return {
         "schema": "veqlib.native_build_contract.v1",
-        "cmake_build_type": topology.cmake_build_type,
+        "cmake_build_type": recipe.cmake_build_type,
         "cxx": cxx,
         "defines": {
-            "ENABLE_ENZYME": _cmake_bool(topology.enable_enzyme),
+            "ENABLE_ENZYME": _cmake_bool(recipe.enable_enzyme),
             "VEQLIB_ENABLE_PYTHON_BINDINGS": "ON",
-            "VEQLIB_ENABLE_NATIVE_OPTIMIZATIONS": _cmake_bool(topology.enable_native_optimizations),
-            "VEQLIB_FP_MODE": topology.fp_mode,
-            "VEQLIB_ENABLE_THIN_LTO": _cmake_bool(topology.enable_thin_lto),
-            "VEQLIB_ANALYSIS_BUILD": _cmake_bool(topology.analysis),
+            "VEQLIB_ENABLE_NATIVE_OPTIMIZATIONS": _cmake_bool(recipe.enable_native_optimizations),
+            "VEQLIB_FP_MODE": recipe.fp_mode,
+            "VEQLIB_ENABLE_THIN_LTO": _cmake_bool(recipe.enable_thin_lto),
+            "VEQLIB_ANALYSIS_BUILD": _cmake_bool(recipe.analysis),
             "VEQ_NR": topology.Nr,
             "VEQ_NT": topology.Nt,
             "VEQ_SOURCE_SAMPLE_COUNT": topology.sample_count,
@@ -681,13 +694,19 @@ def _native_build_contract(topology: Topology, *, cxx: str) -> dict[str, Any]:
             "VEQ_SIN_PROFILE_COUNTS": topology.s_counts,
             "VEQ_BOUNDARY_M_MAX": topology.M_max,
             "VEQ_PROFILE_KMAX_LIMIT": kmax_limit,
-            "VEQ_LAYOUT_PROFILE_FIRST": 1 if topology.layout_profile_first else 0,
-            "VEQ_ENZYME_JACOBIAN_BATCH_WIDTH": topology.enzyme_jacobian_batch_width,
+            "VEQ_LAYOUT_PROFILE_FIRST": 1 if recipe.layout_profile_first else 0,
+            "VEQ_ENZYME_JACOBIAN_BATCH_WIDTH": recipe.enzyme_jacobian_batch_width,
         },
     }
 
 
-def _build_identity(topology: Topology, *, source_dir: Path, cxx: str) -> dict[str, Any]:
+def _build_identity(
+    topology: Topology,
+    recipe: Recipe,
+    *,
+    source_dir: Path,
+    cxx: str,
+) -> dict[str, Any]:
     return {
         "schema": "veqlib.kernel_build_identity.v1",
         "python": {
@@ -702,15 +721,20 @@ def _build_identity(topology: Topology, *, source_dir: Path, cxx: str) -> dict[s
             "cxx_version": _command_version([cxx, "--version"]),
             "nanobind": _package_version("nanobind"),
         },
-        "native_build_contract": _native_build_contract(topology, cxx=cxx),
+        "native_build_contract": _native_build_contract(topology, recipe, cxx=cxx),
         "veqlib_source_digest": _source_digest(source_dir),
     }
 
 
-def _compute_artifact_id(topology: Topology, build_identity: dict[str, Any]) -> str:
+def _compute_artifact_id(
+    topology: Topology,
+    recipe: Recipe,
+    build_identity: dict[str, Any],
+) -> str:
     payload = {
         "schema": ARTIFACT_SCHEMA,
         "topology": topology.to_canonical_dict(),
+        "recipe": recipe.to_canonical_dict(),
         "build_identity": build_identity,
     }
     data = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode(

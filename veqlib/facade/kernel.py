@@ -44,8 +44,7 @@ class Kernel:
         backend: str = "cxx",
     ) -> None:
         self.topology = topology
-        self.recipe = KernelRecipe() if recipe is None else recipe
-        self.artifact_topology = topology.with_recipe(self.recipe)
+        self.recipe = KernelRecipe() if recipe is None else self._kernel_recipe(recipe)
         self.config = KernelConfig() if config is None else self._kernel_config(config)
         self.backend = backend
         self.pin_cpu = pin_cpu
@@ -60,7 +59,7 @@ class Kernel:
 
     @property
     def x_size(self) -> int:
-        return self.artifact_topology.packed_size()
+        return self.topology.packed_size()
 
     def compile(self, *, force: bool = False, dry_run: bool = False) -> CompileResult:
         return self._veqlib_solver().compile(force=force, dry_run=dry_run)
@@ -155,7 +154,8 @@ class Kernel:
             raise ValueError("VEQlib facade currently only supports backend='cxx'")
         if self._solver is None:
             self._solver = VEQlibSolver(
-                self.artifact_topology,
+                self.topology,
+                recipe=self.recipe,
                 registry=self.registry,
                 pin_cpu=self.pin_cpu,
             )
@@ -210,6 +210,12 @@ class Kernel:
         return solver
 
     @staticmethod
+    def _kernel_recipe(recipe: KernelRecipe) -> KernelRecipe:
+        if not isinstance(recipe, KernelRecipe):
+            raise TypeError(f"recipe must be KernelRecipe, got {type(recipe).__name__}")
+        return recipe
+
+    @staticmethod
     def _kernel_config(config: KernelConfig) -> KernelConfig:
         if not isinstance(config, KernelConfig):
             raise TypeError(f"config must be KernelConfig, got {type(config).__name__}")
@@ -240,7 +246,7 @@ class Kernel:
         boundary: KernelBoundary,
         source: KernelSource,
     ) -> None:
-        topology = self.artifact_topology
+        topology = self.topology
         expected_samples = topology.sample_count
         heat_length = source.scaled_heat.size
         current_length = source.scaled_current.size

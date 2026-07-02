@@ -14,6 +14,7 @@ from typing import Any
 from .builder import CompileResult
 from .options import solver_method_code
 from .registry import KernelRegistry, SolverThreadError, ThreadOwnedNativeSolver
+from .types import KernelRecipe as Recipe
 from .types import KernelTopology as Topology
 
 
@@ -24,6 +25,7 @@ class VEQlibSolver:
         self,
         topology: Topology,
         *,
+        recipe: Recipe | None = None,
         registry: KernelRegistry | None = None,
         cache_root: Path | None = None,
         source_dir: Path | None = None,
@@ -32,6 +34,9 @@ class VEQlibSolver:
     ) -> None:
         topology.validate_supported_for_veqlib_native()
         self.topology = topology
+        self.recipe = Recipe() if recipe is None else recipe
+        if not isinstance(self.recipe, Recipe):
+            raise TypeError(f"recipe must be KernelRecipe, got {type(self.recipe).__name__}")
         self.registry = registry or KernelRegistry(
             cache_root=cache_root,
             source_dir=source_dir,
@@ -57,13 +62,19 @@ class VEQlibSolver:
 
     def compile(self, *, force: bool = False, dry_run: bool = False) -> CompileResult:
         self.check_thread()
-        return self.registry.get_or_compile(self.topology, force=force, dry_run=dry_run)
+        return self.registry.get_or_compile(
+            self.topology,
+            recipe=self.recipe,
+            force=force,
+            dry_run=dry_run,
+        )
 
     def _solver(self) -> ThreadOwnedNativeSolver:
         self.check_thread()
         if self._native_solver is None:
             self._native_solver = self.registry.create_solver(
                 self.topology,
+                recipe=self.recipe,
                 solver=self.solver_code,
                 pin_cpu=self.pin_cpu,
             )

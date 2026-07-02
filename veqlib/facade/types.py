@@ -89,8 +89,6 @@ _BUILD_PRESET_KWARGS: dict[str, dict[str, object]] = {
     },
 }
 _DEFAULT_ENZYME_JACOBIAN_BATCH_WIDTH = 0
-_PROFILE_FAMILY_ORDER = ("h", "v", "k", "c0", "c", "s", "psin", "F")
-
 
 class TopologyError(ValueError):
     """Raised when a VEQlib kernel topology cannot be canonicalized."""
@@ -109,6 +107,10 @@ class KernelRecipe:
     enable_thin_lto: bool | None = None
     analysis: bool | None = None
     enzyme_jacobian_batch_width: int | None = None
+
+    def __post_init__(self) -> None:
+        for name, value in self.canonical_kwargs().items():
+            object.__setattr__(self, name, value)
 
     def canonical_kwargs(self) -> dict[str, object]:
         build = _normalize_token(self.build, "build")
@@ -147,6 +149,31 @@ class KernelRecipe:
                 self.enzyme_jacobian_batch_width
             ),
         }
+
+    def to_canonical_dict(self) -> dict[str, object]:
+        return {
+            "preset": self.build,
+            "layout": {
+                "packed": self.layout,
+                "profile_first": self.layout_profile_first,
+                "code": self.layout_code,
+            },
+            "cmake_build_type": self.cmake_build_type,
+            "fp_mode": self.fp_mode,
+            "enable_enzyme": self.enable_enzyme,
+            "enable_native_optimizations": self.enable_native_optimizations,
+            "enable_thin_lto": self.enable_thin_lto,
+            "analysis": self.analysis,
+            "enzyme_jacobian_batch_width": self.enzyme_jacobian_batch_width,
+        }
+
+    @property
+    def layout_code(self) -> int:
+        return _LAYOUT_CODES[self.layout]
+
+    @property
+    def layout_profile_first(self) -> bool:
+        return self.layout == "family"
 
 
 @dataclass(frozen=True, slots=True)
@@ -188,7 +215,7 @@ class KernelBoundary:
 
 @dataclass(frozen=True, slots=True)
 class KernelTopology:
-    """Native VEQlib compile-time topology and artifact policy."""
+    """Native VEQlib compile-time topology independent from artifact recipe."""
 
     h_count: int
     v_count: int
@@ -209,15 +236,6 @@ class KernelTopology:
     L_max: int | None = None
     M_max: int | None = None
     K_max: int | None = None
-    build: str = "fastmath"
-    layout: str = "degree"
-    cmake_build_type: str | None = None
-    fp_mode: str | None = None
-    enable_enzyme: bool | None = None
-    enable_native_optimizations: bool | None = None
-    enable_thin_lto: bool | None = None
-    analysis: bool | None = None
-    enzyme_jacobian_batch_width: int | None = None
     key: str | None = None
 
     def __post_init__(self) -> None:
@@ -268,17 +286,6 @@ class KernelTopology:
             psin_count=profile_counts["psin_count"],
             f_count=profile_counts["F_count"],
         )
-        recipe_kwargs = KernelRecipe(
-            layout=self.layout,
-            build=self.build,
-            cmake_build_type=self.cmake_build_type,
-            fp_mode=self.fp_mode,
-            enable_enzyme=self.enable_enzyme,
-            enable_native_optimizations=self.enable_native_optimizations,
-            enable_thin_lto=self.enable_thin_lto,
-            analysis=self.analysis,
-            enzyme_jacobian_batch_width=self.enzyme_jacobian_batch_width,
-        ).canonical_kwargs()
         normalized_values: dict[str, Any] = {
             **profile_counts,
             "c_counts": c_counts,
@@ -295,7 +302,6 @@ class KernelTopology:
             "L_max": l_max,
             "M_max": m_max,
             "K_max": k_max,
-            **recipe_kwargs,
         }
         for name, value in normalized_values.items():
             object.__setattr__(self, name, value)
@@ -306,11 +312,6 @@ class KernelTopology:
                 f"got {self.key!r}, expected {expected_key!r}"
             )
         object.__setattr__(self, "key", expected_key)
-
-    def with_recipe(self, recipe: KernelRecipe | None) -> Self:
-        if recipe is None:
-            return self
-        return replace(self, **recipe.canonical_kwargs(), key=None)
 
     def active_profiles(self) -> dict[str, int]:
         active: dict[str, int] = {}
@@ -337,8 +338,6 @@ class KernelTopology:
 
     def to_canonical_dict(self) -> dict[str, Any]:
         return {
-            "build": self.build,
-            "recipe": self.recipe_dict(),
             "profiles": {
                 "h_count": self.h_count,
                 "v_count": self.v_count,
@@ -358,12 +357,6 @@ class KernelTopology:
                 "calculus": self.calculus,
             },
             "source": self.source_policy_dict(),
-            "layout": {
-                "packed": self.layout,
-                "profile_first": self.layout_profile_first,
-                "code": self.layout_code,
-                "profile_order": list(_expanded_profile_names(self.M_max)),
-            },
         }
 
     def source_policy_dict(self) -> dict[str, Any]:
@@ -449,26 +442,6 @@ class KernelTopology:
     @property
     def source_uses_beta_constraint(self) -> bool:
         return self.constraint in {"beta", "Ip_beta"}
-
-    @property
-    def layout_code(self) -> int:
-        return _LAYOUT_CODES[self.layout]
-
-    @property
-    def layout_profile_first(self) -> bool:
-        return self.layout == "family"
-
-    def recipe_dict(self) -> dict[str, object]:
-        return {
-            "preset": self.build,
-            "cmake_build_type": self.cmake_build_type,
-            "fp_mode": self.fp_mode,
-            "enable_enzyme": self.enable_enzyme,
-            "enable_native_optimizations": self.enable_native_optimizations,
-            "enable_thin_lto": self.enable_thin_lto,
-            "analysis": self.analysis,
-            "enzyme_jacobian_batch_width": self.enzyme_jacobian_batch_width,
-        }
 
     def validate_supported_for_veqlib_native(self) -> None:
         mismatches: list[str] = []
@@ -815,18 +788,6 @@ def _canonical_sample_count(nodes: str, nr: int, sample_count: int | None) -> in
     if sample_count is None:
         raise TopologyError("uniform source nodes require an explicit sample_count")
     return _positive_int(sample_count, "sample_count")
-
-
-def _expanded_profile_names(m_max: int) -> tuple[str, ...]:
-    names: list[str] = []
-    for family in _PROFILE_FAMILY_ORDER:
-        if family in {"h", "v", "k", "c0", "psin", "F"}:
-            names.append(family)
-        elif family == "c":
-            names.extend(f"c{order}" for order in range(1, m_max + 1))
-        elif family == "s":
-            names.extend(f"s{order}" for order in range(1, m_max + 1))
-    return tuple(names)
 
 
 def _readonly_1d_or_default(

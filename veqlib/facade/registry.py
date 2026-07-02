@@ -20,6 +20,7 @@ from .affinity import cpu_pin_scope_active, pinned_cpu
 from .builder import CompileResult, touch_artifact_used
 from .builder import compile as compile_kernel
 from .options import solver_method_code
+from .types import KernelRecipe as Recipe
 from .types import KernelTopology as Topology
 
 
@@ -143,7 +144,6 @@ class KernelRegistry:
         self.source_dir = source_dir
         self.pin_cpu = pin_cpu
         self._modules: dict[str, LoadedKernel] = {}
-        self._topology_modules: dict[str, LoadedKernel] = {}
         self._thread_local = threading.local()
         self._lock = threading.RLock()
 
@@ -151,48 +151,48 @@ class KernelRegistry:
         self,
         topology: Topology,
         *,
+        recipe: Recipe | None = None,
         force: bool = False,
         dry_run: bool = False,
     ) -> CompileResult:
         return compile_kernel(
             topology,
+            recipe=recipe,
             cache_root=self.cache_root,
             source_dir=self.source_dir,
             force=force,
             dry_run=dry_run,
         )
 
-    def load_kernel(self, topology: Topology, *, force: bool = False) -> LoadedKernel:
-        topology_key = topology.key or topology.compute_key()
-        with self._lock:
-            cached_by_topology = self._topology_modules.get(topology_key)
-            if cached_by_topology is not None and not force:
-                touch_artifact_used(cached_by_topology.artifact)
-                return cached_by_topology
-
-        artifact = self.get_or_compile(topology, force=force, dry_run=False)
+    def load_kernel(
+        self,
+        topology: Topology,
+        *,
+        recipe: Recipe | None = None,
+        force: bool = False,
+    ) -> LoadedKernel:
+        artifact = self.get_or_compile(topology, recipe=recipe, force=force, dry_run=False)
         with self._lock:
             cached = self._modules.get(artifact.artifact_id)
             if cached is not None and not force:
-                self._topology_modules[topology_key] = cached
                 touch_artifact_used(cached.artifact)
                 return cached
             module = _load_artifact_module(artifact)
             touch_artifact_used(artifact)
             loaded = LoadedKernel(artifact=artifact, module=module)
             self._modules[artifact.artifact_id] = loaded
-            self._topology_modules[topology_key] = loaded
             return loaded
 
     def create_solver(
         self,
         topology: Topology,
         *,
+        recipe: Recipe | None = None,
         solver: str | int = "powell",
         force: bool = False,
         pin_cpu: bool | int | None = None,
     ) -> ThreadOwnedNativeSolver:
-        loaded = self.load_kernel(topology, force=force)
+        loaded = self.load_kernel(topology, recipe=recipe, force=force)
         solver_code = solver_method_code(solver)
         pin_policy = self.pin_cpu if pin_cpu is None else pin_cpu
         cpp_solver = loaded.module.NativeSolver(
@@ -204,11 +204,12 @@ class KernelRegistry:
         self,
         topology: Topology,
         *,
+        recipe: Recipe | None = None,
         solver: str | int = "powell",
         force: bool = False,
         pin_cpu: bool | int | None = None,
     ) -> ThreadOwnedNativeSolver:
-        loaded = self.load_kernel(topology, force=force)
+        loaded = self.load_kernel(topology, recipe=recipe, force=force)
         solvers = self._thread_solver_cache()
         solver_code = solver_method_code(solver)
         pin_policy = self.pin_cpu if pin_cpu is None else pin_cpu
@@ -234,12 +235,13 @@ class KernelRegistry:
 def load_kernel(
     topology: Topology,
     *,
+    recipe: Recipe | None = None,
     registry: KernelRegistry | None = None,
     force: bool = False,
 ) -> LoadedKernel:
     """Load a VEQlib kernel through ``registry`` or a short-lived default registry."""
 
-    return (registry or KernelRegistry()).load_kernel(topology, force=force)
+    return (registry or KernelRegistry()).load_kernel(topology, recipe=recipe, force=force)
 
 
 def _load_artifact_module(artifact: CompileResult) -> ModuleType:

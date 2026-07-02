@@ -188,15 +188,19 @@ def test_kernel_runtime_source_parameter_replaces_input_parameter() -> None:
 def test_kernel_topology_and_runtime_source_is_user_facing_contract() -> None:
     topology = make_kernel_topology(c_counts=(0, 0), s_counts=(2, 0, 0), K_max=None)
     same_shape = make_kernel_topology(c_counts=(), s_counts=(2,), L_max=2, M_max=1, K_max=2)
-    family_topology = topology.with_recipe(
-        KernelRecipe(layout="profile-first", build="release")
-    )
+    family_recipe = KernelRecipe(layout="profile-first", build="release")
     kernel_source = tiny_kernel_source(case_name="tiny")
     kernel_boundary = tiny_kernel_boundary()
 
     assert topology.to_canonical_dict() == same_shape.to_canonical_dict()
     assert topology.key == same_shape.key
-    assert family_topology.layout == "family"
+    assert "recipe" not in topology.to_canonical_dict()
+    assert "layout" not in topology.to_canonical_dict()
+    assert family_recipe.layout == "family"
+    assert family_recipe.layout_profile_first is True
+    assert family_recipe.to_canonical_dict()["preset"] == "release"
+    with pytest.raises(TypeError, match="layout"):
+        make_kernel_topology(layout="degree")
     assert topology.route == "PF"
     assert topology.coordinate == "psin"
     assert topology.constraint == "Ip"
@@ -338,12 +342,34 @@ def test_kernel_solve_uses_handle_default_config_with_per_call_overrides() -> No
 
 def test_kernel_dry_run_and_python_owned_result_snapshot(tmp_path: Path) -> None:
     topology = make_kernel_topology()
+    recipe = KernelRecipe(build="release", layout="profile-first")
     kernel_config = KernelConfig(max_residual=4.0e-6)
-    handle = facade.build(topology, config=kernel_config, cache_root=tmp_path, dry_run=True)
+    handle = facade.build(
+        topology,
+        recipe=recipe,
+        config=kernel_config,
+        cache_root=tmp_path,
+        dry_run=True,
+    )
+    artifact = facade.compile(topology, recipe=recipe, cache_root=tmp_path, dry_run=True)
+    default_artifact = facade.compile(
+        topology,
+        recipe=KernelRecipe(build="fastmath", layout="degree"),
+        cache_root=tmp_path,
+        dry_run=True,
+    )
 
     assert isinstance(handle, Kernel)
+    assert handle.recipe is recipe
     assert handle.config is kernel_config
     assert handle.x_size == 9
+    assert artifact.recipe is recipe
+    assert artifact.topology.key == default_artifact.topology.key == topology.key
+    assert artifact.artifact_id != default_artifact.artifact_id
+    assert artifact.metadata["topology"] == topology.to_canonical_dict()
+    assert artifact.metadata["recipe"] == recipe.to_canonical_dict()
+    assert artifact.metadata["build"]["build"] == "release"
+    assert "-DVEQ_LAYOUT_PROFILE_FIRST=1" in artifact.metadata["build"]["cmake_configure"]
 
     raw_x = np.ones(3, dtype=np.float64)
     raw = np.full(3, 2.0, dtype=np.float64)
