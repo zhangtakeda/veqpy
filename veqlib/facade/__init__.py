@@ -7,44 +7,44 @@ helpers for the C++/CMake core under :mod:`veqlib.core`.
 from __future__ import annotations
 
 from .builder import (
-    KernelArtifact,
-    KernelBuildError,
-    KernelCleanResult,
-    build_artifact,
+    CleanResult,
+    CompileError,
+    CompileResult,
     clean,
+    compile,
 )
 from .kernel import Kernel, build, solve
 from .registry import KernelLoadError, KernelRegistry, LoadedKernel, SolverThreadError
 from .solver import VEQlibSolver
 from .types import (
     KernelBoundary,
-    KernelBuildOptions,
     KernelConfig,
     KernelInput,
-    KernelResult,
+    KernelRecipe,
     KernelTopology,
+    SolveResult,
     TopologyError,
 )
 
 __all__ = [
     "Kernel",
-    "KernelArtifact",
+    "CompileResult",
     "KernelBoundary",
-    "KernelBuildOptions",
-    "KernelBuildError",
-    "KernelCleanResult",
+    "KernelRecipe",
+    "CompileError",
+    "CleanResult",
     "KernelConfig",
     "KernelInput",
     "KernelLoadError",
     "KernelRegistry",
-    "KernelResult",
+    "SolveResult",
     "KernelTopology",
     "LoadedKernel",
     "SolverThreadError",
     "TopologyError",
     "VEQlibSolver",
     "build",
-    "build_artifact",
+    "compile",
     "clean",
     "solve",
 ]

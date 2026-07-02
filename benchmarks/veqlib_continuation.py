@@ -54,7 +54,7 @@ from veqlib.facade import (
     KernelConfig,
     KernelInput,
     KernelRegistry,
-    KernelResult,
+    SolveResult,
     VEQlibSolver,
 )
 from veqlib.facade.builder import default_kernel_cache_root
@@ -226,7 +226,7 @@ def _run_policy_sequence_once(
     solver.metadata()  # force artifact load outside the timed sequence
     runtime_config = _policy_runtime_config(case.kernel_config, policy)
     started = time.perf_counter_ns()
-    results: list[KernelResult] = []
+    results: list[SolveResult] = []
     try:
         for kernel_boundary, kernel_input in inputs:
             solver.set_kernel_runtime(
@@ -235,7 +235,7 @@ def _run_policy_sequence_once(
                 *kernel_input.runtime_args(),
                 *runtime_config.runtime_args(x_size=case.x_size),
             )
-            results.append(KernelResult.from_solve_direct(solver.solve_direct()))
+            results.append(SolveResult.from_solve_direct(solver.solve_direct()))
     finally:
         solver.close()
     wall_ms = float(time.perf_counter_ns() - started) / 1.0e6
@@ -311,7 +311,7 @@ def _measure_case(
     ]
     build_solver = VEQlibSolver(case.topology, registry=registry, solver=case.kernel_config.method)
     build_start = time.perf_counter_ns()
-    artifact = build_solver.build(force=False, dry_run=False)
+    artifact = build_solver.compile(force=False, dry_run=False)
     build_wall_ms = float(time.perf_counter_ns() - build_start) / 1.0e6
     build_solver.close()
 

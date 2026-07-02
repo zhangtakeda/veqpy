@@ -21,7 +21,7 @@ os.environ.setdefault("MPLCONFIGDIR", str(Path("/tmp/veqpy-mpl")))
 
 import numpy as np
 
-from veqlib.facade import KernelResult
+from veqlib.facade import SolveResult
 from veqlib.facade.affinity import pinned_cpu
 from veqpy.engine.numba_source import source_parameterization_for_route_key
 from veqpy.model import Boundary, Geqdsk, Grid, Problem
@@ -1208,7 +1208,7 @@ def signature_from_metadata(entry: dict[str, object]) -> dict[str, int]:
 
 @dataclass(frozen=True, slots=True)
 class NativeTiming:
-    result: KernelResult
+    result: SolveResult
     wall_ms: list[float]
     inner_ms: list[float]
     success: list[bool]
@@ -1267,7 +1267,7 @@ def measure_native_solver(
     if final_result is None:
         raise RuntimeError("native timing loop did not run")
     return NativeTiming(
-        result=KernelResult.from_solve_direct(final_result),
+        result=SolveResult.from_solve_direct(final_result),
         wall_ms=wall_ms,
         inner_ms=inner_ms,
         success=success,

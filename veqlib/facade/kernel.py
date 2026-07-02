@@ -15,27 +15,27 @@ from typing import Any
 import numpy as np
 
 from .affinity import pinned_cpu
-from .builder import KernelArtifact
+from .builder import CompileResult
 from .registry import KernelRegistry
 from .solver import VEQlibSolver
 from .types import (
     KernelBoundary,
-    KernelBuildOptions,
     KernelConfig,
     KernelInput,
-    KernelResult,
+    KernelRecipe,
     KernelTopology,
+    SolveResult,
 )
 
 
 class Kernel:
-    """Stateful VEQlib kernel handle backed by one topology/build artifact."""
+    """Stateful VEQlib kernel handle backed by one topology-specific artifact."""
 
     def __init__(
         self,
         topology: KernelTopology,
         *,
-        build: KernelBuildOptions | None = None,
+        recipe: KernelRecipe | None = None,
         config: KernelConfig | None = None,
         registry: KernelRegistry | None = None,
         cache_root: Path | None = None,
@@ -44,8 +44,8 @@ class Kernel:
         backend: str = "cxx",
     ) -> None:
         self.topology = topology
-        self.build_options = KernelBuildOptions() if build is None else build
-        self.build_topology = topology.with_build(self.build_options)
+        self.recipe = KernelRecipe() if recipe is None else recipe
+        self.artifact_topology = topology.with_recipe(self.recipe)
         self.config = KernelConfig() if config is None else self._kernel_config(config)
         self.backend = backend
         self.pin_cpu = pin_cpu
@@ -55,15 +55,15 @@ class Kernel:
             pin_cpu=pin_cpu,
         )
         self._solver: VEQlibSolver | None = None
-        self.history: list[KernelResult] = []
-        self.result: KernelResult | None = None
+        self.history: list[SolveResult] = []
+        self.result: SolveResult | None = None
 
     @property
     def x_size(self) -> int:
-        return self.build_topology.packed_size()
+        return self.artifact_topology.packed_size()
 
-    def build(self, *, force: bool = False, dry_run: bool = False) -> KernelArtifact:
-        return self._veqlib_solver().build(force=force, dry_run=dry_run)
+    def compile(self, *, force: bool = False, dry_run: bool = False) -> CompileResult:
+        return self._veqlib_solver().compile(force=force, dry_run=dry_run)
 
     def solve(
         self,
@@ -73,10 +73,10 @@ class Kernel:
         config: KernelConfig | None = None,
         case_name: str | None = None,
         **config_overrides: Any,
-    ) -> KernelResult:
+    ) -> SolveResult:
         kernel_config = self._runtime_config(config, config_overrides)
         solver = self._set_runtime(boundary, input, kernel_config, case_name=case_name)
-        self.result = KernelResult.from_solve_direct(solver.solve_direct())
+        self.result = SolveResult.from_solve_direct(solver.solve_direct())
         self.history.append(self.result)
         return self.result
 
@@ -155,7 +155,7 @@ class Kernel:
             raise ValueError("VEQlib facade currently only supports backend='cxx'")
         if self._solver is None:
             self._solver = VEQlibSolver(
-                self.build_topology,
+                self.artifact_topology,
                 registry=self.registry,
                 pin_cpu=self.pin_cpu,
             )
@@ -240,7 +240,7 @@ class Kernel:
         boundary: KernelBoundary,
         input: KernelInput,
     ) -> None:
-        topology = self.build_topology
+        topology = self.artifact_topology
         expected_samples = topology.sample_count
         heat_length = input.scaled_heat.size
         current_length = input.scaled_current.size
@@ -268,7 +268,7 @@ class Kernel:
 def build(
     topology: KernelTopology,
     *,
-    build: KernelBuildOptions | None = None,
+    recipe: KernelRecipe | None = None,
     config: KernelConfig | None = None,
     registry: KernelRegistry | None = None,
     cache_root: Path | None = None,
@@ -277,18 +277,18 @@ def build(
     force: bool = False,
     dry_run: bool = False,
 ) -> Kernel:
-    """Create a kernel handle, cache its default config, and resolve its artifact."""
+    """Create a kernel handle, cache its default config, and compile its artifact."""
 
     kernel = Kernel(
         topology,
-        build=build,
+        recipe=recipe,
         config=config,
         registry=registry,
         cache_root=cache_root,
         source_dir=source_dir,
         pin_cpu=pin_cpu,
     )
-    kernel.build(force=force, dry_run=dry_run)
+    kernel.compile(force=force, dry_run=dry_run)
     return kernel
 
 
@@ -298,7 +298,7 @@ def solve(
     input: KernelInput,
     *,
     config: KernelConfig | None = None,
-    build: KernelBuildOptions | None = None,
+    recipe: KernelRecipe | None = None,
     registry: KernelRegistry | None = None,
     cache_root: Path | None = None,
     source_dir: Path | None = None,
@@ -306,12 +306,12 @@ def solve(
     force: bool = False,
     case_name: str | None = None,
     **config_overrides: Any,
-) -> KernelResult:
-    """Build a short-lived kernel, solve one case, and close its private workspace."""
+) -> SolveResult:
+    """Compile a short-lived kernel, solve one case, and close its private workspace."""
 
     kernel = Kernel(
         topology,
-        build=build,
+        recipe=recipe,
         config=config,
         registry=registry,
         cache_root=cache_root,
@@ -319,7 +319,7 @@ def solve(
         pin_cpu=pin_cpu,
     )
     try:
-        kernel.build(force=force, dry_run=False)
+        kernel.compile(force=force, dry_run=False)
         return kernel.solve(boundary, input, case_name=case_name, **config_overrides)
     finally:
         kernel.close()

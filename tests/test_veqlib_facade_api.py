@@ -13,11 +13,11 @@ import veqlib.facade as facade
 from veqlib.facade import (
     Kernel,
     KernelBoundary,
-    KernelBuildOptions,
     KernelConfig,
     KernelInput,
-    KernelResult,
+    KernelRecipe,
     KernelTopology,
+    SolveResult,
 )
 from veqlib.facade.options import (
     RESIDUAL_NORMALIZATION_BALANCED,
@@ -129,27 +129,33 @@ def test_veqlib_facade_imports_without_importing_veqpy() -> None:
 def test_veqlib_facade_root_exports_semantic_surface() -> None:
     assert facade.__all__ == [
         "Kernel",
-        "KernelArtifact",
+        "CompileResult",
         "KernelBoundary",
-        "KernelBuildOptions",
-        "KernelBuildError",
-        "KernelCleanResult",
+        "KernelRecipe",
+        "CompileError",
+        "CleanResult",
         "KernelConfig",
         "KernelInput",
         "KernelLoadError",
         "KernelRegistry",
-        "KernelResult",
+        "SolveResult",
         "KernelTopology",
         "LoadedKernel",
         "SolverThreadError",
         "TopologyError",
         "VEQlibSolver",
         "build",
-        "build_artifact",
+        "compile",
         "clean",
         "solve",
     ]
     for helper in (
+        "KernelArtifact",
+        "KernelBuildError",
+        "KernelBuildOptions",
+        "KernelCleanResult",
+        "KernelResult",
+        "build_artifact",
         "build_kernel",
         "default_kernel_cache_root",
         "pinned_cpu",
@@ -163,8 +169,8 @@ def test_veqlib_facade_root_exports_semantic_surface() -> None:
 def test_kernel_topology_and_runtime_inputs_are_user_facing_contracts() -> None:
     topology = make_kernel_topology(c_counts=(0, 0), s_counts=(2, 0, 0), K_max=None)
     same_shape = make_kernel_topology(c_counts=(), s_counts=(2,), L_max=2, M_max=1, K_max=2)
-    family_topology = topology.with_build(
-        KernelBuildOptions(layout="profile-first", build="release")
+    family_topology = topology.with_recipe(
+        KernelRecipe(layout="profile-first", build="release")
     )
     kernel_input = tiny_kernel_input(case_name="tiny")
     kernel_boundary = tiny_kernel_boundary()
@@ -321,7 +327,7 @@ def test_kernel_dry_run_and_python_owned_result_snapshot(tmp_path: Path) -> None
     raw = np.full(3, 2.0, dtype=np.float64)
     scaled = np.full(3, 3.0, dtype=np.float64)
     alpha = np.array([4.0, 5.0], dtype=np.float64)
-    result = KernelResult.from_solve_direct(
+    result = SolveResult.from_solve_direct(
         (0.25, True, 1, 2, 3, 4, 5, 6, 7, 8.0, 9.0, raw_x, raw, scaled, alpha)
     )
     raw_x[:] = 99.0
@@ -338,9 +344,9 @@ def test_kernel_dry_run_and_python_owned_result_snapshot(tmp_path: Path) -> None
 @pytest.mark.slow
 def test_kernel_python_build_and_solve_native_flow(tmp_path: Path) -> None:
     topology = make_kernel_topology()
-    handle = Kernel(topology, build=KernelBuildOptions(build="fastmath"), cache_root=tmp_path)
+    handle = Kernel(topology, recipe=KernelRecipe(build="fastmath"), cache_root=tmp_path)
 
-    artifact = handle.build()
+    artifact = handle.compile()
     assert artifact.built is True
     assert artifact.shared_library_path.exists()
 

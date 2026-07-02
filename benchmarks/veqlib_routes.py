@@ -73,15 +73,15 @@ from benchmarks._common import (
 )
 from veqlib.facade import (
     KernelBoundary,
-    KernelBuildOptions,
     KernelConfig,
     KernelInput,
+    KernelRecipe,
     KernelRegistry,
     KernelTopology,
     TopologyError,
     VEQlibSolver,
 )
-from veqlib.facade.builder import build_artifact, default_kernel_cache_root
+from veqlib.facade.builder import compile, default_kernel_cache_root
 from veqlib.facade.options import (
     SOLVER_METHOD_LEVENBERG_MARQUARDT,
     SOLVER_METHOD_POWELL,
@@ -298,7 +298,7 @@ def _topology_from_spec(
     *,
     build: str,
     layout: str = "degree",
-    build_options: dict[str, object] | None = None,
+    recipe: dict[str, object] | None = None,
 ) -> tuple[KernelTopology, tuple[str, ...]]:
     coeffs = _profile_coeffs_for_case(spec)
     grid = ROUTE_TEST_GRID
@@ -321,12 +321,12 @@ def _topology_from_spec(
         "M_max": m_max,
         "K_max": max(2, m_max),
     }
-    build_kwargs: dict[str, object] = {"build": build, "layout": layout}
-    if build_options:
-        build_kwargs.update(build_options)
+    recipe_kwargs: dict[str, object] = {"build": build, "layout": layout}
+    if recipe:
+        recipe_kwargs.update(recipe)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always", UserWarning)
-        topology = KernelTopology(**topology_kwargs).with_build(KernelBuildOptions(**build_kwargs))
+        topology = KernelTopology(**topology_kwargs).with_recipe(KernelRecipe(**recipe_kwargs))
     return topology, tuple(str(item.message) for item in caught)
 
 
@@ -472,7 +472,7 @@ def _measure_veqlib(
 ) -> dict[str, Any]:
     solver = VEQlibSolver(case.topology, registry=registry, solver=case.solver_method_code)
     build_start = time.perf_counter_ns()
-    artifact = solver.build(force=False, dry_run=False)
+    artifact = solver.compile(force=False, dry_run=False)
     build_wall_ms = float(time.perf_counter_ns() - build_start) / 1.0e6
 
     def configure() -> None:
@@ -580,7 +580,7 @@ def _plan_row(
     *,
     build: str,
     layout: str,
-    build_options: dict[str, object] | None,
+    recipe: dict[str, object] | None,
     cache_root: Path,
     source_dir: Path,
     skip_artifact_dry_run: bool,
@@ -590,7 +590,7 @@ def _plan_row(
             spec,
             build=build,
             layout=layout,
-            build_options=build_options,
+            recipe=recipe,
         )
     except Exception as exc:
         return (
@@ -605,7 +605,7 @@ def _plan_row(
 
     topology_payload = _topology_payload(topology, warning_messages)
     if not skip_artifact_dry_run:
-        artifact = build_artifact(
+        artifact = compile(
             topology,
             cache_root=cache_root,
             source_dir=source_dir,
@@ -810,7 +810,7 @@ def _summarize(rows: list[dict[str, Any]]) -> dict[str, int]:
     return summary
 
 
-def _build_option_overrides(args: argparse.Namespace) -> dict[str, object]:
+def _recipe_overrides(args: argparse.Namespace) -> dict[str, object]:
     options: dict[str, object] = {}
     for name in (
         "cmake_build_type",
@@ -1125,7 +1125,7 @@ def main(argv: list[str] | None = None) -> int:
     cache_root = args.cache_root or default_kernel_cache_root()
     source_dir = args.source_dir.resolve()
     registry = KernelRegistry(cache_root=cache_root, source_dir=source_dir)
-    build_options = _build_option_overrides(args)
+    recipe = _recipe_overrides(args)
 
     rows: list[dict[str, Any]] = []
     if not args.quiet_progress:
@@ -1161,7 +1161,7 @@ def main(argv: list[str] | None = None) -> int:
                 spec,
                 build=args.build,
                 layout=args.layout,
-                build_options=build_options,
+                recipe=recipe,
                 cache_root=cache_root,
                 source_dir=source_dir,
                 skip_artifact_dry_run=args.skip_artifact_dry_run,
@@ -1204,7 +1204,7 @@ def main(argv: list[str] | None = None) -> int:
         "scope": str(args.scope),
         "case_count": len(rows),
         "build": str(args.build),
-        "build_option_overrides": build_options,
+        "recipe_overrides": recipe,
         "layout": str(args.layout),
         "solver_policy": {
             "initial": NATIVE_SOLVER_INITIAL_POLICY,

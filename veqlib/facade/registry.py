@@ -17,7 +17,8 @@ from types import ModuleType
 from typing import Any
 
 from .affinity import cpu_pin_scope_active, pinned_cpu
-from .builder import KernelArtifact, build_artifact, touch_artifact_used
+from .builder import CompileResult, touch_artifact_used
+from .builder import compile as compile_kernel
 from .options import solver_method_code
 from .types import KernelTopology as Topology
 
@@ -38,7 +39,7 @@ class SolverClosedError(RuntimeError):
 class LoadedKernel:
     """A process-cached nanobind module and its artifact metadata."""
 
-    artifact: KernelArtifact
+    artifact: CompileResult
     module: ModuleType
 
 
@@ -146,14 +147,14 @@ class KernelRegistry:
         self._thread_local = threading.local()
         self._lock = threading.RLock()
 
-    def get_or_build(
+    def get_or_compile(
         self,
         topology: Topology,
         *,
         force: bool = False,
         dry_run: bool = False,
-    ) -> KernelArtifact:
-        return build_artifact(
+    ) -> CompileResult:
+        return compile_kernel(
             topology,
             cache_root=self.cache_root,
             source_dir=self.source_dir,
@@ -169,7 +170,7 @@ class KernelRegistry:
                 touch_artifact_used(cached_by_topology.artifact)
                 return cached_by_topology
 
-        artifact = self.get_or_build(topology, force=force, dry_run=False)
+        artifact = self.get_or_compile(topology, force=force, dry_run=False)
         with self._lock:
             cached = self._modules.get(artifact.artifact_id)
             if cached is not None and not force:
@@ -241,7 +242,7 @@ def load_kernel(
     return (registry or KernelRegistry()).load_kernel(topology, force=force)
 
 
-def _load_artifact_module(artifact: KernelArtifact) -> ModuleType:
+def _load_artifact_module(artifact: CompileResult) -> ModuleType:
     if not artifact.shared_library_path.exists():
         raise KernelLoadError(f"VEQlib shared library is missing: {artifact.shared_library_path}")
     module_name = _module_name_for_artifact(artifact.artifact_id)

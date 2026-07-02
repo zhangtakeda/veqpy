@@ -66,9 +66,9 @@ from benchmarks._common import (
 )
 from veqlib.facade import (
     KernelBoundary,
-    KernelBuildOptions,
     KernelConfig,
     KernelInput,
+    KernelRecipe,
     KernelRegistry,
     KernelTopology,
     VEQlibSolver,
@@ -136,7 +136,7 @@ def _topology_for_case(signature: dict[str, int], case: Any, *, build: str, grid
         M_max=m_max,
         K_max=max(2, m_max),
     )
-    return topology.with_build(KernelBuildOptions(build=build, layout="degree"))
+    return topology.with_recipe(KernelRecipe(build=build, layout="degree"))
 
 
 def _kernel_boundary_from_case(case: Any) -> KernelBoundary:
@@ -336,7 +336,7 @@ def _measure_veqlib(
 ) -> dict[str, Any]:
     solver = VEQlibSolver(case.topology, registry=registry, solver=NATIVE_SOLVER_METHOD)
     build_start = time.perf_counter_ns()
-    artifact = solver.build(force=False, dry_run=False)
+    artifact = solver.compile(force=False, dry_run=False)
     build_wall_ms = float(time.perf_counter_ns() - build_start) / 1.0e6
 
     def configure() -> None:

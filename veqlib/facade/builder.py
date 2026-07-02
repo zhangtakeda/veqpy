@@ -1,6 +1,6 @@
-"""Artifact planning, build, and cache metadata for VEQlib kernels.
+"""Compile planning, build, and cache metadata for VEQlib kernels.
 
-Artifact identity is a setup-time contract: topology, build options, toolchain
+Artifact identity is a setup-time contract: topology, compile recipe, toolchain
 ABI, and source digests participate, while runtime boundary/input/config values
 do not. This keeps repeated case solves on one topology independent from CMake
 artifact lifecycle details.
@@ -36,12 +36,12 @@ NANOBIND_STATIC_SCHEMA = "veqlib.nanobind_static_artifact.v1"
 VEQLIB_CXX = "clang++-18"
 
 
-class KernelBuildError(RuntimeError):
-    """Raised when a VEQlib kernel artifact cannot be planned or built."""
+class CompileError(RuntimeError):
+    """Raised when a VEQlib kernel artifact cannot be planned or compiled."""
 
 
 @dataclass(frozen=True, slots=True)
-class KernelArtifact:
+class CompileResult:
     """Resolved on-disk VEQlib kernel artifact."""
 
     topology: Topology
@@ -59,7 +59,7 @@ class KernelArtifact:
 
 
 @dataclass(frozen=True, slots=True)
-class KernelCleanResult:
+class CleanResult:
     """Summary returned by :func:`clean` for kernel artifact cache cleanup."""
 
     removed: tuple[Path, ...]
@@ -79,14 +79,14 @@ def default_kernel_cache_root() -> Path:
     return _veqlib_root() / "artifact"
 
 
-def build_artifact(
+def compile(
     topology: Topology,
     *,
     cache_root: Path | None = None,
     source_dir: Path | None = None,
     force: bool = False,
     dry_run: bool = False,
-) -> KernelArtifact:
+) -> CompileResult:
     """Resolve, optionally build, and record a VEQlib kernel artifact for ``topology``.
 
     ``dry_run=True`` writes the same planning metadata and CMake arguments but does not invoke
@@ -97,7 +97,7 @@ def build_artifact(
         topology.validate_supported_for_veqlib_native()
     source_dir = _default_source_dir() if source_dir is None else source_dir.resolve()
     if not source_dir.exists():
-        raise KernelBuildError(f"VEQlib source directory does not exist: {source_dir}")
+        raise CompileError(f"VEQlib source directory does not exist: {source_dir}")
 
     cxx = VEQLIB_CXX
     build_identity = _build_identity(topology, source_dir=source_dir, cxx=cxx)
@@ -122,7 +122,7 @@ def build_artifact(
             metadata = _read_json(paths["metadata_path"])
             _stamp_artifact_metadata(metadata, "last_reused_at")
             _write_json(paths["metadata_path"], metadata)
-            return KernelArtifact(
+            return CompileResult(
                 topology=topology,
                 artifact_id=artifact_id,
                 root_dir=root_dir,
@@ -186,7 +186,7 @@ def build_artifact(
             built = True
 
         _write_json(paths["metadata_path"], metadata)
-        return KernelArtifact(
+        return CompileResult(
             topology=topology,
             artifact_id=artifact_id,
             root_dir=root_dir,
@@ -209,7 +209,7 @@ def clean(
     older_than: datetime | str | None = None,
     by: str = "last_used_at",
     dry_run: bool = False,
-) -> KernelCleanResult:
+) -> CleanResult:
     """Remove built kernel artifact directories from the on-disk cache.
 
     ``by`` selects the advisory timestamp used for filtering. Supported values are
@@ -259,7 +259,7 @@ def clean(
         except Exception as exc:  # pragma: no cover - exercised through concrete errors.
             errors.append(f"{root_dir}: {exc}")
 
-    return KernelCleanResult(
+    return CleanResult(
         removed=tuple(removed),
         skipped_recent=tuple(skipped_recent),
         skipped_locked=tuple(skipped_locked),
@@ -269,7 +269,7 @@ def clean(
     )
 
 
-def touch_artifact_used(artifact: KernelArtifact) -> None:
+def touch_artifact_used(artifact: CompileResult) -> None:
     """Update the advisory ``last_used_at`` timestamp for a built artifact."""
 
     lock_path = _artifact_lock_path(artifact.root_dir, artifact.artifact_id)
@@ -340,7 +340,7 @@ def _artifact_lock_path(root_dir: Path, artifact_id: str) -> Path:
 def _stamp_artifact_metadata(metadata: dict[str, Any], field: str) -> None:
     artifact = metadata.setdefault("artifact", {})
     if not isinstance(artifact, dict):
-        raise KernelBuildError("artifact metadata must be a JSON object")
+        raise CompileError("artifact metadata must be a JSON object")
     artifact[field] = _utc_now_iso()
 
 
@@ -564,7 +564,7 @@ def _get_or_build_nanobind_static(
         _run_logged(configure, configure_log_path, cwd=root_dir)
         _run_logged(build_command, build_log_path, cwd=root_dir)
         if not archive_path.exists():
-            raise KernelBuildError(f"nanobind static build did not produce {archive_path}")
+            raise CompileError(f"nanobind static build did not produce {archive_path}")
         metadata = {
             **payload,
             "status": "built",
@@ -776,7 +776,7 @@ def _default_build_parallel_jobs() -> int:
 def _copy_extension(build_dir: Path, destination: Path) -> None:
     candidates = sorted(build_dir.glob("veqlib_ext*.so"))
     if not candidates:
-        raise KernelBuildError(f"CMake build did not produce veqlib_ext*.so in {build_dir}")
+        raise CompileError(f"CMake build did not produce veqlib_ext*.so in {build_dir}")
     shutil.copy2(candidates[0], destination)
 
 
@@ -794,7 +794,7 @@ def _run_logged(command: list[str], log_path: Path, *, cwd: Path) -> None:
         f"# started {started}\n# cwd {cwd}\n# command {' '.join(command)}\n\n{completed.stdout}"
     )
     if completed.returncode != 0:
-        raise KernelBuildError(
+        raise CompileError(
             f"command failed with exit code {completed.returncode}; see {log_path}: "
             + " ".join(command)
         )
@@ -876,7 +876,7 @@ def _read_json(path: Path) -> dict[str, Any]:
     with path.open("rb") as handle:
         data = json.load(handle)
     if not isinstance(data, dict):
-        raise KernelBuildError(f"expected JSON object in {path}")
+        raise CompileError(f"expected JSON object in {path}")
     return data
 
 

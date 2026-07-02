@@ -97,8 +97,8 @@ class TopologyError(ValueError):
 
 
 @dataclass(frozen=True, slots=True)
-class KernelBuildOptions:
-    """Artifact build and packed-layout configuration for one VEQlib kernel."""
+class KernelRecipe:
+    """Compile recipe and packed-layout configuration for one VEQlib kernel."""
 
     layout: str = "degree"
     build: str = "fastmath"
@@ -268,7 +268,7 @@ class KernelTopology:
             psin_count=profile_counts["psin_count"],
             f_count=profile_counts["F_count"],
         )
-        build_kwargs = KernelBuildOptions(
+        recipe_kwargs = KernelRecipe(
             layout=self.layout,
             build=self.build,
             cmake_build_type=self.cmake_build_type,
@@ -295,7 +295,7 @@ class KernelTopology:
             "L_max": l_max,
             "M_max": m_max,
             "K_max": k_max,
-            **build_kwargs,
+            **recipe_kwargs,
         }
         for name, value in normalized_values.items():
             object.__setattr__(self, name, value)
@@ -307,10 +307,10 @@ class KernelTopology:
             )
         object.__setattr__(self, "key", expected_key)
 
-    def with_build(self, build: KernelBuildOptions | None) -> Self:
-        if build is None:
+    def with_recipe(self, recipe: KernelRecipe | None) -> Self:
+        if recipe is None:
             return self
-        return replace(self, **build.canonical_kwargs(), key=None)
+        return replace(self, **recipe.canonical_kwargs(), key=None)
 
     def active_profiles(self) -> dict[str, int]:
         active: dict[str, int] = {}
@@ -338,7 +338,7 @@ class KernelTopology:
     def to_canonical_dict(self) -> dict[str, Any]:
         return {
             "build": self.build,
-            "build_options": self.build_options_dict(),
+            "recipe": self.recipe_dict(),
             "profiles": {
                 "h_count": self.h_count,
                 "v_count": self.v_count,
@@ -458,7 +458,7 @@ class KernelTopology:
     def layout_profile_first(self) -> bool:
         return self.layout == "family"
 
-    def build_options_dict(self) -> dict[str, object]:
+    def recipe_dict(self) -> dict[str, object]:
         return {
             "preset": self.build,
             "cmake_build_type": self.cmake_build_type,
@@ -577,7 +577,7 @@ class KernelConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class KernelResult:
+class SolveResult:
     """Python-owned snapshot of one VEQlib solve result."""
 
     elapsed_ms: float

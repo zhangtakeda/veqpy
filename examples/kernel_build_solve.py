@@ -27,11 +27,11 @@ if str(PROJECT_ROOT) not in sys.path:
 from veqlib.facade import (  # noqa: E402
     Kernel,
     KernelBoundary,
-    KernelBuildOptions,
     KernelConfig,
     KernelInput,
-    KernelResult,
+    KernelRecipe,
     KernelTopology,
+    SolveResult,
 )
 
 MU0 = 4.0e-7 * np.pi
@@ -105,11 +105,11 @@ def main() -> None:
     kernel_config = KernelConfig(method="powell", initial="cold", norm="fast")
     kernel = Kernel(
         topology,
-        build=KernelBuildOptions(build="fastmath"),
+        recipe=KernelRecipe(build="fastmath"),
         config=kernel_config,
         cache_root=outdir / "kernel_cache",
     )
-    artifact = kernel.build()
+    artifact = kernel.compile()
 
     # 3. Prepare typed runtime input.
     kernel_boundary = build_boundary()
@@ -118,7 +118,7 @@ def main() -> None:
     # 4. Solve. Kernel.solve() uses the handle default config unless a
     #    per-call config or field override (for example method=...) is supplied.
     result = kernel.solve(kernel_boundary, kernel_input)
-    assert isinstance(result, KernelResult)
+    assert isinstance(result, SolveResult)
 
     print("VEQlib kernel build + solve demo")
     print(f"  artifact: {artifact.shared_library_path}")

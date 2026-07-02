@@ -11,7 +11,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from .builder import KernelArtifact
+from .builder import CompileResult
 from .options import solver_method_code
 from .registry import KernelRegistry, SolverThreadError, ThreadOwnedNativeSolver
 from .types import KernelTopology as Topology
@@ -55,9 +55,9 @@ class VEQlibSolver:
                 f"current={current}"
             )
 
-    def build(self, *, force: bool = False, dry_run: bool = False) -> KernelArtifact:
+    def compile(self, *, force: bool = False, dry_run: bool = False) -> CompileResult:
         self.check_thread()
-        return self.registry.get_or_build(self.topology, force=force, dry_run=dry_run)
+        return self.registry.get_or_compile(self.topology, force=force, dry_run=dry_run)
 
     def _solver(self) -> ThreadOwnedNativeSolver:
         self.check_thread()
