@@ -30,7 +30,7 @@ MU0 = 4.0e-7 * np.pi
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
-def make_kernel_topology_kwargs(**overrides: object) -> dict[str, object]:
+def make_kernel_topology(**overrides: object) -> KernelTopology:
     params: dict[str, object] = {
         "h_count": 2,
         "v_count": 0,
@@ -48,11 +48,7 @@ def make_kernel_topology_kwargs(**overrides: object) -> dict[str, object]:
         "sample_count": 9,
     }
     params.update(overrides)
-    return params
-
-
-def make_kernel_topology(**overrides: object) -> KernelTopology:
-    return KernelTopology(**make_kernel_topology_kwargs(**overrides))  # type: ignore[arg-type]
+    return KernelTopology(**params)  # type: ignore[arg-type]
 
 
 def tiny_kernel_boundary() -> KernelBoundary:
@@ -197,7 +193,7 @@ def test_kernel_topology_and_runtime_source_is_user_facing_contract() -> None:
 
 def test_kernel_runtime_case_must_match_topology_before_native() -> None:
     topology = make_kernel_topology()
-    handle = Kernel(**make_kernel_topology_kwargs())
+    handle = Kernel(topology)
     recorder = RecordingSolver()
     handle._solver = recorder  # type: ignore[assignment]
 
@@ -257,13 +253,14 @@ def test_kernel_runtime_case_must_match_topology_before_native() -> None:
 
 
 def test_kernel_solve_uses_handle_default_config_with_per_call_overrides() -> None:
+    topology = make_kernel_topology()
     default_config = KernelConfig(
         method="levenberg-marquardt",
         max_residual=2.0e-6,
         max_evaluations=123,
         norm="balanced",
     )
-    handle = Kernel(**make_kernel_topology_kwargs(), config=default_config)
+    handle = Kernel(topology, config=default_config)
     recorder = RecordingSolver(x_size=handle.x_size)
     handle._solver = recorder  # type: ignore[assignment]
 
@@ -312,7 +309,7 @@ def test_kernel_dry_run_and_python_owned_result_snapshot(tmp_path: Path) -> None
     recipe = KernelRecipe(build="release", layout="family")
     kernel_config = KernelConfig(max_residual=4.0e-6)
     handle = facade.build(
-        **make_kernel_topology_kwargs(),
+        topology,
         recipe=recipe,
         config=kernel_config,
         cache_root=tmp_path,
@@ -358,11 +355,8 @@ def test_kernel_dry_run_and_python_owned_result_snapshot(tmp_path: Path) -> None
 
 @pytest.mark.slow
 def test_kernel_python_build_and_solve_native_flow(tmp_path: Path) -> None:
-    handle = Kernel(
-        **make_kernel_topology_kwargs(),
-        recipe=KernelRecipe(build="fastmath"),
-        cache_root=tmp_path,
-    )
+    topology = make_kernel_topology()
+    handle = Kernel(topology, recipe=KernelRecipe(build="fastmath"), cache_root=tmp_path)
 
     artifact = handle.prepare()
     assert artifact.built is True
