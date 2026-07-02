@@ -80,6 +80,14 @@ def tiny_kernel_input(*, case_name: str | None = None) -> KernelInput:
     )
 
 
+class RecordingSolver:
+    def __init__(self) -> None:
+        self.runtime_args: tuple[object, ...] | None = None
+
+    def set_kernel_runtime(self, *args: object) -> None:
+        self.runtime_args = args
+
+
 def test_veqlib_facade_imports_without_importing_veqpy() -> None:
     env = os.environ.copy()
     existing_pythonpath = env.get("PYTHONPATH")
@@ -139,6 +147,67 @@ def test_kernel_topology_and_runtime_inputs_are_user_facing_contracts() -> None:
             scaled_heat=np.ones((2, 1), dtype=np.float64),
             scaled_current=np.ones(2, dtype=np.float64),
         )
+
+
+def test_kernel_runtime_case_must_match_topology_before_native() -> None:
+    topology = make_kernel_topology()
+    handle = Kernel(topology)
+    recorder = RecordingSolver()
+    handle._solver = recorder  # type: ignore[assignment]
+
+    bad_source_length = KernelInput(
+        scaled_heat=np.ones(topology.sample_count - 1, dtype=np.float64),
+        scaled_current=np.ones(topology.sample_count - 1, dtype=np.float64),
+    )
+    with pytest.raises(ValueError, match="case does not match kernel topology: scaled_heat"):
+        handle._set_runtime(
+            tiny_kernel_boundary(),
+            bad_source_length,
+            KernelConfig(),
+            case_name=None,
+        )
+    assert recorder.runtime_args is None
+
+    too_many_c_offsets = KernelBoundary(
+        a=0.5,
+        R0=1.0,
+        Z0=0.0,
+        B0=3.0,
+        c_offsets=np.zeros(topology.M_max + 2, dtype=np.float64),
+    )
+    with pytest.raises(ValueError, match="case does not match kernel topology: c_offsets"):
+        handle._set_runtime(
+            too_many_c_offsets,
+            tiny_kernel_input(),
+            KernelConfig(),
+            case_name=None,
+        )
+    assert recorder.runtime_args is None
+
+    too_many_s_offsets = KernelBoundary(
+        a=0.5,
+        R0=1.0,
+        Z0=0.0,
+        B0=3.0,
+        s_offsets=np.zeros(topology.M_max + 2, dtype=np.float64),
+    )
+    with pytest.raises(ValueError, match="case does not match kernel topology: s_offsets"):
+        handle._set_runtime(
+            too_many_s_offsets,
+            tiny_kernel_input(),
+            KernelConfig(),
+            case_name=None,
+        )
+    assert recorder.runtime_args is None
+
+    handle._set_runtime(
+        tiny_kernel_boundary(),
+        tiny_kernel_input(),
+        KernelConfig(),
+        case_name="override",
+    )
+    assert recorder.runtime_args is not None
+    assert recorder.runtime_args[0] == "override"
 
 
 def test_kernel_dry_run_and_python_owned_result_snapshot(tmp_path: Path) -> None:

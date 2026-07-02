@@ -184,9 +184,10 @@ class Kernel:
         *,
         case_name: str | None,
     ) -> VEQlibSolver:
-        solver = self._veqlib_solver()
         kernel_boundary = self._kernel_boundary(boundary)
         kernel_input = self._kernel_input(input, case_name=case_name)
+        self._validate_runtime_case_adaptability(kernel_boundary, kernel_input)
+        solver = self._veqlib_solver()
         solver.set_kernel_runtime(
             "" if kernel_input.case_name is None else kernel_input.case_name,
             *kernel_boundary.runtime_args(),
@@ -214,6 +215,35 @@ class Kernel:
             beta=input.beta,
             case_name=case_name,
         )
+
+    def _validate_runtime_case_adaptability(
+        self,
+        boundary: KernelBoundary,
+        input: KernelInput,
+    ) -> None:
+        topology = self.build_topology
+        expected_samples = topology.sample_count
+        heat_length = input.scaled_heat.size
+        current_length = input.scaled_current.size
+        if heat_length != expected_samples or current_length != expected_samples:
+            raise ValueError(
+                "case does not match kernel topology: scaled_heat and scaled_current "
+                f"must have length {expected_samples} for "
+                f"route={topology.route}/{topology.coordinate}/{topology.nodes}, "
+                f"got {heat_length} and {current_length}"
+            )
+
+        max_offsets = topology.M_max + 1
+        for name, values in (
+            ("c_offsets", boundary.c_offsets),
+            ("s_offsets", boundary.s_offsets),
+        ):
+            if values.size > max_offsets:
+                raise ValueError(
+                    "case does not match kernel topology: "
+                    f"{name} length must be at most M_max + 1 ({max_offsets}), "
+                    f"got {values.size}"
+                )
 
 
 def build(
