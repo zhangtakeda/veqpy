@@ -170,12 +170,15 @@ representative High configuration for each GEQDSK family.
 
 The package-level Python facade is intentionally semantic: users construct
 `KernelTopology`/`KernelBuild` for artifact structure,
-`KernelBoundary`/`KernelInput`/`KernelConfig` for runtime cases, create a reusable
-`Kernel` with `build(...)`, and call `Kernel.solve(...)` plus residual/JVP/Jacobian
-diagnostic methods. `solve(...)` is the one-shot convenience path and `clean(...)`
-cleans artifact cache entries. The lower-level artifact primitive is named
-`build_artifact(...)` and returns `KernelArtifact`; option-code, CPU-affinity, and
-cache-root helpers remain in their submodules instead of the package root.
+`KernelBoundary`/`KernelInput` for runtime cases, and `KernelConfig` for the
+handle-level default solve policy. `build(..., config=None)` creates a reusable
+`Kernel` and caches that default policy on the handle; `Kernel.solve(...)` can
+use it as-is, replace it with a one-off `config=...`, or override individual
+fields such as `method=...` for one call. `solve(...)` is the one-shot
+convenience path and `clean(...)` cleans artifact cache entries. The lower-level
+artifact primitive is named `build_artifact(...)` and returns `KernelArtifact`;
+option-code, CPU-affinity, and cache-root helpers remain in their submodules
+instead of the package root.
 Manual CMake presets are not part of the supported workflow; Python calls CMake
 with explicit `-D...` definitions and loads the resulting artifact through
 `veqlib.facade`.

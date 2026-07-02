@@ -11,7 +11,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, fields, replace
 from typing import Any, Self
 
 import numpy as np
@@ -543,6 +543,14 @@ class KernelConfig:
     residual_normalization_probe_count: int = 4
     residual_normalization_probe_step: float = 1.0e-6
     residual_normalization_sensitivity_lambda: float = 0.5
+
+    def with_overrides(self, **overrides: Any) -> Self:
+        field_names = {field.name for field in fields(self)}
+        unknown = sorted(name for name in overrides if name not in field_names)
+        if unknown:
+            names = ", ".join(unknown)
+            raise TypeError(f"Unsupported KernelConfig override(s): {names}")
+        return replace(self, **overrides)
 
     def runtime_args(self, *, x_size: int) -> tuple[Any, ...]:
         max_evaluations = (

@@ -19,6 +19,11 @@ from veqlib.facade import (
     KernelResult,
     KernelTopology,
 )
+from veqlib.facade.options import (
+    RESIDUAL_NORMALIZATION_BALANCED,
+    SOLVER_METHOD_LEVENBERG_MARQUARDT,
+    SOLVER_METHOD_POWELL,
+)
 
 MU0 = 4.0e-7 * np.pi
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -81,11 +86,19 @@ def tiny_kernel_input(*, case_name: str | None = None) -> KernelInput:
 
 
 class RecordingSolver:
-    def __init__(self) -> None:
+    def __init__(self, *, x_size: int = 9) -> None:
+        self.x_size = x_size
         self.runtime_args: tuple[object, ...] | None = None
+        self.runtime_calls: list[tuple[object, ...]] = []
 
     def set_kernel_runtime(self, *args: object) -> None:
         self.runtime_args = args
+        self.runtime_calls.append(args)
+
+    def solve_direct(self) -> tuple[object, ...]:
+        x = np.zeros(self.x_size, dtype=np.float64)
+        alpha = np.zeros(2, dtype=np.float64)
+        return (0.0, True, 1, 2, 3, 4, 5, 6, 7, 8.0, 9.0, x, x, x, alpha)
 
 
 def test_veqlib_facade_imports_without_importing_veqpy() -> None:
@@ -244,11 +257,62 @@ def test_kernel_runtime_case_must_match_topology_before_native() -> None:
     assert recorder.runtime_args[0] == "override"
 
 
+def test_kernel_solve_uses_handle_default_config_with_per_call_overrides() -> None:
+    topology = make_kernel_topology()
+    default_config = KernelConfig(
+        method="levenberg-marquardt",
+        max_residual=2.0e-6,
+        max_evaluations=123,
+        norm="balanced",
+    )
+    handle = Kernel(topology, config=default_config)
+    recorder = RecordingSolver(x_size=handle.x_size)
+    handle._solver = recorder  # type: ignore[assignment]
+
+    handle.solve(tiny_kernel_boundary(), tiny_kernel_input(), case_name="default")
+    assert recorder.runtime_args is not None
+    assert recorder.runtime_args[0] == "default"
+    assert recorder.runtime_args[12] == SOLVER_METHOD_LEVENBERG_MARQUARDT
+    assert recorder.runtime_args[13] == default_config.max_residual
+    assert recorder.runtime_args[14] == default_config.max_evaluations
+    assert recorder.runtime_args[19] == RESIDUAL_NORMALIZATION_BALANCED
+
+    handle.solve(
+        tiny_kernel_boundary(),
+        tiny_kernel_input(),
+        method="powell",
+        max_residual=3.0e-6,
+        max_evaluations=None,
+    )
+    assert recorder.runtime_args[12] == SOLVER_METHOD_POWELL
+    assert recorder.runtime_args[13] == 3.0e-6
+    assert recorder.runtime_args[14] == handle.x_size * handle.x_size
+    assert handle.config is default_config
+    assert handle.config.method == "levenberg-marquardt"
+    assert handle.config.max_evaluations == 123
+
+    temporary_config = KernelConfig(method="powell", max_evaluations=5)
+    handle.solve(
+        tiny_kernel_boundary(),
+        tiny_kernel_input(),
+        config=temporary_config,
+        method="levenberg-marquardt",
+    )
+    assert recorder.runtime_args[12] == SOLVER_METHOD_LEVENBERG_MARQUARDT
+    assert recorder.runtime_args[14] == 5
+    assert temporary_config.method == "powell"
+
+    with pytest.raises(TypeError, match="Unsupported KernelConfig override"):
+        handle.solve(tiny_kernel_boundary(), tiny_kernel_input(), unknown_option=True)
+
+
 def test_kernel_dry_run_and_python_owned_result_snapshot(tmp_path: Path) -> None:
     topology = make_kernel_topology()
-    handle = facade.build(topology, cache_root=tmp_path, dry_run=True)
+    kernel_config = KernelConfig(max_residual=4.0e-6)
+    handle = facade.build(topology, config=kernel_config, cache_root=tmp_path, dry_run=True)
 
     assert isinstance(handle, Kernel)
+    assert handle.config is kernel_config
     assert handle.x_size == 9
 
     raw_x = np.ones(3, dtype=np.float64)

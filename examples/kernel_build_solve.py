@@ -100,22 +100,24 @@ def main() -> None:
         sample_count=9,
     )
 
-    # 2. Build/load the topology-specific nanobind artifact.
+    # 2. Build/load the topology-specific nanobind artifact and set the
+    #    handle-level default runtime config.
+    kernel_config = KernelConfig(method="powell", initial="cold", norm="fast")
     kernel = Kernel(
         topology,
         build=KernelBuild(build="fastmath"),
+        config=kernel_config,
         cache_root=outdir / "kernel_cache",
     )
     artifact = kernel.build()
 
-    # 3. Prepare typed runtime input and config.
+    # 3. Prepare typed runtime input.
     kernel_boundary = build_boundary()
     kernel_input = build_input()
-    kernel_config = KernelConfig(method="powell", initial="cold", norm="fast")
 
-    # 4. Solve. Kernel.solve() uses set_kernel_runtime(...) by default and returns
-    #    a Python-owned KernelResult snapshot.
-    result = kernel.solve(kernel_boundary, kernel_input, config=kernel_config)
+    # 4. Solve. Kernel.solve() uses the handle default config unless a
+    #    per-call config or field override (for example method=...) is supplied.
+    result = kernel.solve(kernel_boundary, kernel_input)
     assert isinstance(result, KernelResult)
 
     print("VEQlib kernel build + solve demo")

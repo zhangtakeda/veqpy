@@ -36,6 +36,7 @@ class Kernel:
         topology: KernelTopology,
         *,
         build: KernelBuild | None = None,
+        config: KernelConfig | None = None,
         registry: KernelRegistry | None = None,
         cache_root: Path | None = None,
         source_dir: Path | None = None,
@@ -45,6 +46,7 @@ class Kernel:
         self.topology = topology
         self.build_config = KernelBuild() if build is None else build
         self.build_topology = topology.with_build(self.build_config)
+        self.config = KernelConfig() if config is None else self._kernel_config(config)
         self.backend = backend
         self.pin_cpu = pin_cpu
         self.registry = registry or KernelRegistry(
@@ -70,15 +72,16 @@ class Kernel:
         *,
         config: KernelConfig | None = None,
         case_name: str | None = None,
+        **config_overrides: Any,
     ) -> KernelResult:
-        kernel_config = KernelConfig() if config is None else config
+        kernel_config = self._runtime_config(config, config_overrides)
         solver = self._set_runtime(boundary, input, kernel_config, case_name=case_name)
         self.result = KernelResult.from_solve_direct(solver.solve_direct())
         self.history.append(self.result)
         return self.result
 
-    # Raw numerical APIs intentionally do not expose solve policy.  The default
-    # KernelConfig below only installs the native current-case context required
+    # Raw numerical APIs intentionally do not expose per-call solve policy.  The
+    # handle default config only installs the native current-case context required
     # before residual/JVP/Jacobian kernels run.
     def residual(self, x: Any, boundary: KernelBoundary, input: KernelInput) -> np.ndarray:
         out = np.empty(self.x_size, dtype=np.float64)
@@ -94,7 +97,7 @@ class Kernel:
     ) -> None:
         packed_out = self._packed_output(out, (self.x_size,), "out")
         packed_x = self._packed_input(x, "x")
-        self._set_runtime(boundary, input, KernelConfig(), case_name=None)
+        self._set_runtime(boundary, input, self.config, case_name=None)
         self._veqlib_solver().residual_var_into(packed_out, packed_x)
 
     def jvp(self, x: Any, v: Any, boundary: KernelBoundary, input: KernelInput) -> np.ndarray:
@@ -113,7 +116,7 @@ class Kernel:
         packed_out = self._packed_output(out, (self.x_size,), "out")
         packed_x = self._packed_input(x, "x")
         packed_v = self._packed_input(v, "v")
-        self._set_runtime(boundary, input, KernelConfig(), case_name=None)
+        self._set_runtime(boundary, input, self.config, case_name=None)
         self._veqlib_solver().jvp_into(packed_out, packed_x, packed_v)
 
     def jacobian(self, x: Any, boundary: KernelBoundary, input: KernelInput) -> np.ndarray:
@@ -130,7 +133,7 @@ class Kernel:
     ) -> None:
         matrix_out = self._packed_output(out, (self.x_size, self.x_size), "out")
         packed_x = self._packed_input(x, "x")
-        self._set_runtime(boundary, input, KernelConfig(), case_name=None)
+        self._set_runtime(boundary, input, self.config, case_name=None)
         self._veqlib_solver().jacobian_into(matrix_out, packed_x)
 
     def clear(self) -> None:
@@ -176,6 +179,16 @@ class Kernel:
             raise ValueError(f"{name} must be C-contiguous")
         return out
 
+    def _runtime_config(
+        self,
+        config: KernelConfig | None,
+        overrides: dict[str, Any],
+    ) -> KernelConfig:
+        kernel_config = self.config if config is None else self._kernel_config(config)
+        if overrides:
+            kernel_config = kernel_config.with_overrides(**overrides)
+        return kernel_config
+
     def _set_runtime(
         self,
         boundary: KernelBoundary,
@@ -195,6 +208,12 @@ class Kernel:
             *config.runtime_args(x_size=self.x_size),
         )
         return solver
+
+    @staticmethod
+    def _kernel_config(config: KernelConfig) -> KernelConfig:
+        if not isinstance(config, KernelConfig):
+            raise TypeError(f"config must be KernelConfig, got {type(config).__name__}")
+        return config
 
     @staticmethod
     def _kernel_boundary(boundary: KernelBoundary) -> KernelBoundary:
@@ -250,6 +269,7 @@ def build(
     topology: KernelTopology,
     *,
     build: KernelBuild | None = None,
+    config: KernelConfig | None = None,
     registry: KernelRegistry | None = None,
     cache_root: Path | None = None,
     source_dir: Path | None = None,
@@ -257,11 +277,12 @@ def build(
     force: bool = False,
     dry_run: bool = False,
 ) -> Kernel:
-    """Create a kernel handle and resolve its artifact plan/build."""
+    """Create a kernel handle, cache its default config, and resolve its artifact."""
 
     kernel = Kernel(
         topology,
         build=build,
+        config=config,
         registry=registry,
         cache_root=cache_root,
         source_dir=source_dir,
@@ -284,12 +305,14 @@ def solve(
     pin_cpu: bool | int | None = None,
     force: bool = False,
     case_name: str | None = None,
+    **config_overrides: Any,
 ) -> KernelResult:
     """Build a short-lived kernel, solve one case, and close its private workspace."""
 
     kernel = Kernel(
         topology,
         build=build,
+        config=config,
         registry=registry,
         cache_root=cache_root,
         source_dir=source_dir,
@@ -297,6 +320,6 @@ def solve(
     )
     try:
         kernel.build(force=force, dry_run=False)
-        return kernel.solve(boundary, input, config=config, case_name=case_name)
+        return kernel.solve(boundary, input, case_name=case_name, **config_overrides)
     finally:
         kernel.close()
