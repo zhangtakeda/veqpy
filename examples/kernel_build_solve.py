@@ -27,7 +27,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from veqlib.facade import (  # noqa: E402
     Kernel,
     KernelBoundary,
-    KernelBuild,
+    KernelBuildOptions,
     KernelConfig,
     KernelInput,
     KernelResult,
@@ -105,7 +105,7 @@ def main() -> None:
     kernel_config = KernelConfig(method="powell", initial="cold", norm="fast")
     kernel = Kernel(
         topology,
-        build=KernelBuild(build="fastmath"),
+        build=KernelBuildOptions(build="fastmath"),
         config=kernel_config,
         cache_root=outdir / "kernel_cache",
     )

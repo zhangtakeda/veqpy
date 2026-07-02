@@ -66,7 +66,7 @@ from benchmarks._common import (
 )
 from veqlib.facade import (
     KernelBoundary,
-    KernelBuild,
+    KernelBuildOptions,
     KernelConfig,
     KernelInput,
     KernelRegistry,
@@ -136,7 +136,7 @@ def _topology_for_case(signature: dict[str, int], case: Any, *, build: str, grid
         M_max=m_max,
         K_max=max(2, m_max),
     )
-    return topology.with_build(KernelBuild(build=build, layout="degree"))
+    return topology.with_build(KernelBuildOptions(build=build, layout="degree"))
 
 
 def _kernel_boundary_from_case(case: Any) -> KernelBoundary:

@@ -169,7 +169,7 @@ representative High configuration for each GEQDSK family.
 | X-point(130)    |     2.530054 |     21.647612 |      8.556x |      1.24e-09 |
 
 The package-level Python facade is intentionally semantic: users construct
-`KernelTopology`/`KernelBuild` for artifact structure,
+`KernelTopology`/`KernelBuildOptions` for artifact structure,
 `KernelBoundary`/`KernelInput` for runtime cases, and `KernelConfig` for the
 handle-level default solve policy. `build(..., config=None)` creates a reusable
 `Kernel` and caches that default policy on the handle; `Kernel.solve(...)` can

@@ -73,7 +73,7 @@ from benchmarks._common import (
 )
 from veqlib.facade import (
     KernelBoundary,
-    KernelBuild,
+    KernelBuildOptions,
     KernelConfig,
     KernelInput,
     KernelRegistry,
@@ -326,7 +326,7 @@ def _topology_from_spec(
         build_kwargs.update(build_options)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always", UserWarning)
-        topology = KernelTopology(**topology_kwargs).with_build(KernelBuild(**build_kwargs))
+        topology = KernelTopology(**topology_kwargs).with_build(KernelBuildOptions(**build_kwargs))
     return topology, tuple(str(item.message) for item in caught)
 
 

@@ -20,7 +20,7 @@ from .registry import KernelRegistry
 from .solver import VEQlibSolver
 from .types import (
     KernelBoundary,
-    KernelBuild,
+    KernelBuildOptions,
     KernelConfig,
     KernelInput,
     KernelResult,
@@ -35,7 +35,7 @@ class Kernel:
         self,
         topology: KernelTopology,
         *,
-        build: KernelBuild | None = None,
+        build: KernelBuildOptions | None = None,
         config: KernelConfig | None = None,
         registry: KernelRegistry | None = None,
         cache_root: Path | None = None,
@@ -44,8 +44,8 @@ class Kernel:
         backend: str = "cxx",
     ) -> None:
         self.topology = topology
-        self.build_config = KernelBuild() if build is None else build
-        self.build_topology = topology.with_build(self.build_config)
+        self.build_options = KernelBuildOptions() if build is None else build
+        self.build_topology = topology.with_build(self.build_options)
         self.config = KernelConfig() if config is None else self._kernel_config(config)
         self.backend = backend
         self.pin_cpu = pin_cpu
@@ -268,7 +268,7 @@ class Kernel:
 def build(
     topology: KernelTopology,
     *,
-    build: KernelBuild | None = None,
+    build: KernelBuildOptions | None = None,
     config: KernelConfig | None = None,
     registry: KernelRegistry | None = None,
     cache_root: Path | None = None,
@@ -298,7 +298,7 @@ def solve(
     input: KernelInput,
     *,
     config: KernelConfig | None = None,
-    build: KernelBuild | None = None,
+    build: KernelBuildOptions | None = None,
     registry: KernelRegistry | None = None,
     cache_root: Path | None = None,
     source_dir: Path | None = None,

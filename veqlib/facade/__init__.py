@@ -18,7 +18,7 @@ from .registry import KernelLoadError, KernelRegistry, LoadedKernel, SolverThrea
 from .solver import VEQlibSolver
 from .types import (
     KernelBoundary,
-    KernelBuild,
+    KernelBuildOptions,
     KernelConfig,
     KernelInput,
     KernelResult,
@@ -30,7 +30,7 @@ __all__ = [
     "Kernel",
     "KernelArtifact",
     "KernelBoundary",
-    "KernelBuild",
+    "KernelBuildOptions",
     "KernelBuildError",
     "KernelCleanResult",
     "KernelConfig",

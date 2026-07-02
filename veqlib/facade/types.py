@@ -97,7 +97,7 @@ class TopologyError(ValueError):
 
 
 @dataclass(frozen=True, slots=True)
-class KernelBuild:
+class KernelBuildOptions:
     """Artifact build and packed-layout configuration for one VEQlib kernel."""
 
     layout: str = "degree"
@@ -268,7 +268,7 @@ class KernelTopology:
             psin_count=profile_counts["psin_count"],
             f_count=profile_counts["F_count"],
         )
-        build_kwargs = KernelBuild(
+        build_kwargs = KernelBuildOptions(
             layout=self.layout,
             build=self.build,
             cmake_build_type=self.cmake_build_type,
@@ -307,7 +307,7 @@ class KernelTopology:
             )
         object.__setattr__(self, "key", expected_key)
 
-    def with_build(self, build: KernelBuild | None) -> Self:
+    def with_build(self, build: KernelBuildOptions | None) -> Self:
         if build is None:
             return self
         return replace(self, **build.canonical_kwargs(), key=None)

@@ -13,7 +13,7 @@ import veqlib.facade as facade
 from veqlib.facade import (
     Kernel,
     KernelBoundary,
-    KernelBuild,
+    KernelBuildOptions,
     KernelConfig,
     KernelInput,
     KernelResult,
@@ -131,7 +131,7 @@ def test_veqlib_facade_root_exports_semantic_surface() -> None:
         "Kernel",
         "KernelArtifact",
         "KernelBoundary",
-        "KernelBuild",
+        "KernelBuildOptions",
         "KernelBuildError",
         "KernelCleanResult",
         "KernelConfig",
@@ -163,7 +163,9 @@ def test_veqlib_facade_root_exports_semantic_surface() -> None:
 def test_kernel_topology_and_runtime_inputs_are_user_facing_contracts() -> None:
     topology = make_kernel_topology(c_counts=(0, 0), s_counts=(2, 0, 0), K_max=None)
     same_shape = make_kernel_topology(c_counts=(), s_counts=(2,), L_max=2, M_max=1, K_max=2)
-    family_topology = topology.with_build(KernelBuild(layout="profile-first", build="release"))
+    family_topology = topology.with_build(
+        KernelBuildOptions(layout="profile-first", build="release")
+    )
     kernel_input = tiny_kernel_input(case_name="tiny")
     kernel_boundary = tiny_kernel_boundary()
 
@@ -336,7 +338,7 @@ def test_kernel_dry_run_and_python_owned_result_snapshot(tmp_path: Path) -> None
 @pytest.mark.slow
 def test_kernel_python_build_and_solve_native_flow(tmp_path: Path) -> None:
     topology = make_kernel_topology()
-    handle = Kernel(topology, build=KernelBuild(build="fastmath"), cache_root=tmp_path)
+    handle = Kernel(topology, build=KernelBuildOptions(build="fastmath"), cache_root=tmp_path)
 
     artifact = handle.build()
     assert artifact.built is True
