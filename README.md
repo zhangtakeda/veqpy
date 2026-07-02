@@ -169,17 +169,19 @@ representative High configuration for each GEQDSK family.
 | **X-point(94)** | **1.315509** | **10.269229** |  **7.806x** |  **3.44e-08** |
 | X-point(130)    |     2.530054 |     21.647612 |      8.556x |      1.24e-09 |
 
-The package-level Python facade is intentionally semantic: users construct
-`KernelTopology` for the physical/native topology, including `ip_constraint` and
-`beta_constraint` boolean source constraints, `KernelRecipe` for packed backend,
-layout, and build options, `KernelBoundary`/`KernelSource` for runtime cases,
-and `KernelConfig` for the handle-level default solve policy.
-`build(..., recipe=None, config=None)` creates a reusable `Kernel` and caches
-that default policy on the handle; `Kernel.solve(...)` can use it as-is, replace
-it with a one-off `config=...`, or override individual fields such as
-`method=...` for one call. `solve(...)` is the one-shot convenience path and
-`clean(...)` cleans artifact cache entries. The lower-level artifact primitive
-is named `prepare(topology, recipe=...)` and returns `PrepareResult`.
+The package-level Python facade is intentionally semantic: users pass topology
+fields directly to `Kernel(...)` / `build(...)`, including `ip_constraint` and
+`beta_constraint` boolean source constraints. The handle exposes the canonical
+`KernelTopology` as `kernel.topology`. `KernelRecipe` carries packed backend,
+layout, and build options, `KernelBoundary`/`KernelSource` carry runtime cases,
+and `KernelConfig` carries the handle-level default solve policy.
+`build(..., recipe=None, config=None)` creates a reusable `Kernel` from the same
+topology kwargs and caches that default policy on the handle; `Kernel.solve(...)`
+can use it as-is, replace it with a one-off `config=...`, or override individual
+fields such as `method=...` for one call. `solve(...)` is the one-shot
+convenience path and `clean(...)` cleans artifact cache entries. The lower-level
+artifact primitive is named `prepare(topology, recipe=...)` and returns
+`PrepareResult`.
 ABI-code lowering, CPU-affinity, and cache-root helpers live in their focused
 submodules. Facade inputs use one canonical Python spelling per option; aliases
 are not part of the public contract. Python drives CMake with explicit `-D...` definitions and loads the

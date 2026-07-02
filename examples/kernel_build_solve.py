@@ -30,7 +30,6 @@ from veqlib.facade import (  # noqa: E402
     KernelConfig,
     KernelRecipe,
     KernelSource,
-    KernelTopology,
     SolveResult,
 )
 
@@ -82,8 +81,10 @@ def build_source() -> KernelSource:
 def main() -> None:
     outdir = ensure_output_dir()
 
-    # 1. Choose the fixed native topology for this tiny native kernel.
-    topology = KernelTopology(
+    # 1. Choose the fixed native topology for this tiny native kernel and
+    #    construct a reusable handle. Kernel owns the canonical KernelTopology.
+    kernel_config = KernelConfig(method="powell", initial="cold", norm="fast")
+    kernel = Kernel(
         h_count=2,
         v_count=0,
         kappa_count=2,
@@ -98,17 +99,12 @@ def main() -> None:
         nodes="uniform",
         ip_constraint=True,
         sample_count=9,
-    )
-
-    # 2. Build/load the topology-specific nanobind artifact and set the
-    #    handle-level default runtime config.
-    kernel_config = KernelConfig(method="powell", initial="cold", norm="fast")
-    kernel = Kernel(
-        topology,
         recipe=KernelRecipe(build="fastmath"),
         config=kernel_config,
         cache_root=outdir / "kernel_cache",
     )
+
+    # 2. Build/load the topology-specific nanobind artifact.
     artifact = kernel.prepare()
 
     # 3. Prepare typed runtime source data.
@@ -122,7 +118,7 @@ def main() -> None:
 
     print("VEQlib kernel build + solve demo")
     print(f"  artifact: {artifact.shared_library_path}")
-    print(f"  topology key: {topology.key}")
+    print(f"  topology key: {kernel.topology.key}")
     print(f"  x_size: {kernel.x_size}")
     print(f"  success: {result.success}")
     print(f"  info: {result.info}, nfev: {result.nfev}")
