@@ -22,14 +22,14 @@ namespace operators::detail
     using tensor::Vector;
 
     template <typename Shape, typename SourceShape>
-    struct SourceOperatorSetup
+    struct OperatorSetup
     {
         ProfileRuntimeParams<Shape>               profile_params{};
         Vector<double, SourceShape::sample_count> heat{};
         Vector<double, SourceShape::sample_count> current{};
     };
 
-    struct SourceOperatorSolveParams
+    struct OperatorRuntimeScalars
     {
         double a    = 1.0;
         double R0   = 1.0;
@@ -113,22 +113,22 @@ namespace operators::detail
         using shape        = Shape;
         using grid         = GridType;
         using source_shape = SourceShape;
-        using Setup        = SourceOperatorSetup<Shape, SourceShape>;
-        using SolveParams  = SourceOperatorSolveParams;
+        using Setup        = OperatorSetup<Shape, SourceShape>;
+        using RuntimeScalars  = OperatorRuntimeScalars;
         using Profiles     = RuntimeProfiles<Shape, GridType>;
         using Geometry     = GeometryRuntime<GridType>;
         using Source       = NativeSourceRuntime<GridType, SourceShape>;
         using Residual     = ResidualRuntime<Shape, GridType>;
         using PackedVector = typename Residual::PackedVector;
 
-        struct KernelPlan
+        struct OperatorPlan
         {
             Profiles                    fixed_profiles{};
             ProfileRuntimeParams<Shape> profile_params{};
             size_t                      n_axis_fix = 0;
         };
 
-        struct KernelWorkspace
+        struct OperatorWorkspace
         {
             Profiles profiles{};
             Geometry geometry{};
@@ -142,9 +142,9 @@ namespace operators::detail
             workspace.source_runtime.set_uniform_sources(source_span(setup.heat), source_span(setup.current));
         }
 
-        constexpr const SolveParams& solve_params() const noexcept { return solve_params_; }
+        constexpr const RuntimeScalars& runtime_scalars() const noexcept { return runtime_scalars_; }
 
-        constexpr void set_solve_params(const SolveParams& params) noexcept { solve_params_ = params; }
+        constexpr void set_runtime_scalars(const RuntimeScalars& params) noexcept { runtime_scalars_ = params; }
 
         constexpr void reprepare(const Setup& setup) noexcept
         {
@@ -153,14 +153,14 @@ namespace operators::detail
             workspace.source_runtime.set_uniform_sources(source_span(setup.heat), source_span(setup.current));
         }
 
-        static constexpr void evaluate_with(const KernelPlan&    plan,
-                                            const SolveParams&   solve_params,
-                                            KernelWorkspace&     workspace,
+        static constexpr void evaluate_with(const OperatorPlan&    plan,
+                                            const RuntimeScalars&   runtime_scalars,
+                                            OperatorWorkspace&     workspace,
                                             std::span<const double, Shape::x_size> x,
                                             PackedVector& out) noexcept
         {
             workspace.profiles.refresh_active(x, plan.profile_params);
-            workspace.geometry.update(solve_params.a, solve_params.R0, solve_params.Z0, workspace.profiles);
+            workspace.geometry.update(runtime_scalars.a, runtime_scalars.R0, runtime_scalars.Z0, workspace.profiles);
 
             if constexpr (SourceActiveFamilyCode == source_active_psin)
             {
@@ -188,16 +188,16 @@ namespace operators::detail
                 if constexpr (SourceCoordinateCode == source_coordinate_rho)
                     workspace.source_runtime.template update_pf_rho<SourceConstraintCode>(
                         workspace.geometry,
-                        solve_params.Ip,
-                        solve_params.beta,
-                        solve_params.B0,
+                        runtime_scalars.Ip,
+                        runtime_scalars.beta,
+                        runtime_scalars.B0,
                         plan.n_axis_fix);
                 else
                     workspace.source_runtime.template update_pf_psin_uniform<SourceConstraintCode>(
                         workspace.geometry,
-                        solve_params.Ip,
-                        solve_params.beta,
-                        solve_params.B0,
+                        runtime_scalars.Ip,
+                        runtime_scalars.beta,
+                        runtime_scalars.B0,
                         plan.n_axis_fix);
             }
             else if constexpr (SourceRouteCode == source_route_pp)
@@ -205,16 +205,16 @@ namespace operators::detail
                 if constexpr (SourceCoordinateCode == source_coordinate_rho)
                     workspace.source_runtime.template update_pp_rho<SourceConstraintCode>(
                         workspace.geometry,
-                        solve_params.Ip,
-                        solve_params.beta,
-                        solve_params.B0,
+                        runtime_scalars.Ip,
+                        runtime_scalars.beta,
+                        runtime_scalars.B0,
                         plan.n_axis_fix);
                 else
                     workspace.source_runtime.template update_pp_psin<SourceConstraintCode>(
                         workspace.geometry,
-                        solve_params.Ip,
-                        solve_params.beta,
-                        solve_params.B0,
+                        runtime_scalars.Ip,
+                        runtime_scalars.beta,
+                        runtime_scalars.B0,
                         plan.n_axis_fix);
             }
             else if constexpr (SourceRouteCode == source_route_pi)
@@ -222,16 +222,16 @@ namespace operators::detail
                 if constexpr (SourceCoordinateCode == source_coordinate_rho)
                     workspace.source_runtime.template update_pi_rho<SourceConstraintCode>(
                         workspace.geometry,
-                        solve_params.Ip,
-                        solve_params.beta,
-                        solve_params.B0,
+                        runtime_scalars.Ip,
+                        runtime_scalars.beta,
+                        runtime_scalars.B0,
                         plan.n_axis_fix);
                 else
                     workspace.source_runtime.template update_pi_psin<SourceConstraintCode>(
                         workspace.geometry,
-                        solve_params.Ip,
-                        solve_params.beta,
-                        solve_params.B0,
+                        runtime_scalars.Ip,
+                        runtime_scalars.beta,
+                        runtime_scalars.B0,
                         plan.n_axis_fix);
             }
             else if constexpr (SourceRouteCode == source_route_pj1)
@@ -239,16 +239,16 @@ namespace operators::detail
                 if constexpr (SourceCoordinateCode == source_coordinate_rho)
                     workspace.source_runtime.template update_pj1_rho<SourceConstraintCode>(
                         workspace.geometry,
-                        solve_params.Ip,
-                        solve_params.beta,
-                        solve_params.B0,
+                        runtime_scalars.Ip,
+                        runtime_scalars.beta,
+                        runtime_scalars.B0,
                         plan.n_axis_fix);
                 else
                     workspace.source_runtime.template update_pj1_psin<SourceConstraintCode>(
                         workspace.geometry,
-                        solve_params.Ip,
-                        solve_params.beta,
-                        solve_params.B0,
+                        runtime_scalars.Ip,
+                        runtime_scalars.beta,
+                        runtime_scalars.B0,
                         plan.n_axis_fix);
             }
             else if constexpr (SourceRouteCode == source_route_pj2)
@@ -256,26 +256,26 @@ namespace operators::detail
                 if constexpr (SourceCoordinateCode == source_coordinate_rho)
                     workspace.source_runtime.template update_pj2_rho<SourceConstraintCode>(
                         workspace.geometry,
-                        solve_params.R0,
-                        solve_params.Ip,
-                        solve_params.beta,
-                        solve_params.B0,
+                        runtime_scalars.R0,
+                        runtime_scalars.Ip,
+                        runtime_scalars.beta,
+                        runtime_scalars.B0,
                         plan.n_axis_fix);
                 else if constexpr (SourceNodesCode == source_nodes_uniform)
                     workspace.source_runtime.template update_pj2_psin_uniform_fixed_point<SourceConstraintCode>(
                         workspace.geometry,
-                        solve_params.R0,
-                        solve_params.Ip,
-                        solve_params.beta,
-                        solve_params.B0,
+                        runtime_scalars.R0,
+                        runtime_scalars.Ip,
+                        runtime_scalars.beta,
+                        runtime_scalars.B0,
                         plan.n_axis_fix);
                 else
                     workspace.source_runtime.template update_pj2_psin<SourceConstraintCode>(
                         workspace.geometry,
-                        solve_params.R0,
-                        solve_params.Ip,
-                        solve_params.beta,
-                        solve_params.B0,
+                        runtime_scalars.R0,
+                        runtime_scalars.Ip,
+                        runtime_scalars.beta,
+                        runtime_scalars.B0,
                         plan.n_axis_fix);
             }
             else
@@ -283,18 +283,18 @@ namespace operators::detail
                 if constexpr (SourceCoordinateCode == source_coordinate_rho)
                     workspace.source_runtime.template update_pq_rho<SourceConstraintCode>(
                         workspace.geometry,
-                        solve_params.R0,
-                        solve_params.Ip,
-                        solve_params.beta,
-                        solve_params.B0,
+                        runtime_scalars.R0,
+                        runtime_scalars.Ip,
+                        runtime_scalars.beta,
+                        runtime_scalars.B0,
                         plan.n_axis_fix);
                 else
                     workspace.source_runtime.template update_pq_psin<SourceConstraintCode>(
                         workspace.geometry,
-                        solve_params.R0,
-                        solve_params.Ip,
-                        solve_params.beta,
-                        solve_params.B0,
+                        runtime_scalars.R0,
+                        runtime_scalars.Ip,
+                        runtime_scalars.beta,
+                        runtime_scalars.B0,
                         plan.n_axis_fix);
             }
 
@@ -302,21 +302,21 @@ namespace operators::detail
                 workspace.source_runtime.publish_source_target_root_fields();
 
             workspace.residual.update_compact(workspace.source_runtime, workspace.geometry);
-            workspace.residual.pack_into(out, solve_params.a, solve_params.R0, solve_params.B0);
+            workspace.residual.pack_into(out, runtime_scalars.a, runtime_scalars.R0, runtime_scalars.B0);
         }
 
         constexpr void evaluate(std::span<const double, Shape::x_size> x, PackedVector& out) noexcept
         {
-            evaluate_with(plan, solve_params_, workspace, x, out);
+            evaluate_with(plan, runtime_scalars_, workspace, x, out);
         }
 
-        KernelPlan      plan{};
-        KernelWorkspace workspace{};
+        OperatorPlan      plan{};
+        OperatorWorkspace workspace{};
 
     private:
-        static constexpr KernelPlan make_plan(const Setup& setup) noexcept
+        static constexpr OperatorPlan make_plan(const Setup& setup) noexcept
         {
-            KernelPlan out{};
+            OperatorPlan out{};
             out.profile_params = setup.profile_params;
             out.n_axis_fix     = axis_fix_count<GridType>();
             out.fixed_profiles.refresh_fixed(out.profile_params);
@@ -329,13 +329,13 @@ namespace operators::detail
             return std::span<const double, SourceShape::sample_count>{values.data(), SourceShape::sample_count};
         }
 
-        SolveParams solve_params_{};
+        RuntimeScalars runtime_scalars_{};
     };
 } // namespace operators::detail
 
 namespace operators
 {
     using detail::SourceOperator;
-    using detail::SourceOperatorSetup;
-    using detail::SourceOperatorSolveParams;
+    using detail::OperatorSetup;
+    using detail::OperatorRuntimeScalars;
 } // namespace operators

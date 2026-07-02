@@ -88,7 +88,7 @@ namespace veqlib_kernel_api
                   typename CalculusScheme,
                   size_t BoundaryMmax = inferred_M_max<CFamilyCounts, SFamilyCounts>(),
                   bool   LayoutProfileFirst = false>
-        struct SourceKernelTopology
+        struct SourceCompiledTopology
         {
             static constexpr size_t L_max =
                 inferred_L_max<HCount, VCount, KappaCount, PsinCount, FCount, CFamilyCounts, SFamilyCounts>();
@@ -123,7 +123,7 @@ namespace veqlib_kernel_api
         constexpr auto kernel_c_counts = Topology::c_family_counts;
         constexpr auto kernel_s_counts = Topology::s_family_counts;
 
-        using KernelTopology = SourceKernelTopology<Topology::Nr,
+        using CompiledTopology = SourceCompiledTopology<Topology::Nr,
                                                        Topology::Nt,
                                                        Topology::source_sample_count,
                                                        Topology::h_count,
@@ -137,15 +137,15 @@ namespace veqlib_kernel_api
                                                        Spectral,
                                                        Topology::M_max,
                                                        Topology::layout_profile_first>;
-        using KernelShape    = KernelTopology::Shape;
-        using KernelGrid     = KernelTopology::Grid;
-        using KernelSource   = KernelTopology::Source;
-        using KernelOperator = KernelTopology::Operator;
-        using PackedVector   = KernelOperator::PackedVector;
+        using CompiledShape    = CompiledTopology::Shape;
+        using CompiledGrid     = CompiledTopology::Grid;
+        using CompiledSource   = CompiledTopology::Source;
+        using CompiledOperator = CompiledTopology::Operator;
+        using PackedVector   = CompiledOperator::PackedVector;
 
-        static_assert(KernelShape::L_max == Topology::L_max);
-        static_assert(KernelShape::M_max == Topology::M_max);
-        static_assert(KernelShape::K_max == Topology::K_max);
+        static_assert(CompiledShape::L_max == Topology::L_max);
+        static_assert(CompiledShape::M_max == Topology::M_max);
+        static_assert(CompiledShape::K_max == Topology::K_max);
 
         constexpr double veqpy_max_residual              = 1.0e-6;
         constexpr int    veqpy_requested_max_evaluations = 1000;
@@ -175,14 +175,14 @@ namespace veqlib_kernel_api
         };
 
 
-        struct CaseInput
+        struct RuntimeCase
         {
             std::string                                    case_name = "PF_psin_uniform_Ip";
-            std::array<double, KernelSource::sample_count> heat{};
-            std::array<double, KernelSource::sample_count> current{};
-            std::array<double, KernelShape::x_size>        x0{};
-            std::array<double, KernelShape::x_size>        x_scale{};
-            std::array<double, KernelShape::x_size>        residual_scale{};
+            std::array<double, CompiledSource::sample_count> heat{};
+            std::array<double, CompiledSource::sample_count> current{};
+            std::array<double, CompiledShape::x_size>        x0{};
+            std::array<double, CompiledShape::x_size>        x_scale{};
+            std::array<double, CompiledShape::x_size>        residual_scale{};
             double                                         a         = 1.05 / 1.85;
             double                                         R0        = 1.05;
             double                                         Z0        = 0.0;
@@ -190,8 +190,8 @@ namespace veqlib_kernel_api
             double                                         ka        = 2.2;
             double                                         c0_offset = 0.0;
             double                                         s1_offset = 0.52359877559829887308;
-            std::array<double, KernelShape::M_max + 1>     c_offsets{};
-            std::array<double, KernelShape::M_max + 1>     s_offsets{};
+            std::array<double, CompiledShape::M_max + 1>     c_offsets{};
+            std::array<double, CompiledShape::M_max + 1>     s_offsets{};
             double                                         Ip                       = 3.7699111867885415;
             double                                         beta                     = std::numeric_limits<double>::quiet_NaN();
             double                                         max_residual             = veqpy_max_residual;
@@ -214,7 +214,7 @@ namespace veqlib_kernel_api
 
         struct SolveResult
         {
-            std::array<double, KernelShape::x_size> x{};
+            std::array<double, CompiledShape::x_size> x{};
             PackedVector                            raw{};
             PackedVector                            scaled{};
             std::array<double, 2>                   alpha{};
@@ -248,7 +248,7 @@ namespace veqlib_kernel_api
             bool                                    accepted                       = false;
         };
 
-        double norm2(std::span<const double, KernelShape::x_size> values) noexcept
+        double norm2(std::span<const double, CompiledShape::x_size> values) noexcept
         {
             double total = 0.0;
             for (double value : values)
@@ -267,13 +267,13 @@ namespace veqlib_kernel_api
             return scaled > veqpy_accepted_residual_floor ? scaled : veqpy_accepted_residual_floor;
         }
 
-        double acceptance_threshold(const CaseInput& input) noexcept
+        double acceptance_threshold(const RuntimeCase& input) noexcept
         {
             const double scaled = input.max_residual * input.accepted_residual_factor;
             return scaled > input.accepted_residual_floor ? scaled : input.accepted_residual_floor;
         }
 
-        int max_solver_evaluations(const CaseInput& input) noexcept
+        int max_solver_evaluations(const RuntimeCase& input) noexcept
         {
             return input.max_evaluations > 500 ? input.max_evaluations : 500;
         }
@@ -309,10 +309,10 @@ namespace veqlib_kernel_api
         };
 
         template <typename Values>
-        constexpr std::array<double, KernelSource::sample_count> source_defaults_from(const Values& values) noexcept
+        constexpr std::array<double, CompiledSource::sample_count> source_defaults_from(const Values& values) noexcept
         {
-            std::array<double, KernelSource::sample_count> out{};
-            for (size_t i = 0; i < KernelSource::sample_count; ++i)
+            std::array<double, CompiledSource::sample_count> out{};
+            for (size_t i = 0; i < CompiledSource::sample_count; ++i)
             {
                 const size_t source_index = i < values.size() ? i : values.size() - 1;
                 out[i]                    = values[source_index];

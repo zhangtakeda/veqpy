@@ -1,7 +1,7 @@
 """Native module registry and thread-owned VEQlib solver wrappers.
 
 The registry caches loaded topology artifacts at process scope, but each
-``KernelSolver`` wrapper owns mutable C++ workspace and is guarded by the Python
+``NativeSolver`` wrapper owns mutable C++ workspace and is guarded by the Python
 thread that created it. Sharing artifacts is allowed; sharing solver workspace
 across threads is not.
 """
@@ -42,8 +42,8 @@ class LoadedKernel:
     module: ModuleType
 
 
-class ThreadOwnedKernelSolver:
-    """Small Python guard around the mutable C++ KernelSolver workspace."""
+class ThreadOwnedNativeSolver:
+    """Small Python guard around the mutable C++ NativeSolver workspace."""
 
     def __init__(self, solver: Any, *, pin_cpu: bool | int | None = None) -> None:
         self._solver: Any | None = solver
@@ -62,7 +62,7 @@ class ThreadOwnedKernelSolver:
         current = threading.get_ident()
         if current != self._owner_thread_id:
             raise SolverThreadError(
-                "VEQlib KernelSolver owns mutable C++ workspace and cannot be used "
+                "VEQlib NativeSolver owns mutable C++ workspace and cannot be used "
                 f"from thread {current}; owner thread is {self._owner_thread_id}"
             )
 
@@ -118,7 +118,7 @@ class ThreadOwnedKernelSolver:
 
     def _require_solver(self) -> Any:
         if self._solver is None:
-            raise SolverClosedError("VEQlib KernelSolver wrapper is closed")
+            raise SolverClosedError("VEQlib NativeSolver wrapper is closed")
         return self._solver
 
     def _call_native(self, method: Any, *args: Any) -> Any:
@@ -190,14 +190,14 @@ class KernelRegistry:
         solver: str | int = "powell",
         force: bool = False,
         pin_cpu: bool | int | None = None,
-    ) -> ThreadOwnedKernelSolver:
+    ) -> ThreadOwnedNativeSolver:
         loaded = self.load_kernel(topology, force=force)
         solver_code = solver_method_code(solver)
         pin_policy = self.pin_cpu if pin_cpu is None else pin_cpu
-        cpp_solver = loaded.module.KernelSolver(
+        cpp_solver = loaded.module.NativeSolver(
             solver_code=solver_code,
         )
-        return ThreadOwnedKernelSolver(cpp_solver, pin_cpu=pin_policy)
+        return ThreadOwnedNativeSolver(cpp_solver, pin_cpu=pin_policy)
 
     def get_thread_solver(
         self,
@@ -206,7 +206,7 @@ class KernelRegistry:
         solver: str | int = "powell",
         force: bool = False,
         pin_cpu: bool | int | None = None,
-    ) -> ThreadOwnedKernelSolver:
+    ) -> ThreadOwnedNativeSolver:
         loaded = self.load_kernel(topology, force=force)
         solvers = self._thread_solver_cache()
         solver_code = solver_method_code(solver)
@@ -215,14 +215,14 @@ class KernelRegistry:
         cached = solvers.get(key)
         if cached is not None and not cached.closed:
             return cached
-        cpp_solver = loaded.module.KernelSolver(
+        cpp_solver = loaded.module.NativeSolver(
             solver_code=solver_code,
         )
-        wrapped = ThreadOwnedKernelSolver(cpp_solver, pin_cpu=pin_policy)
+        wrapped = ThreadOwnedNativeSolver(cpp_solver, pin_cpu=pin_policy)
         solvers[key] = wrapped
         return wrapped
 
-    def _thread_solver_cache(self) -> dict[tuple[str, int, object], ThreadOwnedKernelSolver]:
+    def _thread_solver_cache(self) -> dict[tuple[str, int, object], ThreadOwnedNativeSolver]:
         solvers = getattr(self._thread_local, "solvers", None)
         if solvers is None:
             solvers = {}

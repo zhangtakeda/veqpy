@@ -61,15 +61,15 @@ namespace veqlib_kernel_api
             return physical_scale;
         }
 
-        profiles::ProfileRuntimeParams<KernelShape> profile_params_for_case(const CaseInput& input) noexcept
+        profiles::ProfileRuntimeParams<CompiledShape> profile_params_for_case(const RuntimeCase& input) noexcept
         {
-            profiles::ProfileRuntimeParams<KernelShape> params{};
-            params.offsets[KernelShape::kappa_profile_id] = input.ka;
-            params.scales[KernelShape::F_profile_id]      = input.R0 * input.B0;
-            for (size_t order = 0; order <= KernelShape::M_max; ++order)
-                params.offsets[KernelShape::c_profile_id(order)] = input.c_offsets[order];
-            for (size_t order = 1; order <= KernelShape::M_max; ++order)
-                params.offsets[KernelShape::s_profile_id(order)] = input.s_offsets[order];
+            profiles::ProfileRuntimeParams<CompiledShape> params{};
+            params.offsets[CompiledShape::kappa_profile_id] = input.ka;
+            params.scales[CompiledShape::F_profile_id]      = input.R0 * input.B0;
+            for (size_t order = 0; order <= CompiledShape::M_max; ++order)
+                params.offsets[CompiledShape::c_profile_id(order)] = input.c_offsets[order];
+            for (size_t order = 1; order <= CompiledShape::M_max; ++order)
+                params.offsets[CompiledShape::s_profile_id(order)] = input.s_offsets[order];
             return params;
         }
 
@@ -131,7 +131,7 @@ namespace veqlib_kernel_api
             return is_finite(max_ratio) && max_ratio >= 1.0 ? max_ratio : 1.0;
         }
 
-        double median_sorted_prefix(std::array<double, KernelShape::x_size>& values, size_t count) noexcept
+        double median_sorted_prefix(std::array<double, CompiledShape::x_size>& values, size_t count) noexcept
         {
             if (count == 0)
                 return 0.0;
@@ -142,7 +142,7 @@ namespace veqlib_kernel_api
             return 0.5 * (values[mid - 1] + values[mid]);
         }
 
-        double stable_rms_clipped(std::array<double, KernelShape::x_size>& values,
+        double stable_rms_clipped(std::array<double, CompiledShape::x_size>& values,
                                   size_t                                 count,
                                   double                                 cutoff) noexcept
         {
@@ -194,7 +194,7 @@ namespace veqlib_kernel_api
 
         double robust_rms_block(const PackedVector& residual, size_t offset, size_t length, double huber_tau) noexcept
         {
-            std::array<double, KernelShape::x_size> finite{};
+            std::array<double, CompiledShape::x_size> finite{};
             size_t                                 count = 0;
             for (size_t i = 0; i < length; ++i)
             {
@@ -205,9 +205,9 @@ namespace veqlib_kernel_api
             if (count == 0)
                 return 0.0;
 
-            std::array<double, KernelShape::x_size> sorted = finite;
+            std::array<double, CompiledShape::x_size> sorted = finite;
             const double                           center = median_sorted_prefix(sorted, count);
-            std::array<double, KernelShape::x_size> deviations{};
+            std::array<double, CompiledShape::x_size> deviations{};
             for (size_t i = 0; i < count; ++i)
                 deviations[i] = std::abs(finite[i] - center);
             const double mad = median_sorted_prefix(deviations, count);
@@ -218,9 +218,9 @@ namespace veqlib_kernel_api
             return stable_rms_clipped(finite, count, cutoff);
         }
 
-        double balanced_residual_anchor(std::array<double, KernelShape::active_count>& values) noexcept
+        double balanced_residual_anchor(std::array<double, CompiledShape::active_count>& values) noexcept
         {
-            std::array<double, KernelShape::active_count> finite_positive{};
+            std::array<double, CompiledShape::active_count> finite_positive{};
             size_t                                       count = 0;
             for (double value : values)
                 if (is_finite(value) && value > 0.0)
@@ -234,7 +234,7 @@ namespace veqlib_kernel_api
             return 0.5 * (finite_positive[mid - 1] + finite_positive[mid]);
         }
 
-        void clip_scale_by_anchor(std::array<double, KernelShape::active_count>& values,
+        void clip_scale_by_anchor(std::array<double, CompiledShape::active_count>& values,
                                   double                                        floor,
                                   double                                        max_ratio) noexcept
         {
@@ -257,14 +257,14 @@ namespace veqlib_kernel_api
                 value = std::clamp(value, lower, upper);
         }
 
-        std::array<double, KernelShape::x_size>
-        expand_block_scale_values(const std::array<double, KernelShape::active_count>& block_values) noexcept
+        std::array<double, CompiledShape::x_size>
+        expand_block_scale_values(const std::array<double, CompiledShape::active_count>& block_values) noexcept
         {
-            std::array<double, KernelShape::x_size> scale{};
+            std::array<double, CompiledShape::x_size> scale{};
             size_t                                 offset = 0;
-            for (size_t block = 0; block < KernelShape::active_count; ++block)
+            for (size_t block = 0; block < CompiledShape::active_count; ++block)
             {
-                const size_t length = KernelShape::active_lengths[block];
+                const size_t length = CompiledShape::active_lengths[block];
                 for (size_t i = 0; i < length; ++i)
                     scale[offset + i] = block_values[block];
                 offset += length;
@@ -272,26 +272,26 @@ namespace veqlib_kernel_api
             return scale;
         }
 
-        std::array<double, KernelShape::x_size> build_none_residual_scale() noexcept
+        std::array<double, CompiledShape::x_size> build_none_residual_scale() noexcept
         {
-            std::array<double, KernelShape::x_size> scale{};
+            std::array<double, CompiledShape::x_size> scale{};
             scale.fill(1.0);
             return scale;
         }
 
-        std::array<double, KernelShape::x_size> build_fast_residual_scale(const PackedVector& residual,
+        std::array<double, CompiledShape::x_size> build_fast_residual_scale(const PackedVector& residual,
                                                                          double              floor = 1.0,
                                                                          double max_ratio = 1.0e6) noexcept
         {
-            std::array<double, KernelShape::active_count> block_values{};
+            std::array<double, CompiledShape::active_count> block_values{};
             size_t                                       offset         = 0;
             const double                                 safe_floor     = residual_scale_floor(floor);
             const double                                 safe_max_ratio = residual_scale_max_ratio(max_ratio);
             const double ceiling = is_finite(safe_floor * safe_max_ratio) ? safe_floor * safe_max_ratio
                                                                               : std::numeric_limits<double>::max();
-            for (size_t block = 0; block < KernelShape::active_count; ++block)
+            for (size_t block = 0; block < CompiledShape::active_count; ++block)
             {
-                const size_t length = KernelShape::active_lengths[block];
+                const size_t length = CompiledShape::active_lengths[block];
                 const double rms         = stable_rms_block(residual, offset, length);
                 const double floored     = rms > safe_floor ? rms : safe_floor;
                 block_values[block]      = floored < ceiling ? floored : ceiling;
@@ -300,16 +300,16 @@ namespace veqlib_kernel_api
             return expand_block_scale_values(block_values);
         }
 
-        std::array<double, KernelShape::x_size> build_balanced_residual_scale(const PackedVector& residual,
+        std::array<double, CompiledShape::x_size> build_balanced_residual_scale(const PackedVector& residual,
                                                                              double              floor,
                                                                              double              max_ratio,
                                                                              double huber_tau) noexcept
         {
-            std::array<double, KernelShape::active_count> block_values{};
+            std::array<double, CompiledShape::active_count> block_values{};
             size_t                                       offset = 0;
-            for (size_t block = 0; block < KernelShape::active_count; ++block)
+            for (size_t block = 0; block < CompiledShape::active_count; ++block)
             {
-                const size_t length = KernelShape::active_lengths[block];
+                const size_t length = CompiledShape::active_lengths[block];
                 block_values[block] = robust_rms_block(residual, offset, length, huber_tau);
                 offset += length;
             }
@@ -337,7 +337,7 @@ namespace veqlib_kernel_api
             return relative <= 1.0e-6 ? 0.0 : relative;
         }
 
-        double estimate_axis_shift_h0(const CaseInput& input) noexcept
+        double estimate_axis_shift_h0(const RuntimeCase& input) noexcept
         {
             const double epsilon           = input.R0 != 0.0 ? input.a / input.R0 : 0.0;
             const double kappa             = std::abs(input.ka);
@@ -347,17 +347,17 @@ namespace veqlib_kernel_api
             return std::abs(h0) <= 1.0e-6 ? 0.0 : h0;
         }
 
-        double boundary_curve_strain(const CaseInput& input) noexcept
+        double boundary_curve_strain(const RuntimeCase& input) noexcept
         {
             constexpr size_t samples = 32;
             constexpr double two_pi  = 6.283185307179586476925286766559;
             const double     kappa   = std::abs(input.ka);
 
             bool has_c_shape = false;
-            for (size_t order = 0; order <= KernelShape::M_max; ++order)
+            for (size_t order = 0; order <= CompiledShape::M_max; ++order)
                 has_c_shape = has_c_shape || input.c_offsets[order] != 0.0;
             bool has_s_shape = false;
-            for (size_t order = 1; order <= KernelShape::M_max; ++order)
+            for (size_t order = 1; order <= CompiledShape::M_max; ++order)
                 has_s_shape = has_s_shape || input.s_offsets[order] != 0.0;
             if (!has_c_shape && !has_s_shape)
                 return 0.0;
@@ -368,7 +368,7 @@ namespace veqlib_kernel_api
                 const double theta     = two_pi * static_cast<double>(sample) / static_cast<double>(samples);
                 double       eta       = input.c_offsets[0];
                 double       eta_prime = 0.0;
-                for (size_t order = 1; order <= KernelShape::M_max; ++order)
+                for (size_t order = 1; order <= CompiledShape::M_max; ++order)
                 {
                     const double order_eval = static_cast<double>(order);
                     const double phase      = order_eval * theta;
@@ -391,54 +391,54 @@ namespace veqlib_kernel_api
 
         constexpr size_t fourier_radial_power_for_order(size_t order) noexcept
         {
-            return order < KernelShape::K_max ? order : KernelShape::K_max;
+            return order < CompiledShape::K_max ? order : CompiledShape::K_max;
         }
 
         constexpr size_t profile_radial_power(size_t profile_id) noexcept
         {
-            if (profile_id >= KernelShape::c0_profile_id && profile_id <= KernelShape::c_profile_id(KernelShape::M_max))
+            if (profile_id >= CompiledShape::c0_profile_id && profile_id <= CompiledShape::c_profile_id(CompiledShape::M_max))
             {
-                const size_t order = profile_id - KernelShape::c0_profile_id;
+                const size_t order = profile_id - CompiledShape::c0_profile_id;
                 return order == 0 ? 0 : fourier_radial_power_for_order(order);
             }
-            if (profile_id >= KernelShape::s_profile_id(1) && profile_id <= KernelShape::s_profile_id(KernelShape::M_max))
+            if (profile_id >= CompiledShape::s_profile_id(1) && profile_id <= CompiledShape::s_profile_id(CompiledShape::M_max))
             {
-                const size_t order = profile_id - KernelShape::c0_profile_id - KernelShape::M_max;
+                const size_t order = profile_id - CompiledShape::c0_profile_id - CompiledShape::M_max;
                 return fourier_radial_power_for_order(order);
             }
             return 0;
         }
 
-        double profile_offset_for_initial_seed(const CaseInput& input, size_t profile_id) noexcept
+        double profile_offset_for_initial_seed(const RuntimeCase& input, size_t profile_id) noexcept
         {
-            if (profile_id >= KernelShape::c0_profile_id && profile_id <= KernelShape::c_profile_id(KernelShape::M_max))
-                return input.c_offsets[profile_id - KernelShape::c0_profile_id];
-            if (profile_id >= KernelShape::s_profile_id(1) && profile_id <= KernelShape::s_profile_id(KernelShape::M_max))
-                return input.s_offsets[profile_id - KernelShape::c0_profile_id - KernelShape::M_max];
+            if (profile_id >= CompiledShape::c0_profile_id && profile_id <= CompiledShape::c_profile_id(CompiledShape::M_max))
+                return input.c_offsets[profile_id - CompiledShape::c0_profile_id];
+            if (profile_id >= CompiledShape::s_profile_id(1) && profile_id <= CompiledShape::s_profile_id(CompiledShape::M_max))
+                return input.s_offsets[profile_id - CompiledShape::c0_profile_id - CompiledShape::M_max];
             return 0.0;
         }
 
-        void seed_geometric_initial_state(CaseInput& input) noexcept
+        void seed_geometric_initial_state(RuntimeCase& input) noexcept
         {
             input.x0.fill(0.0);
             const double h0_est = estimate_axis_shift_h0(input);
-            for (size_t active_slot = 0; active_slot < KernelShape::active_count; ++active_slot)
+            for (size_t active_slot = 0; active_slot < CompiledShape::active_count; ++active_slot)
             {
-                const size_t profile_id = KernelShape::active_profile_ids[active_slot];
-                if (KernelShape::active_lengths[active_slot] == 0)
+                const size_t profile_id = CompiledShape::active_profile_ids[active_slot];
+                if (CompiledShape::active_lengths[active_slot] == 0)
                     continue;
-                const int index = KernelShape::coeff_index[profile_id][0];
+                const int index = CompiledShape::coeff_index[profile_id][0];
                 if (index < 0)
                     continue;
                 const size_t x_index = static_cast<size_t>(index);
-                if (profile_id == KernelShape::h_profile_id)
+                if (profile_id == CompiledShape::h_profile_id)
                 {
                     input.x0[x_index] = h0_est;
                 }
-                else if ((profile_id >= KernelShape::c0_profile_id &&
-                          profile_id <= KernelShape::c_profile_id(KernelShape::M_max)) ||
-                         (profile_id >= KernelShape::s_profile_id(1) &&
-                          profile_id <= KernelShape::s_profile_id(KernelShape::M_max)))
+                else if ((profile_id >= CompiledShape::c0_profile_id &&
+                          profile_id <= CompiledShape::c_profile_id(CompiledShape::M_max)) ||
+                         (profile_id >= CompiledShape::s_profile_id(1) &&
+                          profile_id <= CompiledShape::s_profile_id(CompiledShape::M_max)))
                 {
                     const double offset = profile_offset_for_initial_seed(input, profile_id);
                     const size_t power  = profile_radial_power(profile_id);
@@ -447,7 +447,7 @@ namespace veqlib_kernel_api
             }
         }
 
-        void apply_cold_policy(CaseInput& input, int policy_code)
+        void apply_cold_policy(RuntimeCase& input, int policy_code)
         {
             switch (policy_code)
             {
@@ -468,7 +468,7 @@ namespace veqlib_kernel_api
             }
         }
 
-        void apply_initial_policy(CaseInput& input) { apply_cold_policy(input, input.initial_policy_code); }
+        void apply_initial_policy(RuntimeCase& input) { apply_cold_policy(input, input.initial_policy_code); }
 
         constexpr const char* solver_entrypoint(SolverKind solver) noexcept
         {
@@ -677,7 +677,7 @@ namespace veqlib_kernel_api
             return false;
         }
 
-        constexpr const char* solver_jacobian(const CaseInput& input) noexcept
+        constexpr const char* solver_jacobian(const RuntimeCase& input) noexcept
         {
             switch (input.solver)
             {
@@ -709,19 +709,19 @@ namespace veqlib_kernel_api
             return "unknown";
         }
 
-        CaseInput build_inline_case(int repeat, int warmup, SolverKind solver)
+        RuntimeCase build_inline_case(int repeat, int warmup, SolverKind solver)
         {
-            CaseInput input{};
+            RuntimeCase input{};
             input.heat         = default_scaled_heat;
             input.current      = default_scaled_current;
             input.repeat       = repeat;
             input.warmup       = warmup;
             input.solver       = solver;
             input.c_offsets[0] = input.c0_offset;
-            if constexpr (KernelShape::M_max >= 1)
+            if constexpr (CompiledShape::M_max >= 1)
                 input.s_offsets[1] = input.s1_offset;
             apply_initial_policy(input);
-            input.x_scale = build_x_block_scale_vector<KernelShape>(input.x0, profile_params_for_case(input));
+            input.x_scale = build_x_block_scale_vector<CompiledShape>(input.x0, profile_params_for_case(input));
             input.residual_scale.fill(1.0);
             return input;
         }

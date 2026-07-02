@@ -13,7 +13,7 @@ from typing import Any
 
 from .builder import KernelArtifact
 from .options import solver_method_code
-from .registry import KernelRegistry, SolverThreadError, ThreadOwnedKernelSolver
+from .registry import KernelRegistry, SolverThreadError, ThreadOwnedNativeSolver
 from .types import KernelTopology as Topology
 
 
@@ -40,7 +40,7 @@ class VEQlibSolver:
         self.solver_code = solver_method_code(solver)
         self.pin_cpu = pin_cpu
         self._owner_thread_id = threading.get_ident()
-        self._cpp_solver: ThreadOwnedKernelSolver | None = None
+        self._native_solver: ThreadOwnedNativeSolver | None = None
 
     @property
     def owner_thread_id(self) -> int:
@@ -59,15 +59,15 @@ class VEQlibSolver:
         self.check_thread()
         return self.registry.get_or_build(self.topology, force=force, dry_run=dry_run)
 
-    def _solver(self) -> ThreadOwnedKernelSolver:
+    def _solver(self) -> ThreadOwnedNativeSolver:
         self.check_thread()
-        if self._cpp_solver is None:
-            self._cpp_solver = self.registry.create_solver(
+        if self._native_solver is None:
+            self._native_solver = self.registry.create_solver(
                 self.topology,
                 solver=self.solver_code,
                 pin_cpu=self.pin_cpu,
             )
-        return self._cpp_solver
+        return self._native_solver
 
     def metadata(self) -> Any:
         return self._solver().metadata()
@@ -95,9 +95,9 @@ class VEQlibSolver:
 
     def close(self) -> None:
         self.check_thread()
-        if self._cpp_solver is not None:
-            self._cpp_solver.close()
-            self._cpp_solver = None
+        if self._native_solver is not None:
+            self._native_solver.close()
+            self._native_solver = None
 
     @property
     def last_elapsed_ms(self) -> float:

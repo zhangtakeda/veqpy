@@ -59,14 +59,14 @@ namespace
     using Clock = std::chrono::steady_clock;
     using std::size_t;
 
-    using veqlib_kernel_api::CaseInput;
-    using veqlib_kernel_api::KernelOperator;
-    using veqlib_kernel_api::KernelShape;
+    using veqlib_kernel_api::RuntimeCase;
+    using veqlib_kernel_api::CompiledOperator;
+    using veqlib_kernel_api::CompiledShape;
     using veqlib_kernel_api::PackedVector;
     using veqlib_kernel_api::SolverKind;
     using veqlib_kernel_api::build_inline_case;
     using veqlib_kernel_api::setup_for_case;
-    using veqlib_kernel_api::solve_params_for_case;
+    using veqlib_kernel_api::runtime_scalars_for_case;
     using tensor::uninitialized;
 
     enum class Stage
@@ -474,9 +474,9 @@ namespace
         return sink;
     }
 
-    std::vector<std::array<double, KernelShape::x_size>> make_state_ring(const CaseInput& input, size_t ring_size)
+    std::vector<std::array<double, CompiledShape::x_size>> make_state_ring(const RuntimeCase& input, size_t ring_size)
     {
-        std::vector<std::array<double, KernelShape::x_size>> ring;
+        std::vector<std::array<double, CompiledShape::x_size>> ring;
         ring.reserve(ring_size);
         for (size_t state = 0; state < ring_size; ++state)
         {
@@ -495,13 +495,13 @@ namespace
 
     struct BenchState
     {
-        using SourceRuntime     = KernelOperator::Source;
+        using SourceRuntime     = CompiledOperator::Source;
         using SourceRadialVector = SourceRuntime::RadialVector;
 
-        CaseInput                                      input;
-        KernelOperator                                 op;
+        RuntimeCase                                      input;
+        CompiledOperator                                 op;
         PackedVector                                   out;
-        std::vector<std::array<double, KernelShape::x_size>> ring;
+        std::vector<std::array<double, CompiledShape::x_size>> ring;
         SourceRadialVector                             source_scratch0{uninitialized};
         SourceRadialVector                             source_scratch1{uninitialized};
 
@@ -511,12 +511,12 @@ namespace
               out(uninitialized),
               ring(make_state_ring(input, ring_size))
         {
-            op.set_solve_params(solve_params_for_case(input));
+            op.set_runtime_scalars(runtime_scalars_for_case(input));
         }
 
-        std::span<const double, KernelShape::x_size> x_span() const noexcept
+        std::span<const double, CompiledShape::x_size> x_span() const noexcept
         {
-            return std::span<const double, KernelShape::x_size>{input.x0.data(), KernelShape::x_size};
+            return std::span<const double, CompiledShape::x_size>{input.x0.data(), CompiledShape::x_size};
         }
 
         void prepare_profiles() noexcept
@@ -527,9 +527,9 @@ namespace
         void prepare_geometry() noexcept
         {
             prepare_profiles();
-            op.workspace.geometry.update(op.solve_params().a,
-                                         op.solve_params().R0,
-                                         op.solve_params().Z0,
+            op.workspace.geometry.update(op.runtime_scalars().a,
+                                         op.runtime_scalars().R0,
+                                         op.runtime_scalars().Z0,
                                          op.workspace.profiles);
         }
 
@@ -543,7 +543,7 @@ namespace
         {
             prepare_source_materialize();
             op.workspace.source_runtime.update_pf_psin_uniform_ip(op.workspace.geometry,
-                                                                  op.solve_params().Ip,
+                                                                  op.runtime_scalars().Ip,
                                                                   op.plan.n_axis_fix);
         }
 
@@ -555,7 +555,7 @@ namespace
 
         double profile_sink() const noexcept
         {
-            return op.workspace.profiles.profile_field(KernelShape::psin_profile_id, 0, 0);
+            return op.workspace.profiles.profile_field(CompiledShape::psin_profile_id, 0, 0);
         }
 
         double geometry_sink() const noexcept { return op.workspace.geometry.surface_field(0, 0, 0); }
@@ -631,14 +631,14 @@ namespace
             state->prepare_profiles();
             return time_stage_calls(inner, [&](size_t) noexcept {
                 return benchmark_geometry_metric_compute(
-                    state->op.solve_params().a, state->op.solve_params().R0, state->op.workspace.profiles);
+                    state->op.runtime_scalars().a, state->op.runtime_scalars().R0, state->op.workspace.profiles);
             });
         case Stage::Geometry:
             state->prepare_profiles();
             return time_stage_calls(inner, [&](size_t) noexcept {
-                state->op.workspace.geometry.update(state->op.solve_params().a,
-                                                    state->op.solve_params().R0,
-                                                    state->op.solve_params().Z0,
+                state->op.workspace.geometry.update(state->op.runtime_scalars().a,
+                                                    state->op.runtime_scalars().R0,
+                                                    state->op.runtime_scalars().Z0,
                                                     state->op.workspace.profiles);
                 return state->geometry_sink();
             });
@@ -717,7 +717,7 @@ namespace
             state->prepare_source_materialize();
             return time_stage_calls(inner, [&](size_t) noexcept {
                 state->op.workspace.source_runtime.update_pf_psin_uniform_ip(state->op.workspace.geometry,
-                                                                            state->op.solve_params().Ip,
+                                                                            state->op.runtime_scalars().Ip,
                                                                             state->op.plan.n_axis_fix);
                 return state->source_sink();
             });
@@ -792,7 +792,7 @@ namespace
             state->prepare_source_update();
             return time_stage_calls(inner, [&](size_t) noexcept {
                 state->op.workspace.source_runtime.benchmark_update_alpha_from_integral(state->op.workspace.geometry,
-                                                                                       state->op.solve_params().Ip,
+                                                                                       state->op.runtime_scalars().Ip,
                                                                                        1.0);
                 return state->source_sink();
             });
@@ -807,9 +807,9 @@ namespace
             state->prepare_residual_update();
             return time_stage_calls(inner, [&](size_t) noexcept {
                 state->op.workspace.residual.pack_into(state->out,
-                                                       state->op.solve_params().a,
-                                                       state->op.solve_params().R0,
-                                                       state->op.solve_params().B0);
+                                                       state->op.runtime_scalars().a,
+                                                       state->op.runtime_scalars().R0,
+                                                       state->op.runtime_scalars().B0);
                 return state->residual_sink();
             });
         case Stage::Evaluate:
@@ -820,7 +820,7 @@ namespace
         case Stage::EvaluateRing:
             return time_stage_calls(inner, [&](size_t i) noexcept {
                 const auto& x = state->ring[i % state->ring.size()];
-                state->op.evaluate(std::span<const double, KernelShape::x_size>{x.data(), KernelShape::x_size},
+                state->op.evaluate(std::span<const double, CompiledShape::x_size>{x.data(), CompiledShape::x_size},
                                    state->out);
                 return state->residual_sink();
             });
@@ -891,14 +891,14 @@ namespace
     nlohmann::json topology_json()
     {
         nlohmann::json out;
-        out["Nr"]                  = veqlib_kernel_api::KernelGrid::radial_nodes;
-        out["Nt"]                  = veqlib_kernel_api::KernelGrid::theta_rows;
-        out["x_size"]              = KernelShape::x_size;
-        out["active_count"]        = KernelShape::active_count;
-        out["L_max"]               = KernelShape::L_max;
-        out["M_max"]               = KernelShape::M_max;
-        out["K_max"]               = KernelShape::K_max;
-        out["source_sample_count"] = veqlib_kernel_api::KernelSource::sample_count;
+        out["Nr"]                  = veqlib_kernel_api::CompiledGrid::radial_nodes;
+        out["Nt"]                  = veqlib_kernel_api::CompiledGrid::theta_rows;
+        out["x_size"]              = CompiledShape::x_size;
+        out["active_count"]        = CompiledShape::active_count;
+        out["L_max"]               = CompiledShape::L_max;
+        out["M_max"]               = CompiledShape::M_max;
+        out["K_max"]               = CompiledShape::K_max;
+        out["source_sample_count"] = veqlib_kernel_api::CompiledSource::sample_count;
         return out;
     }
 

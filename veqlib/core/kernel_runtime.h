@@ -27,38 +27,38 @@ namespace veqlib_kernel_api
     namespace
     {
         using math::is_finite;
-        std::array<double, KernelShape::x_size>
-        decode_z_to_x(std::span<const double, KernelShape::x_size>   z,
-                      std::span<const double, KernelShape::x_size>   x_scale) noexcept
+        std::array<double, CompiledShape::x_size>
+        decode_z_to_x(std::span<const double, CompiledShape::x_size>   z,
+                      std::span<const double, CompiledShape::x_size>   x_scale) noexcept
         {
-            std::array<double, KernelShape::x_size> x;
-            for (size_t i = 0; i < KernelShape::x_size; ++i)
+            std::array<double, CompiledShape::x_size> x;
+            for (size_t i = 0; i < CompiledShape::x_size; ++i)
                 x[i] = z[i] * x_scale[i];
             return x;
         }
 
-        std::array<double, KernelShape::x_size>
-        decode_z_to_x(std::span<const double, KernelShape::x_size>   z,
-                      const std::array<double, KernelShape::x_size>& x_scale) noexcept
+        std::array<double, CompiledShape::x_size>
+        decode_z_to_x(std::span<const double, CompiledShape::x_size>   z,
+                      const std::array<double, CompiledShape::x_size>& x_scale) noexcept
         {
-            return decode_z_to_x(z, std::span<const double, KernelShape::x_size>{x_scale.data(), KernelShape::x_size});
+            return decode_z_to_x(z, std::span<const double, CompiledShape::x_size>{x_scale.data(), CompiledShape::x_size});
         }
 
-        std::array<double, KernelShape::x_size>
-        encode_x_to_z(const std::array<double, KernelShape::x_size>& x,
-                      const std::array<double, KernelShape::x_size>& x_scale) noexcept
+        std::array<double, CompiledShape::x_size>
+        encode_x_to_z(const std::array<double, CompiledShape::x_size>& x,
+                      const std::array<double, CompiledShape::x_size>& x_scale) noexcept
         {
-            std::array<double, KernelShape::x_size> z;
-            for (size_t i = 0; i < KernelShape::x_size; ++i)
+            std::array<double, CompiledShape::x_size> z;
+            for (size_t i = 0; i < CompiledShape::x_size; ++i)
                 z[i] = x[i] / x_scale[i];
             return z;
         }
 
-        KernelOperator::Setup setup_for_case(const CaseInput& input) noexcept
+        CompiledOperator::Setup setup_for_case(const RuntimeCase& input) noexcept
         {
-            KernelOperator::Setup setup{};
+            CompiledOperator::Setup setup{};
             setup.profile_params = profile_params_for_case(input);
-            for (size_t i = 0; i < KernelSource::sample_count; ++i)
+            for (size_t i = 0; i < CompiledSource::sample_count; ++i)
             {
                 setup.heat[i]    = input.heat[i];
                 setup.current[i] = input.current[i];
@@ -66,9 +66,9 @@ namespace veqlib_kernel_api
             return setup;
         }
 
-        KernelOperator::SolveParams solve_params_for_case(const CaseInput& input) noexcept
+        CompiledOperator::RuntimeScalars runtime_scalars_for_case(const RuntimeCase& input) noexcept
         {
-            KernelOperator::SolveParams params{};
+            CompiledOperator::RuntimeScalars params{};
             params.a  = input.a;
             params.R0 = input.R0;
             params.Z0 = input.Z0;
@@ -78,17 +78,17 @@ namespace veqlib_kernel_api
             return params;
         }
 
-        KernelOperator make_operator_for_case(const CaseInput& input) noexcept
+        CompiledOperator make_operator_for_case(const RuntimeCase& input) noexcept
         {
-            KernelOperator op{setup_for_case(input)};
-            op.set_solve_params(solve_params_for_case(input));
+            CompiledOperator op{setup_for_case(input)};
+            op.set_runtime_scalars(runtime_scalars_for_case(input));
             return op;
         }
 
-        struct SolveContext
+        struct SolveState
         {
-            KernelOperator op;
-            CaseInput      input{};
+            CompiledOperator op;
+            RuntimeCase      input{};
             PackedVector   initial_raw{uninitialized};
             PackedVector   initial_scaled{uninitialized};
             std::array<double, 2> initial_alpha{};
@@ -105,7 +105,7 @@ namespace veqlib_kernel_api
             double         jvp_callback_ms                = 0.0;
             double         linear_solve_ms                = 0.0;
 
-            explicit SolveContext(const CaseInput& case_input)
+            explicit SolveState(const RuntimeCase& case_input)
                 : op(make_operator_for_case(case_input)), input(case_input)
             {
             }
@@ -122,12 +122,12 @@ namespace veqlib_kernel_api
                 linear_solve_ms                = 0.0;
             }
 
-            void raw_residual(std::span<const double, KernelShape::x_size> x,
-                              std::span<double, KernelShape::x_size>       residual) noexcept
+            void raw_residual(std::span<const double, CompiledShape::x_size> x,
+                              std::span<double, CompiledShape::x_size>       residual) noexcept
             {
                 PackedVector raw{uninitialized};
                 op.evaluate(x, raw);
-                for (size_t i = 0; i < KernelShape::x_size; ++i)
+                for (size_t i = 0; i < CompiledShape::x_size; ++i)
                     residual[i] = raw[i];
             }
         };
@@ -144,7 +144,7 @@ namespace veqlib_kernel_api
             return (value & 1ULL) == 0ULL ? -1.0 : 1.0;
         }
 
-        std::array<double, KernelShape::x_size> build_safe_residual_scale(SolveContext&       context,
+        std::array<double, CompiledShape::x_size> build_safe_residual_scale(SolveState&       context,
                                                                           const PackedVector& initial_raw,
                                                                           double              floor,
                                                                           double              max_ratio,
@@ -156,35 +156,35 @@ namespace veqlib_kernel_api
             if (probe_count <= 0 || !is_finite(probe_step) || probe_step <= 0.0)
                 return build_balanced_residual_scale(initial_raw, floor, max_ratio, huber_tau);
 
-            std::array<double, KernelShape::active_count> amplitude_values{};
+            std::array<double, CompiledShape::active_count> amplitude_values{};
             size_t                                        offset = 0;
-            for (size_t block = 0; block < KernelShape::active_count; ++block)
+            for (size_t block = 0; block < CompiledShape::active_count; ++block)
             {
-                const size_t length     = KernelShape::active_lengths[block];
+                const size_t length     = CompiledShape::active_lengths[block];
                 amplitude_values[block] = robust_rms_block(initial_raw, offset, length, huber_tau);
                 offset += length;
             }
 
-            std::array<double, KernelShape::active_count> sensitivity_sq{};
+            std::array<double, CompiledShape::active_count> sensitivity_sq{};
             for (int probe = 0; probe < probe_count; ++probe)
             {
-                std::array<double, KernelShape::x_size> probe_x{};
-                for (size_t i = 0; i < KernelShape::x_size; ++i)
+                std::array<double, CompiledShape::x_size> probe_x{};
+                for (size_t i = 0; i < CompiledShape::x_size; ++i)
                     probe_x[i] = context.input.x0[i] + probe_step * context.input.x_scale[i] *
                                                            deterministic_probe_sign(static_cast<size_t>(probe), i);
 
                 PackedVector probe_raw{uninitialized};
-                context.raw_residual(std::span<const double, KernelShape::x_size>{probe_x.data(), KernelShape::x_size},
-                                     std::span<double, KernelShape::x_size>{probe_raw.data(), KernelShape::x_size});
+                context.raw_residual(std::span<const double, CompiledShape::x_size>{probe_x.data(), CompiledShape::x_size},
+                                     std::span<double, CompiledShape::x_size>{probe_raw.data(), CompiledShape::x_size});
 
                 PackedVector diff{uninitialized};
-                for (size_t i = 0; i < KernelShape::x_size; ++i)
+                for (size_t i = 0; i < CompiledShape::x_size; ++i)
                     diff[i] = (probe_raw[i] - initial_raw[i]) / probe_step;
 
                 offset = 0;
-                for (size_t block = 0; block < KernelShape::active_count; ++block)
+                for (size_t block = 0; block < CompiledShape::active_count; ++block)
                 {
-                    const size_t length = KernelShape::active_lengths[block];
+                    const size_t length = CompiledShape::active_lengths[block];
                     const double value  = robust_rms_block(diff, offset, length, huber_tau);
                     sensitivity_sq[block] += value * value;
                     offset += length;
@@ -192,8 +192,8 @@ namespace veqlib_kernel_api
             }
 
             const double lambda = is_finite(sensitivity_lambda) && sensitivity_lambda > 0.0 ? sensitivity_lambda : 0.0;
-            std::array<double, KernelShape::active_count> combined{};
-            for (size_t block = 0; block < KernelShape::active_count; ++block)
+            std::array<double, CompiledShape::active_count> combined{};
+            for (size_t block = 0; block < CompiledShape::active_count; ++block)
             {
                 const double sensitivity = std::sqrt(sensitivity_sq[block] / static_cast<double>(probe_count));
                 combined[block]          = std::hypot(amplitude_values[block], lambda * sensitivity);
@@ -202,8 +202,8 @@ namespace veqlib_kernel_api
             return expand_block_scale_values(combined);
         }
 
-        std::array<double, KernelShape::x_size>
-        build_residual_scale_for_context(SolveContext& context, const PackedVector& initial_raw) noexcept
+        std::array<double, CompiledShape::x_size>
+        build_residual_scale_for_context(SolveState& context, const PackedVector& initial_raw) noexcept
         {
             switch (context.input.residual_normalization_code)
             {
@@ -232,7 +232,7 @@ namespace veqlib_kernel_api
             }
         }
 
-        int residual_scale_extra_evaluations(const CaseInput& input) noexcept
+        int residual_scale_extra_evaluations(const RuntimeCase& input) noexcept
         {
             if (input.residual_normalization_code != ResidualNormalizationSafe)
                 return 0;
@@ -242,72 +242,72 @@ namespace veqlib_kernel_api
             return input.residual_normalization_probe_count;
         }
 
-        void scaled_residual_z_no_count(SolveContext& context, const double* z, double* fvec) noexcept;
+        void scaled_residual_z_no_count(SolveState& context, const double* z, double* fvec) noexcept;
 
 #ifdef ENABLE_ENZYME
-        using KernelPlan        = KernelOperator::KernelPlan;
-        using KernelSolveParams = KernelOperator::SolveParams;
-        using KernelWorkspace   = KernelOperator::KernelWorkspace;
+        using OperatorPlan        = CompiledOperator::OperatorPlan;
+        using RuntimeScalars = CompiledOperator::RuntimeScalars;
+        using OperatorWorkspace   = CompiledOperator::OperatorWorkspace;
 
         double scaled_residual_raw_x_for_enzyme(double*                  x,
                                                 double*                  fvec,
-                                                KernelWorkspace*         workspace,
-                                                const KernelPlan*        plan,
-                                                const KernelSolveParams* solve_params,
+                                                OperatorWorkspace*         workspace,
+                                                const OperatorPlan*        plan,
+                                                const RuntimeScalars* runtime_scalars,
                                                 const double*            residual_scale) noexcept
         {
             PackedVector raw{uninitialized};
-            KernelOperator::evaluate_with(*plan,
-                                          *solve_params,
+            CompiledOperator::evaluate_with(*plan,
+                                          *runtime_scalars,
                                           *workspace,
-                                          std::span<const double, KernelShape::x_size>{x, KernelShape::x_size},
+                                          std::span<const double, CompiledShape::x_size>{x, CompiledShape::x_size},
                                           raw);
-            for (size_t i = 0; i < KernelShape::x_size; ++i)
+            for (size_t i = 0; i < CompiledShape::x_size; ++i)
                 fvec[i] = raw[i] / residual_scale[i];
             return 0.0;
         }
 #endif
 
-        void scaled_residual_z_no_count(SolveContext& context, const double* z, double* fvec) noexcept
+        void scaled_residual_z_no_count(SolveState& context, const double* z, double* fvec) noexcept
         {
             const auto   callback_started = std::chrono::steady_clock::now();
-            const auto   x = decode_z_to_x(std::span<const double, KernelShape::x_size>{z, KernelShape::x_size},
+            const auto   x = decode_z_to_x(std::span<const double, CompiledShape::x_size>{z, CompiledShape::x_size},
                                          context.input.x_scale);
             PackedVector raw{uninitialized};
             const auto   kernel_started = std::chrono::steady_clock::now();
-            context.raw_residual(std::span<const double, KernelShape::x_size>{x.data(), KernelShape::x_size},
-                                 std::span<double, KernelShape::x_size>{raw.data(), KernelShape::x_size});
+            context.raw_residual(std::span<const double, CompiledShape::x_size>{x.data(), CompiledShape::x_size},
+                                 std::span<double, CompiledShape::x_size>{raw.data(), CompiledShape::x_size});
             context.residual_kernel_ms += elapsed_ms_since(kernel_started);
             const auto scale_started = std::chrono::steady_clock::now();
-            for (size_t i = 0; i < KernelShape::x_size; ++i)
+            for (size_t i = 0; i < CompiledShape::x_size; ++i)
                 fvec[i] = raw[i] / context.input.residual_scale[i];
             context.residual_scale_ms += elapsed_ms_since(scale_started);
             context.residual_callback_ms += elapsed_ms_since(callback_started);
         }
 
 #ifdef ENABLE_ENZYME
-        void fill_enzyme_jvp_z(SolveContext& context, const double* z, const double* v, double* jv)
+        void fill_enzyme_jvp_z(SolveState& context, const double* z, const double* v, double* jv)
         {
-            std::array<double, KernelShape::x_size> x_primal;
-            std::array<double, KernelShape::x_size> x_dot;
-            std::array<double, KernelShape::x_size> f_primal;
+            std::array<double, CompiledShape::x_size> x_primal;
+            std::array<double, CompiledShape::x_size> x_dot;
+            std::array<double, CompiledShape::x_size> f_primal;
             const auto&                             x_scale = context.input.x_scale;
-            for (size_t i = 0; i < KernelShape::x_size; ++i)
+            for (size_t i = 0; i < CompiledShape::x_size; ++i)
             {
                 x_primal[i] = z[i] * x_scale[i];
                 x_dot[i]    = v[i] * x_scale[i];
             }
 
-            KernelWorkspace jvp_workspace_dot{};
-            const KernelPlan&        plan         = context.op.plan;
-            const KernelSolveParams& solve_params = context.op.solve_params();
+            OperatorWorkspace jvp_workspace_dot{};
+            const OperatorPlan&        plan         = context.op.plan;
+            const RuntimeScalars& runtime_scalars = context.op.runtime_scalars();
             (void)enzyme::autodiff<enzyme::Forward, enzyme::Const<double>>(
                 scaled_residual_raw_x_for_enzyme,
                 enzyme::Duplicated<double*>{x_primal.data(), x_dot.data()},
                 enzyme::Duplicated<double*>{f_primal.data(), jv},
-                enzyme::Duplicated<KernelWorkspace*>{&context.op.workspace, &jvp_workspace_dot},
-                enzyme::Const<const KernelPlan*>{&plan},
-                enzyme::Const<const KernelSolveParams*>{&solve_params},
+                enzyme::Duplicated<OperatorWorkspace*>{&context.op.workspace, &jvp_workspace_dot},
+                enzyme::Const<const OperatorPlan*>{&plan},
+                enzyme::Const<const RuntimeScalars*>{&runtime_scalars},
                 enzyme::Const<const double*>{context.input.residual_scale.data()});
         }
 
@@ -315,17 +315,17 @@ namespace veqlib_kernel_api
         {
             if constexpr (Topology::enzyme_jacobian_batch_width > 0)
                 return Topology::enzyme_jacobian_batch_width;
-            if constexpr (KernelShape::x_size >= 8)
+            if constexpr (CompiledShape::x_size >= 8)
                 return 4;
             else
                 return 1;
         }
 
         template <size_t Width>
-        void fill_enzyme_jacobian_z_vector(SolveContext& context, const double* z, double* fjac, int ldfjac)
+        void fill_enzyme_jacobian_z_vector(SolveState& context, const double* z, double* fjac, int ldfjac)
         {
             static_assert(Width > 0);
-            constexpr size_t n                 = KernelShape::x_size;
+            constexpr size_t n                 = CompiledShape::x_size;
             constexpr size_t lane_stride_bytes = n * sizeof(double);
 
             std::array<double, n> x_primal;
@@ -333,15 +333,15 @@ namespace veqlib_kernel_api
             for (size_t i = 0; i < n; ++i)
                 x_primal[i] = z[i] * x_scale[i];
 
-            const KernelPlan&        plan         = context.op.plan;
-            const KernelSolveParams& solve_params = context.op.solve_params();
+            const OperatorPlan&        plan         = context.op.plan;
+            const RuntimeScalars& runtime_scalars = context.op.runtime_scalars();
 
             for (size_t first_col = 0; first_col < n; first_col += Width)
             {
                 std::array<double, Width * n>     x_dot{};
                 std::array<double, n>             f_primal;
                 std::array<double, Width * n>     f_dot;
-                std::array<KernelWorkspace, Width> chunk_workspace_dot{};
+                std::array<OperatorWorkspace, Width> chunk_workspace_dot{};
 
                 const size_t lane_count = std::min(Width, n - first_col);
                 for (size_t lane = 0; lane < lane_count; ++lane)
@@ -359,13 +359,13 @@ namespace veqlib_kernel_api
                                        f_primal.data(),
                                        f_dot.data(),
                                        enzyme_dupv,
-                                       static_cast<int>(sizeof(KernelWorkspace)),
+                                       static_cast<int>(sizeof(OperatorWorkspace)),
                                        &context.op.workspace,
                                        chunk_workspace_dot.data(),
                                        enzyme_const,
                                        &plan,
                                        enzyme_const,
-                                       &solve_params,
+                                       &runtime_scalars,
                                        enzyme_const,
                                        context.input.residual_scale.data());
 
@@ -379,38 +379,38 @@ namespace veqlib_kernel_api
             context.jacobian_component_evaluations += static_cast<int>(n);
         }
 
-        void fill_enzyme_jacobian_z_scalar(SolveContext& context, const double* z, double* fjac, int ldfjac)
+        void fill_enzyme_jacobian_z_scalar(SolveState& context, const double* z, double* fjac, int ldfjac)
         {
-            std::array<double, KernelShape::x_size> x_primal;
+            std::array<double, CompiledShape::x_size> x_primal;
             const auto&                             x_scale = context.input.x_scale;
-            for (size_t i = 0; i < KernelShape::x_size; ++i)
+            for (size_t i = 0; i < CompiledShape::x_size; ++i)
                 x_primal[i] = z[i] * x_scale[i];
 
-            const KernelPlan&        plan         = context.op.plan;
-            const KernelSolveParams& solve_params = context.op.solve_params();
+            const OperatorPlan&        plan         = context.op.plan;
+            const RuntimeScalars& runtime_scalars = context.op.runtime_scalars();
 
-            for (size_t col = 0; col < KernelShape::x_size; ++col)
+            for (size_t col = 0; col < CompiledShape::x_size; ++col)
             {
-                std::array<double, KernelShape::x_size> x_dot{};
-                std::array<double, KernelShape::x_size> f_primal;
-                std::array<double, KernelShape::x_size> f_dot;
-                KernelWorkspace                         column_workspace_dot{};
+                std::array<double, CompiledShape::x_size> x_dot{};
+                std::array<double, CompiledShape::x_size> f_primal;
+                std::array<double, CompiledShape::x_size> f_dot;
+                OperatorWorkspace                         column_workspace_dot{};
                 x_dot[col] = x_scale[col];
                 (void)enzyme::autodiff<enzyme::Forward, enzyme::Const<double>>(
                     scaled_residual_raw_x_for_enzyme,
                     enzyme::Duplicated<double*>{x_primal.data(), x_dot.data()},
                     enzyme::Duplicated<double*>{f_primal.data(), f_dot.data()},
-                    enzyme::Duplicated<KernelWorkspace*>{&context.op.workspace, &column_workspace_dot},
-                    enzyme::Const<const KernelPlan*>{&plan},
-                    enzyme::Const<const KernelSolveParams*>{&solve_params},
+                    enzyme::Duplicated<OperatorWorkspace*>{&context.op.workspace, &column_workspace_dot},
+                    enzyme::Const<const OperatorPlan*>{&plan},
+                    enzyme::Const<const RuntimeScalars*>{&runtime_scalars},
                     enzyme::Const<const double*>{context.input.residual_scale.data()});
-                for (size_t row = 0; row < KernelShape::x_size; ++row)
+                for (size_t row = 0; row < CompiledShape::x_size; ++row)
                     fjac[row + static_cast<size_t>(ldfjac) * col] = f_dot[row];
             }
-            context.jacobian_component_evaluations += static_cast<int>(KernelShape::x_size);
+            context.jacobian_component_evaluations += static_cast<int>(CompiledShape::x_size);
         }
 
-        void fill_enzyme_jacobian_z(SolveContext& context, const double* z, double* fjac, int ldfjac)
+        void fill_enzyme_jacobian_z(SolveState& context, const double* z, double* fjac, int ldfjac)
         {
             constexpr size_t width = enzyme_dense_jacobian_batch_width();
             if constexpr (width == 1)
@@ -422,10 +422,10 @@ namespace veqlib_kernel_api
 
         struct ScaledResidualProblem
         {
-            static constexpr size_t equations = KernelShape::x_size;
-            static constexpr size_t variables = KernelShape::x_size;
+            static constexpr size_t equations = CompiledShape::x_size;
+            static constexpr size_t variables = CompiledShape::x_size;
 
-            SolveContext* context = nullptr;
+            SolveState* context = nullptr;
 
             void operator()(const double* z, double* fvec) const noexcept
             {
@@ -435,7 +435,7 @@ namespace veqlib_kernel_api
 #ifdef ENABLE_ENZYME
             void jacobian(const double* z, double* jacobian) const
             {
-                constexpr size_t          n = KernelShape::x_size;
+                constexpr size_t          n = CompiledShape::x_size;
                 std::array<double, n * n> column_major{};
                 const auto                started = std::chrono::steady_clock::now();
                 fill_enzyme_jacobian_z(*context, z, column_major.data(), static_cast<int>(n));
@@ -482,28 +482,28 @@ namespace veqlib_kernel_api
         }
 
         void fill_solve_result_from_z(
-            SolveContext& context, SolveResult& result, const double* z, int info, int nfev, int njev, int callbacks)
+            SolveState& context, SolveResult& result, const double* z, int info, int nfev, int njev, int callbacks)
         {
             result.info      = info;
             result.nfev      = context.initial_residual_evaluations + nfev + 1;
             result.njev      = njev;
             result.callbacks = callbacks;
             result.solver_nfev = nfev;
-            result.x         = decode_z_to_x(std::span<const double, KernelShape::x_size>{z, KernelShape::x_size},
+            result.x         = decode_z_to_x(std::span<const double, CompiledShape::x_size>{z, CompiledShape::x_size},
                                      context.input.x_scale);
             const auto final_residual_started = std::chrono::steady_clock::now();
-            context.raw_residual(std::span<const double, KernelShape::x_size>{result.x.data(), KernelShape::x_size},
-                                 std::span<double, KernelShape::x_size>{result.raw.data(), KernelShape::x_size});
+            context.raw_residual(std::span<const double, CompiledShape::x_size>{result.x.data(), CompiledShape::x_size},
+                                 std::span<double, CompiledShape::x_size>{result.raw.data(), CompiledShape::x_size});
             result.final_residual_ms = elapsed_ms_since(final_residual_started);
-            for (size_t i = 0; i < KernelShape::x_size; ++i)
+            for (size_t i = 0; i < CompiledShape::x_size; ++i)
                 result.scaled[i] = result.raw[i] / context.input.residual_scale[i];
-            result.raw_norm             = norm2(std::span<const double, KernelShape::x_size>{
+            result.raw_norm             = norm2(std::span<const double, CompiledShape::x_size>{
                 result.raw.data(),
-                KernelShape::x_size,
+                CompiledShape::x_size,
             });
-            result.scaled_norm          = norm2(std::span<const double, KernelShape::x_size>{
+            result.scaled_norm          = norm2(std::span<const double, CompiledShape::x_size>{
                 result.scaled.data(),
-                KernelShape::x_size,
+                CompiledShape::x_size,
             });
             result.residual_callback_ms = context.residual_callback_ms;
             result.residual_kernel_ms   = context.residual_kernel_ms;
@@ -526,7 +526,7 @@ namespace veqlib_kernel_api
         }
 
         template <typename SolverContext>
-        void configure_common_solver(SolverContext& solver_context, const CaseInput& input) noexcept
+        void configure_common_solver(SolverContext& solver_context, const RuntimeCase& input) noexcept
         {
             if constexpr (requires { solver_context.tolerance; })
                 solver_context.tolerance = input.max_residual;
@@ -535,11 +535,11 @@ namespace veqlib_kernel_api
             if constexpr (requires { solver_context.max_iterations; })
                 solver_context.max_iterations = max_solver_evaluations(input);
             if constexpr (requires { solver_context.max_dimension; })
-                solver_context.max_dimension = static_cast<int>(KernelShape::x_size);
+                solver_context.max_dimension = static_cast<int>(CompiledShape::x_size);
         }
 
         template <typename SolverContext>
-        void configure_scaled_z_solver(SolverContext& solver_context, const CaseInput& input) noexcept
+        void configure_scaled_z_solver(SolverContext& solver_context, const RuntimeCase& input) noexcept
         {
             configure_common_solver(solver_context, input);
             if constexpr (requires { solver_context.finite_difference_step; })
@@ -547,9 +547,9 @@ namespace veqlib_kernel_api
             if constexpr (requires { solver_context.initial_step_bound; })
                 solver_context.initial_step_bound = veqpy_hybr_factor;
             if constexpr (requires { solver_context.lower_bandwidth; })
-                solver_context.lower_bandwidth = static_cast<int>(KernelShape::x_size) - 1;
+                solver_context.lower_bandwidth = static_cast<int>(CompiledShape::x_size) - 1;
             if constexpr (requires { solver_context.upper_bandwidth; })
-                solver_context.upper_bandwidth = static_cast<int>(KernelShape::x_size) - 1;
+                solver_context.upper_bandwidth = static_cast<int>(CompiledShape::x_size) - 1;
             if constexpr (requires { solver_context.scale_mode; })
                 solver_context.scale_mode = veqpy_hybr_mode;
             if constexpr (requires { solver_context.print_interval; })
@@ -557,7 +557,7 @@ namespace veqlib_kernel_api
         }
 
         template <typename SolverContext>
-        void configure_levenberg_marquardt_solver(SolverContext& solver_context, const CaseInput& input) noexcept
+        void configure_levenberg_marquardt_solver(SolverContext& solver_context, const RuntimeCase& input) noexcept
         {
             configure_common_solver(solver_context, input);
             if constexpr (requires { solver_context.finite_difference_step; })
@@ -571,11 +571,11 @@ namespace veqlib_kernel_api
         }
 
         template <typename Policy>
-        SolveResult run_nonlinear_policy_once(SolveContext& context)
+        SolveResult run_nonlinear_policy_once(SolveState& context)
         {
             context.reset_solve_counters();
             const auto encoded = encode_x_to_z(context.input.x0, context.input.x_scale);
-            tensor::Vector<double, KernelShape::x_size> z{uninitialized};
+            tensor::Vector<double, CompiledShape::x_size> z{uninitialized};
             std::copy(encoded.begin(), encoded.end(), z.begin());
 
             ScaledResidualProblem problem{&context};
@@ -598,11 +598,11 @@ namespace veqlib_kernel_api
             return result;
         }
 
-        SolveResult run_levenberg_marquardt_once(SolveContext& context)
+        SolveResult run_levenberg_marquardt_once(SolveState& context)
         {
             context.reset_solve_counters();
             const auto encoded = encode_x_to_z(context.input.x0, context.input.x_scale);
-            tensor::Vector<double, KernelShape::x_size> z{uninitialized};
+            tensor::Vector<double, CompiledShape::x_size> z{uninitialized};
             std::copy(encoded.begin(), encoded.end(), z.begin());
 
             ScaledResidualProblem problem{&context};
@@ -625,7 +625,7 @@ namespace veqlib_kernel_api
             return result;
         }
 
-        SolveResult run_solver_once(SolveContext& context)
+        SolveResult run_solver_once(SolveState& context)
         {
             if (context.input.solver == SolverKind::LevenbergMarquardt)
                 return run_levenberg_marquardt_once(context);

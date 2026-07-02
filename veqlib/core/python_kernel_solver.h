@@ -1,6 +1,6 @@
 #pragma once
 
-// Nanobind-facing KernelSolver implementation for VEQlib production kernels.
+// Nanobind-facing NativeSolver implementation for VEQlib production kernels.
 
 #include <algorithm>
 #include <array>
@@ -31,10 +31,10 @@ namespace veqlib_python
     using std::size_t;
 
     using config::Topology;
-    using veqlib_kernel_api::KernelGrid;
-    using veqlib_kernel_api::KernelShape;
-    using veqlib_kernel_api::KernelSource;
-    using veqlib_kernel_api::CaseInput;
+    using veqlib_kernel_api::CompiledGrid;
+    using veqlib_kernel_api::CompiledShape;
+    using veqlib_kernel_api::CompiledSource;
+    using veqlib_kernel_api::RuntimeCase;
     using veqlib_kernel_api::InitialPolicyColdGeometric;
     using veqlib_kernel_api::InitialPolicyCold;
     using veqlib_kernel_api::ContinuePolicyColdZeros;
@@ -44,7 +44,7 @@ namespace veqlib_python
     using veqlib_kernel_api::ContinuePolicyWarmPredict;
     using veqlib_kernel_api::ContinuePolicyWarmChord;
     using veqlib_kernel_api::PackedVector;
-    using veqlib_kernel_api::SolveContext;
+    using veqlib_kernel_api::SolveState;
     using veqlib_kernel_api::SolveResult;
     using veqlib_kernel_api::SolverKind;
     using veqlib_kernel_api::build_residual_scale_for_context;
@@ -82,37 +82,37 @@ namespace veqlib_python
 
     using tensor::uninitialized;
 
-    using PackedArrayView          = nb::ndarray<nb::numpy, const double, nb::shape<KernelShape::x_size>, nb::c_contig>;
-    using MutablePackedArrayView   = nb::ndarray<nb::numpy, double, nb::shape<KernelShape::x_size>, nb::c_contig>;
+    using PackedArrayView          = nb::ndarray<nb::numpy, const double, nb::shape<CompiledShape::x_size>, nb::c_contig>;
+    using MutablePackedArrayView   = nb::ndarray<nb::numpy, double, nb::shape<CompiledShape::x_size>, nb::c_contig>;
     using MutableJacobianArrayView = nb::ndarray<nb::numpy,
                                                 double,
-                                                nb::shape<KernelShape::x_size, KernelShape::x_size>,
+                                                nb::shape<CompiledShape::x_size, CompiledShape::x_size>,
                                                 nb::c_contig>;
     using AlphaArrayView           = nb::ndarray<nb::numpy, const double, nb::shape<2>, nb::c_contig>;
     using RuntimeArrayView         = nb::ndarray<nb::numpy, const double, nb::ndim<1>, nb::c_contig>;
 
-    inline std::unique_ptr<SolveContext> make_context(SolverKind solver)
+    inline std::unique_ptr<SolveState> make_context(SolverKind solver)
     {
-        CaseInput input   = build_inline_case(0, 0, solver);
-        auto      context = std::make_unique<SolveContext>(input);
+        RuntimeCase input   = build_inline_case(0, 0, solver);
+        auto      context = std::make_unique<SolveState>(input);
 
-        context->raw_residual(std::span<const double, KernelShape::x_size>{input.x0.data(), KernelShape::x_size},
-                              std::span<double, KernelShape::x_size>{
+        context->raw_residual(std::span<const double, CompiledShape::x_size>{input.x0.data(), CompiledShape::x_size},
+                              std::span<double, CompiledShape::x_size>{
                                   context->initial_raw.data(),
-                                  KernelShape::x_size,
+                                  CompiledShape::x_size,
                               });
         context->initial_alpha = {context->op.workspace.source_runtime.alpha1,
                                   context->op.workspace.source_runtime.alpha2};
-        context->initial_raw_norm = norm2(std::span<const double, KernelShape::x_size>{
+        context->initial_raw_norm = norm2(std::span<const double, CompiledShape::x_size>{
             context->initial_raw.data(),
-            KernelShape::x_size,
+            CompiledShape::x_size,
         });
         context->input.residual_scale = build_residual_scale_for_context(*context, context->initial_raw);
-        for (size_t i = 0; i < KernelShape::x_size; ++i)
+        for (size_t i = 0; i < CompiledShape::x_size; ++i)
             context->initial_scaled[i] = context->initial_raw[i] / context->input.residual_scale[i];
-        context->initial_scaled_norm = norm2(std::span<const double, KernelShape::x_size>{
+        context->initial_scaled_norm = norm2(std::span<const double, CompiledShape::x_size>{
             context->initial_scaled.data(),
-            KernelShape::x_size,
+            CompiledShape::x_size,
         });
         context->has_initial_residual         = true;
         context->initial_residual_evaluations = 1 + residual_scale_extra_evaluations(context->input);
@@ -121,14 +121,14 @@ namespace veqlib_python
 
     inline void read_exact_runtime_array(RuntimeArrayView values,
                                          const char*      name,
-                                         std::array<double, KernelSource::sample_count>& out)
+                                         std::array<double, CompiledSource::sample_count>& out)
     {
         const size_t length = values.shape(0);
-        if (length != KernelSource::sample_count)
+        if (length != CompiledSource::sample_count)
             throw std::runtime_error(std::string{name} + " length mismatch: expected " +
-                                     std::to_string(KernelSource::sample_count) + ", got " +
+                                     std::to_string(CompiledSource::sample_count) + ", got " +
                                      std::to_string(length));
-        for (size_t i = 0; i < KernelSource::sample_count; ++i)
+        for (size_t i = 0; i < CompiledSource::sample_count; ++i)
             out[i] = values.data()[i];
     }
 
@@ -152,7 +152,7 @@ namespace veqlib_python
             out[i] = values.data()[i];
     }
 
-    inline CaseInput case_input_from_runtime(const std::string& case_name,
+    inline RuntimeCase runtime_case_from_abi(const std::string& case_name,
                                              double             a,
                                              double             R0,
                                              double             Z0,
@@ -179,7 +179,7 @@ namespace veqlib_python
                                              double             residual_normalization_probe_step,
                                              double             residual_normalization_sensitivity_lambda)
     {
-        CaseInput input = build_inline_case(0, 0, solver_kind_from_runtime_method_code(method_code));
+        RuntimeCase input = build_inline_case(0, 0, solver_kind_from_runtime_method_code(method_code));
         if (!case_name.empty())
             input.case_name = case_name;
 
@@ -193,7 +193,7 @@ namespace veqlib_python
         read_runtime_offset_array(c_offsets, "c_offsets", input.c_offsets, false);
         read_runtime_offset_array(s_offsets, "s_offsets", input.s_offsets, true);
         input.c0_offset = input.c_offsets[0];
-        if constexpr (KernelShape::M_max >= 1)
+        if constexpr (CompiledShape::M_max >= 1)
             input.s1_offset = input.s_offsets[1];
 
         read_exact_runtime_array(scaled_heat, "scaled_heat", input.heat);
@@ -224,14 +224,14 @@ namespace veqlib_python
 
         apply_initial_policy(input);
 
-        input.x_scale = build_x_block_scale_vector<KernelShape>(input.x0, profile_params_for_case(input));
+        input.x_scale = build_x_block_scale_vector<CompiledShape>(input.x0, profile_params_for_case(input));
         input.residual_scale.fill(1.0);
         return input;
     }
 
     inline double local_abs(double value) noexcept { return value < 0.0 ? -value : value; }
 
-    inline bool cold_policy_uses_geometric_seed(const CaseInput& input, int policy_code) noexcept
+    inline bool cold_policy_uses_geometric_seed(const RuntimeCase& input, int policy_code) noexcept
     {
         if (policy_code == InitialPolicyColdGeometric || policy_code == ContinuePolicyColdGeometric)
             return true;
@@ -240,9 +240,9 @@ namespace veqlib_python
         return false;
     }
 
-    inline bool project_psin0_from_source_target(SolveContext& context, double& coeff_out) noexcept
+    inline bool project_psin0_from_source_target(SolveState& context, double& coeff_out) noexcept
     {
-        constexpr bool has_active_psin = KernelShape::slot_for_profile_id(KernelShape::psin_profile_id).optimized();
+        constexpr bool has_active_psin = CompiledShape::slot_for_profile_id(CompiledShape::psin_profile_id).optimized();
         if constexpr (!has_active_psin)
         {
             (void)context;
@@ -251,7 +251,7 @@ namespace veqlib_python
         }
         else
         {
-            constexpr int psin0_index = KernelShape::coeff_index[KernelShape::psin_profile_id][0];
+            constexpr int psin0_index = CompiledShape::coeff_index[CompiledShape::psin_profile_id][0];
             if constexpr (psin0_index < 0)
             {
                 (void)context;
@@ -262,9 +262,9 @@ namespace veqlib_python
             {
                 PackedVector scratch{uninitialized};
                 context.op.evaluate(
-                    std::span<const double, KernelShape::x_size>{
+                    std::span<const double, CompiledShape::x_size>{
                         context.input.x0.data(),
-                        KernelShape::x_size,
+                        CompiledShape::x_size,
                     },
                     scratch);
 
@@ -278,7 +278,7 @@ namespace veqlib_python
                 const double target_offset =
                     context.op.workspace.source_runtime.source_target_root_fields(source::root_psin, 0);
                 const double target_scale = context.op.workspace.source_runtime.source_target_root_fields(
-                                                source::root_psin, KernelGrid::radial_nodes - 1) -
+                                                source::root_psin, CompiledGrid::radial_nodes - 1) -
                                             target_offset;
                 if (local_abs(target_scale) <= tiny)
                     return false;
@@ -288,7 +288,7 @@ namespace veqlib_python
                 double lower       = -coeff_abs_limit;
                 double upper       = coeff_abs_limit;
 
-                for (size_t i = 0; i < KernelGrid::radial_nodes; ++i)
+                for (size_t i = 0; i < CompiledGrid::radial_nodes; ++i)
                 {
                     double normalized =
                         (context.op.workspace.source_runtime.source_target_root_fields(source::root_psin, i) -
@@ -296,15 +296,15 @@ namespace veqlib_python
                         target_scale;
                     if (i == 0)
                         normalized = 0.0;
-                    else if (i + 1 == KernelGrid::radial_nodes)
+                    else if (i + 1 == CompiledGrid::radial_nodes)
                         normalized = 1.0;
 
-                    const double rho     = KernelGrid::nodes[i];
-                    const double y       = KernelGrid::y[i];
+                    const double rho     = CompiledGrid::nodes[i];
+                    const double y       = CompiledGrid::y[i];
                     const double rho2    = rho * rho;
                     const double base    = rho2;
                     const double basis   = rho2 * y;
-                    const double weight  = KernelGrid::weights[i];
+                    const double weight  = CompiledGrid::weights[i];
                     const double base_r  = 2.0 * rho;
                     const double basis_r = 2.0 * rho * y - 2.0 * rho * rho2;
                     const double rhs     = radial_derivative_tol - base_r;
@@ -342,10 +342,10 @@ namespace veqlib_python
                     return false;
 
                 double previous = 0.0;
-                for (size_t i = 0; i < KernelGrid::radial_nodes; ++i)
+                for (size_t i = 0; i < CompiledGrid::radial_nodes; ++i)
                 {
-                    const double rho               = KernelGrid::nodes[i];
-                    const double y                 = KernelGrid::y[i];
+                    const double rho               = CompiledGrid::nodes[i];
+                    const double y                 = CompiledGrid::y[i];
                     const double rho2              = rho * rho;
                     const double value             = rho2 + coeff * rho2 * y;
                     const double radial_derivative = 2.0 * rho + coeff * (2.0 * rho * y - 2.0 * rho * rho2);
@@ -364,42 +364,42 @@ namespace veqlib_python
         }
     }
 
-    inline void refine_cold_initial_state(SolveContext& context, int policy_code)
+    inline void refine_cold_initial_state(SolveState& context, int policy_code)
     {
         if (!cold_policy_uses_geometric_seed(context.input, policy_code))
             return;
         double coeff = 0.0;
         if (!project_psin0_from_source_target(context, coeff))
             return;
-        constexpr int psin0_index = KernelShape::coeff_index[KernelShape::psin_profile_id][0];
+        constexpr int psin0_index = CompiledShape::coeff_index[CompiledShape::psin_profile_id][0];
         if constexpr (psin0_index >= 0)
         {
             context.input.x0[static_cast<size_t>(psin0_index)] = coeff;
             context.input.x_scale =
-                build_x_block_scale_vector<KernelShape>(context.input.x0, profile_params_for_case(context.input));
+                build_x_block_scale_vector<CompiledShape>(context.input.x0, profile_params_for_case(context.input));
         }
     }
 
-    inline void refresh_initial_residual_scale(SolveContext& context)
+    inline void refresh_initial_residual_scale(SolveState& context)
     {
         context.raw_residual(
-            std::span<const double, KernelShape::x_size>{
+            std::span<const double, CompiledShape::x_size>{
                 context.input.x0.data(),
-                KernelShape::x_size,
+                CompiledShape::x_size,
             },
-            std::span<double, KernelShape::x_size>{context.initial_raw.data(), KernelShape::x_size});
+            std::span<double, CompiledShape::x_size>{context.initial_raw.data(), CompiledShape::x_size});
         context.initial_alpha = {context.op.workspace.source_runtime.alpha1,
                                  context.op.workspace.source_runtime.alpha2};
-        context.initial_raw_norm = norm2(std::span<const double, KernelShape::x_size>{
+        context.initial_raw_norm = norm2(std::span<const double, CompiledShape::x_size>{
             context.initial_raw.data(),
-            KernelShape::x_size,
+            CompiledShape::x_size,
         });
         context.input.residual_scale = build_residual_scale_for_context(context, context.initial_raw);
-        for (size_t i = 0; i < KernelShape::x_size; ++i)
+        for (size_t i = 0; i < CompiledShape::x_size; ++i)
             context.initial_scaled[i] = context.initial_raw[i] / context.input.residual_scale[i];
-        context.initial_scaled_norm = norm2(std::span<const double, KernelShape::x_size>{
+        context.initial_scaled_norm = norm2(std::span<const double, CompiledShape::x_size>{
             context.initial_scaled.data(),
-            KernelShape::x_size,
+            CompiledShape::x_size,
         });
         context.has_initial_residual         = true;
         context.initial_residual_evaluations = 1 + residual_scale_extra_evaluations(context.input);
@@ -477,7 +477,7 @@ namespace veqlib_python
 
     inline PackedArrayView packed_view(const double* data, nb::handle owner)
     {
-        return PackedArrayView(data, {KernelShape::x_size}, owner);
+        return PackedArrayView(data, {CompiledShape::x_size}, owner);
     }
 
     inline AlphaArrayView alpha_view(const double* data, nb::handle owner) { return AlphaArrayView(data, {2}, owner); }
@@ -491,7 +491,7 @@ namespace veqlib_python
         return out;
     }
 
-    inline nb::dict topology_metadata_dict(const CaseInput& input)
+    inline nb::dict topology_metadata_dict(const RuntimeCase& input)
     {
         nb::dict source;
         source["route"]        = source_route_name();
@@ -502,21 +502,21 @@ namespace veqlib_python
         source["constraint_code"] = Topology::source_constraint_code;
         source["nodes"]        = source_nodes_name();
         source["nodes_code"]   = Topology::source_nodes_code;
-        source["sample_count"] = KernelSource::sample_count;
+        source["sample_count"] = CompiledSource::sample_count;
         source["active_family_code"] = Topology::source_active_family_code;
         source["parameterization_code"] = Topology::source_parameterization_code;
 
         nb::dict grid;
-        grid["Nr"]         = KernelGrid::radial_nodes;
-        grid["Nt"]         = KernelGrid::theta_rows;
-        grid["L_max"]      = KernelShape::L_max;
-        grid["M_max"]      = KernelShape::M_max;
-        grid["K_max"]      = KernelShape::K_max;
+        grid["Nr"]         = CompiledGrid::radial_nodes;
+        grid["Nt"]         = CompiledGrid::theta_rows;
+        grid["L_max"]      = CompiledShape::L_max;
+        grid["M_max"]      = CompiledShape::M_max;
+        grid["K_max"]      = CompiledShape::K_max;
         grid["quadrature"] = "legendre";
         grid["calculus"]   = "spectral";
 
         nb::dict profiles;
-        using ProfileEvaluator  = profiles::ProfileEvaluator<KernelShape>;
+        using ProfileEvaluator  = profiles::ProfileEvaluator<CompiledShape>;
         profiles["h_count"]     = ProfileEvaluator::h_count;
         profiles["v_count"]     = ProfileEvaluator::v_count;
         profiles["kappa_count"] = ProfileEvaluator::kappa_count;
@@ -545,8 +545,8 @@ namespace veqlib_python
         out["schema"]        = "veqlib.kernel.metadata.v1";
         out["backend"]       = "veqlib.nanobind";
         out["route"]         = source_route_label();
-        out["x_size"]        = KernelShape::x_size;
-        out["active_count"]  = KernelShape::active_count;
+        out["x_size"]        = CompiledShape::x_size;
+        out["active_count"]  = CompiledShape::active_count;
         out["source"]        = source;
         out["grid"]          = grid;
         out["profiles"]      = profiles;
@@ -558,10 +558,10 @@ namespace veqlib_python
         return out;
     }
 
-    class KernelSolver
+    class NativeSolver
     {
     public:
-        explicit KernelSolver(int solver_code = static_cast<int>(veqlib_kernel_api::SolverMethodPowell))
+        explicit NativeSolver(int solver_code = static_cast<int>(veqlib_kernel_api::SolverMethodPowell))
             : solver_(solver_kind_from_runtime_method_code(solver_code)), context_(make_context(solver_))
         {
         }
@@ -598,7 +598,7 @@ namespace veqlib_python
                                 double             residual_normalization_probe_step,
                                 double             residual_normalization_sensitivity_lambda)
         {
-            CaseInput next_input = case_input_from_runtime(case_name,
+            RuntimeCase next_input = runtime_case_from_abi(case_name,
                                                            a,
                                                            R0,
                                                            Z0,
@@ -640,12 +640,12 @@ namespace veqlib_python
         void adopt_last_solution_as_initial()
         {
             if (!has_last_result_)
-                throw std::runtime_error("KernelSolver has no solve result to adopt");
+                throw std::runtime_error("NativeSolver has no solve result to adopt");
             if (!last_result_.accepted || !solver_info_succeeded(context_->input.solver, last_result_.info))
-                throw std::runtime_error("KernelSolver cannot adopt an unsuccessful solve result");
+                throw std::runtime_error("NativeSolver cannot adopt an unsuccessful solve result");
 
             context_->input.x0      = last_result_.x;
-            context_->input.x_scale = build_x_block_scale_vector<KernelShape>(
+            context_->input.x_scale = build_x_block_scale_vector<CompiledShape>(
                 context_->input.x0,
                 profile_params_for_case(context_->input));
             refresh_initial_residual_scale(*context_);
@@ -682,13 +682,13 @@ namespace veqlib_python
 
         void residual_var_into(MutablePackedArrayView out, PackedArrayView x)
         {
-            context_->raw_residual(std::span<const double, KernelShape::x_size>{x.data(), KernelShape::x_size},
-                                   std::span<double, KernelShape::x_size>{out.data(), KernelShape::x_size});
+            context_->raw_residual(std::span<const double, CompiledShape::x_size>{x.data(), CompiledShape::x_size},
+                                   std::span<double, CompiledShape::x_size>{out.data(), CompiledShape::x_size});
         }
 
         void jvp_into(MutablePackedArrayView out, PackedArrayView x, PackedArrayView v)
         {
-            constexpr size_t n = KernelShape::x_size;
+            constexpr size_t n = CompiledShape::x_size;
             double           v_norm_sq = 0.0;
             double           x_norm_sq = 0.0;
             for (size_t i = 0; i < n; ++i)
@@ -719,7 +719,7 @@ namespace veqlib_python
 
         void jacobian_into(MutableJacobianArrayView out, PackedArrayView x)
         {
-            constexpr size_t n = KernelShape::x_size;
+            constexpr size_t n = CompiledShape::x_size;
             PackedVector     x_plus{uninitialized};
             PackedVector     f_base{uninitialized};
             PackedVector     f_plus{uninitialized};
@@ -750,19 +750,19 @@ namespace veqlib_python
             return result.accepted && solver_info_succeeded(context_->input.solver, result.info);
         }
 
-        bool same_array(const std::array<double, KernelSource::sample_count>& lhs,
-                        const std::array<double, KernelSource::sample_count>& rhs) const noexcept
+        bool same_array(const std::array<double, CompiledSource::sample_count>& lhs,
+                        const std::array<double, CompiledSource::sample_count>& rhs) const noexcept
         {
-            for (size_t i = 0; i < KernelSource::sample_count; ++i)
+            for (size_t i = 0; i < CompiledSource::sample_count; ++i)
                 if (lhs[i] != rhs[i])
                     return false;
             return true;
         }
 
-        bool same_offsets(const std::array<double, KernelShape::M_max + 1>& lhs,
-                          const std::array<double, KernelShape::M_max + 1>& rhs) const noexcept
+        bool same_offsets(const std::array<double, CompiledShape::M_max + 1>& lhs,
+                          const std::array<double, CompiledShape::M_max + 1>& rhs) const noexcept
         {
-            for (size_t i = 0; i <= KernelShape::M_max; ++i)
+            for (size_t i = 0; i <= CompiledShape::M_max; ++i)
                 if (lhs[i] != rhs[i])
                     return false;
             return true;
@@ -772,8 +772,8 @@ namespace veqlib_python
         {
             if (!has_latest_input_)
                 return false;
-            const CaseInput& old = latest_input_;
-            const CaseInput& now = context_->input;
+            const RuntimeCase& old = latest_input_;
+            const RuntimeCase& now = context_->input;
             return old.a == now.a && old.R0 == now.R0 && old.Z0 == now.Z0 && old.B0 == now.B0 &&
                    old.ka == now.ka && old.c0_offset == now.c0_offset && old.s1_offset == now.s1_offset &&
                    same_offsets(old.c_offsets, now.c_offsets) && same_offsets(old.s_offsets, now.s_offsets) &&
@@ -781,7 +781,7 @@ namespace veqlib_python
         }
 
         void fill_certified_result(SolveResult&                                   result,
-                                   const std::array<double, KernelShape::x_size>& x,
+                                   const std::array<double, CompiledShape::x_size>& x,
                                    const PackedVector&                            raw,
                                    const PackedVector&                            scaled,
                                    const std::array<double, 2>&                   alpha,
@@ -843,15 +843,15 @@ namespace veqlib_python
 
         void scale_raw_into(PackedVector& scaled, const PackedVector& raw) const noexcept
         {
-            for (size_t i = 0; i < KernelShape::x_size; ++i)
+            for (size_t i = 0; i < CompiledShape::x_size; ++i)
                 scaled[i] = raw[i] / context_->input.residual_scale[i];
         }
 
-        bool candidate_is_reasonable(const std::array<double, KernelShape::x_size>& candidate) const noexcept
+        bool candidate_is_reasonable(const std::array<double, CompiledShape::x_size>& candidate) const noexcept
         {
             if (!has_latest_solution_)
                 return false;
-            for (size_t i = 0; i < KernelShape::x_size; ++i)
+            for (size_t i = 0; i < CompiledShape::x_size; ++i)
             {
                 if (!std::isfinite(candidate[i]))
                     return false;
@@ -863,7 +863,7 @@ namespace veqlib_python
             return true;
         }
 
-        bool try_candidate_certificate(const std::array<double, KernelShape::x_size>& candidate,
+        bool try_candidate_certificate(const std::array<double, CompiledShape::x_size>& candidate,
                                        const std::string&                             accepted_by,
                                        const std::string&                             fast_path,
                                        int&                                           certification_evals,
@@ -875,13 +875,13 @@ namespace veqlib_python
 
             PackedVector raw{uninitialized};
             context_->raw_residual(
-                std::span<const double, KernelShape::x_size>{candidate.data(), KernelShape::x_size},
-                std::span<double, KernelShape::x_size>{raw.data(), KernelShape::x_size});
+                std::span<const double, CompiledShape::x_size>{candidate.data(), CompiledShape::x_size},
+                std::span<double, CompiledShape::x_size>{raw.data(), CompiledShape::x_size});
             const std::array<double, 2> alpha = {context_->op.workspace.source_runtime.alpha1,
                                                  context_->op.workspace.source_runtime.alpha2};
             ++certification_evals;
 
-            const double raw_norm = norm2(std::span<const double, KernelShape::x_size>{raw.data(), KernelShape::x_size});
+            const double raw_norm = norm2(std::span<const double, CompiledShape::x_size>{raw.data(), CompiledShape::x_size});
             if (std::isfinite(raw_norm) && raw_norm < best_raw_norm)
                 best_raw_norm = raw_norm;
             if (!std::isfinite(raw_norm) || raw_norm > acceptance_threshold(context_->input))
@@ -890,7 +890,7 @@ namespace veqlib_python
             PackedVector scaled{uninitialized};
             scale_raw_into(scaled, raw);
             const double scaled_norm =
-                norm2(std::span<const double, KernelShape::x_size>{scaled.data(), KernelShape::x_size});
+                norm2(std::span<const double, CompiledShape::x_size>{scaled.data(), CompiledShape::x_size});
             fill_certified_result(result,
                                   candidate,
                                   raw,
@@ -911,8 +911,8 @@ namespace veqlib_python
             if (!has_predictor_history())
                 return false;
 
-            std::array<double, KernelShape::x_size> secant{};
-            for (size_t i = 0; i < KernelShape::x_size; ++i)
+            std::array<double, CompiledShape::x_size> secant{};
+            for (size_t i = 0; i < CompiledShape::x_size; ++i)
                 secant[i] = latest_solution_[i] + (latest_solution_[i] - previous_solution_[i]);
             if (try_candidate_certificate(
                     secant, "secant_predictor_certificate", "warm-predict", certification_evals, best_raw_norm, result))
@@ -921,8 +921,8 @@ namespace veqlib_python
             if (!has_older_solution_)
                 return false;
 
-            std::array<double, KernelShape::x_size> quadratic{};
-            for (size_t i = 0; i < KernelShape::x_size; ++i)
+            std::array<double, CompiledShape::x_size> quadratic{};
+            for (size_t i = 0; i < CompiledShape::x_size; ++i)
                 quadratic[i] = 3.0 * latest_solution_[i] - 3.0 * previous_solution_[i] + older_solution_[i];
             return try_candidate_certificate(quadratic,
                                              "quadratic_predictor_certificate",
@@ -932,63 +932,63 @@ namespace veqlib_python
                                              result);
         }
 
-        void build_chord_jacobian(const std::array<double, KernelShape::x_size>& current,
+        void build_chord_jacobian(const std::array<double, CompiledShape::x_size>& current,
                                   const PackedVector&                            current_raw,
-                                  tensor::Matrix<double, KernelShape::x_size, KernelShape::x_size>& jacobian,
+                                  tensor::Matrix<double, CompiledShape::x_size, CompiledShape::x_size>& jacobian,
                                   int&                                           certification_evals)
         {
-            for (size_t col = 0; col < KernelShape::x_size; ++col)
+            for (size_t col = 0; col < CompiledShape::x_size; ++col)
             {
-                std::array<double, KernelShape::x_size> perturbed = current;
+                std::array<double, CompiledShape::x_size> perturbed = current;
                 const double step = 1.0e-6 * std::max(1.0, std::abs(current[col]));
                 perturbed[col] += step;
 
                 PackedVector plus_raw{uninitialized};
                 context_->raw_residual(
-                    std::span<const double, KernelShape::x_size>{perturbed.data(), KernelShape::x_size},
-                    std::span<double, KernelShape::x_size>{plus_raw.data(), KernelShape::x_size});
+                    std::span<const double, CompiledShape::x_size>{perturbed.data(), CompiledShape::x_size},
+                    std::span<double, CompiledShape::x_size>{plus_raw.data(), CompiledShape::x_size});
                 ++certification_evals;
 
-                for (size_t row = 0; row < KernelShape::x_size; ++row)
-                    jacobian[row * KernelShape::x_size + col] = (plus_raw[row] - current_raw[row]) / step;
+                for (size_t row = 0; row < CompiledShape::x_size; ++row)
+                    jacobian[row * CompiledShape::x_size + col] = (plus_raw[row] - current_raw[row]) / step;
             }
         }
 
         bool try_chord_newton_certificate(int& certification_evals, double& best_raw_norm, SolveResult& result)
         {
-            std::array<double, KernelShape::x_size> current = context_->input.x0;
+            std::array<double, CompiledShape::x_size> current = context_->input.x0;
             PackedVector                            current_raw = context_->initial_raw;
-            tensor::Matrix<double, KernelShape::x_size, KernelShape::x_size> chord_jacobian{uninitialized};
+            tensor::Matrix<double, CompiledShape::x_size, CompiledShape::x_size> chord_jacobian{uninitialized};
             build_chord_jacobian(current, current_raw, chord_jacobian, certification_evals);
 
             for (int iteration = 0; iteration < chord_max_iterations; ++iteration)
             {
-                tensor::Matrix<double, KernelShape::x_size, 1> rhs{uninitialized};
-                for (size_t row = 0; row < KernelShape::x_size; ++row)
+                tensor::Matrix<double, CompiledShape::x_size, 1> rhs{uninitialized};
+                for (size_t row = 0; row < CompiledShape::x_size; ++row)
                     rhs[row] = -current_raw[row];
 
-                tensor::Matrix<double, KernelShape::x_size, 1> step{uninitialized};
+                tensor::Matrix<double, CompiledShape::x_size, 1> step{uninitialized};
                 linalg::solve_into(step, chord_jacobian, rhs);
 
                 bool finite_step = true;
-                for (size_t i = 0; i < KernelShape::x_size; ++i)
+                for (size_t i = 0; i < CompiledShape::x_size; ++i)
                     finite_step = finite_step && std::isfinite(step[i]);
                 if (!finite_step)
                     return false;
 
-                std::array<double, KernelShape::x_size> trial{};
-                for (size_t i = 0; i < KernelShape::x_size; ++i)
+                std::array<double, CompiledShape::x_size> trial{};
+                for (size_t i = 0; i < CompiledShape::x_size; ++i)
                     trial[i] = current[i] + step[i];
 
                 PackedVector trial_raw{uninitialized};
                 context_->raw_residual(
-                    std::span<const double, KernelShape::x_size>{trial.data(), KernelShape::x_size},
-                    std::span<double, KernelShape::x_size>{trial_raw.data(), KernelShape::x_size});
+                    std::span<const double, CompiledShape::x_size>{trial.data(), CompiledShape::x_size},
+                    std::span<double, CompiledShape::x_size>{trial_raw.data(), CompiledShape::x_size});
                 const std::array<double, 2> trial_alpha = {context_->op.workspace.source_runtime.alpha1,
                                                            context_->op.workspace.source_runtime.alpha2};
                 ++certification_evals;
                 const double trial_norm =
-                    norm2(std::span<const double, KernelShape::x_size>{trial_raw.data(), KernelShape::x_size});
+                    norm2(std::span<const double, CompiledShape::x_size>{trial_raw.data(), CompiledShape::x_size});
                 if (!std::isfinite(trial_norm))
                     return false;
 
@@ -997,7 +997,7 @@ namespace veqlib_python
                     PackedVector scaled{uninitialized};
                     scale_raw_into(scaled, trial_raw);
                     const double scaled_norm =
-                        norm2(std::span<const double, KernelShape::x_size>{scaled.data(), KernelShape::x_size});
+                        norm2(std::span<const double, CompiledShape::x_size>{scaled.data(), CompiledShape::x_size});
                     fill_certified_result(result,
                                           trial,
                                           trial_raw,
@@ -1060,7 +1060,7 @@ namespace veqlib_python
         {
             context_->input.x0 = result.x;
             context_->input.x_scale =
-                build_x_block_scale_vector<KernelShape>(context_->input.x0, profile_params_for_case(context_->input));
+                build_x_block_scale_vector<CompiledShape>(context_->input.x0, profile_params_for_case(context_->input));
             if (refresh_scale)
                 refresh_initial_residual_scale(*context_);
 
@@ -1080,7 +1080,7 @@ namespace veqlib_python
             has_latest_input_    = true;
         }
 
-        void apply_runtime_case(CaseInput next_input)
+        void apply_runtime_case(RuntimeCase next_input)
         {
             bool should_refine_cold = true;
             int  cold_policy_code   = next_input.initial_policy_code;
@@ -1090,7 +1090,7 @@ namespace veqlib_python
                 if (continue_policy_uses_warm_state(continue_policy))
                 {
                     next_input.x0      = latest_solution_;
-                    next_input.x_scale = build_x_block_scale_vector<KernelShape>(
+                    next_input.x_scale = build_x_block_scale_vector<CompiledShape>(
                         next_input.x0,
                         profile_params_for_case(next_input));
                     should_refine_cold = false;
@@ -1098,13 +1098,13 @@ namespace veqlib_python
                 else if (continue_policy_is_cold(continue_policy))
                 {
                     apply_cold_policy(next_input, continue_policy);
-                    next_input.x_scale = build_x_block_scale_vector<KernelShape>(
+                    next_input.x_scale = build_x_block_scale_vector<CompiledShape>(
                         next_input.x0,
                         profile_params_for_case(next_input));
                     cold_policy_code = continue_policy;
                 }
             }
-            auto next_context = std::make_unique<SolveContext>(next_input);
+            auto next_context = std::make_unique<SolveState>(next_input);
             if (should_refine_cold)
                 refine_cold_initial_state(*next_context, cold_policy_code);
             refresh_initial_residual_scale(*next_context);
@@ -1112,12 +1112,12 @@ namespace veqlib_python
         }
 
         SolverKind                    solver_;
-        std::unique_ptr<SolveContext> context_;
+        std::unique_ptr<SolveState> context_;
         SolveResult                   last_result_{};
-        std::array<double, KernelShape::x_size> older_solution_{};
-        std::array<double, KernelShape::x_size> previous_solution_{};
-        std::array<double, KernelShape::x_size> latest_solution_{};
-        CaseInput                     latest_input_{};
+        std::array<double, CompiledShape::x_size> older_solution_{};
+        std::array<double, CompiledShape::x_size> previous_solution_{};
+        std::array<double, CompiledShape::x_size> latest_solution_{};
+        RuntimeCase                     latest_input_{};
         bool                          has_last_result_ = false;
         bool                          has_older_solution_ = false;
         bool                          has_previous_solution_ = false;
