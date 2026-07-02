@@ -104,7 +104,7 @@ def main() -> None:
     #    handle-level default runtime config.
     kernel_config = KernelConfig(method="powell", initial="cold", norm="fast")
     kernel = Kernel(
-        topology,
+        topology=topology,
         recipe=KernelRecipe(build="fastmath"),
         config=kernel_config,
         cache_root=outdir / "kernel_cache",

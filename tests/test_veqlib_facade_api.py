@@ -193,7 +193,7 @@ def test_kernel_topology_and_runtime_source_is_user_facing_contract() -> None:
 
 def test_kernel_runtime_case_must_match_topology_before_native() -> None:
     topology = make_kernel_topology()
-    handle = Kernel(topology)
+    handle = Kernel(topology=topology)
     recorder = RecordingSolver()
     handle._solver = recorder  # type: ignore[assignment]
 
@@ -260,7 +260,7 @@ def test_kernel_solve_uses_handle_default_config_with_per_call_overrides() -> No
         max_evaluations=123,
         norm="balanced",
     )
-    handle = Kernel(topology, config=default_config)
+    handle = Kernel(topology=topology, config=default_config)
     recorder = RecordingSolver(x_size=handle.x_size)
     handle._solver = recorder  # type: ignore[assignment]
 
@@ -309,7 +309,7 @@ def test_kernel_dry_run_and_python_owned_result_snapshot(tmp_path: Path) -> None
     recipe = KernelRecipe(build="release", layout="family")
     kernel_config = KernelConfig(max_residual=4.0e-6)
     handle = facade.build(
-        topology,
+        topology=topology,
         recipe=recipe,
         config=kernel_config,
         cache_root=tmp_path,
@@ -356,7 +356,11 @@ def test_kernel_dry_run_and_python_owned_result_snapshot(tmp_path: Path) -> None
 @pytest.mark.slow
 def test_kernel_python_build_and_solve_native_flow(tmp_path: Path) -> None:
     topology = make_kernel_topology()
-    handle = Kernel(topology, recipe=KernelRecipe(build="fastmath"), cache_root=tmp_path)
+    handle = Kernel(
+        topology=topology,
+        recipe=KernelRecipe(build="fastmath"),
+        cache_root=tmp_path,
+    )
 
     artifact = handle.prepare()
     assert artifact.built is True

@@ -40,8 +40,8 @@ class Kernel:
 
     def __init__(
         self,
-        topology: KernelTopology,
         *,
+        topology: KernelTopology,
         recipe: KernelRecipe | None = None,
         config: KernelConfig | None = None,
         registry: KernelRegistry | None = None,
@@ -270,8 +270,8 @@ class Kernel:
 
 
 def build(
-    topology: KernelTopology,
     *,
+    topology: KernelTopology,
     recipe: KernelRecipe | None = None,
     config: KernelConfig | None = None,
     registry: KernelRegistry | None = None,
@@ -284,7 +284,7 @@ def build(
     """Create a kernel handle, cache its default config, and prepare its artifact."""
 
     kernel = Kernel(
-        topology,
+        topology=topology,
         recipe=recipe,
         config=config,
         registry=registry,
@@ -297,10 +297,10 @@ def build(
 
 
 def solve(
-    topology: KernelTopology,
     boundary: KernelBoundary,
     source: KernelSource,
     *,
+    topology: KernelTopology,
     config: KernelConfig | None = None,
     recipe: KernelRecipe | None = None,
     registry: KernelRegistry | None = None,
@@ -314,7 +314,7 @@ def solve(
     """Prepare a short-lived kernel, solve one case, and close its private workspace."""
 
     kernel = Kernel(
-        topology,
+        topology=topology,
         recipe=recipe,
         config=config,
         registry=registry,

@@ -171,15 +171,17 @@ representative High configuration for each GEQDSK family.
 
 The package-level Python facade is intentionally semantic: users construct
 `KernelTopology` for the physical/native topology, including `ip_constraint` and
-`beta_constraint` boolean source constraints, `KernelRecipe` for packed backend,
-layout, and build options, `KernelBoundary`/`KernelSource` for runtime cases,
-and `KernelConfig` for the handle-level default solve policy.
-`build(..., recipe=None, config=None)` creates a reusable `Kernel` and caches
-that default policy on the handle; `Kernel.solve(...)` can use it as-is, replace
-it with a one-off `config=...`, or override individual fields such as
-`method=...` for one call. `solve(...)` is the one-shot convenience path and
-`clean(...)` cleans artifact cache entries. The lower-level artifact primitive
-is named `prepare(topology, recipe=...)` and returns `PrepareResult`.
+`beta_constraint` boolean source constraints, then pass it explicitly as
+`Kernel(topology=topology)` or `build(topology=topology, ...)`. `KernelRecipe`
+carries packed backend, layout, and build options, `KernelBoundary`/`KernelSource`
+carry runtime cases, and `KernelConfig` carries the handle-level default solve
+policy. `build(topology=..., recipe=None, config=None)` creates a reusable
+`Kernel` and caches that default policy on the handle; `Kernel.solve(...)` can
+use it as-is, replace it with a one-off `config=...`, or override individual
+fields such as `method=...` for one call. `solve(..., topology=...)` is the
+one-shot convenience path and `clean(...)` cleans artifact cache entries. The
+lower-level artifact primitive is named `prepare(topology, recipe=...)` and
+returns `PrepareResult`.
 ABI-code lowering, CPU-affinity, and cache-root helpers live in their focused
 submodules. Facade inputs use one canonical Python spelling per option; aliases
 are not part of the public contract. Python drives CMake with explicit `-D...` definitions and loads the
