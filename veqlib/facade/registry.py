@@ -1,7 +1,7 @@
-"""Native module registry and thread-owned VEQlib solver wrappers.
+"""Native module registry and thread-owned VEQlib solvers.
 
 The registry caches loaded topology artifacts at process scope, but each
-``NativeSolver`` wrapper owns mutable C++ workspace and is guarded by the Python
+``NativeSolver`` guard owns mutable C++ workspace and is bound to the Python
 thread that created it. Sharing artifacts is allowed; sharing solver workspace
 across threads is not.
 """
@@ -33,7 +33,7 @@ class SolverThreadError(RuntimeError):
 
 
 class SolverClosedError(RuntimeError):
-    """Raised when a closed VEQlib solver wrapper is used again."""
+    """Raised when a closed VEQlib solver guard is used again."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,7 +45,7 @@ class LoadedKernel:
 
 
 class ThreadOwnedNativeSolver:
-    """Small Python guard around the mutable C++ NativeSolver workspace."""
+    """Python guard around the mutable C++ NativeSolver workspace."""
 
     def __init__(self, solver: Any, *, pin_cpu: bool | int | None = None) -> None:
         self._solver: Any | None = solver
@@ -120,7 +120,7 @@ class ThreadOwnedNativeSolver:
 
     def _require_solver(self) -> Any:
         if self._solver is None:
-            raise SolverClosedError("VEQlib NativeSolver wrapper is closed")
+            raise SolverClosedError("VEQlib NativeSolver guard is closed")
         return self._solver
 
     def _call_native(self, method: Any, *args: Any) -> Any:
@@ -230,18 +230,6 @@ class KernelRegistry:
             solvers = {}
             self._thread_local.solvers = solvers
         return solvers
-
-
-def load_kernel(
-    topology: Topology,
-    *,
-    recipe: Recipe | None = None,
-    registry: KernelRegistry | None = None,
-    force: bool = False,
-) -> LoadedKernel:
-    """Load a VEQlib kernel through ``registry`` or a short-lived default registry."""
-
-    return (registry or KernelRegistry()).load_kernel(topology, recipe=recipe, force=force)
 
 
 def _load_artifact_module(artifact: CompileResult) -> ModuleType:

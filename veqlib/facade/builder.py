@@ -1,9 +1,9 @@
 """Compile planning, build, and cache metadata for VEQlib kernels.
 
 Artifact identity is a setup-time contract: topology, compile recipe, toolchain
-ABI, and source digests participate, while runtime boundary/input/config values
-do not. This keeps repeated case solves on one topology independent from CMake
-artifact lifecycle details.
+ABI, and source digests define reusable native modules. Runtime
+boundary/input/config values stay on the per-case solve path, keeping repeated
+case solves on one topology independent from CMake artifact lifecycle details.
 """
 
 from __future__ import annotations
@@ -75,7 +75,7 @@ class CleanResult:
 def default_kernel_cache_root() -> Path:
     """Return the repository-local VEQlib kernel cache root without creating it."""
 
-    override = os.environ.get("VEQLIB_KERNEL_CACHE") or os.environ.get("VEQPY_KERNEL_CACHE")
+    override = os.environ.get("VEQLIB_KERNEL_CACHE")
     if override:
         return Path(override).expanduser()
     return _veqlib_root() / "artifact"

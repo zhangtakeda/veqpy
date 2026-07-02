@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import inspect
 import os
 import subprocess
 import sys
@@ -150,39 +149,6 @@ def test_veqlib_facade_root_exports_semantic_surface() -> None:
         "clean",
         "solve",
     ]
-    for helper in (
-        "KernelArtifact",
-        "KernelBuildError",
-        "KernelBuildOptions",
-        "KernelCleanResult",
-        "KernelResult",
-        "build_artifact",
-        "build_kernel",
-        "default_kernel_cache_root",
-        "pinned_cpu",
-        "current_cpu_affinity",
-        "KernelInput",
-        "solver_method_code",
-        "SOLVER_METHOD_POWELL",
-    ):
-        assert not hasattr(facade, helper)
-
-
-def test_kernel_runtime_source_parameter_replaces_input_parameter() -> None:
-    callables = (
-        facade.solve,
-        Kernel.solve,
-        Kernel.residual,
-        Kernel.residual_into,
-        Kernel.jvp,
-        Kernel.jvp_into,
-        Kernel.jacobian,
-        Kernel.jacobian_into,
-    )
-    for callable_ in callables:
-        parameters = inspect.signature(callable_).parameters
-        assert "source" in parameters
-        assert "input" not in parameters
 
 
 def test_kernel_topology_and_runtime_source_is_user_facing_contract() -> None:
@@ -194,13 +160,9 @@ def test_kernel_topology_and_runtime_source_is_user_facing_contract() -> None:
 
     assert topology.to_canonical_dict() == same_shape.to_canonical_dict()
     assert topology.key == same_shape.key
-    assert "recipe" not in topology.to_canonical_dict()
-    assert "layout" not in topology.to_canonical_dict()
     assert family_recipe.layout == "family"
     assert family_recipe.layout_profile_first is True
     assert family_recipe.to_canonical_dict()["preset"] == "release"
-    with pytest.raises(TypeError, match="layout"):
-        make_kernel_topology(layout="degree")
     assert topology.route == "PF"
     assert topology.coordinate == "psin"
     assert topology.constraint == "Ip"

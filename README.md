@@ -178,23 +178,20 @@ that default policy on the handle; `Kernel.solve(...)` can use it as-is, replace
 it with a one-off `config=...`, or override individual fields such as
 `method=...` for one call. `solve(...)` is the one-shot convenience path and
 `clean(...)` cleans artifact cache entries. The lower-level artifact primitive
-is named `compile(topology, recipe=...)` and returns `CompileResult`;
-option-code, CPU-affinity, and cache-root helpers remain in their submodules
-instead of the package root.
-Manual CMake presets are not part of the supported workflow; Python calls CMake
-with explicit `-D...` definitions and loads the resulting artifact through
-`veqlib.facade`.
+is named `compile(topology, recipe=...)` and returns `CompileResult`.
+Option-code, CPU-affinity, and cache-root helpers live in their focused
+submodules. Python drives CMake with explicit `-D...` definitions and loads the
+resulting artifact through `veqlib.facade`.
 
 The current production boundary is narrow: route/topology planning covers the
 benchmark matrix, while native execution is gated by
-`KernelTopology.validate_supported_for_veqlib_native()`. Runtime values such as
-boundary coefficients, source arrays, `Ip`, `beta`, solver tolerances, and `x0`
-do not participate in the kernel artifact identity. The artifact cache key is
+`KernelTopology.validate_supported_for_veqlib_native()`. The artifact cache key is
 computed from the canonical topology, explicit compile recipe, Python/toolchain
 ABI, the native CMake define contract, and a digest of implementation inputs under
 `veqlib/core` (`.h`, `.cpp`, `.in`, and `CMakeLists.txt`). Artifacts are cached
-under `veqlib/artifact/` by default, `VEQLIB_KERNEL_CACHE` when set, or legacy
-`VEQPY_KERNEL_CACHE` as fallback.
+under `veqlib/artifact/` by default, or under `VEQLIB_KERNEL_CACHE` when set.
+Runtime boundary/source arrays, physical constraints, solver tolerances, and `x0`
+belong to the per-case solve call.
 
 The facade pins short native calls to one CPU by default to reduce scheduler
 noise. Set `VEQLIB_PIN_CPU=0` to disable scoped pinning, or

@@ -2,8 +2,8 @@
 
 This module owns the user-facing ``Kernel`` lifecycle: artifact resolution,
 typed ``KernelBoundary``/``KernelSource``/``KernelConfig`` runtime calls, and
-Python-owned result snapshots. It deliberately does not translate external
-``Operator`` objects or make benchmark adapters part of the VEQlib ABI.
+Python-owned result snapshots. External ``Operator`` adapters and benchmark
+harnesses stay outside this ABI boundary.
 """
 
 from __future__ import annotations
@@ -44,7 +44,9 @@ class Kernel:
         backend: str = "cxx",
     ) -> None:
         self.topology = topology
-        self.recipe = KernelRecipe() if recipe is None else self._kernel_recipe(recipe)
+        self.recipe = KernelRecipe() if recipe is None else recipe
+        if not isinstance(self.recipe, KernelRecipe):
+            raise TypeError(f"recipe must be KernelRecipe, got {type(self.recipe).__name__}")
         self.config = KernelConfig() if config is None else self._kernel_config(config)
         self.backend = backend
         self.pin_cpu = pin_cpu
@@ -79,9 +81,8 @@ class Kernel:
         self.history.append(self.result)
         return self.result
 
-    # Raw numerical APIs intentionally do not expose per-call solve policy.  The
-    # handle default config only installs the native current-case context required
-    # before residual/JVP/Jacobian kernels run.
+    # Raw numerical APIs use the handle default config to install the native
+    # current-case context required before residual/JVP/Jacobian kernels run.
     def residual(self, x: Any, boundary: KernelBoundary, source: KernelSource) -> np.ndarray:
         out = np.empty(self.x_size, dtype=np.float64)
         self.residual_into(out, x, boundary, source)
@@ -208,12 +209,6 @@ class Kernel:
             *config.runtime_args(x_size=self.x_size),
         )
         return solver
-
-    @staticmethod
-    def _kernel_recipe(recipe: KernelRecipe) -> KernelRecipe:
-        if not isinstance(recipe, KernelRecipe):
-            raise TypeError(f"recipe must be KernelRecipe, got {type(recipe).__name__}")
-        return recipe
 
     @staticmethod
     def _kernel_config(config: KernelConfig) -> KernelConfig:
