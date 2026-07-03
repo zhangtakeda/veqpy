@@ -427,6 +427,43 @@ def test_kernel_dry_run_and_python_owned_result_snapshot(tmp_path: Path) -> None
     assert result.alpha.flags.owndata
 
 
+def test_kernel_artifact_identity_excludes_runtime_case_and_solver_config(tmp_path: Path) -> None:
+    topology = make_kernel_topology()
+    recipe = KernelRecipe(build="release", layout="degree")
+    first = Kernel(
+        topology=topology,
+        recipe=recipe,
+        config=KernelConfig(max_residual=1.0e-5, max_evaluations=3),
+        cache_root=tmp_path,
+    )
+    second = Kernel(
+        topology=topology,
+        recipe=recipe,
+        config=KernelConfig(max_residual=9.0e-7, max_evaluations=99),
+        cache_root=tmp_path,
+    )
+    materialize_kernel_source(topology, tiny_kernel_source(case_name="one"))
+    materialize_kernel_source(
+        topology,
+        KernelSource(
+            heat_profile=tiny_kernel_source().heat_profile * 1.1,
+            current_profile=tiny_kernel_source().current_profile,
+            Ip=4.0e6,
+            case_name="two",
+        ),
+    )
+
+    first_artifact = first.prepare(dry_run=True)
+    second_artifact = second.prepare(dry_run=True)
+
+    assert first_artifact.artifact_id == second_artifact.artifact_id
+    assert first_artifact.metadata["topology"] == topology_identity_payload(topology)
+    assert first_artifact.metadata["recipe"] == recipe_identity_payload(recipe)
+    assert "config" not in first_artifact.metadata
+    assert "source" not in first_artifact.metadata
+    assert "x0" not in first_artifact.metadata
+
+
 @pytest.mark.slow
 def test_kernel_python_build_and_solve_native_flow(tmp_path: Path) -> None:
     topology = make_kernel_topology()

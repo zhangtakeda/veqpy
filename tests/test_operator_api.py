@@ -143,6 +143,18 @@ def test_operator_keeps_problem_inputs_raw_and_rejects_pre_scaled_ip() -> None:
         with pytest.raises(ValueError, match="Rejected setup input magnitude"):
             Operator(tiny_grid(), bad_problem)
 
+    bad_current_problem = Problem(
+        route="PF",
+        coordinate="rho",
+        active_profiles={"h": 2},
+        boundary=tiny_boundary(),
+        heat_input=np.full(3, 1.0e6, dtype=np.float64),
+        current_input=np.full(3, 1.0e6, dtype=np.float64),
+    )
+    with pytest.warns(RuntimeWarning, match="Pass unnormalized setup values to Problem"):
+        with pytest.raises(ValueError, match="current_input max_abs"):
+            Operator(tiny_grid(), bad_current_problem)
+
 
 def test_pf_rho_grid_unconstrained_equilibrium_uses_positive_flux_branch() -> None:
     grid = tiny_grid()

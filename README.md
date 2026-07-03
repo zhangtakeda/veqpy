@@ -57,8 +57,9 @@ and easier to reuse than full solver-native equilibrium or reconstruction pipeli
   `KernelTopology + KernelRecipe + KernelBoundary + KernelSource + KernelConfig` API,
   with raw runtime source profiles in `KernelSource`, and builds/loads optional
   topology-specific VEQlib C++/nanobind kernels for the current MVP path. The
-  explicit `veqpy.kernel.NumbaKernel` entrypoint reuses the same KernelTypes while
-  it temporarily lowers to the standard Python/Numba solver for parity checks.
+  explicit `veqpy.kernel.NumbaKernel` entrypoint reuses the same KernelTypes and
+  the same route-dependent source materialization table while it temporarily
+  lowers to the standard Python/Numba solver for parity checks.
 
 ## Installation
 
@@ -177,10 +178,14 @@ carries packed backend, layout, and build options, `KernelBoundary`/`KernelSourc
 carry runtime cases, and `KernelConfig` carries the handle-level default solve
 policy. `KernelSource` stores raw user-facing `heat_profile`, `current_profile`,
 `Ip`, and `beta` values; the facade materializes route-dependent `mu0` scaling
-before calling backend kernels. `veqpy.kernel.NumbaKernel` accepts the same
+before calling backend kernels. That Python-side source semantic table is also
+used by the legacy `Operator` source plan, so the native facade and the
+Numba compatibility bridge reject pre-scaled inputs consistently while preserving
+their public field names. `veqpy.kernel.NumbaKernel` accepts the same
 `KernelTopology`, `KernelBoundary`, `KernelSource`, `KernelConfig`, `KernelRecipe`,
 and `SolveResult` types for the explicit Numba compatibility path; it currently
-supports degree layout and keeps JVP/Jacobian APIs explicitly unimplemented.
+supports degree layout, lowers through the legacy solver rather than a direct
+runtime, and keeps JVP/Jacobian APIs explicitly unimplemented.
 `build(topology=..., recipe=None, config=None)` creates a reusable
 `Kernel` and caches that default policy on the handle; `Kernel.solve(...)` can
 use it as-is, replace it with a one-off `config=...`, or override individual

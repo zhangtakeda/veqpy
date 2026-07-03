@@ -12,13 +12,13 @@ Notes:
 
 from __future__ import annotations
 
-import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
 
+from veqlib import materialize_source_inputs
 from veqpy.engine import (
     COORDINATE_CODES,
     source_parameterization_for_route_key,
@@ -33,13 +33,6 @@ if TYPE_CHECKING:
     from veqpy.model import Problem
 
 RouteKey = tuple[str, str, str]
-
-MU0 = 4.0e-7 * np.pi
-SETUP_NORMALIZED_ABS_MIN = 1.0e-3
-SETUP_NORMALIZED_ABS_MAX = 1.0e3
-SETUP_PHYSICAL_ABS_MIN = SETUP_NORMALIZED_ABS_MIN / MU0
-SETUP_PHYSICAL_ABS_MAX = SETUP_NORMALIZED_ABS_MAX / MU0
-CURRENT_PROFILE_ROUTES = frozenset({"PI", "PJ1", "PJ2"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,58 +135,22 @@ def build_source_plan(
 
 
 def _scaled_source_inputs(problem: Problem) -> tuple[np.ndarray, np.ndarray, float, float]:
-    route = str(problem.route).upper()
-    scaled_heat = _scale_pressure_like_input(problem.heat_input, name="heat_input")
-    scaled_current = _scale_current_input(problem.current_input, route=route)
-    scaled_Ip = _scale_physical_constraint(float(problem.Ip), name="Ip")
-    return scaled_heat, scaled_current, scaled_Ip, float(problem.beta)
-
-
-def _scale_pressure_like_input(value: np.ndarray, *, name: str) -> np.ndarray:
-    max_abs = float(np.max(np.abs(value))) if value.size else 0.0
-    if not _in_closed_range(max_abs, SETUP_PHYSICAL_ABS_MIN, SETUP_PHYSICAL_ABS_MAX):
-        _reject_setup_magnitude(name=name, max_abs=max_abs)
-    return _readonly_array(value * MU0)
-
-
-def _scale_current_input(value: np.ndarray, *, route: str) -> np.ndarray:
-    max_abs = float(np.max(np.abs(value))) if value.size else 0.0
-    if route in CURRENT_PROFILE_ROUTES:
-        if not _in_closed_range(max_abs, SETUP_PHYSICAL_ABS_MIN, SETUP_PHYSICAL_ABS_MAX):
-            _reject_setup_magnitude(name="current_input", max_abs=max_abs)
-        return _readonly_array(value * MU0)
-    if not _in_closed_range(max_abs, SETUP_NORMALIZED_ABS_MIN, SETUP_NORMALIZED_ABS_MAX):
-        _reject_setup_magnitude(name="current_input", max_abs=max_abs)
-    return _readonly_array(value)
-
-
-def _scale_physical_constraint(value: float, *, name: str) -> float:
-    if not np.isfinite(value):
-        return value
-    max_abs = abs(float(value))
-    if not _in_closed_range(max_abs, SETUP_PHYSICAL_ABS_MIN, SETUP_PHYSICAL_ABS_MAX):
-        _reject_setup_magnitude(name=name, max_abs=max_abs)
-    return float(value) * MU0
-
-
-def _reject_setup_magnitude(*, name: str, max_abs: float) -> None:
-    magnitude_label = f"{name} abs" if name == "Ip" else f"{name} max_abs"
-    message = (
-        f"Rejected setup input magnitude: {magnitude_label}={max_abs:.6g}. "
-        "Pass unnormalized setup values to Problem; SourcePlan applies mu0 scaling once."
+    materialized = materialize_source_inputs(
+        route=str(problem.route).upper(),
+        heat=problem.heat_input,
+        current=problem.current_input,
+        Ip=float(problem.Ip),
+        beta=float(problem.beta),
+        heat_name="heat_input",
+        current_name="current_input",
+        advice="Pass unnormalized setup values to Problem; SourcePlan applies mu0 scaling once.",
     )
-    warnings.warn(message, RuntimeWarning, stacklevel=3)
-    raise ValueError(message)
-
-
-def _in_closed_range(value: float, lower: float, upper: float) -> bool:
-    return lower <= value <= upper
-
-
-def _readonly_array(value: np.ndarray) -> np.ndarray:
-    arr = np.asarray(value, dtype=np.float64).copy()
-    arr.setflags(write=False)
-    return arr
+    return (
+        materialized.scaled_heat,
+        materialized.scaled_current,
+        materialized.scaled_Ip,
+        materialized.beta,
+    )
 
 
 def validate_source_plan_profile_support(

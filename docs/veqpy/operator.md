@@ -36,6 +36,11 @@ remains a normalized or field-derived driver such as `FF'`, `psin_r`, or `q`.
 Inputs with magnitudes outside the expected setup ranges are rejected while
 building the source plan.
 
+The Kernel API keeps the same distinction. Public `KernelSource` values are raw
+case inputs named `heat_profile`, `current_profile`, `Ip`, and `beta`; any
+`scaled_*` arrays are internal materialized state shared by the VEQlib facade and
+legacy `SourcePlan`, not public snapshot fields.
+
 ## Source Routes
 
 All routes produce the same root fields for residual assembly:

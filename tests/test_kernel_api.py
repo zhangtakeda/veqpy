@@ -7,12 +7,24 @@ from numpy.linalg import norm
 from numpy.testing import assert_allclose
 
 from veqlib.facade import KernelBoundary, KernelConfig, KernelRecipe, KernelSource, KernelTopology
+from veqlib.facade.source_semantics import materialize_kernel_source
+from veqpy.engine import validate_route
 from veqpy.kernel import NumbaKernel
 from veqpy.kernel.result import solve_result_from_legacy
 from veqpy.model import Boundary, Grid, Problem
 from veqpy.operator import Operator
+from veqpy.operator.source_plan import build_source_plan
 from veqpy.solver import SolverResult
 from veqpy.solver.residual_scale import make_residual_scale
+
+ROUTE_PARITY_CASES = (
+    ("PF", "psin", "uniform"),
+    ("PP", "psin", "uniform"),
+    ("PI", "rho", "uniform"),
+    ("PJ1", "psin", "uniform"),
+    ("PJ2", "psin", "uniform"),
+    ("PQ", "rho", "grid"),
+)
 
 
 def make_kernel_topology(**overrides: object) -> KernelTopology:
@@ -57,9 +69,54 @@ def tiny_kernel_source() -> KernelSource:
     )
 
 
+def route_kernel_topology(route: str, coordinate: str, nodes: str) -> KernelTopology:
+    params: dict[str, object] = {
+        "h_count": 2,
+        "v_count": 0,
+        "kappa_count": 0,
+        "psin_count": 0,
+        "F_count": 0,
+        "c_counts": (),
+        "s_counts": (2,),
+        "Nr": 8,
+        "Nt": 8,
+        "route": route,
+        "coordinate": coordinate,
+        "nodes": nodes,
+        "ip_constraint": True,
+        "sample_count": 8 if nodes == "grid" else 9,
+    }
+    if route == "PJ2":
+        params["F_count"] = 2
+    elif coordinate == "psin" and nodes == "uniform":
+        params["psin_count"] = 2
+    return KernelTopology(**params)  # type: ignore[arg-type]
+
+
+def route_kernel_source(route: str, sample_count: int) -> KernelSource:
+    heat_profile = np.linspace(1.0e6, 1.4e6, sample_count, dtype=np.float64)
+    if route in {"PI", "PJ1", "PJ2"}:
+        current_profile = np.linspace(1.0e6, 3.0e6, sample_count, dtype=np.float64)
+    else:
+        current_profile = np.linspace(1.0, 3.0, sample_count, dtype=np.float64)
+    return KernelSource(
+        heat_profile=heat_profile,
+        current_profile=current_profile,
+        Ip=3.0e6,
+    )
+
+
 def tiny_legacy_operator(topology: KernelTopology) -> Operator:
     source = tiny_kernel_source()
     boundary = tiny_kernel_boundary()
+    return legacy_operator_from_kernel_case(topology, boundary, source)
+
+
+def legacy_operator_from_kernel_case(
+    topology: KernelTopology,
+    boundary: KernelBoundary,
+    source: KernelSource,
+) -> Operator:
     return Operator(
         Grid(
             Nr=topology.Nr,
@@ -75,19 +132,42 @@ def tiny_legacy_operator(topology: KernelTopology) -> Operator:
             coordinate=topology.coordinate,
             nodes=topology.nodes,
             active_profiles=dict(topology.active_profiles),
-            boundary=Boundary(
-                a=boundary.a,
-                R0=boundary.R0,
-                Z0=boundary.Z0,
-                B0=boundary.B0,
-                ka=boundary.ka,
-                c_offsets=boundary.c_offsets,
-                s_offsets=boundary.s_offsets,
-            ),
+            boundary=legacy_boundary_from_kernel(boundary),
             heat_input=source.heat_profile,
             current_input=source.current_profile,
             Ip=source.Ip,
+            beta=source.beta,
         ),
+    )
+
+
+def legacy_problem_from_kernel_case(
+    topology: KernelTopology,
+    boundary: KernelBoundary,
+    source: KernelSource,
+) -> Problem:
+    return Problem(
+        route=topology.route,
+        coordinate=topology.coordinate,
+        nodes=topology.nodes,
+        active_profiles=dict(topology.active_profiles),
+        boundary=legacy_boundary_from_kernel(boundary),
+        heat_input=source.heat_profile,
+        current_input=source.current_profile,
+        Ip=source.Ip,
+        beta=source.beta,
+    )
+
+
+def legacy_boundary_from_kernel(boundary: KernelBoundary) -> Boundary:
+    return Boundary(
+        a=boundary.a,
+        R0=boundary.R0,
+        Z0=boundary.Z0,
+        B0=boundary.B0,
+        ka=boundary.ka,
+        c_offsets=boundary.c_offsets,
+        s_offsets=boundary.s_offsets,
     )
 
 
@@ -131,6 +211,65 @@ def test_numba_kernel_residual_matches_legacy_operator_and_validates_buffers() -
     with pytest.raises(ValueError, match="C-contiguous"):
         noncontiguous_out = np.empty((kernel.x_size, 2), dtype=np.float64)[:, 0]
         kernel.residual_into(noncontiguous_out, x, boundary, source)
+
+
+@pytest.mark.parametrize(("route", "coordinate", "nodes"), ROUTE_PARITY_CASES)
+def test_kernel_source_materialization_matches_legacy_source_plan_route_matrix(
+    route: str,
+    coordinate: str,
+    nodes: str,
+) -> None:
+    topology = route_kernel_topology(route, coordinate, nodes)
+    boundary = tiny_kernel_boundary()
+    source = route_kernel_source(route, topology.sample_count)
+    problem = legacy_problem_from_kernel_case(topology, boundary, source)
+    source_route_spec = validate_route(problem.route, problem.coordinate, problem.nodes)
+
+    source_plan = build_source_plan(problem=problem, source_route_spec=source_route_spec)
+    materialized = materialize_kernel_source(topology, source)
+
+    assert source_plan.route_key == topology.source_route_key
+    assert source_plan.parameterization == topology.source_parameterization
+    assert_allclose(source_plan.scaled_heat, materialized.scaled_heat)
+    assert_allclose(source_plan.scaled_current, materialized.scaled_current)
+    assert source_plan.scaled_Ip == materialized.scaled_Ip
+    assert_allclose([source_plan.beta], [materialized.beta], equal_nan=True)
+    assert not source_plan.scaled_heat.flags.writeable
+    assert not source_plan.scaled_current.flags.writeable
+
+
+@pytest.mark.parametrize(("route", "coordinate", "nodes"), ROUTE_PARITY_CASES)
+def test_numba_kernel_residual_matches_legacy_operator_for_route_matrix(
+    route: str,
+    coordinate: str,
+    nodes: str,
+) -> None:
+    topology = route_kernel_topology(route, coordinate, nodes)
+    kernel = NumbaKernel(topology=topology)
+    boundary = tiny_kernel_boundary()
+    source = route_kernel_source(route, topology.sample_count)
+    legacy_operator = legacy_operator_from_kernel_case(topology, boundary, source)
+    x = np.zeros(kernel.x_size, dtype=np.float64)
+
+    assert_allclose(kernel.residual(x, boundary, source), legacy_operator.residual_var(x))
+
+
+def test_numba_kernel_build_equilibrium_runtime_state_rules() -> None:
+    topology = make_kernel_topology()
+    kernel = NumbaKernel(topology=topology)
+    boundary = tiny_kernel_boundary()
+    source = tiny_kernel_source()
+    x = np.zeros(kernel.x_size, dtype=np.float64)
+
+    with pytest.raises(RuntimeError, match="previous NumbaKernel runtime case"):
+        kernel.build_equilibrium(x)
+
+    kernel.residual(x, boundary, source)
+    equilibrium = kernel.build_equilibrium(x)
+    assert np.isfinite(equilibrium.Ip)
+
+    with pytest.raises(RuntimeError, match="previous solve result"):
+        kernel.build_equilibrium()
 
 
 def test_numba_kernel_solve_result_lifecycle_and_equilibrium_snapshot() -> None:
