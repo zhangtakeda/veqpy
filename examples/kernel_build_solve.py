@@ -111,7 +111,8 @@ def main() -> None:
     )
     artifact = kernel.prepare()
 
-    # 3. Prepare typed runtime source data.
+    # 3. Prepare typed raw runtime source data; facade materialization applies
+    #    route-dependent mu0 scaling before backend entry.
     kernel_boundary = build_boundary()
     kernel_source = build_source()
 

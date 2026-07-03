@@ -3,12 +3,16 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from helpers import MU0, pf_reference_profiles
+from numpy.linalg import norm
 from numpy.testing import assert_allclose
 
 from veqlib.facade import KernelBoundary, KernelConfig, KernelRecipe, KernelSource, KernelTopology
 from veqpy.kernel import NumbaKernel
+from veqpy.kernel.result import solve_result_from_legacy
 from veqpy.model import Boundary, Grid, Problem
 from veqpy.operator import Operator
+from veqpy.solver import SolverResult
+from veqpy.solver.residual_scale import make_residual_scale
 
 
 def make_kernel_topology(**overrides: object) -> KernelTopology:
@@ -95,6 +99,9 @@ def test_numba_kernel_recipe_validation_and_public_surface() -> None:
     assert kernel.recipe.backend == "numba"
     assert kernel.recipe.layout == "degree"
     assert kernel.prepare() is None
+    assert kernel.prepare(force=True, dry_run=True) is None
+    assert kernel.close() is None
+    assert kernel.close() is None
 
     with pytest.raises(ValueError, match="layout='degree'"):
         NumbaKernel(topology=topology, recipe=KernelRecipe(backend="numba", layout="family"))
@@ -150,10 +157,106 @@ def test_numba_kernel_solve_result_lifecycle_and_equilibrium_snapshot() -> None:
     assert kernel.result is result
     assert kernel.history == [result]
     assert_allclose(kernel.build_equilibrium(result.x).Ip, kernel.build_equilibrium().Ip)
+    assert result.info == int(result.success)
+    assert result.callbacks == 0
+    assert result.jvp_evaluations == 0
+    assert result.jacobian_component_evaluations == 0
 
     kernel.clear()
     assert kernel.result is None
     assert kernel.history == []
+
+
+@pytest.mark.parametrize("norm_mode", ["none", "fast", "balanced"])
+def test_numba_kernel_solve_result_scaled_uses_solver_reference_state(norm_mode: str) -> None:
+    operator = tiny_legacy_operator(make_kernel_topology())
+    x0 = np.zeros(operator.x_size, dtype=np.float64)
+    x_final = np.ones(operator.x_size, dtype=np.float64)
+    solver_result = SolverResult(
+        x0=x0,
+        x=x_final,
+        success=False,
+        message="synthetic terminal state",
+        residual_norm_final=0.0,
+        function_evaluations=3,
+        jacobian_evaluations=1,
+        iterations=2,
+        elapsed=1250.0,
+    )
+    config = KernelConfig(norm=norm_mode)
+
+    result = solve_result_from_legacy(solver_result, operator, config)
+    expected_raw = operator.residual_var(x_final)
+    expected_scaled = _expected_scaled_from_reference(expected_raw, x0, operator, config)
+
+    assert_allclose(result.raw, expected_raw)
+    assert_allclose(result.scaled, expected_scaled)
+    assert result.elapsed_ms == 1.25
+    assert result.info == 0
+    assert result.nfev == 3
+    assert result.njev == 1
+    assert result.linear_iterations == 2
+    assert result.callbacks == 0
+    assert result.jvp_evaluations == 0
+    assert result.jacobian_component_evaluations == 0
+    assert result.raw_norm == pytest.approx(float(norm(result.raw)))
+    assert result.scaled_norm == pytest.approx(float(norm(result.scaled)))
+
+    if norm_mode != "none":
+        final_based_scaled = _expected_scaled_from_reference(
+            expected_raw,
+            x_final,
+            operator,
+            config,
+        )
+        assert not np.allclose(result.scaled, final_based_scaled)
+
+
+def test_numba_kernel_warm_continuation_passes_previous_solution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    kernel = NumbaKernel(topology=make_kernel_topology())
+    boundary = tiny_kernel_boundary()
+    source = tiny_kernel_source()
+    first = kernel.solve(
+        boundary,
+        source,
+        config=KernelConfig(
+            method="levenberg-marquardt",
+            initial="cold-zeros",
+            norm="none",
+            max_evaluations=2,
+        ),
+    )
+    captured: dict[str, np.ndarray | None] = {}
+
+    def fake_solve(
+        boundary_arg: KernelBoundary,
+        source_arg: KernelSource,
+        config_arg: KernelConfig,
+        *,
+        x0: np.ndarray | None,
+    ):
+        del boundary_arg, source_arg, config_arg
+        captured["x0"] = None if x0 is None else x0.copy()
+        return first
+
+    monkeypatch.setattr(kernel._solver, "solve", fake_solve)
+    second = kernel.solve(
+        boundary,
+        source,
+        config=KernelConfig(
+            method="levenberg-marquardt",
+            initial="cold-zeros",
+            continuation="warm",
+            norm="none",
+            max_evaluations=2,
+        ),
+    )
+
+    assert second is first
+    assert captured["x0"] is not None
+    assert_allclose(captured["x0"], first.x)
 
 
 def test_numba_kernel_jvp_and_jacobian_are_explicitly_unimplemented() -> None:
@@ -170,3 +273,30 @@ def test_numba_kernel_jvp_and_jacobian_are_explicitly_unimplemented() -> None:
         kernel.jacobian(x, boundary, source)
     with pytest.raises(NotImplementedError):
         kernel.jacobian_into(np.empty((kernel.x_size, kernel.x_size)), x, boundary, source)
+
+
+def _expected_scaled_from_reference(
+    raw: np.ndarray,
+    x_reference: np.ndarray,
+    operator: Operator,
+    config: KernelConfig,
+) -> np.ndarray:
+    if config.norm == "none":
+        return raw.copy()
+    reference_raw = operator.residual_var(x_reference)
+    params: dict[str, object] = {}
+    if config.norm == "balanced":
+        params = {
+            "floor": config.residual_normalization_floor,
+            "max_ratio": config.residual_normalization_max_ratio,
+            "huber_tau": config.residual_normalization_huber_tau,
+        }
+    scale = make_residual_scale(
+        config.norm,
+        reference_raw,
+        operator.residual_block_lengths(),
+        **params,
+    )
+    if scale is None:
+        scale = np.ones_like(raw)
+    return raw / scale

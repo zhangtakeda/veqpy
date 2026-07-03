@@ -64,6 +64,7 @@ from veqlib.facade.abi import (
     source_runtime_args,
 )
 from veqlib.facade.builder import default_kernel_cache_root
+from veqlib.facade.source_semantics import materialize_kernel_source
 
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "benchmarks" / "results" / "veqlib_continuation"
 UPDATE_CHOICES = ("ip", "boundary", "source", "mixed")
@@ -111,10 +112,10 @@ def _with_case_suffix(kernel_source: KernelSource, suffix: str) -> KernelSource:
 
 
 def _scale_ip(kernel_source: KernelSource, offset: float, *, strength: float = 1.0) -> KernelSource:
-    scaled_ip = float(kernel_source.scaled_Ip)
-    if not np.isfinite(scaled_ip):
-        raise ValueError("ip continuation update requires finite scaled_Ip")
-    return replace(kernel_source, scaled_Ip=float(scaled_ip * (1.0 + strength * offset)))
+    ip = float(kernel_source.Ip)
+    if not np.isfinite(ip):
+        raise ValueError("ip continuation update requires finite Ip")
+    return replace(kernel_source, Ip=float(ip * (1.0 + strength * offset)))
 
 
 def _scaled_boundary_array(
@@ -174,14 +175,14 @@ def _scale_source(
 ) -> KernelSource:
     return replace(
         kernel_source,
-        scaled_heat=_scaled_source_array(
-            kernel_source.scaled_heat,
+        heat_profile=_scaled_source_array(
+            kernel_source.heat_profile,
             offset,
             strength=strength,
             sign=1.0,
         ),
-        scaled_current=_scaled_source_array(
-            kernel_source.scaled_current,
+        current_profile=_scaled_source_array(
+            kernel_source.current_profile,
             offset,
             strength=strength,
             sign=-0.7,
@@ -240,10 +241,11 @@ def _run_policy_sequence_once(
     results: list[SolveResult] = []
     try:
         for kernel_boundary, kernel_source in runtime_points:
+            materialized_source = materialize_kernel_source(case.topology, kernel_source)
             solver.set_kernel_runtime(
                 "" if kernel_source.case_name is None else kernel_source.case_name,
                 *boundary_runtime_args(kernel_boundary),
-                *source_runtime_args(kernel_source),
+                *source_runtime_args(materialized_source),
                 *config_runtime_args(runtime_config, x_size=case.x_size),
             )
             results.append(solve_result_from_native(solver.solve_direct()))

@@ -76,6 +76,7 @@ from veqlib.facade import (
 from veqlib.facade.abi import boundary_runtime_args, config_runtime_args, source_runtime_args
 from veqlib.facade.builder import default_kernel_cache_root
 from veqlib.facade.identity import recipe_identity_payload
+from veqlib.facade.source_semantics import materialize_kernel_source
 
 DEFAULT_OUTPUT = REPO_ROOT / "benchmarks" / "results" / "veqlib_geqdsk.json"
 VALIDATION_ATOL = 1.0e-6
@@ -159,12 +160,12 @@ def _kernel_source_from_operator(
     config_label: str,
     operator: Any,
 ) -> KernelSource:
-    source_plan = operator.plan.source_plan
+    problem = operator.problem
     return KernelSource(
-        scaled_heat=np.asarray(source_plan.scaled_heat, dtype=np.float64),
-        scaled_current=np.asarray(source_plan.scaled_current, dtype=np.float64),
-        scaled_Ip=float(source_plan.scaled_Ip),
-        beta=float(source_plan.beta),
+        heat_profile=np.asarray(problem.heat_input, dtype=np.float64),
+        current_profile=np.asarray(problem.current_input, dtype=np.float64),
+        Ip=float(problem.Ip),
+        beta=float(problem.beta),
         case_name=f"{case_key}-{config_label.lower()}",
     )
 
@@ -349,10 +350,11 @@ def _measure_veqlib(
     build_wall_ms = float(time.perf_counter_ns() - build_start) / 1.0e6
 
     def configure() -> None:
+        materialized_source = materialize_kernel_source(case.topology, case.kernel_source)
         solver.set_kernel_runtime(
             "" if case.kernel_source.case_name is None else case.kernel_source.case_name,
             *boundary_runtime_args(case.kernel_boundary),
-            *source_runtime_args(case.kernel_source),
+            *source_runtime_args(materialized_source),
             *config_runtime_args(case.kernel_config, x_size=case.x_size),
         )
 

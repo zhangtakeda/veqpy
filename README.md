@@ -56,9 +56,9 @@ and easier to reuse than full solver-native equilibrium or reconstruction pipeli
 - **Experimental Kernel bridge**: `veqlib.facade` exposes the shared
   `KernelTopology + KernelRecipe + KernelBoundary + KernelSource + KernelConfig` API,
   with raw runtime source profiles in `KernelSource`, and builds/loads optional
-  topology-specific VEQlib C++/nanobind kernels for the current MVP path.
-  This is an optional acceleration path; the standard Python/Numba solver remains
-  the default.
+  topology-specific VEQlib C++/nanobind kernels for the current MVP path. The
+  explicit `veqpy.kernel.NumbaKernel` entrypoint reuses the same KernelTypes while
+  it temporarily lowers to the standard Python/Numba solver for parity checks.
 
 ## Installation
 
@@ -177,7 +177,11 @@ carries packed backend, layout, and build options, `KernelBoundary`/`KernelSourc
 carry runtime cases, and `KernelConfig` carries the handle-level default solve
 policy. `KernelSource` stores raw user-facing `heat_profile`, `current_profile`,
 `Ip`, and `beta` values; the facade materializes route-dependent `mu0` scaling
-before calling backend kernels. `build(topology=..., recipe=None, config=None)` creates a reusable
+before calling backend kernels. `veqpy.kernel.NumbaKernel` accepts the same
+`KernelTopology`, `KernelBoundary`, `KernelSource`, `KernelConfig`, `KernelRecipe`,
+and `SolveResult` types for the explicit Numba compatibility path; it currently
+supports degree layout and keeps JVP/Jacobian APIs explicitly unimplemented.
+`build(topology=..., recipe=None, config=None)` creates a reusable
 `Kernel` and caches that default policy on the handle; `Kernel.solve(...)` can
 use it as-is, replace it with a one-off `config=...`, or override individual
 fields such as `method=...` for one call. `solve(..., topology=...)` is the

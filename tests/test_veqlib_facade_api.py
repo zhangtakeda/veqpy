@@ -205,6 +205,69 @@ def test_kernel_topology_and_runtime_source_is_user_facing_contract() -> None:
         Kernel(topology=topology, recipe=numba_recipe)
 
 
+@pytest.mark.parametrize(
+    ("route", "current_profile", "expected_current"),
+    [
+        ("PF", np.array([1.0, 2.0, 3.0], dtype=np.float64), np.array([1.0, 2.0, 3.0])),
+        ("PP", np.array([1.0, 2.0, 3.0], dtype=np.float64), np.array([1.0, 2.0, 3.0])),
+        ("PI", np.array([1.0e6, 2.0e6, 3.0e6]), np.array([1.0e6, 2.0e6, 3.0e6]) * MU0),
+        ("PJ1", np.array([1.0e6, 2.0e6, 3.0e6]), np.array([1.0e6, 2.0e6, 3.0e6]) * MU0),
+        ("PJ2", np.array([1.0e6, 2.0e6, 3.0e6]), np.array([1.0e6, 2.0e6, 3.0e6]) * MU0),
+        ("PQ", np.array([1.0, 2.0, 3.0], dtype=np.float64), np.array([1.0, 2.0, 3.0])),
+    ],
+)
+def test_kernel_source_materialization_locks_route_scaling(
+    route: str,
+    current_profile: np.ndarray,
+    expected_current: np.ndarray,
+) -> None:
+    topology = make_kernel_topology(
+        route=route,
+        coordinate="rho",
+        nodes="uniform",
+        sample_count=3,
+        ip_constraint=False,
+        psin_count=0,
+        F_count=1 if route == "PJ2" else 0,
+        h_count=1,
+        kappa_count=0,
+        s_counts=(),
+    )
+    heat_profile = np.array([1.0e6, 1.2e6, 1.4e6], dtype=np.float64)
+    source = KernelSource(
+        heat_profile=heat_profile,
+        current_profile=current_profile,
+        Ip=3.0e6,
+    )
+
+    materialized = materialize_kernel_source(topology, source)
+
+    assert_allclose(materialized.scaled_heat, heat_profile * MU0)
+    assert_allclose(materialized.scaled_current, expected_current)
+    assert materialized.scaled_Ip == 3.0e6 * MU0
+    assert not materialized.scaled_heat.flags.writeable
+    assert not materialized.scaled_current.flags.writeable
+
+
+def test_kernel_source_materialization_errors_use_raw_field_names() -> None:
+    topology = make_kernel_topology(coordinate="rho", psin_count=0, sample_count=3)
+    source = KernelSource(
+        heat_profile=np.array([1.0e6, 1.1e6], dtype=np.float64),
+        current_profile=np.ones(2, dtype=np.float64),
+    )
+    with pytest.raises(ValueError, match="heat_profile and current_profile"):
+        materialize_kernel_source(topology, source)
+
+    prescaled_ip_source = KernelSource(
+        heat_profile=np.full(3, 1.0e6, dtype=np.float64),
+        current_profile=np.ones(3, dtype=np.float64),
+        Ip=3.0e6 * MU0,
+    )
+    with pytest.warns(RuntimeWarning, match="Pass raw case values"):
+        with pytest.raises(ValueError, match="Ip abs"):
+            materialize_kernel_source(topology, prescaled_ip_source)
+
+
 def test_kernel_runtime_case_must_match_topology_before_native() -> None:
     topology = make_kernel_topology()
     handle = Kernel(topology=topology)

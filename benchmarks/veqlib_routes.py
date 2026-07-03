@@ -84,6 +84,7 @@ from veqlib.facade import (
 from veqlib.facade.abi import boundary_runtime_args, config_runtime_args, source_runtime_args
 from veqlib.facade.builder import default_kernel_cache_root, prepare
 from veqlib.facade.identity import recipe_identity_payload, source_policy_payload
+from veqlib.facade.source_semantics import materialize_kernel_source
 from veqlib.facade.validation import validate_supported_for_veqlib_native
 from veqpy.engine import backend_abi
 from veqpy.model import Boundary, Grid, Problem
@@ -353,13 +354,12 @@ def _kernel_boundary_from_case(case: Any) -> KernelBoundary:
     )
 
 
-def _kernel_source_from_operator(case: Any, operator: Any, *, case_name: str) -> KernelSource:
-    source_plan = operator.plan.source_plan
+def _kernel_source_from_case(case: Any, *, case_name: str) -> KernelSource:
     return KernelSource(
-        scaled_heat=np.asarray(source_plan.scaled_heat, dtype=np.float64),
-        scaled_current=np.asarray(source_plan.scaled_current, dtype=np.float64),
-        scaled_Ip=float(source_plan.scaled_Ip),
-        beta=float(source_plan.beta),
+        heat_profile=np.asarray(case.heat_input, dtype=np.float64),
+        current_profile=np.asarray(case.current_input, dtype=np.float64),
+        Ip=float(case.Ip),
+        beta=float(case.beta),
         case_name=case_name,
     )
 
@@ -403,9 +403,8 @@ def _runtime_case(spec: Any, topology: Topology, recipe: KernelRecipe) -> Runtim
     x0 = operator.pack_coefficients(coefficients_from_coeffs(coeffs))
     method = _cxx_solver_method_for_spec(spec)
     kernel_boundary = _kernel_boundary_from_case(case)
-    kernel_source = _kernel_source_from_operator(
+    kernel_source = _kernel_source_from_case(
         case,
-        operator,
         case_name=_spec_label(spec),
     )
     kernel_config = _kernel_config_from_config(
@@ -492,10 +491,11 @@ def _measure_veqlib(
     build_wall_ms = float(time.perf_counter_ns() - build_start) / 1.0e6
 
     def configure() -> None:
+        materialized_source = materialize_kernel_source(case.topology, case.kernel_source)
         solver.set_kernel_runtime(
             "" if case.kernel_source.case_name is None else case.kernel_source.case_name,
             *boundary_runtime_args(case.kernel_boundary),
-            *source_runtime_args(case.kernel_source),
+            *source_runtime_args(materialized_source),
             *config_runtime_args(case.kernel_config, x_size=case.x_size),
         )
 

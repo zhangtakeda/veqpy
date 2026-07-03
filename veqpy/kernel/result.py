@@ -9,6 +9,8 @@ from veqlib.facade import KernelConfig, SolveResult
 from veqpy.operator import Operator
 from veqpy.solver import SolverResult
 
+from ..solver.residual_scale import make_residual_scale
+
 
 def solve_result_from_legacy(
     solver_result: SolverResult,
@@ -20,7 +22,8 @@ def solve_result_from_legacy(
     x_final = operator.coerce_x(solver_result.x).copy()
     raw = operator.residual_var(x_final)
     alpha = operator.source_workspace.alpha_state.copy()
-    scaled = _scaled_residual_snapshot(raw, operator, config)
+    x_reference = operator.coerce_x(solver_result.x0).copy()
+    scaled = _scaled_residual_snapshot(raw, x_reference, operator, config)
     return SolveResult(
         elapsed_ms=float(solver_result.elapsed) / 1000.0,
         success=solver_result.success,
@@ -42,28 +45,56 @@ def solve_result_from_legacy(
 
 def _scaled_residual_snapshot(
     raw: np.ndarray,
+    x_reference: np.ndarray,
     operator: Operator,
     config: KernelConfig,
 ) -> np.ndarray:
     mode = config.norm
     if mode == "none":
         return raw.copy()
+    reference_raw = operator.residual_var(x_reference)
     block_lengths = operator.residual_block_lengths()
-    if block_lengths is None:
-        scale = max(float(norm(raw)) / np.sqrt(max(raw.size, 1)), 1.0)
-        return raw / scale
-    scale = _block_scale(raw, np.asarray(block_lengths, dtype=np.int64))
+    scale = _reference_residual_scale(reference_raw, x_reference, operator, config, block_lengths)
+    if scale is None:
+        return raw.copy()
     return raw / scale
 
 
-def _block_scale(raw: np.ndarray, block_lengths: np.ndarray) -> np.ndarray:
-    scale = np.ones_like(raw, dtype=np.float64)
-    offset = 0
-    for length in block_lengths:
-        block_size = int(length)
-        block = raw[offset : offset + block_size]
-        if block_size > 0:
-            value = max(float(norm(block)) / np.sqrt(block_size), 1.0)
-            scale[offset : offset + block_size] = value
-        offset += block_size
-    return scale
+def _reference_residual_scale(
+    reference_raw: np.ndarray,
+    x_reference: np.ndarray,
+    operator: Operator,
+    config: KernelConfig,
+    block_lengths: np.ndarray | None,
+) -> np.ndarray | None:
+    params: dict[str, object] = {}
+    if config.norm in {"balanced", "safe"}:
+        params.update(
+            floor=config.residual_normalization_floor,
+            max_ratio=config.residual_normalization_max_ratio,
+            huber_tau=config.residual_normalization_huber_tau,
+        )
+    if config.norm == "safe":
+        params.update(
+            residual_fun=lambda x: operator.residual_var(operator.coerce_x(x), check=False),
+            x_guess=x_reference,
+            x_scale=_x_scale_for_reference(operator, x_reference),
+            probe_count=config.residual_normalization_probe_count,
+            probe_step=config.residual_normalization_probe_step,
+            sensitivity_lambda=config.residual_normalization_sensitivity_lambda,
+        )
+    scale = make_residual_scale(
+        config.norm,
+        reference_raw,
+        None if block_lengths is None else np.asarray(block_lengths, dtype=np.int64),
+        **params,
+    )
+    if scale is None:
+        return None
+    return np.asarray(scale, dtype=np.float64)
+
+
+def _x_scale_for_reference(operator: Operator, x_reference: np.ndarray) -> np.ndarray | None:
+    from ..solver.solver import _build_x_block_scale_vector
+
+    return _build_x_block_scale_vector(operator, x_reference)
