@@ -8,19 +8,14 @@ Role:
 
 from __future__ import annotations
 
-from collections.abc import Callable
-
 import numpy as np
 
-from veqpy.engine import validate_route
 from veqpy.workspace import GridWorkspace
-
-from .packed_layout import build_profile_layout
 
 
 def build_profile_parameter_arrays(
     *,
-    problem: object,
+    case: object,
     grid_workspace: GridWorkspace,
     profile_names: tuple[str, ...],
     profile_static_kwargs_by_name: dict[str, dict[str, float | int]],
@@ -34,7 +29,7 @@ def build_profile_parameter_arrays(
     profile_envelope_powers = np.empty(count, dtype=np.int64)
     profile_amplitude_powers = np.empty(count, dtype=np.float64)
     refresh_profile_parameter_arrays(
-        problem=problem,
+        case=case,
         grid_workspace=grid_workspace,
         profile_names=profile_names,
         profile_offsets=profile_offsets,
@@ -56,7 +51,7 @@ def build_profile_parameter_arrays(
 
 def refresh_profile_parameter_arrays(
     *,
-    problem: object,
+    case: object,
     grid_workspace: GridWorkspace,
     profile_names: tuple[str, ...],
     profile_offsets: np.ndarray,
@@ -74,13 +69,13 @@ def refresh_profile_parameter_arrays(
         profile_powers[p] = int(static_kwargs.get("power", 0))
         profile_envelope_powers[p] = int(static_kwargs.get("envelope_power", 1))
         profile_amplitude_powers[p] = float(static_kwargs.get("amplitude_power", 1.0))
-        profile_offsets[p] = _profile_offset(problem, name, profile_offset_specs)
-        profile_scales[p] = _profile_scale(problem, name)
+        profile_offsets[p] = _profile_offset(case, name, profile_offset_specs)
+        profile_scales[p] = _profile_scale(case, name)
 
 
 def refresh_profile_runtime(
     *,
-    problem: object,
+    case: object,
     operator_grid: GridWorkspace,
     profile_names: tuple[str, ...],
     profile_workspace,
@@ -94,7 +89,7 @@ def refresh_profile_runtime(
 ) -> None:
     """Refresh workspace profile slots from flat plan metadata."""
     refresh_profile_parameter_arrays(
-        problem=problem,
+        case=case,
         grid_workspace=operator_grid,
         profile_names=profile_names,
         profile_offsets=profile_offsets,
@@ -222,7 +217,7 @@ def refresh_fourier_family_metadata(
 
     if c_effective_order + 1 < c_family_fields.shape[0]:
         # Zero inactive tails immediately so later fused geometry calls cannot
-        # see leftover higher-order data from an earlier problem.
+        # see leftover higher-order data from an earlier case.
         c_family_fields[c_effective_order + 1 :].fill(0.0)
     if s_effective_order + 1 < s_family_fields.shape[0]:
         # Same tail cleanup for sine modes; s0 may already be a structural zero.
@@ -230,92 +225,29 @@ def refresh_fourier_family_metadata(
     return c_effective_order, s_effective_order
 
 
-def validate_problem_compatibility(
-    problem: object,
-    *,
-    profile_names: tuple[str, ...],
-    prefix_profile_names: tuple[str, ...],
-    profile_L: np.ndarray,
-    coeff_index: np.ndarray,
-    order_offsets: np.ndarray,
-    validate_source_inputs: Callable[[object], None],
-) -> None:
-    """Validate that a replacement problem preserves the bound operator layout."""
-    validate_route(problem.route, problem.coordinate, problem.nodes)
-    next_profile_L, next_coeff_index, next_order_offsets = build_profile_layout(
-        problem.active_profiles,
-        profile_names=profile_names,
-        prefix_profile_names=prefix_profile_names,
-    )
-    if not np.array_equal(next_profile_L, profile_L):
-        raise ValueError("Replacement problem changes the active profile layout")
-    if not np.array_equal(next_coeff_index, coeff_index):
-        raise ValueError("Replacement problem changes the packed coefficient layout")
-    if not np.array_equal(next_order_offsets, order_offsets):
-        raise ValueError("Replacement problem changes the degree ordering layout")
-    _validate_active_prefix_profile_ownership(
-        problem=problem,
-        profile_names=profile_names,
-        profile_L=profile_L,
-    )
-    validate_source_inputs(problem)
-
-
-def _validate_active_prefix_profile_ownership(
-    *,
-    problem: object,
-    profile_names: tuple[str, ...],
-    profile_L: np.ndarray,
-) -> None:
-    active_names = {
-        profile_names[index] for index, length in enumerate(profile_L) if int(length) >= 0
-    }
-    requires_active_F = problem.route == "PJ2"
-    requires_active_psin = (
-        problem.route != "PJ2" and problem.coordinate == "psin" and problem.nodes == "uniform"
-    )
-
-    if "F" in active_names and not requires_active_F:
-        raise ValueError(
-            f"{problem.route} does not accept an active F profile; "
-            "active F is only supported for PJ2"
-        )
-    if requires_active_F and "F" not in active_names:
-        raise ValueError(f"{problem.route} requires an active F profile")
-    if "F" in active_names and "psin" in active_names:
-        raise ValueError("Active F and active psin profiles are mutually exclusive")
-    if "psin" in active_names and not requires_active_psin:
-        raise ValueError(
-            f"{problem.route} {problem.coordinate}/{problem.nodes} does not accept "
-            "an active psin profile"
-        )
-    if requires_active_psin and "psin" not in active_names:
-        raise ValueError(f"{problem.route} requires an active psin profile")
-
-
 def _profile_offset(
-    problem: object,
+    case: object,
     name: str,
     profile_offset_specs: dict[str, float | str],
 ) -> float:
     if name.startswith("c") and name[1:].isdigit():
         order = int(name[1:])
-        return 0.0 if order >= problem.c_offsets.shape[0] else float(problem.c_offsets[order])
+        return 0.0 if order >= case.c_offsets.shape[0] else float(case.c_offsets[order])
     if name.startswith("s") and name[1:].isdigit():
         order = int(name[1:])
-        return 0.0 if order >= problem.s_offsets.shape[0] else float(problem.s_offsets[order])
+        return 0.0 if order >= case.s_offsets.shape[0] else float(case.s_offsets[order])
     try:
         offset_spec = profile_offset_specs[name]
     except KeyError as exc:
         raise KeyError(f"Unknown profile name {name!r}") from exc
     if isinstance(offset_spec, str):
-        return float(getattr(problem, offset_spec))
+        return float(getattr(case, offset_spec))
     return float(offset_spec)
 
 
-def _profile_scale(problem: object, name: str) -> float:
+def _profile_scale(case: object, name: str) -> float:
     if name == "F":
         # F coefficients represent the normalized F**2 amplitude; the profile
         # evaluator applies amplitude_power=0.5 and this scale restores F units.
-        return float(problem.R0 * problem.B0)
+        return float(case.R0 * case.B0)
     return 1.0

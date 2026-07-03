@@ -10,7 +10,7 @@ Public API:
 - GeometryLayout
 - SourceLayout
 - ResidualLayout
-- OperatorLayout
+- KernelLayout
 
 Notes:
 - Workspace objects own memory; layouts execute against already-bound arrays.
@@ -76,8 +76,8 @@ class ResidualLayout:
 
 
 @dataclass(slots=True)
-class OperatorLayout:
-    """Executable operator layout composed from fixed stage layouts."""
+class KernelLayout:
+    """Executable Kernel layout composed from fixed stage layouts."""
 
     profile: ProfileLayout
     geometry: GeometryLayout
@@ -89,9 +89,9 @@ class OperatorLayout:
     def empty(cls, x_size: int) -> Self:
         """Create a no-op layout placeholder before runtime arrays are bound."""
 
-        # Operator construction installs this placeholder before workspaces and
-        # route-specific closures are ready; every callable keeps the public
-        # interface usable but returns zeros until real binding replaces it.
+        # Runtime construction installs this placeholder before workspaces and
+        # route-specific closures are ready; every callable returns zeros until
+        # real binding replaces it.
         return cls.from_callables(
             profile_stage_runner=lambda x: None,
             geometry_stage_runner=lambda: None,
@@ -112,7 +112,7 @@ class OperatorLayout:
         fused_residual_runner_into: Callable[[np.ndarray, np.ndarray], None],
         collocation_runner_into: Callable[[np.ndarray, np.ndarray], None],
     ) -> Self:
-        """Compose stage callables into an executable operator layout."""
+        """Compose stage callables into an executable Kernel layout."""
         return cls(
             profile=ProfileLayout(run_stage=profile_stage_runner),
             geometry=GeometryLayout(run_stage=geometry_stage_runner),

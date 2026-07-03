@@ -11,7 +11,7 @@ Public API:
 
 Notes:
 - Inputs and outputs use packed-field semantics.
-- Operator staging is not handled here.
+- Kernel staging is not handled here.
 """
 
 from __future__ import annotations

@@ -484,7 +484,7 @@ def _construct_object(cls: type, field_values: dict[str, Any]) -> Any:
     except TypeError:
         pass
 
-    # Some legacy serial classes do not accept every serial attribute in
+    # Some serialized classes do not accept every serial attribute in
     # __init__; construct with the supported subset and restore the rest.
     try:
         sig = inspect.signature(cls.__init__)

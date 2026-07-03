@@ -3,7 +3,7 @@ Module: layout.residual_binding
 
 Role:
 - Bind residual and collocation stage callables from refreshed runtime state.
-- Keep residual closure wiring separate from the top-level operator layout factory.
+- Keep residual closure wiring separate from the top-level Kernel layout factory.
 
 Notes:
 - Packed residual semantics remain owned by the kernel packed layout and runtime plan.
@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 def build_residual_full_stage_runner_into(
     *,
     plan: Any,
-    problem: object,
+    case: object,
     profile_workspace: ProfileWorkspace,
     geometry_workspace: GeometryWorkspace,
     residual_workspace: ResidualWorkspace,
@@ -49,9 +49,9 @@ def build_residual_full_stage_runner_into(
     grid_k_max = int(plan.grid_workspace.K_max)
     grid_l_max = int(plan.grid_workspace.L_max)
     weights = plan.grid_workspace.weights
-    a = problem.a
-    R0 = problem.R0
-    B0 = problem.B0
+    a = case.a
+    R0 = case.R0
+    B0 = case.B0
 
     def runner(out: np.ndarray) -> None:
         # Residual compact fields depend only on current geometry/root fields and
@@ -132,7 +132,7 @@ def build_collocation_runner_into(
 def build_fused_residual_runner_into(
     *,
     plan: Any,
-    problem: object,
+    case: object,
     grid_workspace: GridWorkspace,
     residual_binding_layout: Any,
     profile_workspace: ProfileWorkspace,
@@ -175,9 +175,9 @@ def build_fused_residual_runner_into(
         alpha_state=alpha_state,
         c_active_order=int(c_effective_order),
         s_active_order=int(s_effective_order),
-        a=float(problem.a),
-        R0=float(problem.R0),
-        Z0=float(problem.Z0),
-        B0=float(problem.B0),
+        a=float(case.a),
+        R0=float(case.R0),
+        Z0=float(case.Z0),
+        B0=float(case.B0),
         fix_rho=fix_rho,
     )

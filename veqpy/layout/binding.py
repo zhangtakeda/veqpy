@@ -2,11 +2,11 @@
 Module: layout.binding
 
 Role:
-- Own Python closure wiring for executable operator layouts.
+- Own Python closure wiring for executable Kernel layouts.
 - Bind hot-path callables against refreshed plan and workspace objects.
 
 Public API:
-- build_operator_layout
+- build_kernel_layout
 
 Notes:
 - Workspace objects own memory; layout objects own executable stage callables.
@@ -36,13 +36,13 @@ if TYPE_CHECKING:
         SourceWorkspace,
     )
 
-from .runtime import OperatorLayout
+from .runtime import KernelLayout
 
 
-def build_operator_layout(
+def build_kernel_layout(
     *,
     plan: Any,
-    problem: object,
+    case: object,
     profile_workspace: ProfileWorkspace,
     geometry_workspace: GeometryWorkspace,
     source_workspace: SourceWorkspace,
@@ -53,8 +53,8 @@ def build_operator_layout(
     s_effective_order: int,
     fix_rho: float,
     psin_profile_fields_available: bool,
-) -> OperatorLayout:
-    """Bind a full executable ``OperatorLayout`` from refreshed runtime state."""
+) -> KernelLayout:
+    """Bind a full executable ``KernelLayout`` from refreshed runtime state."""
 
     alpha_state = source_workspace.alpha_state
     # Build stage closures in dependency order.  Later fused/collocation runners
@@ -88,9 +88,9 @@ def build_operator_layout(
         h_fields=profile_workspace.fields_for("h"),
         v_fields=profile_workspace.fields_for("v"),
         k_fields=profile_workspace.fields_for("k"),
-        a=problem.a,
-        R0=problem.R0,
-        Z0=problem.Z0,
+        a=case.a,
+        R0=case.R0,
+        Z0=case.Z0,
         surface_fields=geometry_workspace.surface_fields,
         radial_fields=geometry_workspace.radial_fields,
         grid_radial_fields=plan.grid_workspace.radial_fields,
@@ -102,12 +102,12 @@ def build_operator_layout(
         profile_workspace=profile_workspace,
         geometry_workspace=geometry_workspace,
         source_workspace=source_workspace,
-        B0=problem.B0,
+        B0=case.B0,
         fix_rho=fix_rho,
     )
     raw_source_stage_runner = build_bound_source_stage_runner(
         plan=plan,
-        problem=problem,
+        case=case,
         source_workspace=source_workspace,
         profile_workspace=profile_workspace,
         residual_workspace=residual_workspace,
@@ -125,7 +125,7 @@ def build_operator_layout(
     # runner before residual and collocation runners are bound.
     residual_full_stage_runner_into = build_residual_full_stage_runner_into(
         plan=plan,
-        problem=problem,
+        case=case,
         profile_workspace=profile_workspace,
         geometry_workspace=geometry_workspace,
         residual_workspace=residual_workspace,
@@ -133,7 +133,7 @@ def build_operator_layout(
     )
     fused_residual_runner_into = build_fused_residual_runner_into(
         plan=plan,
-        problem=problem,
+        case=case,
         grid_workspace=grid_workspace,
         residual_binding_layout=residual_binding_layout,
         profile_workspace=profile_workspace,
@@ -160,7 +160,7 @@ def build_operator_layout(
         source_stage_runner=source_stage_runner,
         alpha_state=alpha_state,
     )
-    return OperatorLayout.from_callables(
+    return KernelLayout.from_callables(
         profile_stage_runner=profile_stage_runner,
         geometry_stage_runner=geometry_stage_runner,
         source_stage_runner=source_stage_runner,

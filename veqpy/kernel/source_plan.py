@@ -3,7 +3,7 @@ Module: kernel.source_plan
 
 Role:
 - Own source route plans and source input validation.
-- Keep source compatibility at bind-time, before runtime memory refresh and engine calls.
+- Keep source binding validation at bind-time, before runtime memory refresh and engine calls.
 
 Notes:
 - This module owns immutable source plans consumed by the kernel runtime.
@@ -95,25 +95,25 @@ SOURCE_PARAMETERIZATION_CODES = {
 
 def build_source_plan(
     *,
-    problem: object,
+    case: object,
     source_route_spec: object,
     interpolation_kind: str = SOURCE_INTERP_DEFAULT,
 ) -> SourcePlan:
     """Build the immutable source plan for a runtime case."""
-    scaled_heat, scaled_current, scaled_Ip, beta = _scaled_source_inputs(problem)
+    scaled_heat, scaled_current, scaled_Ip, beta = _scaled_source_inputs(case)
     # Parameterization is route-specific.  For example PP/psin/uniform samples
     # on sqrt(psin) to bias resolution near the magnetic axis while all kernels
     # still exchange normalized psin/root fields internally.
     route_key = (
-        str(problem.route).upper(),
-        str(problem.coordinate).lower(),
-        str(problem.nodes).lower(),
+        str(case.route).upper(),
+        str(case.coordinate).lower(),
+        str(case.nodes).lower(),
     )
     return SourcePlan(
-        route=str(problem.route).upper(),
+        route=str(case.route).upper(),
         kernel=source_route_spec.implementation,
-        coordinate=str(problem.coordinate).lower(),
-        nodes=str(problem.nodes).lower(),
+        coordinate=str(case.coordinate).lower(),
+        nodes=str(case.nodes).lower(),
         parameterization=source_parameterization_for_route_key(route_key),
         source_sample_count=int(scaled_heat.shape[0]),
         scaled_heat=scaled_heat,
@@ -124,19 +124,19 @@ def build_source_plan(
             # Grid-node sources are already sampled on operator rho; leave the
             # interpolation slot empty so runtime binding cannot remap them.
             ""
-            if str(problem.nodes).lower() == "grid"
+            if str(case.nodes).lower() == "grid"
             else normalize_source_interpolation_kind(interpolation_kind)
         ),
     )
 
 
-def _scaled_source_inputs(problem: object) -> tuple[np.ndarray, np.ndarray, float, float]:
+def _scaled_source_inputs(case: object) -> tuple[np.ndarray, np.ndarray, float, float]:
     materialized = materialize_source_inputs(
-        route=str(problem.route).upper(),
-        heat=problem.heat_input,
-        current=problem.current_input,
-        Ip=float(problem.Ip),
-        beta=float(problem.beta),
+        route=str(case.route).upper(),
+        heat=case.heat_input,
+        current=case.current_input,
+        Ip=float(case.Ip),
+        beta=float(case.beta),
         heat_name="heat_input",
         current_name="current_input",
         advice="Pass unnormalized runtime values; SourcePlan applies mu0 scaling once.",
@@ -153,9 +153,9 @@ def validate_source_plan_profile_support(
     *,
     source_plan: SourcePlan,
     source_execution: object,
-    problem: object,
+    case: object,
 ) -> None:
-    """Validate source-plan compatibility with active profile ownership."""
+    """Validate the source plan against active profile ownership."""
     route_key = source_plan.route_key
     if route_key != tuple(getattr(source_execution, "route_key")):
         raise ValueError(
@@ -168,11 +168,11 @@ def validate_source_plan_profile_support(
     requires_active_F = bool(getattr(source_execution, "requires_optimized_f_profile", False))
     if has_active_F and not requires_active_F:
         raise ValueError(
-            f"{problem.route} does not accept an active F profile; "
+            f"{case.route} expects no active F profile; "
             "active F is only supported for PJ2"
         )
     if requires_active_F and not has_active_F:
-        raise ValueError(f"{problem.route} requires an active F profile")
+        raise ValueError(f"{case.route} requires an active F profile")
     if has_active_F and has_active_psin:
         raise ValueError("Active F and active psin profiles are mutually exclusive")
     if (
@@ -181,7 +181,7 @@ def validate_source_plan_profile_support(
     ):
         # PF/PP/PI/PJ1/PQ psin-uniform routes query external source samples at
         # the current optimized psin each residual evaluation.
-        raise ValueError(f"{problem.route} requires an active psin profile")
+        raise ValueError(f"{case.route} requires an active psin profile")
     if (
         source_plan.is_psin_coordinate
         and has_active_psin
@@ -191,24 +191,24 @@ def validate_source_plan_profile_support(
         # active psin profile would create two independent owners of the same
         # root field and stale source queries.
         raise ValueError(
-            f"{problem.route} does not accept an active psin profile"
+            f"{case.route} expects no active psin profile"
         )
 
 
-def validate_source_inputs(problem: object, nr: int) -> None:
+def validate_source_inputs(case: object, nr: int) -> None:
     """Validate source input lengths for grid-owned and sampled routes."""
-    if problem.heat_input.shape != problem.current_input.shape:
+    if case.heat_input.shape != case.current_input.shape:
         raise ValueError(
             "Expected heat_input/current_input to share a shape, "
-            f"got {problem.heat_input.shape} and {problem.current_input.shape}"
+            f"got {case.heat_input.shape} and {case.current_input.shape}"
         )
-    if problem.nodes == "grid" and problem.heat_input.shape[0] != nr:
+    if case.nodes == "grid" and case.heat_input.shape[0] != nr:
         # Grid-node routes skip interpolation entirely, so source samples must
         # already match the operator radial grid.
         raise ValueError(
-            f"Expected grid inputs to have shape ({nr},), got {problem.heat_input.shape}"
+            f"Expected grid inputs to have shape ({nr},), got {case.heat_input.shape}"
         )
-    if problem.heat_input.shape[0] < 1:
+    if case.heat_input.shape[0] < 1:
         raise ValueError(
-            f"Expected {problem.coordinate}-coordinate inputs to contain at least one sample"
+            f"Expected {case.coordinate}-coordinate inputs to contain at least one sample"
         )

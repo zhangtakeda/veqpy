@@ -493,7 +493,7 @@ def test_numba_kernel_warm_continuation_passes_previous_solution(
     assert_allclose(captured["x0"], first.x)
 
 
-def test_numba_kernel_jvp_and_jacobian_are_explicitly_unimplemented() -> None:
+def test_numba_kernel_jvp_and_jacobian_raise_contract_errors() -> None:
     kernel = NumbaKernel(topology=make_kernel_topology())
     boundary = tiny_kernel_boundary()
     source = tiny_kernel_source()

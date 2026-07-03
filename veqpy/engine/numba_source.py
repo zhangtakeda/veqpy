@@ -179,7 +179,7 @@ def register_source_route(*route_keys: RouteKey) -> Callable[[Callable], Callabl
 
     Source route registration is intentionally tuple-only at the engine boundary:
     each key must be a three-string tuple such as ``("PJ1", "rho", "uniform")``.
-    Friendly route-name compatibility belongs at the model/source-plan boundary, not
+    Friendly route-name aliases belong at the model/source-plan boundary, not
     in this bind-time registry.
     """
 

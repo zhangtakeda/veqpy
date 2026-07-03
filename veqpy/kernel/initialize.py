@@ -37,7 +37,7 @@ _TINY = 1.0e-16
 
 def build_boundary_slope_initial_state(
     *,
-    problem: object,
+    case: object,
     plan: KernelRuntimePlan,
     profile_workspace: ProfileWorkspace,
     source_psin_target: Callable[[np.ndarray], np.ndarray | None] | None = None,
@@ -47,7 +47,7 @@ def build_boundary_slope_initial_state(
     x = np.zeros(int(plan.x_size), dtype=np.float64)
     _seed_axis_and_boundary_shape_terms(
         x,
-        h0_est=estimate_axis_shift_h0(problem),
+        h0_est=estimate_axis_shift_h0(case),
         plan=plan,
         profile_workspace=profile_workspace,
     )
@@ -84,7 +84,7 @@ def _seed_axis_and_boundary_shape_terms(
             x[idx0] = -offset / float(2 * power + 1)
 
 
-def estimate_axis_shift_h0(problem: object) -> float:
+def estimate_axis_shift_h0(case: object) -> float:
     """Estimate the geometric axis radial-shift coefficient from source moments.
 
     The estimate keeps the large-aspect-ratio Shafranov scaling ``a / R0`` but
@@ -93,13 +93,13 @@ def estimate_axis_shift_h0(problem: object) -> float:
     numerically uniform sources do not perturb finite-difference solvers.
     """
 
-    boundary = problem.boundary
+    boundary = case.boundary
     epsilon = float(boundary.a) / float(boundary.R0)
     kappa = abs(float(boundary.ka))
     elongation_factor = 2.0 * kappa / (1.0 + kappa * kappa)
 
-    pressure_drive = _relative_abs_rms(problem.heat_input)
-    current_drive = _relative_abs_rms(problem.current_input)
+    pressure_drive = _relative_abs_rms(case.heat_input)
+    current_drive = _relative_abs_rms(case.current_input)
     source_drive = np.hypot(
         pressure_drive,
         _SOURCE_CURRENT_ROUGHNESS_WEIGHT * current_drive,

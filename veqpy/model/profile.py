@@ -36,7 +36,7 @@ class Profile(Serial):
 
     def __post_init__(self) -> None:
         # Profile stores only root profile parameters. Derived value/derivative
-        # arrays are allocated in ProfileWorkspace after Operator flattens setup.
+        # arrays are allocated in ProfileWorkspace after Kernel runtime flattens setup.
         object.__setattr__(self, "scale", float(self.scale))
         object.__setattr__(self, "power", int(self.power))
         object.__setattr__(self, "envelope_power", int(self.envelope_power))
@@ -82,7 +82,7 @@ def _coerce_optional_array(value, *, name: str = "array") -> np.ndarray | None:
     if isinstance(value, np.ndarray) and value.ndim == 0:
         scalar = value.item()
         if scalar is None or (isinstance(scalar, float) and np.isnan(scalar)):
-            # Scalar object arrays from legacy serializers can encode "missing"
+            # Scalar object arrays from older serializers can encode "missing"
             # as None/NaN.  Preserve that as a passive profile marker.
             return None
     arr = np.asarray(value, dtype=np.float64)

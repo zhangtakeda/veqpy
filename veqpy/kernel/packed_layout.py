@@ -1,9 +1,9 @@
 """
-Module: operator.packed_layout
+Module: kernel.packed_layout
 
 Role:
 - Build packed layout and profile metadata.
-- Encode and decode packed state vectors at the operator boundary.
+- Encode and decode packed state vectors at the kernel boundary.
 - Provide packed-state shape validation helpers.
 
 Public API:
@@ -48,8 +48,8 @@ RESIDUAL_BLOCK_CODE_BY_NAME = {
 }
 
 # Family order determines both model-facing coefficient dictionaries and the
-# row order of layout metadata arrays.  Reordering it is a file-format/runtime
-# compatibility change, not a local implementation detail.
+# row order of layout metadata arrays.  Reordering it changes file-format and
+# runtime ABI semantics, not just a local implementation detail.
 PACKED_PROFILE_FAMILY_ORDER = ("h", "v", "k", "c0", "c", "s", "psin", "F")
 PREFIX_PROFILE_FAMILIES = ("psin", "F")
 SHAPE_PROFILE_FAMILIES = ("h", "v", "k", "c0", "c", "s")
@@ -281,8 +281,8 @@ def build_profile_layout(
                 order_offsets[k] = x_pos
     order_offsets[max_L + 1] = x_pos
     # order_offsets[k] gives the first packed position for degree k in the
-    # degree-first layout.  For profile-first it is retained for compatibility
-    # checks and monotone layout fingerprints.
+    # degree-first layout.  For profile-first it remains part of monotone
+    # layout fingerprints.
 
     return profile_L, coeff_index, order_offsets
 

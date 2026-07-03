@@ -5,8 +5,8 @@ Role:
 - Mark ``veqpy.layout`` as the executable layout package.
 
 Public API:
-- OperatorLayout
-- build_operator_layout
+- KernelLayout
+- build_kernel_layout
 
 Notes:
 - Package-root exports are the cross-submodule layout contract.
@@ -18,13 +18,13 @@ from importlib import import_module
 from typing import Any
 
 __all__ = [
-    "OperatorLayout",
-    "build_operator_layout",
+    "KernelLayout",
+    "build_kernel_layout",
 ]
 
 _EXPORTS = {
-    "OperatorLayout": ("veqpy.layout.runtime", "OperatorLayout"),
-    "build_operator_layout": ("veqpy.layout.binding", "build_operator_layout"),
+    "KernelLayout": ("veqpy.layout.runtime", "KernelLayout"),
+    "build_kernel_layout": ("veqpy.layout.binding", "build_kernel_layout"),
 }
 
 

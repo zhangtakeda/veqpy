@@ -109,7 +109,7 @@ def build_source_execution_abi(
 ) -> SourceExecutionABI:
     """Build source-route ABI metadata from a source plan and packed profile layout."""
     route_key = (source_plan.route, source_plan.coordinate, source_plan.nodes)
-    del coeff_index  # preserved in the signature for call-site compatibility
+    del coeff_index  # reserved in the ABI-shaped signature
 
     # Active profile ownership is a layout fact, not a route-name convention.
     # Resolve slots here so source kernels can stay flat numba callables.

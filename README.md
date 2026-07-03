@@ -181,8 +181,8 @@ route-dependent `mu0` scaling before calling backend kernels. `veqpy.kernel.Numb
 and `veqpy.facade.Kernel` accept the same `KernelTopology`, `KernelBoundary`,
 `KernelSource`, `KernelConfig`, `KernelRecipe`, and `SolveResult` types for the
 explicit Numba path; they currently support degree layout, evaluate residuals and
-solves through a topology-native Numba runtime, and keep JVP/Jacobian APIs
-explicitly unimplemented.
+solves through a topology-native Numba runtime, and expose JVP/Jacobian contract
+methods that raise `NotImplementedError`.
 `build(topology=..., recipe=None, config=None)` creates a reusable `Kernel` and
 caches that default policy on the handle; `Kernel.solve(...)` can use it as-is,
 replace it with a one-off `config=...`, or override individual fields such as

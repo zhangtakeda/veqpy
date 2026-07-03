@@ -2,7 +2,7 @@
 Module: workspace.allocation
 
 Role:
-- Allocate operator stage workspaces.
+- Allocate kernel stage workspaces.
 - Keep workspace construction coordinated from one entrypoint.
 
 Public API:
@@ -10,7 +10,7 @@ Public API:
 
 Notes:
 - Workspace classes own memory for their respective stages.
-- Operator and layout modules own orchestration and executable callables.
+- Kernel runtime and layout modules own orchestration and executable callables.
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ def allocate_runtime_state(
     SourceWorkspace,
     ResidualWorkspace,
 ]:
-    """Build operator runtime state through stage workspace constructors."""
+    """Build kernel runtime state through stage workspace constructors."""
 
     nr = grid_workspace.Nr
     nt = grid_workspace.Nt

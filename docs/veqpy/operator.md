@@ -15,7 +15,7 @@ solve policy. `Kernel.solve(...)` returns a shared `SolveResult`, and
 The direct Numba implementation lives under `veqpy.kernel`. Its internal runtime
 still owns packed layout metadata, source materialization, residual workspaces,
 and equilibrium snapshot assembly, but those details are not separate public
-problem/operator objects.
+objects.
 
 Public source inputs stay raw: `KernelSource.heat_profile`,
 `KernelSource.current_profile`, `KernelSource.Ip`, and `KernelSource.beta`.

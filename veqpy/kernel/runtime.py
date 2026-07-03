@@ -13,7 +13,7 @@ from veqlib.facade import (
     materialize_kernel_source,
 )
 from veqpy.engine import backend_abi, source_parameterization_for_route_key, validate_route
-from veqpy.layout import OperatorLayout, build_operator_layout
+from veqpy.layout import KernelLayout, build_kernel_layout
 from veqpy.math import SOURCE_INTERP_DEFAULT, normalize_source_interpolation_kind
 from veqpy.model import Grid
 from veqpy.workspace import (
@@ -187,7 +187,7 @@ class NumbaRuntime:
             topology,
             source_interpolation_kind=source_interpolation_kind,
         )
-        self.layout = OperatorLayout.empty(self.plan.x_size)
+        self.layout = KernelLayout.empty(self.plan.x_size)
         (
             self.profile_workspace,
             self.geometry_workspace,
@@ -345,7 +345,7 @@ class NumbaRuntime:
 
     def _refresh_runtime_state(self, case: KernelRuntimeCase) -> None:
         refresh_profile_runtime(
-            problem=case,
+            case=case,
             operator_grid=self.plan.grid_workspace,
             profile_names=self.plan.profile_names,
             profile_workspace=self.profile_workspace,
@@ -390,9 +390,9 @@ class NumbaRuntime:
         self._refresh_runtime_bindings(case)
 
     def _refresh_runtime_bindings(self, case: KernelRuntimeCase) -> None:
-        self.layout = build_operator_layout(
+        self.layout = build_kernel_layout(
             plan=self.plan,
-            problem=case,
+            case=case,
             profile_workspace=self.profile_workspace,
             geometry_workspace=self.geometry_workspace,
             source_workspace=self.source_workspace,
@@ -420,7 +420,7 @@ class NumbaRuntime:
 
     def _build_geometric_initial_state(self) -> np.ndarray:
         x = build_boundary_slope_initial_state(
-            problem=self._require_case(),
+            case=self._require_case(),
             plan=self.plan,
             profile_workspace=self.profile_workspace,
             source_psin_target=self._source_psin_target_for_initial_state,

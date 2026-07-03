@@ -2,7 +2,7 @@
 Module: workspace.grid_workspace
 
 Role:
-- Hold static grid memory snapshots for operator hot paths.
+- Hold static grid memory snapshots for kernel hot paths.
 
 Public API:
 - GridWorkspace
@@ -36,7 +36,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True)
 class GridWorkspace:
-    """Operator-level Grid snapshot: arrays and metadata required by the engine ABI.
+    """Kernel Grid snapshot: arrays and metadata required by the engine ABI.
 
     K_max is normalized: Grid.K_max=None maps to M_max.
     """
