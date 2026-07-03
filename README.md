@@ -57,9 +57,10 @@ and easier to reuse than full solver-native equilibrium or reconstruction pipeli
   `KernelTopology + KernelRecipe + KernelBoundary + KernelSource + KernelConfig` API,
   with raw runtime source profiles in `KernelSource`, and builds/loads optional
   topology-specific VEQlib C++/nanobind kernels for the current MVP path. The
-  explicit `veqpy.kernel.NumbaKernel` entrypoint reuses the same KernelTypes and
-  the same route-dependent source materialization table while assembling a direct
-  topology-native Numba runtime for residuals, solves, and equilibrium snapshots.
+  explicit `veqpy.kernel.NumbaKernel` entrypoint and parallel `veqpy.facade`
+  Numba facade reuse the same KernelTypes and route-dependent source materialization
+  table while assembling a direct topology-native Numba runtime for residuals,
+  solves, and equilibrium snapshots.
 
 ## Installation
 
@@ -181,10 +182,10 @@ policy. `KernelSource` stores raw user-facing `heat_profile`, `current_profile`,
 before calling backend kernels. That Python-side source semantic table is also
 used by the legacy `Operator` source plan, so the native facade and the
 direct Numba runtime reject pre-scaled inputs consistently while preserving their
-public field names. `veqpy.kernel.NumbaKernel` accepts the same
+public field names. `veqpy.kernel.NumbaKernel` and `veqpy.facade.Kernel` accept the same
 `KernelTopology`, `KernelBoundary`, `KernelSource`, `KernelConfig`, `KernelRecipe`,
-and `SolveResult` types for the explicit Numba path; it currently supports degree
-layout, evaluates residuals and solves through a topology-native Numba runtime,
+and `SolveResult` types for the explicit Numba path; they currently support degree
+layout, evaluate residuals and solves through a topology-native Numba runtime,
 and keeps JVP/Jacobian APIs explicitly unimplemented.
 `build(topology=..., recipe=None, config=None)` creates a reusable
 `Kernel` and caches that default policy on the handle; `Kernel.solve(...)` can

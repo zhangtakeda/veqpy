@@ -30,6 +30,17 @@ PUBLIC_EXPORTS = {
     "veqpy.kernel": {
         "NumbaKernel",
     },
+    "veqpy.facade": {
+        "Kernel",
+        "KernelBoundary",
+        "KernelConfig",
+        "KernelRecipe",
+        "KernelSource",
+        "KernelTopology",
+        "NumbaKernel",
+        "SolveResult",
+        "build",
+    },
     "veqpy.operator": {
         "PACKED_LAYOUT_PROFILE_FIRST",
         "PROFILE_OFFSET_SPECS",
