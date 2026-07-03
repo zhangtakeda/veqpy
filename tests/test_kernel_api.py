@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from contextlib import suppress
+from importlib import import_module
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 from helpers import MU0, pf_reference_profiles
@@ -171,6 +175,28 @@ def legacy_boundary_from_kernel(boundary: KernelBoundary) -> Boundary:
     )
 
 
+def install_legacy_bridge_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+    def guarded_build_legacy_operator(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise AssertionError("NumbaKernel direct runtime called legacy bridge")
+
+    kernel_solver = import_module("veqpy.kernel.solver")
+    monkeypatch.setattr(
+        kernel_solver,
+        "build_legacy_operator",
+        guarded_build_legacy_operator,
+        raising=False,
+    )
+    with suppress(ModuleNotFoundError):
+        compat_lowering = import_module("veqpy.kernel._compat_lowering")
+        monkeypatch.setattr(
+            compat_lowering,
+            "build_legacy_operator",
+            guarded_build_legacy_operator,
+            raising=False,
+        )
+
+
 def test_numba_kernel_recipe_validation_and_public_surface() -> None:
     topology = make_kernel_topology()
     kernel = NumbaKernel(topology=topology)
@@ -254,6 +280,36 @@ def test_numba_kernel_residual_matches_legacy_operator_for_route_matrix(
     assert_allclose(kernel.residual(x, boundary, source), legacy_operator.residual_var(x))
 
 
+def test_numba_kernel_residual_uses_direct_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    topology = make_kernel_topology()
+    kernel = NumbaKernel(topology=topology)
+    boundary = tiny_kernel_boundary()
+    source = tiny_kernel_source()
+    legacy_operator = legacy_operator_from_kernel_case(topology, boundary, source)
+    x = np.zeros(kernel.x_size, dtype=np.float64)
+    expected = legacy_operator.residual_var(x)
+
+    install_legacy_bridge_guard(monkeypatch)
+
+    assert_allclose(kernel.residual(x, boundary, source), expected)
+
+
+def test_numba_kernel_residual_into_uses_direct_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    topology = make_kernel_topology()
+    kernel = NumbaKernel(topology=topology)
+    boundary = tiny_kernel_boundary()
+    source = tiny_kernel_source()
+    legacy_operator = legacy_operator_from_kernel_case(topology, boundary, source)
+    x = np.zeros(kernel.x_size, dtype=np.float64)
+    expected = legacy_operator.residual_var(x)
+    out = np.empty(kernel.x_size, dtype=np.float64)
+
+    install_legacy_bridge_guard(monkeypatch)
+
+    kernel.residual_into(out, x, boundary, source)
+    assert_allclose(out, expected)
+
+
 def test_numba_kernel_build_equilibrium_runtime_state_rules() -> None:
     topology = make_kernel_topology()
     kernel = NumbaKernel(topology=topology)
@@ -270,6 +326,140 @@ def test_numba_kernel_build_equilibrium_runtime_state_rules() -> None:
 
     with pytest.raises(RuntimeError, match="previous solve result"):
         kernel.build_equilibrium()
+
+
+def test_numba_kernel_solve_uses_direct_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    topology = make_kernel_topology()
+    kernel = NumbaKernel(topology=topology)
+    boundary = tiny_kernel_boundary()
+    source = tiny_kernel_source()
+
+    install_legacy_bridge_guard(monkeypatch)
+
+    result = kernel.solve(
+        boundary,
+        source,
+        config=KernelConfig(
+            method="levenberg-marquardt",
+            initial="cold-zeros",
+            norm="none",
+            max_evaluations=2,
+        ),
+    )
+
+    assert result.x.shape == (kernel.x_size,)
+    assert result.raw.shape == (kernel.x_size,)
+    assert_allclose(result.raw, kernel.residual(result.x, boundary, source))
+    assert kernel.result is result
+    assert kernel.history == [result]
+
+
+def test_numba_kernel_success_is_raw_residual_gated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    kernel = NumbaKernel(topology=make_kernel_topology())
+    boundary = tiny_kernel_boundary()
+    source = tiny_kernel_source()
+
+    def fake_least_squares(*args: object, **kwargs: object) -> SimpleNamespace:
+        del args, kwargs
+        return SimpleNamespace(
+            x=np.full(kernel.x_size, 1.0e4, dtype=np.float64),
+            success=True,
+            message="synthetic optimizer success",
+            nfev=1,
+            njev=0,
+            nit=0,
+        )
+
+    kernel_solver = import_module("veqpy.kernel.solver")
+    monkeypatch.setattr(kernel_solver, "least_squares", fake_least_squares)
+
+    result = kernel.solve(
+        boundary,
+        source,
+        config=KernelConfig(
+            method="levenberg-marquardt",
+            initial="cold-zeros",
+            norm="none",
+            max_residual=1.0e-12,
+            max_evaluations=2,
+        ),
+    )
+
+    assert not result.success
+    assert result.info == 0
+
+
+def test_numba_kernel_powell_uses_lm_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    kernel = NumbaKernel(topology=make_kernel_topology())
+    boundary = tiny_kernel_boundary()
+    source = tiny_kernel_source()
+    calls: list[str] = []
+
+    def fake_root(*args: object, **kwargs: object) -> SimpleNamespace:
+        del args, kwargs
+        calls.append("hybr")
+        return SimpleNamespace(
+            x=np.full(kernel.x_size, 1.0e4, dtype=np.float64),
+            success=False,
+            message="synthetic root failure",
+            nfev=3,
+            njev=0,
+            nit=0,
+        )
+
+    def fake_least_squares(*args: object, **kwargs: object) -> SimpleNamespace:
+        del args, kwargs
+        calls.append("lm")
+        return SimpleNamespace(
+            x=np.zeros(kernel.x_size, dtype=np.float64),
+            success=False,
+            message="synthetic lm fallback",
+            nfev=4,
+            njev=0,
+            nit=0,
+        )
+
+    kernel_solver = import_module("veqpy.kernel.solver")
+    monkeypatch.setattr(kernel_solver, "root", fake_root)
+    monkeypatch.setattr(kernel_solver, "least_squares", fake_least_squares)
+
+    result = kernel.solve(
+        boundary,
+        source,
+        config=KernelConfig(
+            method="powell",
+            initial="cold-zeros",
+            norm="none",
+            max_residual=1.0,
+            max_evaluations=2,
+        ),
+    )
+
+    assert calls == ["hybr", "lm"]
+    assert result.nfev == 7
+    assert result.success
+
+
+def test_numba_kernel_build_equilibrium_uses_direct_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    topology = make_kernel_topology()
+    kernel = NumbaKernel(topology=topology)
+    boundary = tiny_kernel_boundary()
+    source = tiny_kernel_source()
+    legacy_operator = legacy_operator_from_kernel_case(topology, boundary, source)
+    x = np.zeros(kernel.x_size, dtype=np.float64)
+    expected = legacy_operator.build_equilibrium(x)
+    kernel.residual(x, boundary, source)
+
+    install_legacy_bridge_guard(monkeypatch)
+
+    equilibrium = kernel.build_equilibrium(x)
+    assert_allclose([equilibrium.Ip], [expected.Ip])
 
 
 def test_numba_kernel_solve_result_lifecycle_and_equilibrium_snapshot() -> None:
@@ -304,6 +494,17 @@ def test_numba_kernel_solve_result_lifecycle_and_equilibrium_snapshot() -> None:
     kernel.clear()
     assert kernel.result is None
     assert kernel.history == []
+
+
+def test_numba_kernel_unsupported_solver_method_is_explicit() -> None:
+    kernel = NumbaKernel(topology=make_kernel_topology())
+
+    with pytest.raises(NotImplementedError, match="newton-krylov"):
+        kernel.solve(
+            tiny_kernel_boundary(),
+            tiny_kernel_source(),
+            config=KernelConfig(method="newton-krylov", initial="cold-zeros", norm="none"),
+        )
 
 
 @pytest.mark.parametrize("norm_mode", ["none", "fast", "balanced"])

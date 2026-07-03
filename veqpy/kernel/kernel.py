@@ -21,7 +21,7 @@ from .solver import NumbaSolver
 
 
 class NumbaKernel:
-    """Stateful Numba-backed Kernel API handle using legacy lowering in Phase 1."""
+    """Stateful Numba-backed Kernel API handle using direct Numba runtime."""
 
     def __init__(
         self,
@@ -93,7 +93,7 @@ class NumbaKernel:
 
     def jvp(self, x: Any, v: Any, boundary: KernelBoundary, source: KernelSource) -> np.ndarray:
         del x, v, boundary, source
-        raise NotImplementedError("NumbaKernel.jvp is not implemented in Phase 1")
+        raise NotImplementedError("NumbaKernel.jvp is not implemented")
 
     def jvp_into(
         self,
@@ -104,11 +104,11 @@ class NumbaKernel:
         source: KernelSource,
     ) -> None:
         del out, x, v, boundary, source
-        raise NotImplementedError("NumbaKernel.jvp_into is not implemented in Phase 1")
+        raise NotImplementedError("NumbaKernel.jvp_into is not implemented")
 
     def jacobian(self, x: Any, boundary: KernelBoundary, source: KernelSource) -> np.ndarray:
         del x, boundary, source
-        raise NotImplementedError("NumbaKernel.jacobian is not implemented in Phase 1")
+        raise NotImplementedError("NumbaKernel.jacobian is not implemented")
 
     def jacobian_into(
         self,
@@ -118,7 +118,7 @@ class NumbaKernel:
         source: KernelSource,
     ) -> None:
         del out, x, boundary, source
-        raise NotImplementedError("NumbaKernel.jacobian_into is not implemented in Phase 1")
+        raise NotImplementedError("NumbaKernel.jacobian_into is not implemented")
 
     def build_equilibrium(self, x: Any | None = None) -> Equilibrium:
         if self._last_boundary is None or self._last_source is None:
@@ -160,7 +160,7 @@ class NumbaKernel:
         if recipe.backend != "numba":
             raise ValueError("NumbaKernel requires KernelRecipe backend='numba'")
         if recipe.layout != "degree":
-            raise ValueError("NumbaKernel Phase 1 only supports KernelRecipe layout='degree'")
+            raise ValueError("NumbaKernel only supports KernelRecipe layout='degree'")
 
     @staticmethod
     def _kernel_config(config: KernelConfig) -> KernelConfig:

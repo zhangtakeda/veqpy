@@ -24,6 +24,8 @@ __all__ = [
     "Operator",
     "OperatorBuildPlan",
     "PACKED_LAYOUT_PROFILE_FIRST",
+    "PROFILE_OFFSET_SPECS",
+    "PROFILE_STATIC_KWARGS",
     "ResidualBindingLayout",
     "SourcePlan",
     "build_active_profile_metadata",
@@ -31,11 +33,18 @@ __all__ = [
     "build_profile_index",
     "build_profile_layout",
     "build_profile_names",
+    "build_boundary_slope_initial_state",
+    "build_residual_block_metadata",
+    "build_residual_block_radial_powers",
     "build_shape_profile_names",
     "decode_packed_blocks",
     "encode_packed_state",
     "get_prefix_profile_names",
     "packed_size",
+    "refresh_fourier_family_metadata",
+    "refresh_profile_runtime",
+    "refresh_source_runtime",
+    "refresh_stage_a_runtime",
     "validate_packed_state",
 ]
 
@@ -48,6 +57,8 @@ _EXPORTS = {
         "veqpy.operator.packed_layout",
         "PACKED_LAYOUT_PROFILE_FIRST",
     ),
+    "PROFILE_OFFSET_SPECS": ("veqpy.operator.packed_layout", "PROFILE_OFFSET_SPECS"),
+    "PROFILE_STATIC_KWARGS": ("veqpy.operator.packed_layout", "PROFILE_STATIC_KWARGS"),
     "build_active_profile_metadata": (
         "veqpy.operator.packed_layout",
         "build_active_profile_metadata",
@@ -59,6 +70,18 @@ _EXPORTS = {
     "build_profile_index": ("veqpy.operator.packed_layout", "build_profile_index"),
     "build_profile_layout": ("veqpy.operator.packed_layout", "build_profile_layout"),
     "build_profile_names": ("veqpy.operator.packed_layout", "build_profile_names"),
+    "build_boundary_slope_initial_state": (
+        "veqpy.operator.initialize",
+        "build_boundary_slope_initial_state",
+    ),
+    "build_residual_block_metadata": (
+        "veqpy.operator.packed_layout",
+        "build_residual_block_metadata",
+    ),
+    "build_residual_block_radial_powers": (
+        "veqpy.operator.packed_layout",
+        "build_residual_block_radial_powers",
+    ),
     "build_shape_profile_names": (
         "veqpy.operator.packed_layout",
         "build_shape_profile_names",
@@ -67,6 +90,19 @@ _EXPORTS = {
     "encode_packed_state": ("veqpy.operator.packed_layout", "encode_packed_state"),
     "get_prefix_profile_names": ("veqpy.operator.packed_layout", "get_prefix_profile_names"),
     "packed_size": ("veqpy.operator.packed_layout", "packed_size"),
+    "refresh_fourier_family_metadata": (
+        "veqpy.operator.profile_runtime",
+        "refresh_fourier_family_metadata",
+    ),
+    "refresh_profile_runtime": (
+        "veqpy.operator.profile_runtime",
+        "refresh_profile_runtime",
+    ),
+    "refresh_stage_a_runtime": (
+        "veqpy.operator.profile_runtime",
+        "refresh_stage_a_runtime",
+    ),
+    "refresh_source_runtime": ("veqpy.operator.source_runtime", "refresh_source_runtime"),
     "validate_packed_state": ("veqpy.operator.packed_layout", "validate_packed_state"),
 }
 

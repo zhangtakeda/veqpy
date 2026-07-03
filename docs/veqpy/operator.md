@@ -39,7 +39,10 @@ building the source plan.
 The Kernel API keeps the same distinction. Public `KernelSource` values are raw
 case inputs named `heat_profile`, `current_profile`, `Ip`, and `beta`; any
 `scaled_*` arrays are internal materialized state shared by the VEQlib facade and
-legacy `SourcePlan`, not public snapshot fields.
+legacy `SourcePlan`, not public snapshot fields. The explicit
+`veqpy.kernel.NumbaKernel` runtime also consumes this shared materialized source
+state directly from `KernelTopology` and does not expose `scaled_*` fields on its
+public API.
 
 ## Source Routes
 
