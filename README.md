@@ -44,23 +44,21 @@ and easier to reuse than full solver-native equilibrium or reconstruction pipeli
 - **Unified source route layer**: PF, PP, PI, PJ1, PJ2, and PQ routes map pressure-gradient,
   toroidal-field, flux-gradient, current-related, or safety-factor information to one
   finite-dimensional residual assembly.
-- **Explicit runtime boundary**: `Grid + Problem -> Operator -> Solver -> Equilibrium`
-  separates packed coefficients, runtime workspaces, nonlinear solve orchestration, and
-  post-solve snapshots. `Problem` is the public problem definition type.
+- **Explicit Kernel runtime boundary**:
+  `KernelTopology + KernelBoundary + KernelSource -> Kernel -> SolveResult + Equilibrium`
+  separates packed topology, runtime case inputs, nonlinear solve orchestration, and
+  post-solve snapshots.
 - **GEQDSK workflow support**: GEQDSK I/O, fixed-boundary fitting from GEQDSK boundaries,
   snapshot export, flux-surface comparison, and common diagnostics.
-- **Formula-oriented model objects**: `Problem` stores user-facing solve inputs and
-  active profile lengths, while `Profile` is used for serializable shape-profile
+- **Formula-oriented model objects**: `Profile` is used for serializable shape-profile
   snapshots on `Equilibrium`. `Grid` and `Equilibrium` use reactive derived properties
   to lazily reconstruct geometry and physics diagnostics by formula.
-- **Experimental Kernel API**: `veqlib.facade` exposes the shared
-  `KernelTopology + KernelRecipe + KernelBoundary + KernelSource + KernelConfig` API,
-  with raw runtime source profiles in `KernelSource`, and builds/loads optional
-  topology-specific VEQlib C++/nanobind kernels for the current MVP path. The
-  explicit `veqpy.kernel.NumbaKernel` entrypoint and parallel `veqpy.facade`
-  Numba facade reuse the same KernelTypes and route-dependent source materialization
-  table while assembling a direct topology-native Numba runtime for residuals,
-  solves, and equilibrium snapshots.
+- **Kernel API**: `veqpy.facade.Kernel` is the default Numba-backed runtime handle.
+  It reuses the shared
+  `KernelTopology + KernelRecipe + KernelBoundary + KernelSource + KernelConfig`
+  types from `veqlib.facade`, keeps raw runtime source profiles in `KernelSource`,
+  and applies the shared route-dependent source materialization table before
+  residuals, solves, and equilibrium snapshots.
 
 ## Installation
 
@@ -108,7 +106,7 @@ Basic demo:
 .venv/bin/python examples/minimal_equilibrium.py
 ```
 
-This script builds a smooth fixed-boundary problem, solves an equilibrium using PF(`psin`)
+This script builds a smooth fixed-boundary Kernel case, solves an equilibrium using PF(`psin`)
 source input, writes an `Equilibrium` JSON snapshot, and generates a flux-surface figure.
 By default, outputs go under `./outputs/minimal_equilibrium`; set
 `VEQPY_OUTPUT_DIR` to choose another directory.
@@ -119,10 +117,10 @@ GEQDSK demo:
 .venv/bin/python examples/geqdsk_workflow.py
 ```
 
-This script reads an EFIT-style GEQDSK file, fits it as a VEQPy fixed boundary, solves
-PF(`psin`) and PQ(`psin`) cases with an `Ip` constraint using one-dimensional source
-profiles from the GEQDSK file, and writes a two-column VEQPy-vs-GEQDSK comparison
-figure. By default, it reads `./data/EFIT.geqdsk` and writes outputs under
+This script reads a GEQDSK file, fits it as a VEQPy fixed boundary, solves a small
+PF(`psin`) Kernel case with an `Ip` constraint using one-dimensional source profiles
+from the GEQDSK file, and writes a comparison figure. By default, it reads
+`./data/SOLOVEV.geqdsk` and writes outputs under
 `./outputs/geqdsk_workflow`; set `VEQPY_GEQDSK` and `VEQPY_OUTPUT_DIR` to override
 those paths. Manuscript-oriented reproduction scripts are available under
 [`scripts/`][scripts]; they are heavier than the minimal examples and may write
@@ -143,8 +141,8 @@ Core local checks mirror the push/PR CI workflow.
 VEQlib is the experimental C++/nanobind kernel layer used for topology-specific
 shared-library kernels and VEQPy-vs-native benchmarks.
 
-Representative VEQlib-vs-Numba timing snapshot from `benchmarks.veqlib_geqdsk_pareto`
-using the production nanobind/shared-library path is shown below. The three benchmark
+Representative VEQlib-vs-Numba timing data retained in
+`benchmarks/results/veqlib_geqdsk.json` is summarized below. The three benchmark
 families are GEQDSK-backed cases:
 
 - `D-shaped`: `data/SOLOVEV.geqdsk`
@@ -172,32 +170,23 @@ representative High configuration for each GEQDSK family.
 | X-point(130)    |     2.530054 |     21.647612 |      8.556x |      1.24e-09 |
 
 The package-level Python facade is intentionally semantic: users construct
-`KernelTopology` for the physical/native topology, including `ip_constraint` and
+`KernelTopology` for the solve topology, including `ip_constraint` and
 `beta_constraint` boolean source constraints, then pass it explicitly as
-`Kernel(topology=topology)` or `build(topology=topology, ...)`. `KernelRecipe`
-carries packed backend, layout, and build options, `KernelBoundary`/`KernelSource`
-carry runtime cases, and `KernelConfig` carries the handle-level default solve
-policy. `KernelSource` stores raw user-facing `heat_profile`, `current_profile`,
-`Ip`, and `beta` values; the facade materializes route-dependent `mu0` scaling
-before calling backend kernels. That Python-side source semantic table is also
-used by the legacy `Operator` source plan, so the native facade and the
-direct Numba runtime reject pre-scaled inputs consistently while preserving their
-public field names. `veqpy.kernel.NumbaKernel` and `veqpy.facade.Kernel` accept the same
-`KernelTopology`, `KernelBoundary`, `KernelSource`, `KernelConfig`, `KernelRecipe`,
-and `SolveResult` types for the explicit Numba path; they currently support degree
-layout, evaluate residuals and solves through a topology-native Numba runtime,
-and keeps JVP/Jacobian APIs explicitly unimplemented.
-`build(topology=..., recipe=None, config=None)` creates a reusable
-`Kernel` and caches that default policy on the handle; `Kernel.solve(...)` can
-use it as-is, replace it with a one-off `config=...`, or override individual
-fields such as `method=...` for one call. `solve(..., topology=...)` is the
-one-shot convenience path and `clean(...)` cleans artifact cache entries. The
-lower-level artifact primitive is named `prepare(topology, recipe=...)` and
-returns `PrepareResult`.
-ABI-code lowering, CPU-affinity, and cache-root helpers live in their focused
-submodules. Facade inputs use one canonical Python spelling per option. Python
-drives CMake with explicit `-D...` definitions and loads the resulting artifact
-through `veqlib.facade`.
+`Kernel(topology=topology)` or `build(topology=topology, ...)`.
+`KernelBoundary`/`KernelSource` carry runtime cases, `KernelConfig` carries the
+handle-level default solve policy, and `KernelRecipe` remains the shared backend
+recipe type. `KernelSource` stores raw user-facing `heat_profile`,
+`current_profile`, `Ip`, and `beta` values; the facade materializes
+route-dependent `mu0` scaling before calling backend kernels. `veqpy.kernel.NumbaKernel`
+and `veqpy.facade.Kernel` accept the same `KernelTopology`, `KernelBoundary`,
+`KernelSource`, `KernelConfig`, `KernelRecipe`, and `SolveResult` types for the
+explicit Numba path; they currently support degree layout, evaluate residuals and
+solves through a topology-native Numba runtime, and keep JVP/Jacobian APIs
+explicitly unimplemented.
+`build(topology=..., recipe=None, config=None)` creates a reusable `Kernel` and
+caches that default policy on the handle; `Kernel.solve(...)` can use it as-is,
+replace it with a one-off `config=...`, or override individual fields such as
+`method=...` for one call.
 
 The current production boundary is narrow: route/topology planning covers the
 benchmark matrix, while native execution is gated by the facade native-support
@@ -223,53 +212,10 @@ Useful VEQlib checks from the repository root:
 .venv/bin/python -m pytest tests/test_veqlib_facade_api.py
 ```
 
-Pure VEQPy/Numba benchmark entrypoints:
-
-```bash
-.venv/bin/python -m benchmarks.veqpy_routes \
-  --repeat 100 \
-  --warmup 5 \
-  --output benchmarks/results/manual/veqpy_routes.json
-
-.venv/bin/python -m benchmarks.veqpy_geqdsk_routes \
-  --repeat 1 \
-  --warmup 5 \
-  --output benchmarks/results/manual/veqpy_geqdsk_routes.json
-```
-
-`benchmarks.veqpy_geqdsk_routes` defaults to the Solovev GEQDSK case; pass
-`--geqdsk /path/to/case.geqdsk` to run another input. The `--repeat 1` example
-is a quick smoke run; use larger repeat counts for timing evidence.
-
-Route/topology comparison benchmark:
-
-```bash
-.venv/bin/python -m benchmarks.veqlib_routes \
-  --build fastmath \
-  --repeat 100 \
-  --warmup 5 \
-  --output benchmarks/results/manual/routes.json
-```
-
-GEQDSK configuration benchmark:
-
-```bash
-.venv/bin/python -m benchmarks.veqlib_geqdsk_pareto \
-  --build fastmath \
-  --repeat 100 \
-  --warmup 5 \
-  --output benchmarks/results/manual/geqdsk_configs.json
-```
-
-Continuation-policy effective-nfev benchmark:
-
-```bash
-.venv/bin/python -m benchmarks.veqlib_continuation
-```
-
-Executable-side C++ diagnostics are secondary. Retained performance evidence
-should use the production nanobind/shared-library path through `veqlib.facade`,
-paired with VEQPy correctness comparison.
+Retained benchmark result artifacts live under `benchmarks/results/`. Future
+timing evidence should use the shared KernelTypes directly through
+`veqpy.facade.Kernel` and, when native C++ comparison is needed,
+`veqlib.facade`.
 
 ## Implementation Documentation
 
@@ -277,10 +223,10 @@ User-facing architecture notes:
 
 - [`model.md`][model-doc]: responsibilities, snapshot boundaries, and diagnostic
   interfaces for `Grid`, `Profile`, `Boundary`, `Geqdsk`, and `Equilibrium`.
-- [`operator.md`][operator-doc]: source routes, packed state, stage pipeline,
-  and runtime/snapshot separation.
-- [`solver.md`][solver-doc]: nonlinear solve lifecycle, fallback behavior,
-  residual normalization, and collocation polish.
+- [`operator.md`][operator-doc]: Kernel runtime boundary, source materialization,
+  and packed runtime responsibilities.
+- [`solver.md`][solver-doc]: Kernel solve lifecycle, result semantics, residual
+  normalization, and warm continuation.
 
 Low-level base/math design notes for `Reactive`, `Serial`, `Registry`, interpolation,
 quadrature, and calculus now live in the corresponding source module headers.

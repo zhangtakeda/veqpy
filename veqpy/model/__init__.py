@@ -8,7 +8,6 @@ Public API:
 - Boundary
 - Grid
 - Profile
-- Problem
 - Geqdsk
 - Equilibrium
 
@@ -28,7 +27,6 @@ __all__ = [
     "Geqdsk",
     "Boundary",
     "Profile",
-    "Problem",
 ]
 
 _EXPORTS = {
@@ -36,7 +34,6 @@ _EXPORTS = {
     "Equilibrium": ("veqpy.model.equilibrium", "Equilibrium"),
     "Geqdsk": ("veqpy.model.geqdsk", "Geqdsk"),
     "Grid": ("veqpy.model.grid", "Grid"),
-    "Problem": ("veqpy.model.problem", "Problem"),
     "Profile": ("veqpy.model.profile", "Profile"),
 }
 

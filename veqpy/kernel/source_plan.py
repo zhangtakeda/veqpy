@@ -1,12 +1,12 @@
 """
-Module: operator.source_plan
+Module: kernel.source_plan
 
 Role:
 - Own source route plans and source input validation.
-- Keep user/model compatibility at bind-time, before runtime memory refresh and engine calls.
+- Keep source compatibility at bind-time, before runtime memory refresh and engine calls.
 
 Notes:
-- This module builds immutable plans from ``Problem`` and resolved route specs.
+- This module owns immutable source plans consumed by the kernel runtime.
 - It does not allocate runtime arrays, run source kernels, or implement source mathematics.
 """
 
@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -28,9 +27,6 @@ from veqpy.math import (
     normalize_source_interpolation_kind,
     source_interpolation_kind_is_barycentric,
 )
-
-if TYPE_CHECKING:
-    from veqpy.model import Problem
 
 RouteKey = tuple[str, str, str]
 
@@ -99,11 +95,11 @@ SOURCE_PARAMETERIZATION_CODES = {
 
 def build_source_plan(
     *,
-    problem: Problem,
+    problem: object,
     source_route_spec: object,
     interpolation_kind: str = SOURCE_INTERP_DEFAULT,
 ) -> SourcePlan:
-    """Build the immutable source plan for a ``Problem``."""
+    """Build the immutable source plan for a runtime case."""
     scaled_heat, scaled_current, scaled_Ip, beta = _scaled_source_inputs(problem)
     # Parameterization is route-specific.  For example PP/psin/uniform samples
     # on sqrt(psin) to bias resolution near the magnetic axis while all kernels
@@ -134,7 +130,7 @@ def build_source_plan(
     )
 
 
-def _scaled_source_inputs(problem: Problem) -> tuple[np.ndarray, np.ndarray, float, float]:
+def _scaled_source_inputs(problem: object) -> tuple[np.ndarray, np.ndarray, float, float]:
     materialized = materialize_source_inputs(
         route=str(problem.route).upper(),
         heat=problem.heat_input,
@@ -143,7 +139,7 @@ def _scaled_source_inputs(problem: Problem) -> tuple[np.ndarray, np.ndarray, flo
         beta=float(problem.beta),
         heat_name="heat_input",
         current_name="current_input",
-        advice="Pass unnormalized setup values to Problem; SourcePlan applies mu0 scaling once.",
+        advice="Pass unnormalized runtime values; SourcePlan applies mu0 scaling once.",
     )
     return (
         materialized.scaled_heat,
@@ -157,7 +153,7 @@ def validate_source_plan_profile_support(
     *,
     source_plan: SourcePlan,
     source_execution: object,
-    problem: Problem,
+    problem: object,
 ) -> None:
     """Validate source-plan compatibility with active profile ownership."""
     route_key = source_plan.route_key
@@ -199,7 +195,7 @@ def validate_source_plan_profile_support(
         )
 
 
-def validate_source_inputs(problem: Problem, nr: int) -> None:
+def validate_source_inputs(problem: object, nr: int) -> None:
     """Validate source input lengths for grid-owned and sampled routes."""
     if problem.heat_input.shape != problem.current_input.shape:
         raise ValueError(

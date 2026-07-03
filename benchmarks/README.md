@@ -1,6 +1,9 @@
 # Benchmarks
 
-This directory contains VEQPy/VEQlib benchmark entry points for route semantics, GEQDSK cases, native C++/nanobind kernels, and continuation policies.
+This directory retains VEQPy/VEQlib benchmark result artifacts and environment
+metadata captured before the Kernel API became the sole public runtime entry.
+New benchmark entrypoints should be built directly on `veqpy.facade.Kernel` and,
+when native C++ comparison is needed, `veqlib.facade`.
 
 Runtime tables report median solve/runtime time only. VEQlib artifact build time is not included in `Cxx ms`; full build metadata and samples are in the JSON outputs.
 
@@ -11,27 +14,6 @@ Runtime tables report median solve/runtime time only. VEQlib artifact build time
 - CMake: `cmake version 3.28.3`
 - C++: `c++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0`
 - Thread env: `OPENBLAS_NUM_THREADS=1`, `OMP_NUM_THREADS=1`, `MKL_NUM_THREADS=1`.
-
-## Scripts
-
-- `veqpy_routes.py`: pure VEQPy/Numba synthetic route matrix.
-- `veqpy_geqdsk_routes.py`: pure VEQPy/Numba GEQDSK-backed route matrix.
-- `veqlib_routes.py`: VEQlib native route matrix compared with VEQPy/Numba.
-- `veqlib_geqdsk_pareto.py`: VEQlib vs VEQPy for Solov'ev/CHEASE/EFIT Low/Medium/High/Ref cases.
-- `veqlib_continuation.py`: continuation-policy benchmark using mean `effective_nfev`.
-- `_common.py`: shared case construction, timing, route specs, and JSON helpers.
-
-## Reproduce
-
-```bash
-.venv/bin/python benchmarks/veqpy_routes.py --quiet-progress
-.venv/bin/python benchmarks/veqpy_geqdsk_routes.py --quiet-progress
-.venv/bin/python benchmarks/veqlib_routes.py --quiet-progress
-.venv/bin/python benchmarks/veqlib_geqdsk_pareto.py --quiet-progress
-.venv/bin/python benchmarks/veqlib_continuation.py --quiet-progress
-```
-
-Outputs are written under `benchmarks/results/`.
 
 ## Results
 
@@ -138,5 +120,5 @@ Outputs are written under `benchmarks/results/`.
 
 - VEQlib tables exclude first-run C++/nanobind build cost; inspect JSON `artifact.*` fields for build timing.
 - This WSL2 run records script wall-time medians only; it does not claim PMU, cache, IPC, or Roofline evidence.
-- `veqpy_geqdsk_routes.py` failed rows are tolerance failures, not script crashes.
-- Regenerate this file after changing solver policy, route topology, profile layout, compiler flags, or hardware.
+- Regenerate this file after adding Kernel API benchmark entrypoints or changing
+  solver policy, route topology, profile layout, compiler flags, or hardware.

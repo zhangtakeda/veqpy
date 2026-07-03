@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from veqpy.model import Boundary, Grid, Problem
-from veqpy.operator import Operator
+from veqpy.model import Boundary
 
 MU0 = 4.0e-7 * np.pi
 
@@ -28,26 +27,3 @@ def pf_reference_profiles(psin: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     current_input = (1.0 - beta0) * alpha_f * (np.exp(alpha_f * psin) - exp_af) / den_f
     heat_input = beta0 * alpha_p * (np.exp(alpha_p * psin) - exp_ap) / den_p
     return current_input.astype(np.float64), heat_input.astype(np.float64)
-
-
-def tiny_pf_problem() -> Problem:
-    psin = np.linspace(0.0, 1.0, 9, dtype=np.float64)
-    ffn_psin, pn_psin = pf_reference_profiles(psin)
-    return Problem(
-        route="PF",
-        coordinate="psin",
-        nodes="uniform",
-        active_profiles={"psin": 3, "h": 2, "k": 2, "s1": 2},
-        boundary=tiny_boundary(),
-        heat_input=pn_psin / MU0,
-        current_input=ffn_psin,
-        Ip=3.0e6,
-    )
-
-
-def tiny_grid() -> Grid:
-    return Grid(Nr=8, Nt=8, L_max=3, M_max=2, K_max=1, quadrature_scheme="legendre")
-
-
-def tiny_operator() -> Operator:
-    return Operator(tiny_grid(), tiny_pf_problem())

@@ -2,18 +2,12 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import numpy as np
 from numpy.linalg import norm
 
 from veqlib.facade import KernelConfig, SolveResult
 
-from ..solver.residual_scale import make_residual_scale
-
-if TYPE_CHECKING:
-    from veqpy.operator import Operator
-    from veqpy.solver import SolverResult
+from .residual_scale import make_residual_scale
 
 
 def solve_result_from_runtime(
@@ -52,37 +46,6 @@ def solve_result_from_runtime(
         raw=raw_final,
         scaled=scaled,
         alpha=np.asarray(alpha, dtype=np.float64).copy(),
-    )
-
-
-def solve_result_from_legacy(
-    solver_result: SolverResult,
-    operator: Operator,
-    config: KernelConfig,
-) -> SolveResult:
-    """Map a legacy SolverResult plus final runtime state to Kernel SolveResult."""
-
-    x_final = operator.coerce_x(solver_result.x).copy()
-    raw = operator.residual_var(x_final)
-    alpha = operator.source_workspace.alpha_state.copy()
-    x_reference = operator.coerce_x(solver_result.x0).copy()
-    scaled = _scaled_residual_snapshot(raw, x_reference, operator, config)
-    return SolveResult(
-        elapsed_ms=float(solver_result.elapsed) / 1000.0,
-        success=solver_result.success,
-        info=1 if solver_result.success else 0,
-        nfev=solver_result.function_evaluations,
-        njev=solver_result.jacobian_evaluations,
-        callbacks=0,
-        jacobian_component_evaluations=0,
-        jvp_evaluations=0,
-        linear_iterations=solver_result.iterations,
-        raw_norm=float(norm(raw)),
-        scaled_norm=float(norm(scaled)),
-        x=x_final,
-        raw=raw,
-        scaled=scaled,
-        alpha=alpha,
     )
 
 

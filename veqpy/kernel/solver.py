@@ -11,7 +11,7 @@ from scipy.optimize import least_squares, root
 from veqlib.facade import KernelBoundary, KernelConfig, KernelSource, KernelTopology, SolveResult
 from veqpy.model import Equilibrium
 
-from ..solver.residual_scale import make_residual_scale
+from .residual_scale import make_residual_scale
 from .result import solve_result_from_runtime
 from .runtime import NumbaRuntime
 

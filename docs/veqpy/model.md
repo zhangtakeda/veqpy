@@ -1,6 +1,12 @@
 # Model
 
-The `model` layer stores interpretable, serializable physical objects in VEQPy. It is not a mirror of the operator runtime; it organizes independent inputs and solved snapshots into a stable API. `Problem` keeps user-facing source, boundary, and active-profile topology inputs, while `Profile` is the serializable parameter object used by solved shape-profile snapshots. Derived grid geometry and equilibrium diagnostics are reconstructed lazily through `Reactive` properties. Files store only root state.
+The `model` layer stores interpretable, serializable physical objects in VEQPy.
+It is not a mirror of the Kernel runtime; solve setup lives in
+`KernelTopology`, `KernelBoundary`, and `KernelSource`, while solved snapshots
+are represented by `Equilibrium`. `Profile` is the serializable parameter object
+used by solved shape-profile snapshots. Derived grid geometry and equilibrium
+diagnostics are reconstructed lazily through `Reactive` properties. Files store
+only root state.
 
 The main source files live in `veqpy/model/`.
 
@@ -14,7 +20,10 @@ The main source files live in `veqpy/model/`.
 | `Geqdsk`      | GEQDSK data loading, storage, and conversion                                                              |
 | `Equilibrium` | Solved continuous equilibrium snapshot and diagnostic interface                                           |
 
-`Profile` represents a one-dimensional radial profile with scale, power, envelope, offset, and optional Chebyshev coefficients. Operator setup lowers active profile topology to flat arrays; `Profile` remains on the model side for `Equilibrium.shape_profiles` and other serializable snapshots.
+`Profile` represents a one-dimensional radial profile with scale, power,
+envelope, offset, and optional Chebyshev coefficients. Kernel runtime setup
+lowers active profile topology to flat arrays; `Profile` remains on the model
+side for `Equilibrium.shape_profiles` and other serializable snapshots.
 
 ## Equilibrium Snapshot
 
@@ -32,7 +41,10 @@ These fields are sufficient to reconstruct common physical quantities, but they 
 
 The model layer exposes stable snapshot diagnostics, not every intermediate array used during residual assembly. Geometrically, `Equilibrium` provides flux-surface mapping, Jacobian-related fields, area/volume, and flux-surface-averaged geometry factors. Physically, it provides pressure, toroidal-field function, safety factor, current, and flux diagnostics.
 
-A small set of packed geometry fields is retained because those combinations have stable meaning for plotting, comparison, and GEQDSK export. Finer local derivative combinations, residual projection matrices, and backend workspaces remain in the operator/runtime layer and do not become public snapshot API.
+A small set of packed geometry fields is retained because those combinations
+have stable meaning for plotting, comparison, and GEQDSK export. Finer local
+derivative combinations, residual projection matrices, and backend workspaces
+remain in the Kernel runtime layer and do not become public snapshot API.
 
 ## Boundary
 

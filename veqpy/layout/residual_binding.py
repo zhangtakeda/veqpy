@@ -6,23 +6,20 @@ Role:
 - Keep residual closure wiring separate from the top-level operator layout factory.
 
 Notes:
-- Packed residual semantics remain owned by ``veqpy.operator.packed_layout`` and
-  ``veqpy.operator.build_plan``.
+- Packed residual semantics remain owned by the kernel packed layout and runtime plan.
 - Numerical kernels remain in ``veqpy.engine``.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from veqpy.engine import numba_operator, numba_residual
 
 if TYPE_CHECKING:
-    from veqpy.model import Problem
-    from veqpy.operator import OperatorBuildPlan, ResidualBindingLayout
     from veqpy.workspace import (
         GeometryWorkspace,
         GridWorkspace,
@@ -34,8 +31,8 @@ if TYPE_CHECKING:
 
 def build_residual_full_stage_runner_into(
     *,
-    plan: OperatorBuildPlan,
-    problem: Problem,
+    plan: Any,
+    problem: object,
     profile_workspace: ProfileWorkspace,
     geometry_workspace: GeometryWorkspace,
     residual_workspace: ResidualWorkspace,
@@ -134,10 +131,10 @@ def build_collocation_runner_into(
 
 def build_fused_residual_runner_into(
     *,
-    plan: OperatorBuildPlan,
-    problem: Problem,
+    plan: Any,
+    problem: object,
     grid_workspace: GridWorkspace,
-    residual_binding_layout: ResidualBindingLayout,
+    residual_binding_layout: Any,
     profile_workspace: ProfileWorkspace,
     geometry_workspace: GeometryWorkspace,
     source_workspace: SourceWorkspace,

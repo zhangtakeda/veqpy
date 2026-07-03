@@ -21,7 +21,7 @@ Notes:
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from numba import njit
@@ -49,7 +49,6 @@ from veqpy.engine.numba_source import (
 from veqpy.math import build_uniform_source_interpolation_coefficients
 
 if TYPE_CHECKING:
-    from veqpy.operator import ResidualBindingLayout, SourcePlan
     from veqpy.workspace import (
         GeometryWorkspace,
         GridWorkspace,
@@ -61,7 +60,7 @@ if TYPE_CHECKING:
 
 def bind_source_eval_runner(
     *,
-    source_plan: SourcePlan,
+    source_plan: Any,
     grid_workspace: GridWorkspace,
     profile_workspace: ProfileWorkspace,
     geometry_workspace: GeometryWorkspace,
@@ -333,10 +332,10 @@ def _run_pj2_psin_uniform_barycentric_with_scratch_impl(
 
 def bind_fused_residual_runner(
     *,
-    source_plan: SourcePlan,
+    source_plan: Any,
     source_execution: backend_abi.SourceExecutionABI,
     grid_workspace: GridWorkspace,
-    residual_binding_layout: ResidualBindingLayout,
+    residual_binding_layout: Any,
     profile_workspace: ProfileWorkspace,
     geometry_workspace: GeometryWorkspace,
     source_workspace: SourceWorkspace,
@@ -380,10 +379,10 @@ def bind_fused_residual_runner(
 
 def bind_fused_residual_runner_into(
     *,
-    source_plan: SourcePlan,
+    source_plan: Any,
     source_execution: backend_abi.SourceExecutionABI,
     grid_workspace: GridWorkspace,
-    residual_binding_layout: ResidualBindingLayout,
+    residual_binding_layout: Any,
     profile_workspace: ProfileWorkspace,
     geometry_workspace: GeometryWorkspace,
     source_workspace: SourceWorkspace,
@@ -536,7 +535,7 @@ def _bind_single_pass_residual_runner_core(
 
 def _bind_profile_owned_psin_residual_runner_core(
     *,
-    source_plan: SourcePlan,
+    source_plan: Any,
     source_execution: backend_abi.SourceExecutionABI,
     grid_workspace: GridWorkspace,
     profile_workspace: ProfileWorkspace,
@@ -620,7 +619,7 @@ def _bind_profile_owned_psin_residual_runner_core(
 
 def _bind_pj2_psin_uniform_residual_runner_core(
     *,
-    source_plan: SourcePlan,
+    source_plan: Any,
     grid_workspace: GridWorkspace,
     profile_workspace: ProfileWorkspace,
     geometry_workspace: GeometryWorkspace,

@@ -1,9 +1,9 @@
 """
-Module: operator.profile_runtime
+Module: kernel.profile_runtime
 
 Role:
-- Consolidate shared Python rules for profile/problem setup and ProfileWorkspace refresh.
-- Keep profile parameter parsing, Stage-A binding, and Fourier-family details out of operator.py.
+- Consolidate Python rules for kernel case setup and ProfileWorkspace refresh.
+- Keep profile parameter parsing, Stage-A binding, and Fourier-family details out of runtime.py.
 """
 
 from __future__ import annotations
@@ -13,14 +13,14 @@ from collections.abc import Callable
 import numpy as np
 
 from veqpy.engine import validate_route
-from veqpy.model import Problem
-from veqpy.operator.packed_layout import build_profile_layout
 from veqpy.workspace import GridWorkspace
+
+from .packed_layout import build_profile_layout
 
 
 def build_profile_parameter_arrays(
     *,
-    problem: Problem,
+    problem: object,
     grid_workspace: GridWorkspace,
     profile_names: tuple[str, ...],
     profile_static_kwargs_by_name: dict[str, dict[str, float | int]],
@@ -56,7 +56,7 @@ def build_profile_parameter_arrays(
 
 def refresh_profile_parameter_arrays(
     *,
-    problem: Problem,
+    problem: object,
     grid_workspace: GridWorkspace,
     profile_names: tuple[str, ...],
     profile_offsets: np.ndarray,
@@ -80,7 +80,7 @@ def refresh_profile_parameter_arrays(
 
 def refresh_profile_runtime(
     *,
-    problem: Problem,
+    problem: object,
     operator_grid: GridWorkspace,
     profile_names: tuple[str, ...],
     profile_workspace,
@@ -231,14 +231,14 @@ def refresh_fourier_family_metadata(
 
 
 def validate_problem_compatibility(
-    problem: Problem,
+    problem: object,
     *,
     profile_names: tuple[str, ...],
     prefix_profile_names: tuple[str, ...],
     profile_L: np.ndarray,
     coeff_index: np.ndarray,
     order_offsets: np.ndarray,
-    validate_source_inputs: Callable[[Problem], None],
+    validate_source_inputs: Callable[[object], None],
 ) -> None:
     """Validate that a replacement problem preserves the bound operator layout."""
     validate_route(problem.route, problem.coordinate, problem.nodes)
@@ -263,7 +263,7 @@ def validate_problem_compatibility(
 
 def _validate_active_prefix_profile_ownership(
     *,
-    problem: Problem,
+    problem: object,
     profile_names: tuple[str, ...],
     profile_L: np.ndarray,
 ) -> None:
@@ -294,7 +294,7 @@ def _validate_active_prefix_profile_ownership(
 
 
 def _profile_offset(
-    problem: Problem,
+    problem: object,
     name: str,
     profile_offset_specs: dict[str, float | str],
 ) -> float:
@@ -313,7 +313,7 @@ def _profile_offset(
     return float(offset_spec)
 
 
-def _profile_scale(problem: Problem, name: str) -> float:
+def _profile_scale(problem: object, name: str) -> float:
     if name == "F":
         # F coefficients represent the normalized F**2 amplitude; the profile
         # evaluator applies amplitude_power=0.5 and this scale restores F units.

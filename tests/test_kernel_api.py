@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from contextlib import suppress
 from importlib import import_module
 from types import SimpleNamespace
 
@@ -12,14 +11,8 @@ from numpy.testing import assert_allclose
 
 from veqlib.facade import KernelBoundary, KernelConfig, KernelRecipe, KernelSource, KernelTopology
 from veqlib.facade.source_semantics import materialize_kernel_source
-from veqpy.engine import validate_route
 from veqpy.kernel import NumbaKernel
-from veqpy.kernel.result import solve_result_from_legacy
-from veqpy.model import Boundary, Grid, Problem
-from veqpy.operator import Operator
-from veqpy.operator.source_plan import build_source_plan
-from veqpy.solver import SolverResult
-from veqpy.solver.residual_scale import make_residual_scale
+from veqpy.kernel.residual_scale import make_residual_scale
 
 ROUTE_PARITY_CASES = (
     ("PF", "psin", "uniform"),
@@ -110,93 +103,6 @@ def route_kernel_source(route: str, sample_count: int) -> KernelSource:
     )
 
 
-def tiny_legacy_operator(topology: KernelTopology) -> Operator:
-    source = tiny_kernel_source()
-    boundary = tiny_kernel_boundary()
-    return legacy_operator_from_kernel_case(topology, boundary, source)
-
-
-def legacy_operator_from_kernel_case(
-    topology: KernelTopology,
-    boundary: KernelBoundary,
-    source: KernelSource,
-) -> Operator:
-    return Operator(
-        Grid(
-            Nr=topology.Nr,
-            Nt=topology.Nt,
-            L_max=topology.L_max,
-            M_max=topology.M_max,
-            K_max=topology.K_max,
-            quadrature_scheme=topology.quadrature,
-            calculus_scheme=topology.calculus,
-        ),
-        Problem(
-            route=topology.route,
-            coordinate=topology.coordinate,
-            nodes=topology.nodes,
-            active_profiles=dict(topology.active_profiles),
-            boundary=legacy_boundary_from_kernel(boundary),
-            heat_input=source.heat_profile,
-            current_input=source.current_profile,
-            Ip=source.Ip,
-            beta=source.beta,
-        ),
-    )
-
-
-def legacy_problem_from_kernel_case(
-    topology: KernelTopology,
-    boundary: KernelBoundary,
-    source: KernelSource,
-) -> Problem:
-    return Problem(
-        route=topology.route,
-        coordinate=topology.coordinate,
-        nodes=topology.nodes,
-        active_profiles=dict(topology.active_profiles),
-        boundary=legacy_boundary_from_kernel(boundary),
-        heat_input=source.heat_profile,
-        current_input=source.current_profile,
-        Ip=source.Ip,
-        beta=source.beta,
-    )
-
-
-def legacy_boundary_from_kernel(boundary: KernelBoundary) -> Boundary:
-    return Boundary(
-        a=boundary.a,
-        R0=boundary.R0,
-        Z0=boundary.Z0,
-        B0=boundary.B0,
-        ka=boundary.ka,
-        c_offsets=boundary.c_offsets,
-        s_offsets=boundary.s_offsets,
-    )
-
-
-def install_legacy_bridge_guard(monkeypatch: pytest.MonkeyPatch) -> None:
-    def guarded_build_legacy_operator(*args: object, **kwargs: object) -> None:
-        del args, kwargs
-        raise AssertionError("NumbaKernel direct runtime called legacy bridge")
-
-    kernel_solver = import_module("veqpy.kernel.solver")
-    monkeypatch.setattr(
-        kernel_solver,
-        "build_legacy_operator",
-        guarded_build_legacy_operator,
-        raising=False,
-    )
-    with suppress(ModuleNotFoundError):
-        compat_lowering = import_module("veqpy.kernel._compat_lowering")
-        monkeypatch.setattr(
-            compat_lowering,
-            "build_legacy_operator",
-            guarded_build_legacy_operator,
-            raising=False,
-        )
-
-
 def test_numba_kernel_recipe_validation_and_public_surface() -> None:
     topology = make_kernel_topology()
     kernel = NumbaKernel(topology=topology)
@@ -215,16 +121,17 @@ def test_numba_kernel_recipe_validation_and_public_surface() -> None:
         NumbaKernel(topology=topology, recipe=KernelRecipe(backend="cxx", layout="degree"))
 
 
-def test_numba_kernel_residual_matches_legacy_operator_and_validates_buffers() -> None:
+def test_numba_kernel_residual_is_repeatable_and_validates_buffers() -> None:
     topology = make_kernel_topology()
     kernel = NumbaKernel(topology=topology)
     boundary = tiny_kernel_boundary()
     source = tiny_kernel_source()
-    legacy_operator = tiny_legacy_operator(topology)
     x = np.zeros(kernel.x_size, dtype=np.float64)
 
     residual = kernel.residual(x, boundary, source)
-    assert_allclose(residual, legacy_operator.residual_var(x))
+    assert residual.shape == (kernel.x_size,)
+    assert np.all(np.isfinite(residual))
+    assert_allclose(residual, kernel.residual(x.copy(), boundary, source))
 
     out = np.empty(kernel.x_size, dtype=np.float64)
     kernel.residual_into(out, x.tolist(), boundary, source)
@@ -240,32 +147,31 @@ def test_numba_kernel_residual_matches_legacy_operator_and_validates_buffers() -
 
 
 @pytest.mark.parametrize(("route", "coordinate", "nodes"), ROUTE_PARITY_CASES)
-def test_kernel_source_materialization_matches_legacy_source_plan_route_matrix(
+def test_kernel_source_materialization_route_matrix(
     route: str,
     coordinate: str,
     nodes: str,
 ) -> None:
     topology = route_kernel_topology(route, coordinate, nodes)
-    boundary = tiny_kernel_boundary()
     source = route_kernel_source(route, topology.sample_count)
-    problem = legacy_problem_from_kernel_case(topology, boundary, source)
-    source_route_spec = validate_route(problem.route, problem.coordinate, problem.nodes)
-
-    source_plan = build_source_plan(problem=problem, source_route_spec=source_route_spec)
     materialized = materialize_kernel_source(topology, source)
 
-    assert source_plan.route_key == topology.source_route_key
-    assert source_plan.parameterization == topology.source_parameterization
-    assert_allclose(source_plan.scaled_heat, materialized.scaled_heat)
-    assert_allclose(source_plan.scaled_current, materialized.scaled_current)
-    assert source_plan.scaled_Ip == materialized.scaled_Ip
-    assert_allclose([source_plan.beta], [materialized.beta], equal_nan=True)
-    assert not source_plan.scaled_heat.flags.writeable
-    assert not source_plan.scaled_current.flags.writeable
+    assert topology.source_route_key == (route, coordinate, nodes)
+    assert materialized.scaled_heat.shape == (topology.sample_count,)
+    assert materialized.scaled_current.shape == (topology.sample_count,)
+    assert_allclose(materialized.scaled_heat, source.heat_profile * MU0)
+    if route in {"PI", "PJ1", "PJ2"}:
+        assert_allclose(materialized.scaled_current, source.current_profile * MU0)
+    else:
+        assert_allclose(materialized.scaled_current, source.current_profile)
+    assert materialized.scaled_Ip == pytest.approx(source.Ip * MU0)
+    assert_allclose([materialized.beta], [source.beta], equal_nan=True)
+    assert not materialized.scaled_heat.flags.writeable
+    assert not materialized.scaled_current.flags.writeable
 
 
 @pytest.mark.parametrize(("route", "coordinate", "nodes"), ROUTE_PARITY_CASES)
-def test_numba_kernel_residual_matches_legacy_operator_for_route_matrix(
+def test_numba_kernel_residual_route_matrix_is_finite_and_repeatable(
     route: str,
     coordinate: str,
     nodes: str,
@@ -274,40 +180,16 @@ def test_numba_kernel_residual_matches_legacy_operator_for_route_matrix(
     kernel = NumbaKernel(topology=topology)
     boundary = tiny_kernel_boundary()
     source = route_kernel_source(route, topology.sample_count)
-    legacy_operator = legacy_operator_from_kernel_case(topology, boundary, source)
     x = np.zeros(kernel.x_size, dtype=np.float64)
 
-    assert_allclose(kernel.residual(x, boundary, source), legacy_operator.residual_var(x))
-
-
-def test_numba_kernel_residual_uses_direct_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
-    topology = make_kernel_topology()
-    kernel = NumbaKernel(topology=topology)
-    boundary = tiny_kernel_boundary()
-    source = tiny_kernel_source()
-    legacy_operator = legacy_operator_from_kernel_case(topology, boundary, source)
-    x = np.zeros(kernel.x_size, dtype=np.float64)
-    expected = legacy_operator.residual_var(x)
-
-    install_legacy_bridge_guard(monkeypatch)
-
-    assert_allclose(kernel.residual(x, boundary, source), expected)
-
-
-def test_numba_kernel_residual_into_uses_direct_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
-    topology = make_kernel_topology()
-    kernel = NumbaKernel(topology=topology)
-    boundary = tiny_kernel_boundary()
-    source = tiny_kernel_source()
-    legacy_operator = legacy_operator_from_kernel_case(topology, boundary, source)
-    x = np.zeros(kernel.x_size, dtype=np.float64)
-    expected = legacy_operator.residual_var(x)
+    residual = kernel.residual(x, boundary, source)
     out = np.empty(kernel.x_size, dtype=np.float64)
-
-    install_legacy_bridge_guard(monkeypatch)
-
     kernel.residual_into(out, x, boundary, source)
-    assert_allclose(out, expected)
+
+    assert residual.shape == (kernel.x_size,)
+    assert np.all(np.isfinite(residual))
+    assert_allclose(out, residual)
+    assert_allclose(kernel.residual(x.copy(), boundary, source), residual)
 
 
 def test_numba_kernel_build_equilibrium_runtime_state_rules() -> None:
@@ -328,13 +210,11 @@ def test_numba_kernel_build_equilibrium_runtime_state_rules() -> None:
         kernel.build_equilibrium()
 
 
-def test_numba_kernel_solve_uses_direct_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_numba_kernel_solve_records_runtime_result() -> None:
     topology = make_kernel_topology()
     kernel = NumbaKernel(topology=topology)
     boundary = tiny_kernel_boundary()
     source = tiny_kernel_source()
-
-    install_legacy_bridge_guard(monkeypatch)
 
     result = kernel.solve(
         boundary,
@@ -445,21 +325,18 @@ def test_numba_kernel_powell_uses_lm_fallback(
 
 
 def test_numba_kernel_build_equilibrium_uses_direct_runtime(
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     topology = make_kernel_topology()
     kernel = NumbaKernel(topology=topology)
     boundary = tiny_kernel_boundary()
     source = tiny_kernel_source()
-    legacy_operator = legacy_operator_from_kernel_case(topology, boundary, source)
     x = np.zeros(kernel.x_size, dtype=np.float64)
-    expected = legacy_operator.build_equilibrium(x)
     kernel.residual(x, boundary, source)
 
-    install_legacy_bridge_guard(monkeypatch)
-
     equilibrium = kernel.build_equilibrium(x)
-    assert_allclose([equilibrium.Ip], [expected.Ip])
+    assert np.isfinite(equilibrium.Ip)
+    assert equilibrium.shape_profiles
+    assert "h" in equilibrium.shape_profiles
 
 
 def test_numba_kernel_solve_result_lifecycle_and_equilibrium_snapshot() -> None:
@@ -509,29 +386,46 @@ def test_numba_kernel_unsupported_solver_method_is_explicit() -> None:
 
 @pytest.mark.parametrize("norm_mode", ["none", "fast", "balanced"])
 def test_numba_kernel_solve_result_scaled_uses_solver_reference_state(norm_mode: str) -> None:
-    operator = tiny_legacy_operator(make_kernel_topology())
-    x0 = np.zeros(operator.x_size, dtype=np.float64)
-    x_final = np.ones(operator.x_size, dtype=np.float64)
-    solver_result = SolverResult(
-        x0=x0,
-        x=x_final,
-        success=False,
-        message="synthetic terminal state",
-        residual_norm_final=0.0,
-        function_evaluations=3,
-        jacobian_evaluations=1,
-        iterations=2,
-        elapsed=1250.0,
-    )
+    kernel = NumbaKernel(topology=make_kernel_topology())
+    boundary = tiny_kernel_boundary()
+    source = tiny_kernel_source()
     config = KernelConfig(norm=norm_mode)
+    x_final = np.ones(kernel.x_size, dtype=np.float64)
 
-    result = solve_result_from_legacy(solver_result, operator, config)
-    expected_raw = operator.residual_var(x_final)
-    expected_scaled = _expected_scaled_from_reference(expected_raw, x0, operator, config)
+    def fake_least_squares(*args: object, **kwargs: object) -> SimpleNamespace:
+        del args, kwargs
+        return SimpleNamespace(
+            x=x_final.copy(),
+            success=True,
+            message="synthetic terminal state",
+            nfev=3,
+            njev=1,
+            nit=2,
+        )
+
+    kernel_solver = import_module("veqpy.kernel.solver")
+    original_least_squares = kernel_solver.least_squares
+    kernel_solver.least_squares = fake_least_squares
+    try:
+        result = kernel.solve(
+            boundary,
+            source,
+            config=KernelConfig(
+                method="levenberg-marquardt",
+                initial="cold-zeros",
+                norm=norm_mode,
+                max_evaluations=2,
+            ),
+        )
+    finally:
+        kernel_solver.least_squares = original_least_squares
+
+    x0 = np.zeros(kernel.x_size, dtype=np.float64)
+    expected_raw = kernel.residual(x_final, boundary, source)
+    expected_scaled = _expected_scaled_from_reference(expected_raw, x0, kernel, config)
 
     assert_allclose(result.raw, expected_raw)
     assert_allclose(result.scaled, expected_scaled)
-    assert result.elapsed_ms == 1.25
     assert result.info == 0
     assert result.nfev == 3
     assert result.njev == 1
@@ -546,7 +440,7 @@ def test_numba_kernel_solve_result_scaled_uses_solver_reference_state(norm_mode:
         final_based_scaled = _expected_scaled_from_reference(
             expected_raw,
             x_final,
-            operator,
+            kernel,
             config,
         )
         assert not np.allclose(result.scaled, final_based_scaled)
@@ -618,12 +512,14 @@ def test_numba_kernel_jvp_and_jacobian_are_explicitly_unimplemented() -> None:
 def _expected_scaled_from_reference(
     raw: np.ndarray,
     x_reference: np.ndarray,
-    operator: Operator,
+    kernel: NumbaKernel,
     config: KernelConfig,
 ) -> np.ndarray:
     if config.norm == "none":
         return raw.copy()
-    reference_raw = operator.residual_var(x_reference)
+    if kernel._last_boundary is None or kernel._last_source is None:
+        raise RuntimeError("kernel case must be set before computing expected scale")
+    reference_raw = kernel.residual(x_reference, kernel._last_boundary, kernel._last_source)
     params: dict[str, object] = {}
     if config.norm == "balanced":
         params = {
@@ -634,7 +530,7 @@ def _expected_scaled_from_reference(
     scale = make_residual_scale(
         config.norm,
         reference_raw,
-        operator.residual_block_lengths(),
+        kernel._solver.runtime.residual_block_lengths(),
         **params,
     )
     if scale is None:

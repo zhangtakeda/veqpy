@@ -8,7 +8,7 @@ Public API:
 - SourceWorkspace
 
 Notes:
-- Source planning and validation live in ``veqpy.operator.source_plan``.
+- Source planning and validation live in ``veqpy.kernel.source_plan``.
 - Source numerical kernels live in ``veqpy.engine``.
 """
 

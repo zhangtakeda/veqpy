@@ -65,6 +65,6 @@ def test_kernel_build_solve_example_runs_with_tmp_output(tmp_path: Path) -> None
     result = _run_example("kernel_build_solve.py", outdir, timeout=180)
 
     assert result.returncode == 0, result.stderr + result.stdout
-    assert "VEQlib kernel build + solve demo" in result.stdout
+    assert "VEQPy Kernel build + solve demo" in result.stdout
     assert "success: True" in result.stdout
-    assert (outdir / "kernel_cache").is_dir()
+    assert outdir.is_dir()

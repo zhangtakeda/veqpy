@@ -5,7 +5,8 @@ from __future__ import annotations
 import numpy as np
 
 from veqpy.model import Equilibrium, Profile
-from veqpy.operator import decode_packed_blocks
+
+from .packed_layout import decode_packed_blocks
 
 
 def snapshot_equilibrium_from_kernel_runtime(
@@ -34,7 +35,7 @@ def snapshot_equilibrium_from_kernel_runtime(
     alpha1: float,
     alpha2: float,
 ) -> Equilibrium:
-    """Materialize an ``Equilibrium`` without constructing a legacy ``Problem``."""
+    """Materialize an ``Equilibrium`` directly from Kernel runtime state."""
 
     coeff_values = decode_packed_blocks(
         x,

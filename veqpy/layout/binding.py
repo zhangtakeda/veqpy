@@ -15,7 +15,7 @@ Notes:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from veqpy.engine import numba_operator, numba_profile
 from veqpy.layout.geometry_binding import build_geometry_stage_runner
@@ -28,8 +28,6 @@ from veqpy.layout.residual_binding import (
 from veqpy.layout.source_binding import build_bound_source_stage_runner
 
 if TYPE_CHECKING:
-    from veqpy.model import Problem
-    from veqpy.operator import OperatorBuildPlan, ResidualBindingLayout
     from veqpy.workspace import (
         GeometryWorkspace,
         GridWorkspace,
@@ -43,14 +41,14 @@ from .runtime import OperatorLayout
 
 def build_operator_layout(
     *,
-    plan: OperatorBuildPlan,
-    problem: Problem,
+    plan: Any,
+    problem: object,
     profile_workspace: ProfileWorkspace,
     geometry_workspace: GeometryWorkspace,
     source_workspace: SourceWorkspace,
     residual_workspace: ResidualWorkspace,
     grid_workspace: GridWorkspace,
-    residual_binding_layout: ResidualBindingLayout,
+    residual_binding_layout: Any,
     c_effective_order: int,
     s_effective_order: int,
     fix_rho: float,

@@ -1,5 +1,5 @@
 """
-Module: solver.residual_scale
+Module: kernel.residual_scale
 
 Role:
 - Registry-backed residual normalization scale builders.
@@ -10,7 +10,7 @@ Public API:
 - make_residual_scale
 
 Mode summary:
-- ``fast`` / ``block_rms``: legacy first-residual block RMS scale.
+- ``fast`` / ``block_rms``: first-residual block RMS scale.
 - ``balance`` / ``balanced`` / ``block_huber``: robust block RMS with floor and
   max-ratio clipping.
 - ``safe`` / ``block_sensitivity``: robust amplitude plus deterministic local
@@ -30,7 +30,7 @@ from veqpy.base import Registry
 # -----------------------------------------------------------------------------
 
 _RESIDUAL_SCALE_BUILDER: Registry[str, Callable] = Registry(str, Callable)
-# SolverConfig, benchmarks, and GEQDSK workflows all use this same default.
+# KernelConfig, benchmarks, and GEQDSK workflows all use this same default.
 DEFAULT_RESIDUAL_NORMALIZATION = "fast"
 
 # -----------------------------------------------------------------------------
@@ -39,7 +39,7 @@ DEFAULT_RESIDUAL_NORMALIZATION = "fast"
 
 
 def _mode_is_block_rms(mode: str) -> bool:
-    """Check if *mode* maps to the block-RMS (legacy) scale builder."""
+    """Check if *mode* maps to the block-RMS scale builder."""
     key = mode.lower()
     if key not in _RESIDUAL_SCALE_BUILDER:
         return False
@@ -67,8 +67,8 @@ def make_residual_scale(
 
 @_RESIDUAL_SCALE_BUILDER("block_rms", "fast")
 def _build_block_rms_scale(residual: np.ndarray, block_lengths: np.ndarray) -> np.ndarray | None:
-    # Legacy fast mode trusts the first residual block amplitudes and enforces a
-    # minimum scale of 1.0.  It is cheap and deterministic but not outlier-robust.
+    # Fast mode trusts the first residual block amplitudes and enforces a minimum
+    # scale of 1.0.  It is cheap and deterministic but not outlier-robust.
     residual_eval = np.asarray(residual, dtype=np.float64)
     lengths_eval = np.asarray(block_lengths, dtype=np.int64)
     block_rms = _block_rms_values(residual_eval, lengths_eval)

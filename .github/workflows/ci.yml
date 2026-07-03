@@ -87,10 +87,8 @@ jobs:
           from pathlib import Path
 
           import veqpy
+          from veqpy.facade import Kernel, KernelBoundary, KernelSource, KernelTopology
           from veqpy.model import Grid
-          from veqpy.operator import Operator
-          from veqpy.solver import Solver
-          from veqlib.facade import KernelTopology
 
           module_path = Path(veqpy.__file__).resolve()
           workspace = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
@@ -99,5 +97,12 @@ jobs:
 
           print("veqpy distribution", metadata.version("veqpy"))
           print("veqpy module", module_path)
-          print("smoke symbols", Grid.__name__, Operator.__name__, Solver.__name__, KernelTopology.__name__)
+          print(
+              "smoke symbols",
+              Grid.__name__,
+              Kernel.__name__,
+              KernelBoundary.__name__,
+              KernelSource.__name__,
+              KernelTopology.__name__,
+          )
           PY

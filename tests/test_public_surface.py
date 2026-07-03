@@ -7,8 +7,6 @@ import veqpy
 import veqpy.facade as facade
 import veqpy.kernel as kernel
 import veqpy.model as model
-import veqpy.operator as operator
-import veqpy.solver as solver
 
 
 def test_package_version_matches_pyproject() -> None:
@@ -23,14 +21,9 @@ def test_core_public_imports_are_available() -> None:
     assert model.Grid
     assert model.Boundary
     assert model.Profile
-    assert model.Problem
     assert model.Geqdsk
     assert model.Equilibrium
     assert facade.Kernel
     assert facade.NumbaKernel
     assert facade.KernelTopology
     assert kernel.NumbaKernel
-    assert operator.Operator
-    assert solver.Solver
-    assert solver.SolverConfig
-    assert solver.SolverResult

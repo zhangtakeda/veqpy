@@ -17,9 +17,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-from veqpy.model import Boundary, Grid, Problem
-from veqpy.operator import Operator
-from veqpy.solver import Solver, SolverConfig
+from veqpy.facade import Kernel, KernelBoundary, KernelConfig, KernelSource, KernelTopology
+from veqpy.model import Grid
 
 MU0 = 4.0e-7 * np.pi
 SOURCE_SAMPLE_COUNT = 51
@@ -34,8 +33,8 @@ def ensure_output_dir() -> Path:
     return outdir
 
 
-def build_demo_boundary() -> Boundary:
-    return Boundary(
+def build_demo_boundary() -> KernelBoundary:
+    return KernelBoundary(
         a=1.05 / 1.85,
         R0=1.05,
         Z0=0.0,
@@ -145,43 +144,48 @@ def main() -> None:
     psin = np.linspace(0.0, 1.0, SOURCE_SAMPLE_COUNT, dtype=np.float64)
     current_input, heat_input = pf_reference_profiles(psin)
     pressure_input = heat_input / MU0
-    problem = Problem(
+    topology = KernelTopology(
+        h_count=2,
+        v_count=0,
+        kappa_count=2,
+        psin_count=3,
+        F_count=0,
+        c_counts=(),
+        s_counts=(2,),
+        Nr=8,
+        Nt=8,
         route="PF",
         coordinate="psin",
-        active_profiles={"psin": 6, "h": 3, "k": 6, "s1": 3},
-        boundary=boundary,
-        heat_input=pressure_input,
-        current_input=current_input,
-        Ip=3.0e6,
+        nodes="uniform",
+        ip_constraint=True,
+        sample_count=SOURCE_SAMPLE_COUNT,
     )
-    solve_grid = Grid(
-        Nr=16,
-        Nt=16,
-        quadrature_scheme="legendre",
+    source = KernelSource(
+        heat_profile=pressure_input,
+        current_profile=current_input,
+        Ip=3.0e6,
     )
     plot_grid = Grid(
         Nr=128,
         Nt=256,
         quadrature_scheme="uniform",
-        L_max=solve_grid.L_max,
-        M_max=solve_grid.M_max,
+        L_max=topology.L_max,
+        M_max=topology.M_max,
+        K_max=topology.K_max,
     )
-    solver = Solver(
-        operator=Operator(grid=solve_grid, problem=problem),
-        config=SolverConfig(
-            method="hybr",
-            enable_verbose=False,
-            enable_history=False,
+    kernel = Kernel(
+        topology=topology,
+        config=KernelConfig(
+            method="levenberg-marquardt",
+            initial="cold-zeros",
+            norm="none",
+            max_evaluations=16,
         ),
     )
 
-    for _ in range(10):
-        solver.solve()
-        solver.reset()
-
-    solver.solve(enable_verbose=False, enable_history=False)
-    print(solver.result)
-    equilibrium = solver.build_equilibrium()
+    result = kernel.solve(boundary, source)
+    print(result)
+    equilibrium = kernel.build_equilibrium()
     equilibrium.plot(outdir / "demo_equilibrium.png", grid=plot_grid)
     plot_equilibrium = equilibrium.resample(grid=plot_grid)
 
@@ -206,16 +210,13 @@ def main() -> None:
     # Save one serialized equilibrium so users can inspect the solved payload.
     equilibrium.write(str(equilibrium_path))
 
-    result = solver.result
-    if result is None:
-        raise RuntimeError("solver.result is unavailable after demo solve")
-
     print(f"Saved figure      : {figure_path}")
     print(f"Saved equilibrium : {equilibrium_path}")
-    print(f"Solver success    : {result.success}")
-    print(f"Residual norm     : {result.residual_norm_final:.6e}")
+    print(f"Kernel success    : {result.success}")
+    print(f"Raw residual norm : {result.raw_norm:.6e}")
     print(f"Ip [MA]           : {equilibrium.Ip / 1.0e6:.6f}")
     print(f"beta_t            : {equilibrium.beta_t:.6e}")
+    kernel.close()
 
 
 if __name__ == "__main__":

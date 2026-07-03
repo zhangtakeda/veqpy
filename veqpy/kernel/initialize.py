@@ -1,13 +1,12 @@
 """
-Module: operator.initialize
+Module: kernel.initialize
 
 Role:
-- Build operator-owned packed initial states.
-- Keep geometric initializer formulas out of the fused Operator facade.
+- Build kernel-owned packed initial states.
+- Keep geometric initializer formulas out of the direct runtime facade.
 
 Public API:
 - build_boundary_slope_initial_state
-- build_legacy_boundary_slope_initial_state
 - estimate_axis_shift_h0
 """
 
@@ -19,10 +18,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 from numba import njit
 
-from veqpy.model import Problem
-
 if TYPE_CHECKING:
-    from veqpy.operator.build_plan import OperatorBuildPlan
+    from veqpy.kernel.runtime import KernelRuntimePlan
     from veqpy.workspace import ProfileWorkspace
 
 _SOURCE_CURRENT_ROUGHNESS_WEIGHT = 0.5
@@ -40,12 +37,12 @@ _TINY = 1.0e-16
 
 def build_boundary_slope_initial_state(
     *,
-    problem: Problem,
-    plan: OperatorBuildPlan,
+    problem: object,
+    plan: KernelRuntimePlan,
     profile_workspace: ProfileWorkspace,
     source_psin_target: Callable[[np.ndarray], np.ndarray | None] | None = None,
 ) -> np.ndarray:
-    """Build the geometric packed initial state for an operator layout."""
+    """Build the geometric packed initial state for a kernel layout."""
 
     x = np.zeros(int(plan.x_size), dtype=np.float64)
     _seed_axis_and_boundary_shape_terms(
@@ -63,29 +60,11 @@ def build_boundary_slope_initial_state(
     return x
 
 
-def build_legacy_boundary_slope_initial_state(
-    *,
-    problem: Problem,
-    plan: OperatorBuildPlan,
-    profile_workspace: ProfileWorkspace,
-) -> np.ndarray:
-    """Build the legacy geometric packed x0 used for initializer comparisons."""
-
-    x = np.zeros(int(plan.x_size), dtype=np.float64)
-    _seed_axis_and_boundary_shape_terms(
-        x,
-        h0_est=_estimate_legacy_axis_shift_h0(problem),
-        plan=plan,
-        profile_workspace=profile_workspace,
-    )
-    return x
-
-
 def _seed_axis_and_boundary_shape_terms(
     x: np.ndarray,
     *,
     h0_est: float,
-    plan: OperatorBuildPlan,
+    plan: KernelRuntimePlan,
     profile_workspace: ProfileWorkspace,
 ) -> None:
     for slot, profile_id in enumerate(profile_workspace.active_profile_ids):
@@ -105,7 +84,7 @@ def _seed_axis_and_boundary_shape_terms(
             x[idx0] = -offset / float(2 * power + 1)
 
 
-def estimate_axis_shift_h0(problem: Problem) -> float:
+def estimate_axis_shift_h0(problem: object) -> float:
     """Estimate the geometric axis radial-shift coefficient from source moments.
 
     The estimate keeps the large-aspect-ratio Shafranov scaling ``a / R0`` but
@@ -130,28 +109,6 @@ def estimate_axis_shift_h0(problem: Problem) -> float:
     return 0.0 if abs(h0) <= _AXIS_SHIFT_COEFF_TOL else h0
 
 
-def _estimate_legacy_axis_shift_h0(problem: Problem) -> float:
-    try:
-        a = float(problem.boundary.a)
-        r0 = float(problem.boundary.R0)
-    except (AttributeError, TypeError, ValueError):
-        return 0.0
-
-    heat = getattr(problem, "heat_input", None)
-    if heat is None or not hasattr(heat, "__len__") or len(heat) < 6:
-        return 0.66 * a / r0
-    try:
-        source = np.abs(np.asarray(heat, dtype=np.float64))
-        mean = float(np.mean(source))
-        if mean < 1.0e-30:
-            return 0.0
-        if float(np.max(source) - np.min(source)) / mean < 1.0e-4:
-            return 0.0
-        return 0.66 * a / r0
-    except (TypeError, ValueError):
-        return 0.66 * a / r0
-
-
 def _relative_abs_rms(values: np.ndarray) -> float:
     source = np.abs(np.asarray(values, dtype=np.float64))
     mean = float(np.mean(source))
@@ -164,7 +121,7 @@ def _relative_abs_rms(values: np.ndarray) -> float:
 def _seed_active_psin_coefficients(
     x: np.ndarray,
     *,
-    plan: OperatorBuildPlan,
+    plan: KernelRuntimePlan,
     profile_workspace: ProfileWorkspace,
     source_psin_target: Callable[[np.ndarray], np.ndarray | None] | None,
 ) -> None:
@@ -241,7 +198,7 @@ def _normalized_source_psin_target(
 def _project_psin_target_coefficients(
     target: np.ndarray,
     *,
-    plan: OperatorBuildPlan,
+    plan: KernelRuntimePlan,
     profile_workspace: ProfileWorkspace,
     psin_profile_id: int,
     coeff_count: int,
@@ -300,7 +257,7 @@ def _project_psin_target_coefficients(
 def _project_psin0_target_coefficient(
     target: np.ndarray,
     *,
-    plan: OperatorBuildPlan,
+    plan: KernelRuntimePlan,
     profile_workspace: ProfileWorkspace,
     psin_profile_id: int,
 ) -> np.ndarray | None:
@@ -345,7 +302,7 @@ def _project_psin0_source_target_coefficient(
     target: np.ndarray | None,
     *,
     expected_shape: tuple[int, ...],
-    plan: OperatorBuildPlan,
+    plan: KernelRuntimePlan,
     profile_workspace: ProfileWorkspace,
     psin_profile_id: int,
 ) -> np.ndarray | None:
@@ -464,7 +421,7 @@ def _project_psin0_source_target_coefficient_impl(
 
 def _psin_projection_basis(
     *,
-    plan: OperatorBuildPlan,
+    plan: KernelRuntimePlan,
     profile_workspace: ProfileWorkspace,
     psin_profile_id: int,
     coeff_count: int,

@@ -8,7 +8,7 @@ Public API:
 - ResidualWorkspace
 
 Notes:
-- Packed residual semantics remain owned by ``veqpy.operator``.
+- Packed residual semantics remain owned by the Kernel runtime.
 - This module allocates reusable residual buffers and scratch arrays.
 """
 

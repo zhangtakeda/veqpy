@@ -16,12 +16,16 @@ from veqpy.engine import backend_abi, source_parameterization_for_route_key, val
 from veqpy.layout import OperatorLayout, build_operator_layout
 from veqpy.math import SOURCE_INTERP_DEFAULT, normalize_source_interpolation_kind
 from veqpy.model import Grid
-from veqpy.operator import (
+from veqpy.workspace import (
+    GridWorkspace,
+    allocate_runtime_state,
+)
+
+from .initialize import build_boundary_slope_initial_state
+from .packed_layout import (
     PROFILE_OFFSET_SPECS,
     PROFILE_STATIC_KWARGS,
-    SourcePlan,
     build_active_profile_metadata,
-    build_boundary_slope_initial_state,
     build_fourier_profile_names,
     build_profile_index,
     build_profile_layout,
@@ -31,17 +35,15 @@ from veqpy.operator import (
     build_shape_profile_names,
     get_prefix_profile_names,
     packed_size,
+)
+from .profile_runtime import (
     refresh_fourier_family_metadata,
     refresh_profile_runtime,
-    refresh_source_runtime,
     refresh_stage_a_runtime,
 )
-from veqpy.workspace import (
-    GridWorkspace,
-    allocate_runtime_state,
-)
-
 from .snapshot import snapshot_equilibrium_from_kernel_runtime
+from .source_plan import SourcePlan
+from .source_runtime import refresh_source_runtime
 
 _AUTO_CURVE_STRAIN_THRESHOLD = 0.20
 _AUTO_CURVE_STRAIN_SAMPLES = 32

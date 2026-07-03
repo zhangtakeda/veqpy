@@ -1,4 +1,4 @@
-"""Minimal Python-side VEQlib kernel build + solve demo.
+"""Minimal Python-side VEQPy Kernel build + solve demo.
 
 Run directly:
 
@@ -7,9 +7,9 @@ Run directly:
 The example is intentionally notebook-like: each section is one step in the
 runtime workflow.
 
-The first run compiles a tiny topology-specific nanobind kernel, so it may take
-a few seconds. Build/cache files are written under ``VEQPY_OUTPUT_DIR`` when set,
-otherwise under ``./outputs/kernel_build_solve``.
+The first run may spend a moment compiling Numba kernels. ``VEQPY_OUTPUT_DIR`` is
+accepted for consistency with the plotting examples, although this script only
+prints the solved Kernel result.
 """
 
 from __future__ import annotations
@@ -24,11 +24,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from veqlib.facade import (  # noqa: E402
+from veqpy.facade import (  # noqa: E402
     Kernel,
     KernelBoundary,
     KernelConfig,
-    KernelRecipe,
     KernelSource,
     KernelTopology,
     SolveResult,
@@ -82,7 +81,7 @@ def build_source() -> KernelSource:
 def main() -> None:
     outdir = ensure_output_dir()
 
-    # 1. Choose the fixed native topology for this tiny native kernel.
+    # 1. Choose the fixed topology for this tiny Kernel handle.
     topology = KernelTopology(
         h_count=2,
         v_count=0,
@@ -100,16 +99,18 @@ def main() -> None:
         sample_count=9,
     )
 
-    # 2. Build/load the topology-specific nanobind artifact and set the
-    #    handle-level default runtime config.
-    kernel_config = KernelConfig(method="powell", initial="cold", norm="fast")
+    # 2. Create the reusable handle and set the default runtime config.
+    kernel_config = KernelConfig(
+        method="levenberg-marquardt",
+        initial="cold-zeros",
+        norm="none",
+        max_evaluations=16,
+    )
     kernel = Kernel(
         topology=topology,
-        recipe=KernelRecipe(build="fastmath"),
         config=kernel_config,
-        cache_root=outdir / "kernel_cache",
     )
-    artifact = kernel.prepare()
+    kernel.prepare()
 
     # 3. Prepare typed raw runtime source data; facade materialization applies
     #    route-dependent mu0 scaling before backend entry.
@@ -121,8 +122,8 @@ def main() -> None:
     result = kernel.solve(kernel_boundary, kernel_source)
     assert isinstance(result, SolveResult)
 
-    print("VEQlib kernel build + solve demo")
-    print(f"  artifact: {artifact.shared_library_path}")
+    print("VEQPy Kernel build + solve demo")
+    print(f"  output dir: {outdir}")
     print(f"  topology key: {topology.key}")
     print(f"  x_size: {kernel.x_size}")
     print(f"  success: {result.success}")

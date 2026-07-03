@@ -365,7 +365,7 @@ def load_case_samples_from_equilibrium_jsons(
 
     Inputs are the three GEQDSK files, the three Figure 06 reference
     equilibrium JSON files, and the 3x3 representative reduced equilibrium
-    JSON files written by scripts/07-pareto-analysis.py.
+    JSON files listed by the reduced-equilibrium manifest.
     """
 
     reduced_manifest = load_reduced_equilibrium_manifest()
@@ -383,7 +383,7 @@ def load_case_samples_from_equilibrium_jsons(
                 raise FileNotFoundError(
                     f"Missing {CASE_LABELS[case_key]} {config_label} "
                     f"reduced equilibrium JSON at {path}. "
-                    "Run `python scripts/07-pareto-analysis.py` first."
+                    "Generate the reduced-equilibrium manifest before running this figure."
                 ) from exc
             samples.append(
                 sample_from_equilibrium(

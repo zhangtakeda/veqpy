@@ -680,8 +680,7 @@ def load_reduced_transport_geometries(
             raise FileNotFoundError(
                 f"Missing {CASE_LABELS[case_key]} {config_label} "
                 f"reduced equilibrium JSON at {path}. "
-                "Run `python scripts/07-pareto-analysis.py` first so Figure 09 uses the same "
-                "representative equilibria as Figures 07/08."
+                "Generate the reduced-equilibrium manifest before running this figure."
             ) from exc
 
         params = metadata_int(metadata, "parameter_count")

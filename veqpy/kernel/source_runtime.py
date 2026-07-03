@@ -1,5 +1,5 @@
 """
-Module: operator.source_runtime
+Module: kernel.source_runtime
 
 Role:
 - Refresh source runtime memory from a bound ``SourcePlan`` and current psin state.
@@ -21,7 +21,8 @@ from veqpy.engine import (
     resolve_source_inputs,
 )
 from veqpy.math import build_uniform_source_interpolation_coefficients
-from veqpy.operator.source_plan import SourcePlan
+
+from .source_plan import SourcePlan
 
 if TYPE_CHECKING:
     from veqpy.workspace import SourceWorkspace

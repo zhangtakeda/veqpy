@@ -23,14 +23,13 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from veqpy.engine.numba_source import SOURCE_ROUTE_KEYS
 
 if TYPE_CHECKING:
-    from veqpy.operator import ResidualBindingLayout, SourcePlan
     from veqpy.workspace import (
         GeometryWorkspace,
         GridWorkspace,
@@ -102,7 +101,7 @@ def _active_profile_slot_and_length(
 
 def build_source_execution_abi(
     *,
-    source_plan: SourcePlan,
+    source_plan: Any,
     profile_index: dict[str, int],
     profile_L: np.ndarray,
     coeff_index: np.ndarray,
@@ -335,7 +334,7 @@ def build_fused_hot_runtime_abi(
 def build_fused_residual_pack_abi(
     *,
     grid_workspace: GridWorkspace,
-    residual_binding_layout: ResidualBindingLayout,
+    residual_binding_layout: Any,
     profile_workspace: ProfileWorkspace,
     residual_workspace: ResidualWorkspace,
     a: float,
@@ -367,7 +366,7 @@ def build_fused_residual_pack_abi(
 
 def build_fused_source_eval_abi(
     *,
-    source_plan: SourcePlan,
+    source_plan: Any,
     grid_workspace: GridWorkspace,
     geometry_workspace: GeometryWorkspace,
     source_workspace: SourceWorkspace,
@@ -399,7 +398,7 @@ def build_fused_source_eval_abi(
 
 def build_profile_owned_psin_source_abi(
     *,
-    source_plan: SourcePlan,
+    source_plan: Any,
     source_execution: SourceExecutionABI,
     grid_workspace: GridWorkspace,
     profile_workspace: ProfileWorkspace,

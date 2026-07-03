@@ -6,9 +6,9 @@ Role:
 
 Public API:
 - engine
+- facade
+- kernel
 - model
-- operator
-- solver
 
 Notes:
 - Package roots are the only modules that declare ``__all__``.
