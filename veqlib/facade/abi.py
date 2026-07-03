@@ -6,7 +6,8 @@ from typing import Any
 
 import numpy as np
 
-from .types import KernelBoundary, KernelConfig, KernelSource, SolveResult
+from .source_semantics import MaterializedKernelSource
+from .types import KernelBoundary, KernelConfig, SolveResult
 
 
 def boundary_runtime_args(boundary: KernelBoundary) -> tuple[Any, ...]:
@@ -21,7 +22,7 @@ def boundary_runtime_args(boundary: KernelBoundary) -> tuple[Any, ...]:
     )
 
 
-def source_runtime_args(source: KernelSource) -> tuple[Any, ...]:
+def source_runtime_args(source: MaterializedKernelSource) -> tuple[Any, ...]:
     return (
         source.scaled_heat,
         source.scaled_current,

@@ -27,6 +27,9 @@ PUBLIC_EXPORTS = {
         "Boundary",
         "Geqdsk",
     },
+    "veqpy.kernel": {
+        "NumbaKernel",
+    },
     "veqpy.operator": {
         "PACKED_LAYOUT_PROFILE_FIRST",
         "build_active_profile_metadata",
@@ -46,6 +49,28 @@ PUBLIC_EXPORTS = {
         "SolverConfig",
         "SolverRecord",
         "SolverResult",
+    },
+    "veqlib.facade": {
+        "CleanResult",
+        "Kernel",
+        "KernelBoundary",
+        "KernelConfig",
+        "KernelLoadError",
+        "KernelRecipe",
+        "KernelRegistry",
+        "KernelSource",
+        "KernelTopology",
+        "LoadedKernel",
+        "PrepareError",
+        "PrepareResult",
+        "SolveResult",
+        "SolverThreadError",
+        "TopologyError",
+        "VEQlibSolver",
+        "build",
+        "clean",
+        "prepare",
+        "solve",
     },
 }
 

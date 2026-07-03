@@ -24,6 +24,7 @@ from .affinity import pinned_cpu
 from .builder import PrepareResult
 from .registry import KernelRegistry
 from .solver import VEQlibSolver
+from .source_semantics import MaterializedKernelSource, materialize_kernel_source
 from .types import (
     KernelBoundary,
     KernelConfig,
@@ -53,6 +54,7 @@ class Kernel:
         self.recipe = KernelRecipe() if recipe is None else recipe
         if not isinstance(self.recipe, KernelRecipe):
             raise TypeError(f"recipe must be KernelRecipe, got {type(self.recipe).__name__}")
+        self._validate_native_recipe(self.recipe)
         self.config = KernelConfig() if config is None else self._kernel_config(config)
         self.pin_cpu = pin_cpu
         self.registry = registry or KernelRegistry(
@@ -203,15 +205,24 @@ class Kernel:
     ) -> VEQlibSolver:
         kernel_boundary = self._kernel_boundary(boundary)
         kernel_source = self._kernel_source(source, case_name=case_name)
-        self._validate_runtime_case_adaptability(kernel_boundary, kernel_source)
+        materialized_source = materialize_kernel_source(self.topology, kernel_source)
+        self._validate_runtime_case_adaptability(kernel_boundary, materialized_source)
         solver = self._veqlib_solver()
         solver.set_kernel_runtime(
-            "" if kernel_source.case_name is None else kernel_source.case_name,
+            "" if materialized_source.case_name is None else materialized_source.case_name,
             *boundary_runtime_args(kernel_boundary),
-            *source_runtime_args(kernel_source),
+            *source_runtime_args(materialized_source),
             *config_runtime_args(config, x_size=self.x_size),
         )
         return solver
+
+    @staticmethod
+    def _validate_native_recipe(recipe: KernelRecipe) -> None:
+        if recipe.backend != "cxx":
+            raise ValueError(
+                "veqlib.facade.Kernel only supports KernelRecipe backend='cxx'; "
+                "use veqpy.kernel.NumbaKernel for backend='numba'"
+            )
 
     @staticmethod
     def _kernel_config(config: KernelConfig) -> KernelConfig:
@@ -232,9 +243,9 @@ class Kernel:
         if case_name is None:
             return source
         return KernelSource(
-            scaled_heat=source.scaled_heat,
-            scaled_current=source.scaled_current,
-            scaled_Ip=source.scaled_Ip,
+            heat_profile=source.heat_profile,
+            current_profile=source.current_profile,
+            Ip=source.Ip,
             beta=source.beta,
             case_name=case_name,
         )
@@ -242,20 +253,9 @@ class Kernel:
     def _validate_runtime_case_adaptability(
         self,
         boundary: KernelBoundary,
-        source: KernelSource,
+        source: MaterializedKernelSource,
     ) -> None:
         topology = self.topology
-        expected_samples = topology.sample_count
-        heat_length = source.scaled_heat.size
-        current_length = source.scaled_current.size
-        if heat_length != expected_samples or current_length != expected_samples:
-            raise ValueError(
-                "case does not match kernel topology: scaled_heat and scaled_current "
-                f"must have length {expected_samples} for "
-                f"route={topology.route}/{topology.coordinate}/{topology.nodes}, "
-                f"got {heat_length} and {current_length}"
-            )
-
         max_offsets = topology.M_max + 1
         for name, values in (
             ("c_offsets", boundary.c_offsets),

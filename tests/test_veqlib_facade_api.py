@@ -25,6 +25,7 @@ from veqlib.facade.options import (
     SOLVER_METHOD_LEVENBERG_MARQUARDT,
     SOLVER_METHOD_POWELL,
 )
+from veqlib.facade.source_semantics import materialize_kernel_source
 
 MU0 = 4.0e-7 * np.pi
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -77,11 +78,11 @@ def pf_reference_profiles(psin: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 
 def tiny_kernel_source(*, case_name: str | None = None) -> KernelSource:
     psin = np.linspace(0.0, 1.0, 9, dtype=np.float64)
-    scaled_current, scaled_heat = pf_reference_profiles(psin)
+    current_profile, scaled_heat = pf_reference_profiles(psin)
     return KernelSource(
-        scaled_heat=scaled_heat,
-        scaled_current=scaled_current,
-        scaled_Ip=3.0e6 * MU0,
+        heat_profile=scaled_heat / MU0,
+        current_profile=current_profile,
+        Ip=3.0e6,
         case_name=case_name,
     )
 
@@ -156,7 +157,9 @@ def test_kernel_topology_and_runtime_source_is_user_facing_contract() -> None:
     topology = make_kernel_topology(c_counts=(0, 0), s_counts=(2, 0, 0), K_max=None)
     same_shape = make_kernel_topology(c_counts=(), s_counts=(2,), L_max=2, M_max=1, K_max=2)
     family_recipe = KernelRecipe(layout="family", build="release")
+    numba_recipe = KernelRecipe(backend="numba", layout="degree")
     kernel_source = tiny_kernel_source(case_name="tiny")
+    materialized_source = materialize_kernel_source(topology, kernel_source)
     kernel_boundary = tiny_kernel_boundary()
 
     assert topology_identity_payload(topology) == topology_identity_payload(same_shape)
@@ -164,6 +167,8 @@ def test_kernel_topology_and_runtime_source_is_user_facing_contract() -> None:
     assert family_recipe.backend == "cxx"
     assert family_recipe.layout == "family"
     assert family_recipe.layout_profile_first is True
+    assert numba_recipe.backend == "numba"
+    assert numba_recipe.layout == "degree"
     assert recipe_identity_payload(family_recipe)["preset"] == "release"
     assert topology.route == "PF"
     assert topology.coordinate == "psin"
@@ -173,22 +178,31 @@ def test_kernel_topology_and_runtime_source_is_user_facing_contract() -> None:
 
     assert kernel_source.case_name == "tiny"
     assert kernel_boundary.a == 0.5
-    assert_allclose(kernel_source.scaled_heat, tiny_kernel_source().scaled_heat)
-    assert kernel_source.scaled_Ip == 3.0e6 * MU0
+    assert_allclose(kernel_source.heat_profile, tiny_kernel_source().heat_profile)
+    assert kernel_source.Ip == 3.0e6
+    assert not hasattr(kernel_source, "scaled_heat")
+    assert not hasattr(kernel_source, "scaled_current")
+    assert not hasattr(kernel_source, "scaled_Ip")
+    assert_allclose(materialized_source.scaled_heat, tiny_kernel_source().heat_profile * MU0)
+    assert_allclose(materialized_source.scaled_current, tiny_kernel_source().current_profile)
+    assert materialized_source.scaled_Ip == 3.0e6 * MU0
     assert kernel_boundary.c_offsets.flags.c_contiguous
     assert kernel_boundary.s_offsets.flags.c_contiguous
-    assert kernel_source.scaled_heat.flags.c_contiguous
-    assert kernel_source.scaled_current.flags.c_contiguous
+    assert kernel_source.heat_profile.flags.c_contiguous
+    assert kernel_source.current_profile.flags.c_contiguous
     assert not kernel_boundary.c_offsets.flags.writeable
     assert not kernel_boundary.s_offsets.flags.writeable
-    assert not kernel_source.scaled_heat.flags.writeable
-    assert not kernel_source.scaled_current.flags.writeable
+    assert not kernel_source.heat_profile.flags.writeable
+    assert not kernel_source.current_profile.flags.writeable
 
-    with pytest.raises(ValueError, match="scaled_heat must be 1D"):
+    with pytest.raises(ValueError, match="heat_profile must be 1D"):
         KernelSource(
-            scaled_heat=np.ones((2, 1), dtype=np.float64),
-            scaled_current=np.ones(2, dtype=np.float64),
+            heat_profile=np.ones((2, 1), dtype=np.float64),
+            current_profile=np.ones(2, dtype=np.float64),
         )
+
+    with pytest.raises(ValueError, match="veqlib.facade.Kernel only supports"):
+        Kernel(topology=topology, recipe=numba_recipe)
 
 
 def test_kernel_runtime_case_must_match_topology_before_native() -> None:
@@ -198,10 +212,10 @@ def test_kernel_runtime_case_must_match_topology_before_native() -> None:
     handle._solver = recorder  # type: ignore[assignment]
 
     bad_source_length = KernelSource(
-        scaled_heat=np.ones(topology.sample_count - 1, dtype=np.float64),
-        scaled_current=np.ones(topology.sample_count - 1, dtype=np.float64),
+        heat_profile=np.ones(topology.sample_count - 1, dtype=np.float64),
+        current_profile=np.ones(topology.sample_count - 1, dtype=np.float64),
     )
-    with pytest.raises(ValueError, match="case does not match kernel topology: scaled_heat"):
+    with pytest.raises(ValueError, match="case does not match kernel topology: heat_profile"):
         handle._set_runtime(
             tiny_kernel_boundary(),
             bad_source_length,
@@ -250,6 +264,9 @@ def test_kernel_runtime_case_must_match_topology_before_native() -> None:
     )
     assert recorder.runtime_args is not None
     assert recorder.runtime_args[0] == "override"
+    assert_allclose(recorder.runtime_args[8], tiny_kernel_source().heat_profile * MU0)
+    assert_allclose(recorder.runtime_args[9], tiny_kernel_source().current_profile)
+    assert recorder.runtime_args[10] == 3.0e6 * MU0
 
 
 def test_kernel_solve_uses_handle_default_config_with_per_call_overrides() -> None:

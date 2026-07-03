@@ -101,6 +101,11 @@ def prepare(
     recipe = Recipe() if recipe is None else recipe
     if not isinstance(recipe, Recipe):
         raise TypeError(f"recipe must be KernelRecipe, got {type(recipe).__name__}")
+    if recipe.backend != "cxx":
+        raise ValueError(
+            "veqlib.facade.prepare only supports KernelRecipe backend='cxx'; "
+            "use veqpy.kernel.NumbaKernel for backend='numba'"
+        )
     if not dry_run:
         validate_supported_for_veqlib_native(topology)
     source_dir = _default_source_dir() if source_dir is None else source_dir.resolve()

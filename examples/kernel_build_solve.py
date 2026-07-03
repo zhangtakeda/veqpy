@@ -70,11 +70,11 @@ def build_boundary() -> KernelBoundary:
 
 def build_source() -> KernelSource:
     psin = np.linspace(0.0, 1.0, 9, dtype=np.float64)
-    current_input, scaled_heat = pf_reference_profiles(psin)
+    current_profile, pressure_gradient = pf_reference_profiles(psin)
     return KernelSource(
-        scaled_heat=scaled_heat,
-        scaled_current=current_input,
-        scaled_Ip=3.0e6 * MU0,
+        heat_profile=pressure_gradient / MU0,
+        current_profile=current_profile,
+        Ip=3.0e6,
         case_name="kernel-build-solve-demo",
     )
 

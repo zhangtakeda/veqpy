@@ -53,10 +53,10 @@ and easier to reuse than full solver-native equilibrium or reconstruction pipeli
   active profile lengths, while `Profile` is used for serializable shape-profile
   snapshots on `Equilibrium`. `Grid` and `Equilibrium` use reactive derived properties
   to lazily reconstruct geometry and physics diagnostics by formula.
-- **Experimental VEQlib bridge**: `veqlib.facade` exposes a C++-aligned
-  `KernelTopology + KernelRecipe + KernelBoundary + KernelSource + KernelConfig` API
-  and builds/loads optional topology-specific VEQlib C++/nanobind kernels for the
-  current MVP path.
+- **Experimental Kernel bridge**: `veqlib.facade` exposes the shared
+  `KernelTopology + KernelRecipe + KernelBoundary + KernelSource + KernelConfig` API,
+  with raw runtime source profiles in `KernelSource`, and builds/loads optional
+  topology-specific VEQlib C++/nanobind kernels for the current MVP path.
   This is an optional acceleration path; the standard Python/Numba solver remains
   the default.
 
@@ -175,7 +175,9 @@ The package-level Python facade is intentionally semantic: users construct
 `Kernel(topology=topology)` or `build(topology=topology, ...)`. `KernelRecipe`
 carries packed backend, layout, and build options, `KernelBoundary`/`KernelSource`
 carry runtime cases, and `KernelConfig` carries the handle-level default solve
-policy. `build(topology=..., recipe=None, config=None)` creates a reusable
+policy. `KernelSource` stores raw user-facing `heat_profile`, `current_profile`,
+`Ip`, and `beta` values; the facade materializes route-dependent `mu0` scaling
+before calling backend kernels. `build(topology=..., recipe=None, config=None)` creates a reusable
 `Kernel` and caches that default policy on the handle; `Kernel.solve(...)` can
 use it as-is, replace it with a one-off `config=...`, or override individual
 fields such as `method=...` for one call. `solve(..., topology=...)` is the

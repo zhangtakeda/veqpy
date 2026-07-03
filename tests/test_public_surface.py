@@ -4,6 +4,7 @@ import tomllib
 from pathlib import Path
 
 import veqpy
+import veqpy.kernel as kernel
 import veqpy.model as model
 import veqpy.operator as operator
 import veqpy.solver as solver
@@ -24,6 +25,7 @@ def test_core_public_imports_are_available() -> None:
     assert model.Problem
     assert model.Geqdsk
     assert model.Equilibrium
+    assert kernel.NumbaKernel
     assert operator.Operator
     assert solver.Solver
     assert solver.SolverConfig

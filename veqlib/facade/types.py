@@ -330,23 +330,23 @@ class KernelTopology:
 class KernelSource:
     """Runtime source and physical constraints for one VEQlib kernel solve."""
 
-    scaled_heat: np.ndarray | list[float] | tuple[float, ...]
-    scaled_current: np.ndarray | list[float] | tuple[float, ...]
-    scaled_Ip: float = np.nan
+    heat_profile: np.ndarray | list[float] | tuple[float, ...]
+    current_profile: np.ndarray | list[float] | tuple[float, ...]
+    Ip: float = np.nan
     beta: float = np.nan
     case_name: str | None = None
 
     def __post_init__(self) -> None:
-        heat = _readonly_1d(self.scaled_heat, "scaled_heat")
-        current = _readonly_1d(self.scaled_current, "scaled_current")
+        heat = _readonly_1d(self.heat_profile, "heat_profile")
+        current = _readonly_1d(self.current_profile, "current_profile")
         if heat.shape != current.shape:
             raise ValueError(
-                "scaled_heat and scaled_current must share the same shape, "
+                "heat_profile and current_profile must share the same shape, "
                 f"got {heat.shape} and {current.shape}"
             )
-        object.__setattr__(self, "scaled_heat", heat)
-        object.__setattr__(self, "scaled_current", current)
-        object.__setattr__(self, "scaled_Ip", float(self.scaled_Ip))
+        object.__setattr__(self, "heat_profile", heat)
+        object.__setattr__(self, "current_profile", current)
+        object.__setattr__(self, "Ip", float(self.Ip))
         object.__setattr__(self, "beta", float(self.beta))
         case_name = None if self.case_name is None else str(self.case_name)
         object.__setattr__(self, "case_name", case_name)
@@ -475,9 +475,9 @@ def _normalize_layout(value: str) -> str:
 
 def _normalize_backend(value: str) -> str:
     normalized = _normalize_token(value, "backend").lower()
-    if normalized == "cxx":
+    if normalized in {"cxx", "numba"}:
         return normalized
-    raise TopologyError("backend must be cxx")
+    raise TopologyError("backend must be cxx or numba")
 
 
 def _source_active_family(route: str, coordinate: str, nodes: str) -> str:
