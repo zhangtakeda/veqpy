@@ -168,7 +168,7 @@ class _CxxKernelImpl:
             packed_x = self.result.x
         else:
             packed_x = self._packed_input(x, "x")
-        from veqlib.numba_core.runtime import NumbaRuntime
+        from veqpy.kernels.numba_kernel.runtime import NumbaRuntime
 
         runtime = NumbaRuntime(self.topology)
         return runtime.build_equilibrium(packed_x, self._last_boundary, self._last_source)
@@ -448,7 +448,7 @@ def _make_kernel_impl(
             source_dir=source_dir,
             pin_cpu=pin_cpu,
         )
-        from veqlib.numba_core.kernel import _NumbaKernelImpl
+        from veqpy.kernels.numba_kernel.kernel import _NumbaKernelImpl
 
         return _NumbaKernelImpl(topology=topology, recipe=kernel_recipe, config=config)
     raise ValueError("KernelRecipe backend selection supports backend='cxx' or backend='numba'")

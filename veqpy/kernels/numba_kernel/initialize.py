@@ -19,8 +19,8 @@ import numpy as np
 from numba import njit
 
 if TYPE_CHECKING:
-    from veqlib.numba_core.runtime import KernelRuntimePlan
-    from veqpy.workspace import ProfileWorkspace
+    from veqpy.kernels.numba_kernel.runtime import KernelRuntimePlan
+    from veqpy.kernels.numba_kernel.workspace import ProfileWorkspace
 
 _SOURCE_CURRENT_ROUGHNESS_WEIGHT = 0.5
 _SOURCE_STRUCTURE_REL_TOL = 1.0e-6

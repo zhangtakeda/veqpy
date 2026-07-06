@@ -27,11 +27,16 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from veqpy.engine.numba_source import SOURCE_ROUTE_KEYS
+from veqpy.kernels.numba_kernel.numba_source import SOURCE_ROUTE_KEYS
 
 if TYPE_CHECKING:
+    from veqpy.kernels.numba_kernel.workspace import (
+        GeometryWorkspace,
+        ProfileWorkspace,
+        ResidualWorkspace,
+        SourceWorkspace,
+    )
     from veqpy.model.numerics import GridWorkspace
-    from veqpy.workspace import GeometryWorkspace, ProfileWorkspace, ResidualWorkspace, SourceWorkspace
 
 
 RouteKey = tuple[str, str, str]

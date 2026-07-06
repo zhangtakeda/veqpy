@@ -18,7 +18,7 @@ from veqlib.facade import (
     KernelTopology,
 )
 from veqlib.facade.source_semantics import materialize_kernel_source
-from veqlib.numba_core.residual_scale import make_residual_scale
+from veqpy.kernels.numba_kernel.residual_scale import make_residual_scale
 
 ROUTE_PARITY_CASES = (
     ("PF", "psin", "uniform"),
@@ -315,7 +315,7 @@ def test_kernel_numba_backend_success_is_raw_residual_gated(
             nit=0,
         )
 
-    kernel_solver = import_module("veqlib.numba_core.solver")
+    kernel_solver = import_module("veqpy.kernels.numba_kernel.solver")
     monkeypatch.setattr(kernel_solver, "least_squares", fake_least_squares)
 
     result = kernel.solve(
@@ -361,7 +361,7 @@ def test_kernel_numba_backend_powell_uses_hybr_budget(
         del args, kwargs
         raise AssertionError("powell solve should not invoke least_squares")
 
-    kernel_solver = import_module("veqlib.numba_core.solver")
+    kernel_solver = import_module("veqpy.kernels.numba_kernel.solver")
     monkeypatch.setattr(kernel_solver, "root", fake_root)
     monkeypatch.setattr(kernel_solver, "least_squares", fake_least_squares)
 
@@ -453,7 +453,7 @@ def test_kernel_numba_backend_solve_result_scaled_uses_solver_reference_state(
             nit=2,
         )
 
-    kernel_solver = import_module("veqlib.numba_core.solver")
+    kernel_solver = import_module("veqpy.kernels.numba_kernel.solver")
     original_least_squares = kernel_solver.least_squares
     kernel_solver.least_squares = fake_least_squares
     try:

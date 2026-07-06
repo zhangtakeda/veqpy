@@ -7,7 +7,7 @@ Role:
 
 Notes:
 - Packed residual semantics remain owned by the kernel packed layout and runtime plan.
-- Numerical kernels remain in ``veqpy.engine``.
+- Numerical kernels remain private to this backend package.
 """
 
 from __future__ import annotations
@@ -17,11 +17,16 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from veqpy.engine import numba_operator, numba_residual
+from . import numba_operator, numba_residual
 
 if TYPE_CHECKING:
+    from veqpy.kernels.numba_kernel.workspace import (
+        GeometryWorkspace,
+        ProfileWorkspace,
+        ResidualWorkspace,
+        SourceWorkspace,
+    )
     from veqpy.model.numerics import GridWorkspace
-    from veqpy.workspace import GeometryWorkspace, ProfileWorkspace, ResidualWorkspace, SourceWorkspace
 
 
 def build_residual_full_stage_runner_into(

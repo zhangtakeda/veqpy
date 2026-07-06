@@ -19,13 +19,13 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from veqpy.workspace.geometry_workspace import GeometryWorkspace
-from veqpy.workspace.profile_workspace import ProfileWorkspace
-from veqpy.workspace.residual_workspace import ResidualWorkspace
-from veqpy.workspace.source_workspace import SourceWorkspace
+from veqpy.kernels.numba_kernel.workspace.geometry_workspace import GeometryWorkspace
+from veqpy.kernels.numba_kernel.workspace.profile_workspace import ProfileWorkspace
+from veqpy.kernels.numba_kernel.workspace.residual_workspace import ResidualWorkspace
+from veqpy.kernels.numba_kernel.workspace.source_workspace import SourceWorkspace
 
 if TYPE_CHECKING:
-    from veqpy.engine import SourceExecutionABI
+    from veqpy.kernels.numba_kernel.backend_abi import SourceExecutionABI
     from veqpy.model.numerics import GridWorkspace
 
 

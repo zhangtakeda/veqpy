@@ -26,14 +26,12 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from numba import njit
 
-import veqpy.engine.backend_abi as backend_abi
-from veqpy.model.numerics.geometry import update_geometry_hot_auto
-from veqpy.model.numerics.profile_eval import update_profiles_packed_bulk
-from veqpy.engine.numba_residual import (
+import veqpy.kernels.numba_kernel.backend_abi as backend_abi
+from veqpy.kernels.numba_kernel.numba_residual import (
     run_residual_blocks_packed_precomputed_auto,
     update_residual_compact,
 )
-from veqpy.engine.numba_source import (
+from veqpy.kernels.numba_kernel.numba_source import (
     PJ2_PSIN_UNIFORM_BARYCENTRIC_ORDER_CAP,
     PJ2_PSIN_UNIFORM_FIXED_POINT_MAX_ITER,
     PJ2_PSIN_UNIFORM_FIXED_POINT_MAX_RESIDUAL,
@@ -47,10 +45,17 @@ from veqpy.engine.numba_source import (
     uniform_barycentric_weights,
 )
 from veqpy.model.numerics import build_uniform_source_interpolation_coefficients
+from veqpy.model.numerics.geometry import update_geometry_hot_auto
+from veqpy.model.numerics.profile_eval import update_profiles_packed_bulk
 
 if TYPE_CHECKING:
+    from veqpy.kernels.numba_kernel.workspace import (
+        GeometryWorkspace,
+        ProfileWorkspace,
+        ResidualWorkspace,
+        SourceWorkspace,
+    )
     from veqpy.model.numerics import GridWorkspace
-    from veqpy.workspace import GeometryWorkspace, ProfileWorkspace, ResidualWorkspace, SourceWorkspace
 
 
 def bind_source_eval_runner(

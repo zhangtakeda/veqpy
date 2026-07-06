@@ -2,7 +2,7 @@
 Module: workspace.__init__
 
 Role:
-- Expose the workspace package-root contract used outside ``veqpy.workspace``.
+- Expose the workspace package-root contract used outside ``veqpy.kernels.numba_kernel.workspace``.
 
 Public API:
 - GridWorkspace and allocate_runtime_state for operator construction
@@ -76,12 +76,24 @@ _EXPORTS = {
         "RESIDUAL_SURFACE_GPSIN_R_SIN_TB",
     ),
     "RESIDUAL_SURFACE_GPSIN_Z": ("veqpy.model.numerics.field_rows", "RESIDUAL_SURFACE_GPSIN_Z"),
-    "GeometryWorkspace": ("veqpy.workspace.geometry_workspace", "GeometryWorkspace"),
+    "GeometryWorkspace": (
+        "veqpy.kernels.numba_kernel.workspace.geometry_workspace",
+        "GeometryWorkspace",
+    ),
     "GridWorkspace": ("veqpy.model.numerics.grid_workspace", "GridWorkspace"),
-    "ProfileWorkspace": ("veqpy.workspace.profile_workspace", "ProfileWorkspace"),
-    "ResidualWorkspace": ("veqpy.workspace.residual_workspace", "ResidualWorkspace"),
-    "SourceWorkspace": ("veqpy.workspace.source_workspace", "SourceWorkspace"),
-    "allocate_runtime_state": ("veqpy.workspace.allocation", "allocate_runtime_state"),
+    "ProfileWorkspace": (
+        "veqpy.kernels.numba_kernel.workspace.profile_workspace",
+        "ProfileWorkspace",
+    ),
+    "ResidualWorkspace": (
+        "veqpy.kernels.numba_kernel.workspace.residual_workspace",
+        "ResidualWorkspace",
+    ),
+    "SourceWorkspace": ("veqpy.kernels.numba_kernel.workspace.source_workspace", "SourceWorkspace"),
+    "allocate_runtime_state": (
+        "veqpy.kernels.numba_kernel.workspace.allocation",
+        "allocate_runtime_state",
+    ),
 }
 
 

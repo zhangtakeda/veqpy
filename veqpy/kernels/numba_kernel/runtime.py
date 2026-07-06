@@ -12,17 +12,19 @@ from veqlib.facade import (
     KernelTopology,
 )
 from veqlib.facade.source_semantics import materialize_kernel_source
-from veqpy.engine import backend_abi, source_parameterization_for_route_key, validate_route
-from veqpy.layout import KernelLayout, build_kernel_layout
+from veqpy.kernels.numba_kernel.workspace import allocate_runtime_state
+from veqpy.model import Grid
 from veqpy.model.numerics import (
-    GridWorkspace,
     SOURCE_INTERP_DEFAULT,
+    GridWorkspace,
     normalize_source_interpolation_kind,
 )
-from veqpy.model import Grid
-from veqpy.workspace import allocate_runtime_state
 
+from . import backend_abi
 from .initialize import build_boundary_slope_initial_state
+from .layout import KernelLayout
+from .layout_binding import build_kernel_layout
+from .numba_source import source_parameterization_for_route_key, validate_route
 from .packed_layout import (
     PROFILE_OFFSET_SPECS,
     PROFILE_STATIC_KWARGS,

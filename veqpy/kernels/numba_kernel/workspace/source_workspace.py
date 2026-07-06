@@ -8,9 +8,9 @@ Public API:
 - SourceWorkspace
 
 Notes:
-- Source planning and validation live in ``veqlib.facade.source_semantics`` and
-  backend-local VEQlib runtime modules.
-- Source numerical kernels live in ``veqpy.engine``.
+- Source planning and validation live in the shared facade semantics and
+  backend-local runtime modules.
+- Source numerical kernels live in the Numba backend package.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 if TYPE_CHECKING:
-    from veqpy.engine import SourceExecutionABI
+    from veqpy.kernels.numba_kernel.backend_abi import SourceExecutionABI
 
 
 @dataclass(init=False, slots=True)

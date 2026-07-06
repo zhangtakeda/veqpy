@@ -10,34 +10,35 @@ Public API:
 
 Notes:
 - Workspace objects own memory; layout objects own executable stage callables.
-- Numerical kernels remain in ``veqpy.engine``.
+- Numerical kernels remain private to this backend package.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from veqpy.engine import numba_operator
-from veqpy.layout.geometry_binding import build_geometry_stage_runner
-from veqpy.layout.profile_binding import build_profile_stage_runner
-from veqpy.layout.residual_binding import (
+from veqpy.model.numerics import profile_eval as numba_profile
+
+from . import numba_operator
+from .geometry_binding import build_geometry_stage_runner
+from .profile_binding import build_profile_stage_runner
+from .residual_binding import (
     build_collocation_runner_into,
     build_fused_residual_runner_into,
     build_residual_full_stage_runner_into,
 )
-from veqpy.layout.source_binding import build_bound_source_stage_runner
-from veqpy.model.numerics import profile_eval as numba_profile
+from .source_binding import build_bound_source_stage_runner
 
 if TYPE_CHECKING:
-    from veqpy.model.numerics import GridWorkspace
-    from veqpy.workspace import (
+    from veqpy.kernels.numba_kernel.workspace import (
         GeometryWorkspace,
         ProfileWorkspace,
         ResidualWorkspace,
         SourceWorkspace,
     )
+    from veqpy.model.numerics import GridWorkspace
 
-from .runtime import KernelLayout
+from .layout import KernelLayout
 
 
 def build_kernel_layout(

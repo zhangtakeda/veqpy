@@ -6,8 +6,8 @@ Role:
 - Keep Python closure wiring separate from source planning and runtime memory refresh.
 
 Notes:
-- This module binds preallocated arrays and engine callables; it does not allocate memory.
-- Numerical kernels remain in ``veqpy.engine``.
+- This module binds preallocated arrays and backend callables; it does not allocate memory.
+- Numerical kernels remain private to this backend package.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from collections.abc import Callable
 
 import numpy as np
 
-from veqpy.engine import numba_source
+from . import numba_source
 
 
 def build_bound_source_stage_runner(

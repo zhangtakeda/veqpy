@@ -22,11 +22,6 @@ import numpy as np
 from numba import njit
 
 from veqpy.model.numerics import (
-    indexed_matvec_into,
-    rowwise_sum_into,
-    rowwise_weighted_sum_into,
-)
-from veqpy.model.numerics import (
     GEOMETRY_SURFACE_GRTDIVJR_T,
     GEOMETRY_SURFACE_GTTDIVJR,
     GEOMETRY_SURFACE_GTTDIVJR_R,
@@ -47,6 +42,9 @@ from veqpy.model.numerics import (
     RESIDUAL_SURFACE_GPSIN_R,
     RESIDUAL_SURFACE_GPSIN_R_SIN_TB,
     RESIDUAL_SURFACE_GPSIN_Z,
+    indexed_matvec_into,
+    rowwise_sum_into,
+    rowwise_weighted_sum_into,
 )
 
 

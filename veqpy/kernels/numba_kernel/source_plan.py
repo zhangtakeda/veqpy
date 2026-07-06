@@ -18,14 +18,15 @@ from dataclasses import dataclass
 import numpy as np
 
 from veqlib.facade.source_semantics import materialize_source_inputs
-from veqpy.engine import (
-    COORDINATE_CODES,
-    source_parameterization_for_route_key,
-)
 from veqpy.model.numerics import (
     SOURCE_INTERP_DEFAULT,
     normalize_source_interpolation_kind,
     source_interpolation_kind_is_barycentric,
+)
+
+from .numba_source import (
+    COORDINATE_CODES,
+    source_parameterization_for_route_key,
 )
 
 RouteKey = tuple[str, str, str]

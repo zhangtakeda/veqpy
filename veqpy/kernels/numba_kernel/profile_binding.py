@@ -6,7 +6,7 @@ Role:
 
 Notes:
 - Profile metadata is already flattened before this binding is built.
-- Numerical kernels remain in ``veqpy.engine``.
+- Numerical kernels remain private to this backend package.
 """
 
 from __future__ import annotations

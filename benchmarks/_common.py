@@ -28,7 +28,7 @@ from veqlib.facade import (  # noqa: E402
     KernelTopology,
     SolveResult,
 )
-from veqlib.numba_core.packed_layout import (  # noqa: E402
+from veqpy.kernels.numba_kernel.packed_layout import (  # noqa: E402
     build_profile_index,
     build_profile_layout,
     build_profile_names,

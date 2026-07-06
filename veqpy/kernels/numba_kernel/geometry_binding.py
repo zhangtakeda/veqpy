@@ -6,8 +6,8 @@ Role:
 - Keep Python closure wiring separate from geometry runtime memory ownership.
 
 Notes:
-- This module binds preallocated arrays and engine callables; it does not allocate memory.
-- Numerical kernels remain in ``veqpy.engine``.
+- This module binds preallocated arrays and backend callables; it does not allocate memory.
+- Numerical kernels remain private to this backend package.
 """
 
 from __future__ import annotations
@@ -16,8 +16,9 @@ from collections.abc import Callable
 
 import numpy as np
 
-from veqpy.engine import update_fourier_family_fields
 from veqpy.model.numerics import update_geometry_hot_auto
+
+from .numba_source import update_fourier_family_fields
 
 
 def build_geometry_stage_runner(

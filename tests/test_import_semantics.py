@@ -10,15 +10,6 @@ SOURCE_ROOTS = ("veqpy", "veqlib")
 
 PUBLIC_EXPORTS = {
     "veqpy.base": {"depends_on"},
-    "veqpy.engine": {
-        "COORDINATE_NAMES",
-        "PSIN_COORDINATE",
-        "RHO_AXIS",
-        "RHO_COORDINATE",
-        "THETA_AXIS",
-        "full_differentiation",
-        "full_integration",
-    },
     "veqpy.model.numerics": {
         "barycentric_log_weights",
         "GridWorkspace",
