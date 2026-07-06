@@ -38,7 +38,7 @@ from veqpy.model import Boundary, Geqdsk, Grid  # noqa: E402
 
 THIS_FILE = Path(__file__).resolve()
 REPO_ROOT = THIS_FILE.parents[1]
-CORE_DIR = REPO_ROOT / "veqlib" / "cxx_core" / "core"
+CORE_DIR = REPO_ROOT / "veqpy" / "kernels" / "cxx_kernel" / "core"
 RESULTS_DIR = REPO_ROOT / "benchmarks" / "results"
 
 MU0 = 4.0e-7 * np.pi
@@ -112,10 +112,10 @@ GEQDSK_ROUTE_PROFILE_SIGNATURE = {
 
 
 def default_kernel_cache_root() -> Path:
-    override = os.environ.get("VEQLIB_KERNEL_CACHE")
+    override = os.environ.get("VEQPY_KERNEL_CACHE")
     if override:
         return Path(override).expanduser()
-    return REPO_ROOT / "veqlib" / "artifact"
+    return REPO_ROOT / ".veqpy-kernel-cache"
 
 
 @dataclass(frozen=True, slots=True)

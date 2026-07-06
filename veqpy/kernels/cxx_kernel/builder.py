@@ -76,12 +76,12 @@ class CleanResult:
 
 
 def default_kernel_cache_root() -> Path:
-    """Return the repository-local VEQlib kernel cache root without creating it."""
+    """Return the repository-local VEQPy kernel cache root without creating it."""
 
-    override = os.environ.get("VEQLIB_KERNEL_CACHE")
+    override = os.environ.get("VEQPY_KERNEL_CACHE")
     if override:
         return Path(override).expanduser()
-    return _veqlib_root() / "artifact"
+    return _project_root() / ".veqpy-kernel-cache"
 
 
 def prepare(
@@ -416,7 +416,7 @@ def _metadata_payload(
     nanobind_static: dict[str, Any],
     dry_run: bool,
 ) -> dict[str, Any]:
-    module_name = f"veqlib._kernel_cache.k_{artifact_id}.veqlib_ext"
+    module_name = f"veqpy._kernel_cache.k_{artifact_id}.veqlib_ext"
     return {
         "schema": ARTIFACT_SCHEMA,
         "generator": GENERATOR_VERSION,
@@ -890,12 +890,12 @@ def _cmake_bool(value: bool) -> str:
     return "ON" if value else "OFF"
 
 
-def _veqlib_root() -> Path:
-    return Path(__file__).resolve().parents[1]
+def _project_root() -> Path:
+    return Path(__file__).resolve().parents[3]
 
 
 def _default_source_dir() -> Path:
-    return _veqlib_root() / "cxx_core" / "core"
+    return Path(__file__).resolve().parent / "core"
 
 
 def _write_json(path: Path, payload: Any) -> None:

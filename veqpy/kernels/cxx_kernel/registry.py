@@ -255,7 +255,7 @@ def _load_artifact_module(artifact: PrepareResult) -> ModuleType:
 
 def _module_name_for_artifact(artifact_id: str) -> str:
     safe_id = artifact_id.replace("-", "_")
-    return f"veqlib._kernel_cache.k_{safe_id}.veqlib_ext"
+    return f"veqpy._kernel_cache.k_{safe_id}.veqlib_ext"
 
 
 def _pinning_cache_key(policy: bool | int | None) -> object:

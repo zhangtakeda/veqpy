@@ -63,7 +63,7 @@ include = ["veqpy*", "veqlib*", "benchmarks*"]
 namespaces = false
 
 [tool.setuptools.package-data]
-veqlib = [
+"veqpy.kernels.cxx_kernel" = [
     "core/*.cpp",
     "core/*.h",
     "core/*.in",

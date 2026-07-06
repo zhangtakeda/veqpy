@@ -7,7 +7,6 @@ import pytest
 from numpy.testing import assert_allclose
 
 import veqlib.facade as facade
-from veqlib.cxx_core.abi import solve_result_from_native
 from veqlib.facade import (
     Kernel,
     KernelBoundary,
@@ -23,6 +22,7 @@ from veqpy.kernels.abi.options import (
     SOLVER_METHOD_POWELL,
 )
 from veqpy.kernels.abi.source_semantics import materialize_kernel_source
+from veqpy.kernels.cxx_kernel.native_abi import solve_result_from_native
 
 MU0 = 4.0e-7 * np.pi
 

@@ -22,17 +22,17 @@ from veqpy.types import (
 
 _LAZY_EXPORTS = {
     "Kernel": ("veqlib.facade.kernel", "Kernel"),
-    "PrepareResult": ("veqlib.cxx_core.builder", "PrepareResult"),
-    "PrepareError": ("veqlib.cxx_core.builder", "PrepareError"),
-    "CleanResult": ("veqlib.cxx_core.builder", "CleanResult"),
-    "KernelLoadError": ("veqlib.cxx_core.registry", "KernelLoadError"),
-    "KernelRegistry": ("veqlib.cxx_core.registry", "KernelRegistry"),
-    "LoadedKernel": ("veqlib.cxx_core.registry", "LoadedKernel"),
-    "SolverThreadError": ("veqlib.cxx_core.registry", "SolverThreadError"),
-    "VEQlibSolver": ("veqlib.cxx_core.solver", "VEQlibSolver"),
+    "PrepareResult": ("veqpy.kernels.cxx_kernel.builder", "PrepareResult"),
+    "PrepareError": ("veqpy.kernels.cxx_kernel.builder", "PrepareError"),
+    "CleanResult": ("veqpy.kernels.cxx_kernel.builder", "CleanResult"),
+    "KernelLoadError": ("veqpy.kernels.cxx_kernel.registry", "KernelLoadError"),
+    "KernelRegistry": ("veqpy.kernels.cxx_kernel.registry", "KernelRegistry"),
+    "LoadedKernel": ("veqpy.kernels.cxx_kernel.registry", "LoadedKernel"),
+    "SolverThreadError": ("veqpy.kernels.cxx_kernel.registry", "SolverThreadError"),
+    "VEQlibSolver": ("veqpy.kernels.cxx_kernel.solver", "VEQlibSolver"),
     "build": ("veqlib.facade.kernel", "build"),
-    "prepare": ("veqlib.cxx_core.builder", "prepare"),
-    "clean": ("veqlib.cxx_core.builder", "clean"),
+    "prepare": ("veqpy.kernels.cxx_kernel.builder", "prepare"),
+    "clean": ("veqpy.kernels.cxx_kernel.builder", "clean"),
     "solve": ("veqlib.facade.kernel", "solve"),
 }
 
