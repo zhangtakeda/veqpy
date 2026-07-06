@@ -44,10 +44,10 @@ from veqpy.kernels.numba_kernel.numba_source import (
     _update_pj2_from_psin_uniform_inputs_with_scratch,
     uniform_barycentric_weights,
 )
-from veqpy.model.numerics.geometry import update_geometry_hot_auto
-from veqpy.model.numerics.grid_workspace import GridWorkspace
+from veqpy.kernels.numba_kernel.geometry import update_geometry_hot_auto
+from veqpy.kernels.numba_kernel.workspace.grid_workspace import GridWorkspace
 from veqpy.numerics import build_uniform_source_interpolation_coefficients
-from veqpy.model.numerics.profile_eval import update_profiles_packed_bulk
+from veqpy.kernels.numba_kernel.profile_eval import update_profiles_packed_bulk
 
 if TYPE_CHECKING:
     from veqpy.kernels.numba_kernel.workspace import (

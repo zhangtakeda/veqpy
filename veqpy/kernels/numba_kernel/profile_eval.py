@@ -21,7 +21,7 @@ from __future__ import annotations
 import numpy as np
 from numba import njit
 
-from veqpy.model.numerics.field_rows import GRID_RADIAL_RHO_POWERS_START
+from veqpy.kernels.numba_kernel.workspace.field_rows import GRID_RADIAL_RHO_POWERS_START
 
 _AMPLITUDE_POWER_FLOOR = 1.0e-10
 

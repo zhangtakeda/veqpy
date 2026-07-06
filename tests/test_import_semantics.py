@@ -54,11 +54,6 @@ PUBLIC_EXPORTS = {
         "normalize_source_interpolation_kind",
         "source_interpolation_kind_is_barycentric",
     },
-    "veqpy.model.numerics": {
-        "GridWorkspace",
-        "update_geometry_hot_auto",
-        "update_profile",
-    },
     "veqpy.model": {
         "Boundary",
         "Equilibrium",

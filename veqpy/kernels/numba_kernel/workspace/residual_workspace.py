@@ -18,7 +18,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from veqpy.model.numerics.field_rows import (
+from veqpy.kernels.numba_kernel.workspace.field_rows import (
     RESIDUAL_ROOT_FFN_PSIN,
     RESIDUAL_ROOT_PN_PSIN,
     RESIDUAL_ROOT_PSIN,

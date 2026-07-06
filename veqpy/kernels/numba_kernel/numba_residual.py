@@ -26,7 +26,7 @@ from veqpy.model.numerics.fast import (
     rowwise_sum_into,
     rowwise_weighted_sum_into,
 )
-from veqpy.model.numerics.field_rows import (
+from veqpy.kernels.numba_kernel.workspace.field_rows import (
     GEOMETRY_SURFACE_GRTDIVJR_T,
     GEOMETRY_SURFACE_GTTDIVJR,
     GEOMETRY_SURFACE_GTTDIVJR_R,

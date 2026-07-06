@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Self
 
 import numpy as np
 
-from veqpy.model.numerics.field_rows import (
+from veqpy.kernels.numba_kernel.workspace.field_rows import (
     GRID_POLOIDAL_COS_MTHETA_START,
     GRID_POLOIDAL_THETA,
     GRID_RADIAL_RHO,
@@ -31,7 +31,7 @@ from veqpy.model.numerics.field_rows import (
 )
 
 if TYPE_CHECKING:
-    from veqpy.model.grid import Grid
+    from veqpy.model import Grid
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,7 +191,7 @@ class GridWorkspace:
     def to_grid(self) -> Grid:
         """Rebuild a full Grid from the snapshot for Equilibrium materialization and
         other callers that need a real Grid."""
-        from veqpy.model.grid import Grid
+        from veqpy.model import Grid
 
         return Grid(
             Nr=self.Nr,

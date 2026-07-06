@@ -37,7 +37,6 @@ from rich.tree import Tree
 from veqpy.base import Reactive, Serial
 from veqpy.model.geqdsk import Geqdsk
 from veqpy.model.grid import Grid
-from veqpy.model.numerics import GridWorkspace, update_geometry_hot_auto, update_profile
 from veqpy.model.profile import Profile
 
 plt.style.use("seaborn-v0_8-paper")
@@ -1202,15 +1201,12 @@ def _materialized_geometry_from_profile_fields(
 ) -> tuple[np.ndarray, np.ndarray]:
     surface_fields = np.empty((9, grid.Nr, grid.Nt), dtype=np.float64)
     radial_fields = np.empty((5, grid.Nr), dtype=np.float64)
-    grid_workspace = GridWorkspace.from_grid(grid)
-    update_geometry_hot_auto(
+    _update_model_geometry(
         surface_fields,
         radial_fields,
         float(a),
         float(R0),
-        0.0,  # Z0 is irrelevant for derivative-only surface/radial fields.
-        grid_workspace.radial_fields,
-        grid_workspace.poloidal_fields,
+        grid,
         h_fields,
         v_fields,
         k_fields,
@@ -1241,7 +1237,7 @@ def _evaluate_profile_fields(profile: Profile, grid: Grid) -> np.ndarray:
         grid.y,
         int(profile.envelope_power),
     )
-    update_profile(
+    _update_model_profile(
         fields,
         grid.T,
         grid.T_r,
@@ -1256,6 +1252,286 @@ def _evaluate_profile_fields(profile: Profile, grid: Grid) -> np.ndarray:
     if scale != 1.0:
         np.multiply(fields, scale, out=fields)
     return fields
+
+
+def _update_model_profile(
+    out_fields: np.ndarray,
+    T: np.ndarray,
+    T_r: np.ndarray,
+    T_rr: np.ndarray,
+    rp_fields: np.ndarray,
+    env_fields: np.ndarray,
+    offset: float,
+    coeff: np.ndarray | None,
+    amplitude_power: float,
+) -> None:
+    if coeff is None:
+        if amplitude_power == 1.0:
+            np.multiply(rp_fields, offset, out=out_fields)
+            return
+        amp, amp_r, amp_rr = _model_amplitude_power(offset, 0.0, 0.0, amplitude_power)
+        out_fields[0] = amp * rp_fields[0]
+        out_fields[1] = amp * rp_fields[1] + rp_fields[0] * amp_r
+        out_fields[2] = amp * rp_fields[2] + 2.0 * rp_fields[1] * amp_r + rp_fields[0] * amp_rr
+        return
+
+    coeff_array = np.asarray(coeff, dtype=np.float64)
+    coeff_size = coeff_array.size
+    series = coeff_array @ T[:coeff_size]
+    series_r = coeff_array @ T_r[:coeff_size]
+    series_rr = coeff_array @ T_rr[:coeff_size]
+
+    env = env_fields[0]
+    env_r = env_fields[1]
+    env_rr = env_fields[2]
+    base = env * series
+    base_r = env_r * series + env * series_r
+    base_rr = env_rr * series + 2.0 * env_r * series_r + env * series_rr
+
+    if amplitude_power == 1.0:
+        amp = offset + base
+        amp_r = base_r
+        amp_rr = base_rr
+    else:
+        amp, amp_r, amp_rr = _model_amplitude_power(
+            offset + base,
+            base_r,
+            base_rr,
+            amplitude_power,
+        )
+
+    out_fields[0] = rp_fields[0] * amp
+    out_fields[1] = rp_fields[1] * amp + rp_fields[0] * amp_r
+    out_fields[2] = rp_fields[2] * amp + 2.0 * rp_fields[1] * amp_r + rp_fields[0] * amp_rr
+
+
+def _model_amplitude_power(
+    amp: float | np.ndarray,
+    amp_r: float | np.ndarray,
+    amp_rr: float | np.ndarray,
+    amplitude_power: float,
+) -> tuple[float | np.ndarray, float | np.ndarray, float | np.ndarray]:
+    if amplitude_power == 1.0:
+        return amp, amp_r, amp_rr
+
+    amp_safe = np.maximum(amp, 1.0e-10)
+    if amplitude_power == 0.5:
+        value = np.sqrt(amp_safe)
+        inv_value = 1.0 / value
+        inv_value3 = inv_value / amp_safe
+        return (
+            value,
+            0.5 * amp_r * inv_value,
+            0.5 * amp_rr * inv_value - 0.25 * amp_r * amp_r * inv_value3,
+        )
+
+    value = amp_safe**amplitude_power
+    value_r = amplitude_power * amp_safe ** (amplitude_power - 1.0) * amp_r
+    value_rr = (
+        amplitude_power * amp_safe ** (amplitude_power - 1.0) * amp_rr
+        + amplitude_power
+        * (amplitude_power - 1.0)
+        * amp_safe ** (amplitude_power - 2.0)
+        * amp_r
+        * amp_r
+    )
+    return value, value_r, value_rr
+
+
+def _update_model_geometry(
+    surface_fields: np.ndarray,
+    radial_fields: np.ndarray,
+    a: float,
+    R0: float,
+    grid: Grid,
+    h_fields: np.ndarray,
+    v_fields: np.ndarray,
+    k_fields: np.ndarray,
+    c_fields: np.ndarray,
+    s_fields: np.ndarray,
+    c_active_order: int,
+    s_active_order: int,
+) -> None:
+    rho = grid.rho
+    theta = grid.theta
+    cos_mtheta = grid.cos_mtheta
+    sin_mtheta = grid.sin_mtheta
+    m_cos_mtheta = grid.m_cos_mtheta
+    m_sin_mtheta = grid.m_sin_mtheta
+    m2_cos_mtheta = grid.m2_cos_mtheta
+    m2_sin_mtheta = grid.m2_sin_mtheta
+
+    sin_tb = surface_fields[0]
+    R_surface = surface_fields[1]
+    R_t_surface = surface_fields[2]
+    Z_t_surface = surface_fields[3]
+    J_surface = surface_fields[4]
+    JdivR_surface = surface_fields[5]
+    grtdivJR_t_surface = surface_fields[6]
+    gttdivJR_surface = surface_fields[7]
+    gttdivJR_r_surface = surface_fields[8]
+    S_r = radial_fields[0]
+    V_r = radial_fields[1]
+    Kn = radial_fields[2]
+    Kn_r = radial_fields[3]
+    Ln_r = radial_fields[4]
+
+    nr = rho.shape[0]
+    nt = theta.shape[0]
+    theta_scale = 2.0 * np.pi / nt
+    mean_scale = 1.0 / nt
+    two_pi = 2.0 * np.pi
+    c_limit = _effective_model_fourier_limit(c_fields, c_active_order, cos_mtheta.shape[0])
+    s_limit = _effective_model_fourier_limit(s_fields, s_active_order, sin_mtheta.shape[0])
+
+    for i in range(nr):
+        rho_i = rho[i]
+        h_i = h_fields[0, i]
+        h_r_i = h_fields[1, i]
+        h_rr_i = h_fields[2, i]
+        v_r_i = v_fields[1, i]
+        v_rr_i = v_fields[2, i]
+        k_i = k_fields[0, i]
+        k_r_i = k_fields[1, i]
+        k_rr_i = k_fields[2, i]
+        c0_i = c_fields[0, 0, i]
+        c0_r_i = c_fields[0, 1, i]
+        c0_rr_i = c_fields[0, 2, i]
+
+        sum_J = 0.0
+        sum_JR = 0.0
+        sum_gttdivJR = 0.0
+        sum_gttdivJR_r = 0.0
+        sum_JdivR = 0.0
+
+        for j in range(nt):
+            sin_t = sin_mtheta[1, j]
+            cos_t = cos_mtheta[1, j]
+
+            tb_ij = theta[j] + c0_i
+            tb_r_ij = c0_r_i
+            tb_t_ij = 1.0
+            tb_rr_ij = c0_rr_i
+            tb_rt_ij = 0.0
+            tb_tt_ij = 0.0
+
+            for order in range(1, c_limit):
+                cos_kt = cos_mtheta[order, j]
+                k_sin_kt = m_sin_mtheta[order, j]
+                k2_cos_kt = m2_cos_mtheta[order, j]
+                c_i = c_fields[order, 0, i]
+                c_r_i = c_fields[order, 1, i]
+                c_rr_i = c_fields[order, 2, i]
+
+                tb_ij += c_i * cos_kt
+                tb_r_ij += c_r_i * cos_kt
+                tb_t_ij -= c_i * k_sin_kt
+                tb_rr_ij += c_rr_i * cos_kt
+                tb_rt_ij -= c_r_i * k_sin_kt
+                tb_tt_ij -= c_i * k2_cos_kt
+
+            for order in range(1, s_limit):
+                sin_kt = sin_mtheta[order, j]
+                k_cos_kt = m_cos_mtheta[order, j]
+                k2_sin_kt = m2_sin_mtheta[order, j]
+                s_i = s_fields[order, 0, i]
+                s_r_i = s_fields[order, 1, i]
+                s_rr_i = s_fields[order, 2, i]
+
+                tb_ij += s_i * sin_kt
+                tb_r_ij += s_r_i * sin_kt
+                tb_t_ij += s_i * k_cos_kt
+                tb_rr_ij += s_rr_i * sin_kt
+                tb_rt_ij += s_r_i * k_cos_kt
+                tb_tt_ij -= s_i * k2_sin_kt
+
+            cos_tb_ij = np.cos(tb_ij)
+            sin_tb_ij = np.sin(tb_ij)
+
+            R_ij = R0 + a * (h_i + rho_i * cos_tb_ij)
+            if R_ij < 1.0e-6:
+                R_ij = 1.0e-6
+
+            R_r_ij = a * (h_r_i + cos_tb_ij - rho_i * sin_tb_ij * tb_r_ij)
+            R_t_ij = -a * rho_i * sin_tb_ij * tb_t_ij
+            R_rr_ij = a * (
+                h_rr_i
+                - 2.0 * sin_tb_ij * tb_r_ij
+                - rho_i * (cos_tb_ij * tb_r_ij * tb_r_ij + sin_tb_ij * tb_rr_ij)
+            )
+            R_rt_ij = -a * (
+                sin_tb_ij * tb_t_ij
+                + rho_i * (cos_tb_ij * tb_r_ij * tb_t_ij + sin_tb_ij * tb_rt_ij)
+            )
+            R_tt_ij = -a * rho_i * (
+                cos_tb_ij * tb_t_ij * tb_t_ij + sin_tb_ij * tb_tt_ij
+            )
+
+            Z_r_ij = a * (v_r_i - (k_i + rho_i * k_r_i) * sin_t)
+            Z_t_ij = -a * rho_i * k_i * cos_t
+            Z_rr_ij = a * (v_rr_i - (2.0 * k_r_i + rho_i * k_rr_i) * sin_t)
+            Z_rt_ij = -a * (k_i + rho_i * k_r_i) * cos_t
+            Z_tt_ij = a * rho_i * k_i * sin_t
+
+            J_ij = R_t_ij * Z_r_ij - R_r_ij * Z_t_ij
+            if J_ij < 1.0e-6:
+                J_ij = 1.0e-6
+
+            J_r_ij = -(
+                R_rr_ij * Z_t_ij - R_rt_ij * Z_r_ij + R_r_ij * Z_rt_ij - R_t_ij * Z_rr_ij
+            )
+            J_t_ij = -(
+                R_rt_ij * Z_t_ij - R_tt_ij * Z_r_ij + R_r_ij * Z_tt_ij - R_t_ij * Z_rt_ij
+            )
+            JR_ij = J_ij * R_ij
+            JR_r_ij = J_r_ij * R_ij + J_ij * R_r_ij
+            JR_t_ij = J_t_ij * R_ij + J_ij * R_t_ij
+            JdivR_ij = J_ij / R_ij
+
+            grt_ij = R_r_ij * R_t_ij + Z_r_ij * Z_t_ij
+            grt_t_ij = (
+                R_rt_ij * R_t_ij
+                + R_r_ij * R_tt_ij
+                + Z_rt_ij * Z_t_ij
+                + Z_r_ij * Z_tt_ij
+            )
+            gtt_ij = R_t_ij * R_t_ij + Z_t_ij * Z_t_ij
+            gtt_r_ij = 2.0 * (R_t_ij * R_rt_ij + Z_t_ij * Z_rt_ij)
+            inv_JR = 1.0 / JR_ij
+            grtdivJR_t_ij = (grt_t_ij - grt_ij * JR_t_ij * inv_JR) * inv_JR
+            gttdivJR_ij = gtt_ij * inv_JR
+            gttdivJR_r_ij = gtt_r_ij * inv_JR - gtt_ij * JR_r_ij * inv_JR * inv_JR
+
+            sin_tb[i, j] = sin_tb_ij
+            R_surface[i, j] = R_ij
+            R_t_surface[i, j] = R_t_ij
+            Z_t_surface[i, j] = Z_t_ij
+            J_surface[i, j] = J_ij
+            JdivR_surface[i, j] = JdivR_ij
+            grtdivJR_t_surface[i, j] = grtdivJR_t_ij
+            gttdivJR_surface[i, j] = gttdivJR_ij
+            gttdivJR_r_surface[i, j] = gttdivJR_r_ij
+
+            sum_J += J_ij
+            sum_JR += JR_ij
+            sum_gttdivJR += gttdivJR_ij
+            sum_gttdivJR_r += gttdivJR_r_ij
+            sum_JdivR += JdivR_ij
+
+        S_r[i] = sum_J * theta_scale
+        V_r[i] = sum_JR * theta_scale * two_pi
+        Kn[i] = sum_gttdivJR * mean_scale
+        Kn_r[i] = sum_gttdivJR_r * mean_scale
+        Ln_r[i] = sum_JdivR * mean_scale
+
+
+def _effective_model_fourier_limit(fields: np.ndarray, active_order: int, trig_count: int) -> int:
+    declared_limit = min(active_order + 1, fields.shape[0], trig_count)
+    effective_limit = min(1, declared_limit)
+    for order in range(1, declared_limit):
+        if np.any(fields[order] != 0.0):
+            effective_limit = order + 1
+    return effective_limit
 
 
 def _power_terms(rho: np.ndarray, power: int) -> np.ndarray:

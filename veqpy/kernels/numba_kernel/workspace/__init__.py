@@ -15,7 +15,7 @@ Notes:
 
 from __future__ import annotations
 
-from veqpy.model.numerics.grid_workspace import GridWorkspace
+from veqpy.kernels.numba_kernel.workspace.grid_workspace import GridWorkspace
 
 from .allocation import allocate_runtime_state
 from .geometry_workspace import GeometryWorkspace
