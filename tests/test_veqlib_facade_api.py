@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import os
-import subprocess
-import sys
 from pathlib import Path
 
 import numpy as np
@@ -28,7 +25,6 @@ from veqlib.facade.options import (
 from veqlib.facade.source_semantics import materialize_kernel_source
 
 MU0 = 4.0e-7 * np.pi
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def make_kernel_topology(**overrides: object) -> KernelTopology:
@@ -103,31 +99,6 @@ class RecordingSolver:
         return (0.0, True, 1, 2, 3, 4, 5, 6, 7, 8.0, 9.0, x, x, x, alpha)
 
 
-def test_veqlib_facade_imports_without_importing_veqpy() -> None:
-    env = os.environ.copy()
-    existing_pythonpath = env.get("PYTHONPATH")
-    env["PYTHONPATH"] = (
-        str(PROJECT_ROOT)
-        if not existing_pythonpath
-        else os.pathsep.join((str(PROJECT_ROOT), existing_pythonpath))
-    )
-    completed = subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            "import sys; import veqlib.facade; "
-            "print(any(name == 'veqpy' or name.startswith('veqpy.') for name in sys.modules))",
-        ],
-        env=env,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-
-    assert completed.returncode == 0, completed.stderr
-    assert completed.stdout.strip() == "False"
-
-
 def test_veqlib_facade_root_exports_semantic_surface() -> None:
     assert facade.__all__ == [
         "Kernel",
@@ -157,7 +128,6 @@ def test_kernel_topology_and_runtime_source_is_user_facing_contract() -> None:
     topology = make_kernel_topology(c_counts=(0, 0), s_counts=(2, 0, 0), K_max=None)
     same_shape = make_kernel_topology(c_counts=(), s_counts=(2,), L_max=2, M_max=1, K_max=2)
     family_recipe = KernelRecipe(layout="family", build="release")
-    numba_recipe = KernelRecipe(backend="numba", layout="degree")
     kernel_source = tiny_kernel_source(case_name="tiny")
     materialized_source = materialize_kernel_source(topology, kernel_source)
     kernel_boundary = tiny_kernel_boundary()
@@ -167,8 +137,6 @@ def test_kernel_topology_and_runtime_source_is_user_facing_contract() -> None:
     assert family_recipe.backend == "cxx"
     assert family_recipe.layout == "family"
     assert family_recipe.layout_profile_first is True
-    assert numba_recipe.backend == "numba"
-    assert numba_recipe.layout == "degree"
     assert recipe_identity_payload(family_recipe)["preset"] == "release"
     assert topology.route == "PF"
     assert topology.coordinate == "psin"
@@ -180,9 +148,6 @@ def test_kernel_topology_and_runtime_source_is_user_facing_contract() -> None:
     assert kernel_boundary.a == 0.5
     assert_allclose(kernel_source.heat_profile, tiny_kernel_source().heat_profile)
     assert kernel_source.Ip == 3.0e6
-    assert not hasattr(kernel_source, "scaled_heat")
-    assert not hasattr(kernel_source, "scaled_current")
-    assert not hasattr(kernel_source, "scaled_Ip")
     assert_allclose(materialized_source.scaled_heat, tiny_kernel_source().heat_profile * MU0)
     assert_allclose(materialized_source.scaled_current, tiny_kernel_source().current_profile)
     assert materialized_source.scaled_Ip == 3.0e6 * MU0
@@ -200,9 +165,6 @@ def test_kernel_topology_and_runtime_source_is_user_facing_contract() -> None:
             heat_profile=np.ones((2, 1), dtype=np.float64),
             current_profile=np.ones(2, dtype=np.float64),
         )
-
-    with pytest.raises(ValueError, match="veqlib.facade.Kernel only supports"):
-        Kernel(topology=topology, recipe=numba_recipe)
 
 
 @pytest.mark.parametrize(

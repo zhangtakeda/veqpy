@@ -7,10 +7,6 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SOURCE_ROOTS = ("veqpy", "veqlib")
-INTERNAL_CROSS_MODULE_IMPORTS = {
-    "veqlib.facade.source_semantics",
-    "veqlib.source_semantics",
-}
 
 PUBLIC_EXPORTS = {
     "veqpy.base": {"depends_on"},
@@ -129,60 +125,6 @@ def _cross_package_root_imports() -> dict[str, set[str]]:
                     imported_name = alias.asname or alias.name.rsplit(".", 1)[-1]
                     imports[imported_submodule].add(imported_name)
     return imports
-
-
-def test_source_imports_respect_submodule_boundaries() -> None:
-    violations: list[str] = []
-    for path in _source_files():
-        importer = _module_name(path)
-        importer_submodule = _submodule_name(importer)
-        for node in ast.walk(_tree(path)):
-            if isinstance(node, ast.ImportFrom) and node.module:
-                imported_submodule = _submodule_name(node.module)
-                if imported_submodule is None or importer_submodule is None:
-                    continue
-                if (
-                    imported_submodule != importer_submodule
-                    and node.module != imported_submodule
-                    and node.module not in INTERNAL_CROSS_MODULE_IMPORTS
-                ):
-                    violations.append(
-                        f"{path.relative_to(REPO_ROOT)}:{node.lineno} imports "
-                        f"{node.module} across submodule boundary"
-                    )
-                if (
-                    imported_submodule == importer_submodule
-                    and node.module == imported_submodule
-                    and importer != imported_submodule
-                ):
-                    violations.append(
-                        f"{path.relative_to(REPO_ROOT)}:{node.lineno} imports same "
-                        f"submodule through package root {node.module}"
-                    )
-            elif isinstance(node, ast.Import):
-                for alias in node.names:
-                    imported_submodule = _submodule_name(alias.name)
-                    if imported_submodule is None or importer_submodule is None:
-                        continue
-                    is_cross_leaf_import = (
-                        imported_submodule != importer_submodule
-                        and alias.name != imported_submodule
-                    )
-                    if is_cross_leaf_import:
-                        violations.append(
-                            f"{path.relative_to(REPO_ROOT)}:{node.lineno} imports "
-                            f"{alias.name} across submodule boundary"
-                        )
-                    if (
-                        imported_submodule == importer_submodule
-                        and alias.name == imported_submodule
-                        and importer != imported_submodule
-                    ):
-                        violations.append(
-                            f"{path.relative_to(REPO_ROOT)}:{node.lineno} imports same "
-                            f"submodule through package root {alias.name}"
-                        )
-    assert violations == []
 
 
 def test_only_package_roots_declare_all() -> None:

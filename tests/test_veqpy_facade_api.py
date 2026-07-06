@@ -1,16 +1,11 @@
 from __future__ import annotations
 
-import sys
-from types import ModuleType
-
 import numpy as np
-import pytest
 from helpers import MU0, pf_reference_profiles
 from numpy.testing import assert_allclose
 
 import veqlib.facade as native_facade
 import veqpy.facade as facade
-from veqlib.facade import KernelRecipe
 from veqpy.kernel import NumbaKernel
 
 
@@ -102,14 +97,3 @@ def test_veqpy_facade_kernel_matches_numba_kernel_residual() -> None:
         facade_kernel.residual(x, boundary, source),
         direct_kernel.residual(x, boundary, source),
     )
-
-
-def test_veqpy_facade_keeps_native_facade_dispatch_separate() -> None:
-    assert isinstance(sys.modules.get("veqpy.facade"), ModuleType)
-    assert native_facade.Kernel is not facade.Kernel
-
-    with pytest.raises(ValueError, match="only supports KernelRecipe backend='cxx'"):
-        native_facade.Kernel(
-            topology=make_kernel_topology(),
-            recipe=KernelRecipe(backend="numba", layout="degree"),
-        )

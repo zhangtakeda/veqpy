@@ -16,8 +16,8 @@ LM fallback through `method="powell"` and a direct LM path through
 
 `SolveResult` records the final packed state, raw residual, scaled residual,
 source `alpha` values, function/iteration counters, success flag, and elapsed
-time. JVP and Jacobian counters remain zero for the Numba backend because those
-APIs are explicit `NotImplementedError` surfaces.
+time. `Kernel.jvp(...)` and `Kernel.jacobian(...)` are finite-difference numerical
+queries over the same residual runtime.
 
 Warm continuation is handle-local: after a solve, the next `Kernel.solve(...)`
 can reuse the previous solution when the continuation policy is warm. Use

@@ -9,7 +9,6 @@ Role:
 Public API:
 - PACKED_PROFILE_FAMILY_ORDER
 - PACKED_LAYOUT_PROFILE_FIRST
-- INTERLEAVE_SHAPE_COEFFS_BY_ORDER
 - get_prefix_profile_names
 - build_fourier_profile_names
 - build_shape_profile_names
@@ -204,9 +203,6 @@ def build_residual_block_radial_powers(
 # True  -> profile/name-first: h[0:L], v[0:L], ..., psin[0:L], F[0:L].
 # False -> degree-first: all active profile 0th coefficients, then 1st coefficients, etc.
 PACKED_LAYOUT_PROFILE_FIRST = False
-
-# Backwards-readable alias for the previous degree-first switch name.
-INTERLEAVE_SHAPE_COEFFS_BY_ORDER = not PACKED_LAYOUT_PROFILE_FIRST
 
 
 def build_profile_index(profile_names: tuple[str, ...]) -> dict[str, int]:

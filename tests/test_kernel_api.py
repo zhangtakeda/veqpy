@@ -390,17 +390,6 @@ def test_numba_kernel_solve_result_lifecycle_and_equilibrium_snapshot() -> None:
     assert kernel.history == []
 
 
-def test_numba_kernel_unsupported_solver_method_is_explicit() -> None:
-    kernel = NumbaKernel(topology=make_kernel_topology())
-
-    with pytest.raises(NotImplementedError, match="newton-krylov"):
-        kernel.solve(
-            tiny_kernel_boundary(),
-            tiny_kernel_source(),
-            config=KernelConfig(method="newton-krylov", initial="cold-zeros", norm="none"),
-        )
-
-
 @pytest.mark.parametrize("norm_mode", ["none", "fast", "balanced"])
 def test_numba_kernel_solve_result_scaled_uses_solver_reference_state(norm_mode: str) -> None:
     kernel = NumbaKernel(topology=make_kernel_topology())

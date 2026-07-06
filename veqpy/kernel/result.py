@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 from numpy.linalg import norm
 
 from veqlib.facade import KernelConfig, SolveResult
 
 from .residual_scale import make_residual_scale
+
+if TYPE_CHECKING:
+    from .runtime import NumbaRuntime
 
 
 def solve_result_from_runtime(
@@ -21,7 +26,7 @@ def solve_result_from_runtime(
     njev: int,
     iterations: int,
     elapsed_ms: float,
-    runtime,
+    runtime: NumbaRuntime,
     config: KernelConfig,
 ) -> SolveResult:
     """Build a ``SolveResult`` from a direct residual runtime."""
@@ -52,7 +57,7 @@ def solve_result_from_runtime(
 def _scaled_residual_snapshot(
     raw: np.ndarray,
     x_reference: np.ndarray,
-    runtime,
+    runtime: NumbaRuntime,
     config: KernelConfig,
 ) -> np.ndarray:
     mode = config.norm
@@ -69,7 +74,7 @@ def _scaled_residual_snapshot(
 def _reference_residual_scale(
     reference_raw: np.ndarray,
     x_reference: np.ndarray,
-    runtime,
+    runtime: NumbaRuntime,
     config: KernelConfig,
     block_lengths: np.ndarray | None,
 ) -> np.ndarray | None:
@@ -100,15 +105,11 @@ def _reference_residual_scale(
     return np.asarray(scale, dtype=np.float64)
 
 
-def _runtime_residual(runtime, x: np.ndarray) -> np.ndarray:
-    if hasattr(runtime, "residual_for_current_case"):
-        return runtime.residual_for_current_case(x)
-    return runtime.residual_var(runtime.coerce_x(x), check=False)
+def _runtime_residual(runtime: NumbaRuntime, x: np.ndarray) -> np.ndarray:
+    return runtime.residual_for_current_case(x)
 
 
-def _x_scale_for_reference(runtime, x_reference: np.ndarray) -> np.ndarray | None:
-    if not hasattr(runtime, "active_profile_blocks"):
-        return None
+def _x_scale_for_reference(runtime: NumbaRuntime, x_reference: np.ndarray) -> np.ndarray | None:
     x_eval = np.asarray(x_reference, dtype=np.float64)
     scale = np.ones_like(x_eval)
     for _, profile_name, coeff_indices, offset, profile_scale in runtime.active_profile_blocks():

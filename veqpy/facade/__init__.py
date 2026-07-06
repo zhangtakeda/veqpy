@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 from importlib import import_module
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from veqlib.facade import KernelConfig, KernelRecipe, KernelTopology
+    from veqpy.kernel import NumbaKernel
 
 __all__ = [
     "Kernel",
@@ -18,9 +22,8 @@ __all__ = [
 ]
 
 _EXPORTS = {
-    "Kernel": ("veqpy.facade.kernel", "Kernel"),
-    "NumbaKernel": ("veqpy.facade.kernel", "NumbaKernel"),
-    "build": ("veqpy.facade.kernel", "build"),
+    "Kernel": ("veqpy.kernel", "NumbaKernel"),
+    "NumbaKernel": ("veqpy.kernel", "NumbaKernel"),
     "KernelBoundary": ("veqlib.facade", "KernelBoundary"),
     "KernelConfig": ("veqlib.facade", "KernelConfig"),
     "KernelRecipe": ("veqlib.facade", "KernelRecipe"),
@@ -28,6 +31,19 @@ _EXPORTS = {
     "KernelTopology": ("veqlib.facade", "KernelTopology"),
     "SolveResult": ("veqlib.facade", "SolveResult"),
 }
+
+
+def build(
+    *,
+    topology: KernelTopology,
+    recipe: KernelRecipe | None = None,
+    config: KernelConfig | None = None,
+) -> NumbaKernel:
+    """Create a reusable Numba Kernel handle."""
+
+    from veqpy.kernel import NumbaKernel
+
+    return NumbaKernel(topology=topology, recipe=recipe, config=config)
 
 
 def __getattr__(name: str) -> Any:
