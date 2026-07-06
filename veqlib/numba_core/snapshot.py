@@ -1,4 +1,4 @@
-"""Equilibrium snapshots from direct NumbaKernel runtime state."""
+"""Equilibrium snapshots from direct Numba backend runtime state."""
 
 from __future__ import annotations
 

@@ -8,7 +8,8 @@ Public API:
 - SourceWorkspace
 
 Notes:
-- Source planning and validation live in ``veqpy.kernel.source_plan``.
+- Source planning and validation live in ``veqlib.facade.source_semantics`` and
+  backend-local VEQlib runtime modules.
 - Source numerical kernels live in ``veqpy.engine``.
 """
 

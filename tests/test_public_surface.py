@@ -5,8 +5,6 @@ from pathlib import Path
 
 import veqlib
 import veqpy
-import veqpy.facade as facade
-import veqpy.kernel as kernel
 import veqpy.model as model
 
 
@@ -24,9 +22,8 @@ def test_core_public_imports_are_available() -> None:
     assert model.Profile
     assert model.Geqdsk
     assert model.Equilibrium
-    assert facade.Kernel
-    assert facade.NumbaKernel
-    assert facade.KernelTopology
-    assert kernel.NumbaKernel
     assert veqlib.Kernel
     assert veqlib.KernelRecipe
+    assert veqlib.KernelTopology
+    assert veqlib.KernelBoundary
+    assert veqlib.KernelSource

@@ -9,11 +9,16 @@ from helpers import MU0, pf_reference_profiles
 from numpy.linalg import norm
 from numpy.testing import assert_allclose
 
-from veqlib.facade import Kernel as UnifiedKernel
-from veqlib.facade import KernelBoundary, KernelConfig, KernelRecipe, KernelSource, KernelTopology
+from veqlib.facade import (
+    Kernel,
+    KernelBoundary,
+    KernelConfig,
+    KernelRecipe,
+    KernelSource,
+    KernelTopology,
+)
 from veqlib.facade.source_semantics import materialize_kernel_source
-from veqpy.kernel import NumbaKernel
-from veqpy.kernel.residual_scale import make_residual_scale
+from veqlib.numba_core.residual_scale import make_residual_scale
 
 ROUTE_PARITY_CASES = (
     ("PF", "psin", "uniform"),
@@ -104,9 +109,22 @@ def route_kernel_source(route: str, sample_count: int) -> KernelSource:
     )
 
 
-def test_numba_kernel_recipe_validation_and_public_surface() -> None:
+def numba_kernel(
+    *,
+    topology: KernelTopology,
+    recipe: KernelRecipe | None = None,
+    config: KernelConfig | None = None,
+) -> Kernel:
+    return Kernel(
+        topology=topology,
+        recipe=recipe or KernelRecipe(backend="numba", layout="degree"),
+        config=config,
+    )
+
+
+def test_kernel_numba_backend_recipe_validation_and_public_surface() -> None:
     topology = make_kernel_topology()
-    kernel = NumbaKernel(topology=topology)
+    kernel = numba_kernel(topology=topology)
 
     assert kernel.x_size == topology.x_size
     assert kernel.recipe.backend == "numba"
@@ -140,14 +158,12 @@ def test_numba_kernel_recipe_validation_and_public_surface() -> None:
     assert kernel.close() is None
 
     with pytest.raises(ValueError, match="layout='degree'"):
-        NumbaKernel(topology=topology, recipe=KernelRecipe(backend="numba", layout="family"))
-    with pytest.raises(ValueError, match="backend='numba'"):
-        NumbaKernel(topology=topology, recipe=KernelRecipe(backend="cxx", layout="degree"))
+        numba_kernel(topology=topology, recipe=KernelRecipe(backend="numba", layout="family"))
 
 
 def test_unified_kernel_selects_numba_backend_and_rejects_native_options(tmp_path) -> None:
     topology = make_kernel_topology()
-    kernel = UnifiedKernel(
+    kernel = Kernel(
         topology=topology,
         recipe=KernelRecipe(backend="numba", layout="degree"),
     )
@@ -161,16 +177,16 @@ def test_unified_kernel_selects_numba_backend_and_rejects_native_options(tmp_pat
     assert prepared.artifact is None
 
     with pytest.raises(ValueError, match="native-only option"):
-        UnifiedKernel(
+        Kernel(
             topology=topology,
             recipe=KernelRecipe(backend="numba", layout="degree"),
             cache_root=tmp_path,
         )
 
 
-def test_numba_kernel_residual_is_repeatable_and_validates_buffers() -> None:
+def test_kernel_numba_backend_residual_is_repeatable_and_validates_buffers() -> None:
     topology = make_kernel_topology()
-    kernel = NumbaKernel(topology=topology)
+    kernel = numba_kernel(topology=topology)
     boundary = tiny_kernel_boundary()
     source = tiny_kernel_source()
     x = np.zeros(kernel.x_size, dtype=np.float64)
@@ -218,13 +234,13 @@ def test_kernel_source_materialization_route_matrix(
 
 
 @pytest.mark.parametrize(("route", "coordinate", "nodes"), ROUTE_PARITY_CASES)
-def test_numba_kernel_residual_route_matrix_is_finite_and_repeatable(
+def test_kernel_numba_backend_residual_route_matrix_is_finite_and_repeatable(
     route: str,
     coordinate: str,
     nodes: str,
 ) -> None:
     topology = route_kernel_topology(route, coordinate, nodes)
-    kernel = NumbaKernel(topology=topology)
+    kernel = numba_kernel(topology=topology)
     boundary = tiny_kernel_boundary()
     source = route_kernel_source(route, topology.sample_count)
     x = np.zeros(kernel.x_size, dtype=np.float64)
@@ -239,14 +255,14 @@ def test_numba_kernel_residual_route_matrix_is_finite_and_repeatable(
     assert_allclose(kernel.residual(x.copy(), boundary, source), residual)
 
 
-def test_numba_kernel_build_equilibrium_runtime_state_rules() -> None:
+def test_kernel_numba_backend_build_equilibrium_runtime_state_rules() -> None:
     topology = make_kernel_topology()
-    kernel = NumbaKernel(topology=topology)
+    kernel = numba_kernel(topology=topology)
     boundary = tiny_kernel_boundary()
     source = tiny_kernel_source()
     x = np.zeros(kernel.x_size, dtype=np.float64)
 
-    with pytest.raises(RuntimeError, match="previous NumbaKernel runtime case"):
+    with pytest.raises(RuntimeError, match="previous Kernel runtime case"):
         kernel.build_equilibrium(x)
 
     kernel.residual(x, boundary, source)
@@ -257,9 +273,9 @@ def test_numba_kernel_build_equilibrium_runtime_state_rules() -> None:
         kernel.build_equilibrium()
 
 
-def test_numba_kernel_solve_records_runtime_result() -> None:
+def test_kernel_numba_backend_solve_records_runtime_result() -> None:
     topology = make_kernel_topology()
-    kernel = NumbaKernel(topology=topology)
+    kernel = numba_kernel(topology=topology)
     boundary = tiny_kernel_boundary()
     source = tiny_kernel_source()
 
@@ -281,10 +297,10 @@ def test_numba_kernel_solve_records_runtime_result() -> None:
     assert kernel.history == [result]
 
 
-def test_numba_kernel_success_is_raw_residual_gated(
+def test_kernel_numba_backend_success_is_raw_residual_gated(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    kernel = NumbaKernel(topology=make_kernel_topology())
+    kernel = numba_kernel(topology=make_kernel_topology())
     boundary = tiny_kernel_boundary()
     source = tiny_kernel_source()
 
@@ -299,7 +315,7 @@ def test_numba_kernel_success_is_raw_residual_gated(
             nit=0,
         )
 
-    kernel_solver = import_module("veqpy.kernel.solver")
+    kernel_solver = import_module("veqlib.numba_core.solver")
     monkeypatch.setattr(kernel_solver, "least_squares", fake_least_squares)
 
     result = kernel.solve(
@@ -318,10 +334,10 @@ def test_numba_kernel_success_is_raw_residual_gated(
     assert result.info == 0
 
 
-def test_numba_kernel_powell_uses_hybr_budget(
+def test_kernel_numba_backend_powell_uses_hybr_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    kernel = NumbaKernel(topology=make_kernel_topology())
+    kernel = numba_kernel(topology=make_kernel_topology())
     boundary = tiny_kernel_boundary()
     source = tiny_kernel_source()
     calls: list[str] = []
@@ -345,7 +361,7 @@ def test_numba_kernel_powell_uses_hybr_budget(
         del args, kwargs
         raise AssertionError("powell solve should not invoke least_squares")
 
-    kernel_solver = import_module("veqpy.kernel.solver")
+    kernel_solver = import_module("veqlib.numba_core.solver")
     monkeypatch.setattr(kernel_solver, "root", fake_root)
     monkeypatch.setattr(kernel_solver, "least_squares", fake_least_squares)
 
@@ -367,10 +383,10 @@ def test_numba_kernel_powell_uses_hybr_budget(
     assert result.success
 
 
-def test_numba_kernel_build_equilibrium_uses_direct_runtime(
+def test_kernel_numba_backend_build_equilibrium_uses_direct_runtime(
 ) -> None:
     topology = make_kernel_topology()
-    kernel = NumbaKernel(topology=topology)
+    kernel = numba_kernel(topology=topology)
     boundary = tiny_kernel_boundary()
     source = tiny_kernel_source()
     x = np.zeros(kernel.x_size, dtype=np.float64)
@@ -382,9 +398,9 @@ def test_numba_kernel_build_equilibrium_uses_direct_runtime(
     assert "h" in equilibrium.shape_profiles
 
 
-def test_numba_kernel_solve_result_lifecycle_and_equilibrium_snapshot() -> None:
+def test_kernel_numba_backend_solve_result_lifecycle_and_equilibrium_snapshot() -> None:
     topology = make_kernel_topology()
-    kernel = NumbaKernel(topology=topology)
+    kernel = numba_kernel(topology=topology)
     boundary = tiny_kernel_boundary()
     source = tiny_kernel_source()
 
@@ -417,8 +433,10 @@ def test_numba_kernel_solve_result_lifecycle_and_equilibrium_snapshot() -> None:
 
 
 @pytest.mark.parametrize("norm_mode", ["none", "fast", "balanced"])
-def test_numba_kernel_solve_result_scaled_uses_solver_reference_state(norm_mode: str) -> None:
-    kernel = NumbaKernel(topology=make_kernel_topology())
+def test_kernel_numba_backend_solve_result_scaled_uses_solver_reference_state(
+    norm_mode: str,
+) -> None:
+    kernel = numba_kernel(topology=make_kernel_topology())
     boundary = tiny_kernel_boundary()
     source = tiny_kernel_source()
     config = KernelConfig(norm=norm_mode)
@@ -435,7 +453,7 @@ def test_numba_kernel_solve_result_scaled_uses_solver_reference_state(norm_mode:
             nit=2,
         )
 
-    kernel_solver = import_module("veqpy.kernel.solver")
+    kernel_solver = import_module("veqlib.numba_core.solver")
     original_least_squares = kernel_solver.least_squares
     kernel_solver.least_squares = fake_least_squares
     try:
@@ -454,7 +472,14 @@ def test_numba_kernel_solve_result_scaled_uses_solver_reference_state(norm_mode:
 
     x0 = np.zeros(kernel.x_size, dtype=np.float64)
     expected_raw = kernel.residual(x_final, boundary, source)
-    expected_scaled = _expected_scaled_from_reference(expected_raw, x0, kernel, config)
+    expected_scaled = _expected_scaled_from_reference(
+        expected_raw,
+        x0,
+        kernel,
+        boundary,
+        source,
+        config,
+    )
 
     assert_allclose(result.raw, expected_raw)
     assert_allclose(result.scaled, expected_scaled)
@@ -473,15 +498,17 @@ def test_numba_kernel_solve_result_scaled_uses_solver_reference_state(norm_mode:
             expected_raw,
             x_final,
             kernel,
+            boundary,
+            source,
             config,
         )
         assert not np.allclose(result.scaled, final_based_scaled)
 
 
-def test_numba_kernel_warm_continuation_passes_previous_solution(
+def test_kernel_numba_backend_warm_continuation_passes_previous_solution(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    kernel = NumbaKernel(topology=make_kernel_topology())
+    kernel = numba_kernel(topology=make_kernel_topology())
     boundary = tiny_kernel_boundary()
     source = tiny_kernel_source()
     first = kernel.solve(
@@ -507,7 +534,7 @@ def test_numba_kernel_warm_continuation_passes_previous_solution(
         captured["x0"] = None if x0 is None else x0.copy()
         return first
 
-    monkeypatch.setattr(kernel._solver, "solve", fake_solve)
+    monkeypatch.setattr(kernel._impl._solver, "solve", fake_solve)
     second = kernel.solve(
         boundary,
         source,
@@ -525,8 +552,8 @@ def test_numba_kernel_warm_continuation_passes_previous_solution(
     assert_allclose(captured["x0"], first.x)
 
 
-def test_numba_kernel_jvp_and_jacobian_match_native_finite_differences() -> None:
-    kernel = NumbaKernel(topology=make_kernel_topology())
+def test_kernel_numba_backend_jvp_and_jacobian_match_native_finite_differences() -> None:
+    kernel = numba_kernel(topology=make_kernel_topology())
     boundary = tiny_kernel_boundary()
     source = tiny_kernel_source()
     x = np.zeros(kernel.x_size, dtype=np.float64)
@@ -574,14 +601,14 @@ def test_numba_kernel_jvp_and_jacobian_match_native_finite_differences() -> None
 def _expected_scaled_from_reference(
     raw: np.ndarray,
     x_reference: np.ndarray,
-    kernel: NumbaKernel,
+    kernel: Kernel,
+    boundary: KernelBoundary,
+    source: KernelSource,
     config: KernelConfig,
 ) -> np.ndarray:
     if config.norm == "none":
         return raw.copy()
-    if kernel._last_boundary is None or kernel._last_source is None:
-        raise RuntimeError("kernel case must be set before computing expected scale")
-    reference_raw = kernel.residual(x_reference, kernel._last_boundary, kernel._last_source)
+    reference_raw = kernel.residual(x_reference, boundary, source)
     params: dict[str, object] = {}
     if config.norm == "balanced":
         params = {
@@ -592,7 +619,7 @@ def _expected_scaled_from_reference(
     scale = make_residual_scale(
         config.norm,
         reference_raw,
-        kernel._solver.runtime.residual_block_lengths(),
+        kernel._impl._solver.runtime.residual_block_lengths(),
         **params,
     )
     if scale is None:

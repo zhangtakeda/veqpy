@@ -17,7 +17,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-from veqpy.facade import Kernel, KernelBoundary, KernelConfig, KernelSource, KernelTopology
+from veqlib import Kernel, KernelBoundary, KernelConfig, KernelRecipe, KernelSource, KernelTopology
 from veqpy.model import Grid
 
 MU0 = 4.0e-7 * np.pi
@@ -175,6 +175,7 @@ def main() -> None:
     )
     kernel = Kernel(
         topology=topology,
+        recipe=KernelRecipe(backend="numba", layout="degree"),
         config=KernelConfig(
             method="levenberg-marquardt",
             initial="cold-zeros",

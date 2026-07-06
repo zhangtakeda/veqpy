@@ -1,5 +1,5 @@
 """
-Module: kernel.packed_layout
+Module: numba_core.packed_layout
 
 Role:
 - Build packed layout and profile metadata.

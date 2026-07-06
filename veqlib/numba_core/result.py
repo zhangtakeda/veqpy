@@ -1,4 +1,4 @@
-"""SolveResult adapters for NumbaKernel runtimes."""
+"""SolveResult adapters for Numba backend runtimes."""
 
 from __future__ import annotations
 

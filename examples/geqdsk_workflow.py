@@ -15,7 +15,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-from veqpy.facade import Kernel, KernelBoundary, KernelConfig, KernelSource, KernelTopology
+from veqlib import Kernel, KernelBoundary, KernelConfig, KernelRecipe, KernelSource, KernelTopology
 from veqpy.model import Boundary, Geqdsk, Grid
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -181,6 +181,7 @@ def main() -> None:
     source = build_source(geqdsk, topology.sample_count)
     kernel = Kernel(
         topology=topology,
+        recipe=KernelRecipe(backend="numba", layout="degree"),
         config=KernelConfig(
             method="levenberg-marquardt",
             initial="cold-zeros",

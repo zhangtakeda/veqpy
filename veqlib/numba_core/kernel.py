@@ -172,7 +172,7 @@ class _NumbaKernelImpl:
 
     def build_equilibrium(self, x: Any | None = None) -> Equilibrium:
         if self._last_boundary is None or self._last_source is None:
-            raise RuntimeError("build_equilibrium requires a previous NumbaKernel runtime case")
+            raise RuntimeError("build_equilibrium requires a previous Kernel runtime case")
         if x is None:
             if self.result is None:
                 raise RuntimeError("build_equilibrium(x=None) requires a previous solve result")
@@ -208,9 +208,9 @@ class _NumbaKernelImpl:
     @staticmethod
     def _validate_numba_recipe(recipe: KernelRecipe) -> None:
         if recipe.backend != "numba":
-            raise ValueError("NumbaKernel requires KernelRecipe backend='numba'")
+            raise ValueError("Numba backend requires KernelRecipe backend='numba'")
         if recipe.layout != "degree":
-            raise ValueError("NumbaKernel only supports KernelRecipe layout='degree'")
+            raise ValueError("Numba backend only supports KernelRecipe layout='degree'")
 
     @staticmethod
     def _kernel_config(config: KernelConfig) -> KernelConfig:

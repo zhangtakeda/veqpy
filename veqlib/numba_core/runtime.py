@@ -1,4 +1,4 @@
-"""Direct runtime assembly for ``NumbaKernel``."""
+"""Direct runtime assembly for the Numba backend."""
 
 from __future__ import annotations
 
@@ -171,7 +171,7 @@ class KernelRuntimeCase:
 
 
 class NumbaRuntime:
-    """Topology-native residual runtime for ``NumbaKernel``."""
+    """Topology-native residual runtime for the Numba backend."""
 
     def __init__(
         self,
@@ -303,7 +303,9 @@ class NumbaRuntime:
             return self.zero_state()
         if initial == "cold-geometric":
             return self._build_geometric_initial_state()
-        raise NotImplementedError(f"NumbaKernel does not support KernelConfig.initial={initial!r}")
+        raise NotImplementedError(
+            f"Numba backend does not support KernelConfig.initial={initial!r}"
+        )
 
     def build_equilibrium(
         self,

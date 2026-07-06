@@ -27,19 +27,17 @@ PUBLIC_EXPORTS = {
         "Boundary",
         "Geqdsk",
     },
-    "veqpy.kernel": {
-        "NumbaKernel",
-    },
-    "veqpy.facade": {
+    "veqlib": {
         "Kernel",
         "KernelBoundary",
         "KernelConfig",
+        "KernelPrepareResult",
         "KernelRecipe",
         "KernelSource",
         "KernelTopology",
-        "NumbaKernel",
         "SolveResult",
         "build",
+        "solve",
     },
     "veqlib.facade": {
         "CleanResult",

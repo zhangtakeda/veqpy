@@ -5,14 +5,16 @@ Role:
 - Define package metadata and top-level package exports.
 
 Public API:
+- base
 - engine
-- facade
-- kernel
+- layout
 - model
+- workspace
 
 Notes:
 - Package roots are the only modules that declare ``__all__``.
-- Subpackages own their narrower public export surfaces.
+- VEQPy owns model-layer data structures and Numba-ready model workspaces.
+- VEQlib owns Kernel construction, backend selection, and solving.
 """
 
 from __future__ import annotations

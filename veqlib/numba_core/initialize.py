@@ -1,5 +1,5 @@
 """
-Module: kernel.initialize
+Module: numba_core.initialize
 
 Role:
 - Build kernel-owned packed initial states.

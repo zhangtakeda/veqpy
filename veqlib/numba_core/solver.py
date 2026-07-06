@@ -1,4 +1,4 @@
-"""Low-level NumbaKernel solve/residual facade backed by direct Numba runtime."""
+"""Low-level solve/residual facade backed by direct Numba runtime."""
 
 from __future__ import annotations
 
@@ -226,7 +226,9 @@ def _solver_method(config: KernelConfig) -> str:
         return "hybr"
     if config.method == "levenberg-marquardt":
         return "lm"
-    raise NotImplementedError(f"NumbaKernel does not support KernelConfig.method={config.method!r}")
+    raise NotImplementedError(
+        f"Numba backend does not support KernelConfig.method={config.method!r}"
+    )
 
 
 def _root_options(config: KernelConfig, *, default_max_evaluations: int) -> dict[str, object]:

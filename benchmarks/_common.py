@@ -20,6 +20,7 @@ os.environ.setdefault("MKL_NUM_THREADS", "1")
 os.environ.setdefault("MPLCONFIGDIR", str(Path("/tmp/veqpy-mpl")))
 
 from veqlib.facade import (  # noqa: E402
+    Kernel,
     KernelBoundary,
     KernelConfig,
     KernelRecipe,
@@ -27,8 +28,7 @@ from veqlib.facade import (  # noqa: E402
     KernelTopology,
     SolveResult,
 )
-from veqpy.facade import Kernel as NumbaKernel  # noqa: E402
-from veqpy.kernel.packed_layout import (  # noqa: E402
+from veqlib.numba_core.packed_layout import (  # noqa: E402
     build_profile_index,
     build_profile_layout,
     build_profile_names,
@@ -1083,7 +1083,7 @@ def route_topology_payload(
 
 
 def solve_numba_case(case: KernelCase) -> tuple[SolveResult, Any]:
-    kernel = NumbaKernel(
+    kernel = Kernel(
         topology=case.topology,
         recipe=KernelRecipe(backend="numba", layout="degree"),
         config=case.config,
@@ -1095,9 +1095,7 @@ def solve_numba_case(case: KernelCase) -> tuple[SolveResult, Any]:
 def solve_native_case(
     case: KernelCase, *, recipe: KernelRecipe | None = None
 ) -> tuple[SolveResult, Any]:
-    from veqlib.facade import Kernel as NativeKernel
-
-    kernel = NativeKernel(
+    kernel = Kernel(
         topology=case.topology,
         recipe=recipe or KernelRecipe(backend="cxx", layout="degree"),
         config=case.config,

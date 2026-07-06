@@ -1,5 +1,5 @@
 """
-Module: kernel.residual_scale
+Module: numba_core.residual_scale
 
 Role:
 - Registry-backed residual normalization scale builders.
