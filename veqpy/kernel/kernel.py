@@ -20,6 +20,9 @@ from veqpy.model import Equilibrium
 
 from .solver import NumbaSolver
 
+_JVP_EPS_SCALE = float(np.sqrt(1.0e-12))
+_JACOBIAN_REL_STEP = 1.0e-7
+
 
 @dataclass(frozen=True, slots=True)
 class NumbaPrepareResult:
@@ -132,8 +135,9 @@ class NumbaKernel:
         self._solver.residual_into(packed_out, packed_x, kernel_boundary, kernel_source)
 
     def jvp(self, x: Any, v: Any, boundary: KernelBoundary, source: KernelSource) -> np.ndarray:
-        del x, v, boundary, source
-        raise NotImplementedError("NumbaKernel.jvp is not implemented")
+        out = np.empty(self.x_size, dtype=np.float64)
+        self.jvp_into(out, x, v, boundary, source)
+        return out
 
     def jvp_into(
         self,
@@ -143,12 +147,19 @@ class NumbaKernel:
         boundary: KernelBoundary,
         source: KernelSource,
     ) -> None:
-        del out, x, v, boundary, source
-        raise NotImplementedError("NumbaKernel.jvp_into is not implemented")
+        packed_out = self._packed_output(out, (self.x_size,), "out")
+        packed_x = self._packed_input(x, "x")
+        packed_v = self._packed_input(v, "v")
+        kernel_boundary = self._kernel_boundary(boundary)
+        kernel_source = self._kernel_source(source, case_name=None)
+        self._last_boundary = kernel_boundary
+        self._last_source = kernel_source
+        _jvp_into(packed_out, packed_x, packed_v, kernel_boundary, kernel_source, self._solver)
 
     def jacobian(self, x: Any, boundary: KernelBoundary, source: KernelSource) -> np.ndarray:
-        del x, boundary, source
-        raise NotImplementedError("NumbaKernel.jacobian is not implemented")
+        out = np.empty((self.x_size, self.x_size), dtype=np.float64)
+        self.jacobian_into(out, x, boundary, source)
+        return out
 
     def jacobian_into(
         self,
@@ -157,8 +168,13 @@ class NumbaKernel:
         boundary: KernelBoundary,
         source: KernelSource,
     ) -> None:
-        del out, x, boundary, source
-        raise NotImplementedError("NumbaKernel.jacobian_into is not implemented")
+        matrix_out = self._packed_output(out, (self.x_size, self.x_size), "out")
+        packed_x = self._packed_input(x, "x")
+        kernel_boundary = self._kernel_boundary(boundary)
+        kernel_source = self._kernel_source(source, case_name=None)
+        self._last_boundary = kernel_boundary
+        self._last_source = kernel_source
+        _jacobian_into(matrix_out, packed_x, kernel_boundary, kernel_source, self._solver)
 
     def build_equilibrium(self, x: Any | None = None) -> Equilibrium:
         if self._last_boundary is None or self._last_source is None:
@@ -280,3 +296,52 @@ def _prepare_source(topology: KernelTopology) -> KernelSource:
         Ip=1.0e6,
         beta=0.5 if topology.beta_constraint else np.nan,
     )
+
+
+def _jvp_into(
+    out: np.ndarray,
+    x: np.ndarray,
+    v: np.ndarray,
+    boundary: KernelBoundary,
+    source: KernelSource,
+    solver: NumbaSolver,
+) -> None:
+    v_norm = float(norm(v))
+    if v_norm <= 0.0:
+        out.fill(0.0)
+        return
+    eps = _JVP_EPS_SCALE * (1.0 + float(norm(x))) / v_norm
+    x_plus = x + eps * v
+    f_base = _raw_residual(x, boundary, source, solver)
+    f_plus = _raw_residual(x_plus, boundary, source, solver)
+    np.subtract(f_plus, f_base, out=out)
+    out /= eps
+
+
+def _jacobian_into(
+    out: np.ndarray,
+    x: np.ndarray,
+    boundary: KernelBoundary,
+    source: KernelSource,
+    solver: NumbaSolver,
+) -> None:
+    x_plus = x.copy()
+    f_base = _raw_residual(x, boundary, source, solver)
+    f_plus = np.empty_like(f_base)
+    for col, saved in enumerate(x):
+        step = _JACOBIAN_REL_STEP * max(1.0, abs(float(saved)))
+        x_plus[col] = saved + step
+        solver.residual_into(f_plus, x_plus, boundary, source)
+        x_plus[col] = saved
+        out[:, col] = (f_plus - f_base) / step
+
+
+def _raw_residual(
+    x: np.ndarray,
+    boundary: KernelBoundary,
+    source: KernelSource,
+    solver: NumbaSolver,
+) -> np.ndarray:
+    raw = np.empty(x.size, dtype=np.float64)
+    solver.residual_into(raw, x, boundary, source)
+    return raw

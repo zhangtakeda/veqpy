@@ -510,20 +510,50 @@ def test_numba_kernel_warm_continuation_passes_previous_solution(
     assert_allclose(captured["x0"], first.x)
 
 
-def test_numba_kernel_jvp_and_jacobian_raise_contract_errors() -> None:
+def test_numba_kernel_jvp_and_jacobian_match_native_finite_differences() -> None:
     kernel = NumbaKernel(topology=make_kernel_topology())
     boundary = tiny_kernel_boundary()
     source = tiny_kernel_source()
     x = np.zeros(kernel.x_size, dtype=np.float64)
+    v = np.linspace(1.0, 2.0, kernel.x_size, dtype=np.float64)
 
-    with pytest.raises(NotImplementedError):
-        kernel.jvp(x, x, boundary, source)
-    with pytest.raises(NotImplementedError):
-        kernel.jvp_into(np.empty_like(x), x, x, boundary, source)
-    with pytest.raises(NotImplementedError):
-        kernel.jacobian(x, boundary, source)
-    with pytest.raises(NotImplementedError):
-        kernel.jacobian_into(np.empty((kernel.x_size, kernel.x_size)), x, boundary, source)
+    base = kernel.residual(x, boundary, source)
+    eps = np.sqrt(1.0e-12) * (1.0 + norm(x)) / norm(v)
+    expected_jvp = (kernel.residual(x + eps * v, boundary, source) - base) / eps
+
+    jvp = kernel.jvp(x, v, boundary, source)
+    assert_allclose(jvp, expected_jvp)
+
+    jvp_out = np.empty_like(x)
+    kernel.jvp_into(jvp_out, x.tolist(), v.tolist(), boundary, source)
+    assert_allclose(jvp_out, expected_jvp)
+
+    zero_jvp = kernel.jvp(x, np.zeros_like(v), boundary, source)
+    assert_allclose(zero_jvp, np.zeros_like(zero_jvp))
+
+    expected_jacobian = np.empty((kernel.x_size, kernel.x_size), dtype=np.float64)
+    for col, saved in enumerate(x):
+        step = 1.0e-7 * max(1.0, abs(float(saved)))
+        x_plus = x.copy()
+        x_plus[col] = saved + step
+        expected_jacobian[:, col] = (kernel.residual(x_plus, boundary, source) - base) / step
+
+    jacobian = kernel.jacobian(x, boundary, source)
+    assert_allclose(jacobian, expected_jacobian)
+
+    jacobian_out = np.empty_like(expected_jacobian)
+    kernel.jacobian_into(jacobian_out, x.tolist(), boundary, source)
+    assert_allclose(jacobian_out, expected_jacobian)
+
+    with pytest.raises(ValueError, match="v must have shape"):
+        kernel.jvp(x, np.ones(kernel.x_size + 1, dtype=np.float64), boundary, source)
+    with pytest.raises(ValueError, match="out must have shape"):
+        kernel.jacobian_into(
+            np.empty((kernel.x_size, kernel.x_size + 1), dtype=np.float64),
+            x,
+            boundary,
+            source,
+        )
 
 
 def _expected_scaled_from_reference(
