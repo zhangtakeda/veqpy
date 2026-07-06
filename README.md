@@ -89,9 +89,9 @@ For a runtime-only install from a local source checkout, omit the `dev` extra:
 ```
 
 VEQPy is a single public package. `veqpy.model` owns model-layer objects,
-`veqpy.types` owns public Kernel dataclasses, `veqpy.kernels` owns the public
-Kernel wrapper plus private Numba/Cxx backends, and `veqpy.api` provides thin
-function-style entrypoints. The native C++ backend is optional for normal
+`veqpy.kernels` owns the public Kernel wrapper, typed Kernel contract, and
+private Numba/Cxx backends, and `veqpy.api` provides thin function-style
+entrypoints. The native C++ backend is optional for normal
 Python/Numba use and requires a local C++20 toolchain and native libraries such
 as CMake 3.24+, `clang++`, nanobind, GCEM, nlohmann-json, CMINPACK,
 LAPACKE/LAPACK, and OpenBLAS.

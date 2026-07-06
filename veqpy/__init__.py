@@ -7,8 +7,8 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 from veqpy.api import build, solve
-from veqpy.kernels import Kernel
-from veqpy.types import (
+from veqpy.kernels import (
+    Kernel,
     KernelBoundary,
     KernelConfig,
     KernelPrepareResult,

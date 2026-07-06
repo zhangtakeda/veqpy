@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from veqpy.types import KernelSource, KernelTopology
+from veqpy.kernels.types import KernelSource, KernelTopology
 
 MU0 = 4.0e-7 * np.pi
 SETUP_NORMALIZED_ABS_MIN = 1.0e-3

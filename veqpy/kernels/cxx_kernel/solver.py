@@ -12,8 +12,8 @@ from pathlib import Path
 from typing import Any
 
 from veqpy.kernels.abi.options import normalize_solver_method, solver_method_code
-from veqpy.types import KernelRecipe as Recipe
-from veqpy.types import KernelTopology as Topology
+from veqpy.kernels.types import KernelRecipe as Recipe
+from veqpy.kernels.types import KernelTopology as Topology
 
 from .builder import PrepareResult
 from .registry import KernelRegistry, SolverThreadError, ThreadOwnedNativeSolver

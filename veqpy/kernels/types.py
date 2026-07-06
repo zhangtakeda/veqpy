@@ -37,7 +37,7 @@ from veqpy.kernels.abi.options import (
     residual_normalization_code,
     solver_method_code,
 )
-from veqpy.types.errors import TopologyError
+from veqpy.kernels.errors import TopologyError
 
 _BUILD_PRESET_KWARGS: dict[str, dict[str, object]] = {
     "fastmath": {

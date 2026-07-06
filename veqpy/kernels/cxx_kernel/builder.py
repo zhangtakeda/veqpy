@@ -27,8 +27,8 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from veqpy.kernels.abi.identity import recipe_identity_payload, topology_identity_payload
-from veqpy.types import KernelRecipe as Recipe
-from veqpy.types import KernelTopology as Topology
+from veqpy.kernels.types import KernelRecipe as Recipe
+from veqpy.kernels.types import KernelTopology as Topology
 
 from .validation import validate_supported_for_cxx_backend
 

@@ -5,8 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from veqpy.kernels import Kernel
-from veqpy.types import (
+from veqpy.kernels import (
+    Kernel,
     KernelBoundary,
     KernelConfig,
     KernelRecipe,

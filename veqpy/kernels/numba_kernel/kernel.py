@@ -9,7 +9,7 @@ import numpy as np
 from numpy.linalg import norm
 
 from veqpy.model.equilibrium import Equilibrium
-from veqpy.types import (
+from veqpy.kernels.types import (
     KernelBoundary,
     KernelConfig,
     KernelPrepareResult,

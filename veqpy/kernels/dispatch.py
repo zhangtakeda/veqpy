@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from veqpy.types import KernelConfig, KernelRecipe, KernelTopology
+from veqpy.kernels.types import KernelConfig, KernelRecipe, KernelTopology
 
 
 def _make_kernel_impl(

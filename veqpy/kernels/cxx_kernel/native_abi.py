@@ -7,7 +7,7 @@ from typing import Any
 import numpy as np
 
 from veqpy.kernels.abi.source_semantics import MaterializedKernelSource
-from veqpy.types import KernelBoundary, KernelConfig, SolveResult
+from veqpy.kernels.types import KernelBoundary, KernelConfig, SolveResult
 
 
 def boundary_runtime_args(boundary: KernelBoundary) -> tuple[Any, ...]:

@@ -14,7 +14,7 @@ from veqpy.model.numerics.interpolate import (
     SOURCE_INTERP_DEFAULT,
     normalize_source_interpolation_kind,
 )
-from veqpy.types import (
+from veqpy.kernels.types import (
     KernelBoundary,
     KernelSource,
     KernelTopology,

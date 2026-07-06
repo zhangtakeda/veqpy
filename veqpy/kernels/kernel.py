@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from veqpy.types import (
+from veqpy.kernels.types import (
     KernelBoundary,
     KernelConfig,
     KernelPrepareResult,

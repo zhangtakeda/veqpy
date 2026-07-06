@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from veqpy.types import KernelTopology, TopologyError
+from veqpy.kernels.errors import TopologyError
+from veqpy.kernels.types import KernelTopology
 
 
 def validate_supported_for_cxx_backend(topology: KernelTopology) -> None:
