@@ -52,7 +52,7 @@ from veqpy.model.numerics.field_rows import (
     RESIDUAL_ROOT_PSIN_R,
     RESIDUAL_ROOT_PSIN_RR,
 )
-from veqpy.model.numerics.interpolate import (
+from veqpy.numerics import (
     DEFAULT_LOCAL_BARYCENTRIC_STENCIL,
     build_uniform_source_interpolation_matrix,
 )

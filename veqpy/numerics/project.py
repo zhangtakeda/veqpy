@@ -8,7 +8,7 @@ Public API:
 - No public helpers yet.
 
 Notes:
-- Pure mathematical construction utilities live under ``veqpy.model.numerics``.
+- Pure mathematical construction utilities live under ``veqpy.numerics``.
 """
 
 from __future__ import annotations

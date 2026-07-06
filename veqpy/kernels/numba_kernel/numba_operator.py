@@ -46,7 +46,7 @@ from veqpy.kernels.numba_kernel.numba_source import (
 )
 from veqpy.model.numerics.geometry import update_geometry_hot_auto
 from veqpy.model.numerics.grid_workspace import GridWorkspace
-from veqpy.model.numerics.interpolate import build_uniform_source_interpolation_coefficients
+from veqpy.numerics import build_uniform_source_interpolation_coefficients
 from veqpy.model.numerics.profile_eval import update_profiles_packed_bulk
 
 if TYPE_CHECKING:

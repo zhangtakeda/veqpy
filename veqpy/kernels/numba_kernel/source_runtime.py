@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from veqpy.model.numerics.interpolate import build_uniform_source_interpolation_coefficients
+from veqpy.numerics import build_uniform_source_interpolation_coefficients
 
 from .numba_source import (
     build_source_remap_cache,

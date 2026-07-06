@@ -18,7 +18,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from veqpy.kernels.abi.source_semantics import materialize_source_inputs
-from veqpy.model.numerics.interpolate import (
+from veqpy.numerics import (
     SOURCE_INTERP_DEFAULT,
     normalize_source_interpolation_kind,
     source_interpolation_kind_is_barycentric,
