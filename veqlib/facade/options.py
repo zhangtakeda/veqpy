@@ -2,7 +2,7 @@
 
 Python facade inputs use canonical string tokens. Native kernels consume integer
 ABI enum codes derived from those strings. Keep these constants synchronized with
-``veqlib/core/abi_enums.h``.
+``veqlib/cxx_core/core/abi_enums.h``.
 """
 
 from __future__ import annotations

@@ -194,7 +194,7 @@ benchmark matrix, while native execution is gated by the facade native-support
 validation helper. The artifact cache key is
 computed from the canonical topology, explicit artifact recipe, Python/toolchain
 ABI, the native CMake define contract, and a digest of implementation inputs under
-`veqlib/core` (`.h`, `.cpp`, `.in`, and `CMakeLists.txt`). Artifacts are cached
+`veqlib/cxx_core/core` (`.h`, `.cpp`, `.in`, and `CMakeLists.txt`). Artifacts are cached
 under `veqlib/artifact/` by default, or under `VEQLIB_KERNEL_CACHE` when set.
 Runtime boundary/source arrays, physical constraints, solver tolerances, and `x0`
 belong to the per-case solve call.

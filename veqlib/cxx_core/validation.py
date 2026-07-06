@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .types import KernelTopology, TopologyError
+from veqlib.facade.types import KernelTopology, TopologyError
 
 
 def validate_supported_for_veqlib_native(topology: KernelTopology) -> None:

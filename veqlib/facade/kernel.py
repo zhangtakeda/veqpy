@@ -14,16 +14,17 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from .abi import (
+from veqlib.cxx_core.abi import (
     boundary_runtime_args,
     config_runtime_args,
     solve_result_from_native,
     source_runtime_args,
 )
-from .affinity import pinned_cpu
-from .builder import PrepareResult
-from .registry import KernelRegistry
-from .solver import VEQlibSolver
+from veqlib.cxx_core.affinity import pinned_cpu
+from veqlib.cxx_core.builder import PrepareResult
+from veqlib.cxx_core.registry import KernelRegistry
+from veqlib.cxx_core.solver import VEQlibSolver
+
 from .source_semantics import MaterializedKernelSource, materialize_kernel_source
 from .types import (
     KernelBoundary,
@@ -242,10 +243,7 @@ class Kernel:
     @staticmethod
     def _validate_native_recipe(recipe: KernelRecipe) -> None:
         if recipe.backend != "cxx":
-            raise ValueError(
-                "veqlib.facade.Kernel only supports KernelRecipe backend='cxx'; "
-                "use veqpy.kernel.NumbaKernel for backend='numba'"
-            )
+            raise ValueError("VEQlib native Kernel requires KernelRecipe backend='cxx'")
 
     @staticmethod
     def _kernel_config(config: KernelConfig) -> KernelConfig:

@@ -24,6 +24,7 @@ from benchmarks._common import (
     REPO_ROOT,
     RouteBenchmarkSpec,
     cpu_affinity,
+    default_kernel_cache_root,
     engine_payload,
     geqdsk_kernel_case,
     geqdsk_signature,
@@ -52,7 +53,6 @@ from benchmarks._reporting import (
     console as reporting_console,
 )
 from veqlib.facade import KernelRecipe
-from veqlib.facade.builder import default_kernel_cache_root
 
 DEFAULT_OUTPUT = REPO_ROOT / "benchmarks" / "results" / "veqlib_geqdsk.json"
 VALIDATION_ATOL = 1.0e-6

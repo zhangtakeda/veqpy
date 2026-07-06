@@ -22,6 +22,7 @@ from benchmarks._common import (
     SYNTHETIC_SOLVER_MAX_EVALUATIONS,
     SYNTHETIC_SOLVER_MAX_RESIDUAL,
     cpu_affinity,
+    default_kernel_cache_root,
     engine_payload,
     filter_route_specs,
     iter_route_specs,
@@ -56,7 +57,6 @@ from benchmarks._reporting import (
     console as reporting_console,
 )
 from veqlib.facade import KernelRecipe
-from veqlib.facade.builder import default_kernel_cache_root
 
 DEFAULT_OUTPUT = REPO_ROOT / "benchmarks" / "results" / "veqlib_routes.json"
 VALIDATION_ATOL = 1.0e-6

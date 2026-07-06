@@ -11,11 +11,12 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from veqlib.facade.options import normalize_solver_method, solver_method_code
+from veqlib.facade.types import KernelRecipe as Recipe
+from veqlib.facade.types import KernelTopology as Topology
+
 from .builder import PrepareResult
-from .options import normalize_solver_method, solver_method_code
 from .registry import KernelRegistry, SolverThreadError, ThreadOwnedNativeSolver
-from .types import KernelRecipe as Recipe
-from .types import KernelTopology as Topology
 from .validation import validate_supported_for_veqlib_native
 
 

@@ -26,6 +26,7 @@ from benchmarks._common import (
     RouteBenchmarkSpec,
     continuation_points,
     cpu_affinity,
+    default_kernel_cache_root,
     float_stats,
     geqdsk_kernel_case,
     int_stats,
@@ -45,7 +46,6 @@ from benchmarks._reporting import (
 )
 from veqlib.facade import Kernel as NativeKernel
 from veqlib.facade import KernelConfig, KernelRecipe
-from veqlib.facade.builder import default_kernel_cache_root
 
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "benchmarks" / "results" / "veqlib_continuation"
 UPDATE_CHOICES = ("ip", "boundary", "source", "mixed")

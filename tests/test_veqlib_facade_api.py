@@ -7,6 +7,7 @@ import pytest
 from numpy.testing import assert_allclose
 
 import veqlib.facade as facade
+from veqlib.cxx_core.abi import solve_result_from_native
 from veqlib.facade import (
     Kernel,
     KernelBoundary,
@@ -15,7 +16,6 @@ from veqlib.facade import (
     KernelSource,
     KernelTopology,
 )
-from veqlib.facade.abi import solve_result_from_native
 from veqlib.facade.identity import recipe_identity_payload, topology_identity_payload
 from veqlib.facade.options import (
     RESIDUAL_NORMALIZATION_BALANCED,

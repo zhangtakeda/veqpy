@@ -26,9 +26,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
-from .identity import recipe_identity_payload, topology_identity_payload
-from .types import KernelRecipe as Recipe
-from .types import KernelTopology as Topology
+from veqlib.facade.identity import recipe_identity_payload, topology_identity_payload
+from veqlib.facade.types import KernelRecipe as Recipe
+from veqlib.facade.types import KernelTopology as Topology
+
 from .validation import validate_supported_for_veqlib_native
 
 GENERATOR_VERSION = "veqlib.kernel.builder.v1"
@@ -102,10 +103,7 @@ def prepare(
     if not isinstance(recipe, Recipe):
         raise TypeError(f"recipe must be KernelRecipe, got {type(recipe).__name__}")
     if recipe.backend != "cxx":
-        raise ValueError(
-            "veqlib.facade.prepare only supports KernelRecipe backend='cxx'; "
-            "use veqpy.kernel.NumbaKernel for backend='numba'"
-        )
+        raise ValueError("VEQlib C++ artifact preparation requires KernelRecipe backend='cxx'")
     if not dry_run:
         validate_supported_for_veqlib_native(topology)
     source_dir = _default_source_dir() if source_dir is None else source_dir.resolve()
@@ -897,7 +895,7 @@ def _veqlib_root() -> Path:
 
 
 def _default_source_dir() -> Path:
-    return _veqlib_root() / "core"
+    return _veqlib_root() / "cxx_core" / "core"
 
 
 def _write_json(path: Path, payload: Any) -> None:

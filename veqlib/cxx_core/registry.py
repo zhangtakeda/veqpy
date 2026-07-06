@@ -16,12 +16,13 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
+from veqlib.facade.options import solver_method_code
+from veqlib.facade.types import KernelRecipe as Recipe
+from veqlib.facade.types import KernelTopology as Topology
+
 from .affinity import cpu_pin_scope_active, pinned_cpu
 from .builder import PrepareResult, touch_artifact_used
 from .builder import prepare as prepare_kernel
-from .options import solver_method_code
-from .types import KernelRecipe as Recipe
-from .types import KernelTopology as Topology
 
 
 class KernelLoadError(ImportError):
