@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from contextlib import AbstractContextManager
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -34,6 +34,9 @@ from .types import (
     SolveResult,
     config_with_overrides,
 )
+
+if TYPE_CHECKING:
+    from veqpy.model import Equilibrium
 
 
 class Kernel:
@@ -65,6 +68,8 @@ class Kernel:
         self._solver: VEQlibSolver | None = None
         self.history: list[SolveResult] = []
         self.result: SolveResult | None = None
+        self._last_boundary: KernelBoundary | None = None
+        self._last_source: KernelSource | None = None
 
     @property
     def x_size(self) -> int:
@@ -143,9 +148,25 @@ class Kernel:
         self._set_runtime(boundary, source, self.config, case_name=None)
         self._veqlib_solver().jacobian_into(matrix_out, packed_x)
 
+    def build_equilibrium(self, x: Any | None = None) -> Equilibrium:
+        if self._last_boundary is None or self._last_source is None:
+            raise RuntimeError("build_equilibrium requires a previous Kernel runtime case")
+        if x is None:
+            if self.result is None:
+                raise RuntimeError("build_equilibrium(x=None) requires a previous solve result")
+            packed_x = self.result.x
+        else:
+            packed_x = self._packed_input(x, "x")
+        from veqpy.kernel.runtime import NumbaRuntime
+
+        runtime = NumbaRuntime(self.topology)
+        return runtime.build_equilibrium(packed_x, self._last_boundary, self._last_source)
+
     def clear(self) -> None:
         self.history.clear()
         self.result = None
+        self._last_boundary = None
+        self._last_source = None
 
     def close(self) -> None:
         if self._solver is not None:
@@ -214,6 +235,8 @@ class Kernel:
             *source_runtime_args(materialized_source),
             *config_runtime_args(config, x_size=self.x_size),
         )
+        self._last_boundary = kernel_boundary
+        self._last_source = kernel_source
         return solver
 
     @staticmethod

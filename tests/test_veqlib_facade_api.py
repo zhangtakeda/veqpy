@@ -378,6 +378,41 @@ def test_kernel_solve_uses_handle_default_config_with_per_call_overrides() -> No
     assert temporary_config.method == "powell"
 
 
+def test_kernel_build_equilibrium_uses_last_runtime_case() -> None:
+    topology = make_kernel_topology()
+    handle = Kernel(topology=topology)
+    recorder = RecordingSolver(x_size=handle.x_size)
+    handle._solver = recorder  # type: ignore[assignment]
+    boundary = tiny_kernel_boundary()
+    source = tiny_kernel_source()
+    x = np.zeros(handle.x_size, dtype=np.float64)
+
+    with pytest.raises(RuntimeError, match="previous Kernel runtime case"):
+        handle.build_equilibrium(x)
+
+    handle._set_runtime(boundary, source, KernelConfig(), case_name=None)
+    with pytest.raises(RuntimeError, match=r"build_equilibrium\(x=None\)"):
+        handle.build_equilibrium()
+
+    equilibrium = handle.build_equilibrium(x.tolist())
+    assert equilibrium.a == boundary.a
+    assert equilibrium.R0 == boundary.R0
+    assert equilibrium.B0 == boundary.B0
+    assert equilibrium.psin.shape == (topology.Nr,)
+    assert np.all(np.isfinite(equilibrium.psin))
+
+    handle.solve(boundary, source)
+    default_equilibrium = handle.build_equilibrium()
+    assert default_equilibrium.psin.shape == (topology.Nr,)
+    assert np.all(np.isfinite(default_equilibrium.psin))
+
+    handle.clear()
+    assert handle.history == []
+    assert handle.result is None
+    with pytest.raises(RuntimeError, match="previous Kernel runtime case"):
+        handle.build_equilibrium(x)
+
+
 def test_kernel_dry_run_and_python_owned_result_snapshot(tmp_path: Path) -> None:
     topology = make_kernel_topology()
     recipe = KernelRecipe(build="release", layout="family")
@@ -518,6 +553,9 @@ def test_kernel_python_build_and_solve_native_flow(tmp_path: Path) -> None:
         handle.x_size,
         handle.x_size,
     )
+
+    equilibrium = handle.build_equilibrium()
+    assert equilibrium.psin.shape == (topology.Nr,)
 
     handle.clear()
     assert handle.history == []
