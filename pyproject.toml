@@ -59,7 +59,7 @@ include-package-data = false
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["veqpy*", "veqlib*"]
+include = ["veqpy*", "veqlib*", "benchmarks*"]
 namespaces = false
 
 [tool.setuptools.package-data]

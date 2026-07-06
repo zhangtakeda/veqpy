@@ -1,11 +1,29 @@
 # Benchmarks
 
-This directory retains VEQPy/VEQlib benchmark result artifacts and environment
-metadata captured before the Kernel API became the sole public runtime entry.
-New benchmark entrypoints should be built directly on `veqpy.facade.Kernel` and,
-when native C++ comparison is needed, `veqlib.facade`.
+This directory contains VEQPy/VEQlib benchmark entry points and historical result
+artifacts. Current scripts use the Kernel API directly: Python/Numba rows call
+`veqpy.facade.Kernel`, and native C++ rows call `veqlib.facade.Kernel`.
 
 Runtime tables report median solve/runtime time only. VEQlib artifact build time is not included in `Cxx ms`; full build metadata and samples are in the JSON outputs.
+
+## Scripts
+
+- `veqpy_routes.py`: VEQPy/Numba synthetic route matrix through `veqpy.facade.Kernel`.
+- `veqpy_geqdsk_routes.py`: GEQDSK-backed VEQPy/Numba route matrix.
+- `veqlib_routes.py`: VEQlib native route matrix compared with VEQPy/Numba Kernel.
+- `veqlib_geqdsk_pareto.py`: GEQDSK VEQlib native vs VEQPy/Numba Kernel matrix.
+- `veqlib_continuation.py`: VEQlib native continuation-policy benchmark.
+- `_common.py`: shared Kernel-case construction, timing, route specs, and JSON helpers.
+
+## Reproduce
+
+```bash
+.venv/bin/python benchmarks/veqpy_routes.py --quiet-progress
+.venv/bin/python benchmarks/veqpy_geqdsk_routes.py --quiet-progress
+.venv/bin/python benchmarks/veqlib_routes.py --quiet-progress
+.venv/bin/python benchmarks/veqlib_geqdsk_pareto.py --quiet-progress
+.venv/bin/python benchmarks/veqlib_continuation.py --quiet-progress
+```
 
 ## Environment
 
