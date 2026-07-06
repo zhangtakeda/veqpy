@@ -17,7 +17,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-from veqlib import Kernel, KernelBoundary, KernelConfig, KernelRecipe, KernelSource, KernelTopology
+from veqpy import Kernel, KernelBoundary, KernelConfig, KernelRecipe, KernelSource, KernelTopology
 from veqpy.model import Grid
 
 MU0 = 4.0e-7 * np.pi

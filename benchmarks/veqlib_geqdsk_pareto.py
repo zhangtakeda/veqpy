@@ -52,7 +52,7 @@ from benchmarks._reporting import (
 from benchmarks._reporting import (
     console as reporting_console,
 )
-from veqlib.facade import KernelRecipe
+from veqpy import KernelRecipe
 
 DEFAULT_OUTPUT = REPO_ROOT / "benchmarks" / "results" / "veqlib_geqdsk.json"
 VALIDATION_ATOL = 1.0e-6

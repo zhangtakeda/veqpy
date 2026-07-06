@@ -19,7 +19,7 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("MKL_NUM_THREADS", "1")
 os.environ.setdefault("MPLCONFIGDIR", str(Path("/tmp/veqpy-mpl")))
 
-from veqlib.facade import (  # noqa: E402
+from veqpy import (  # noqa: E402
     Kernel,
     KernelBoundary,
     KernelConfig,

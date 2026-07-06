@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import importlib.util
 import tomllib
 from pathlib import Path
 
-import veqlib
 import veqpy
 import veqpy.model as model
 
@@ -22,8 +22,12 @@ def test_core_public_imports_are_available() -> None:
     assert model.Profile
     assert model.Geqdsk
     assert model.Equilibrium
-    assert veqlib.Kernel
-    assert veqlib.KernelRecipe
-    assert veqlib.KernelTopology
-    assert veqlib.KernelBoundary
-    assert veqlib.KernelSource
+    assert veqpy.Kernel
+    assert veqpy.KernelRecipe
+    assert veqpy.KernelTopology
+    assert veqpy.KernelBoundary
+    assert veqpy.KernelSource
+
+
+def test_veqlib_package_is_not_importable() -> None:
+    assert importlib.util.find_spec("veqlib") is None

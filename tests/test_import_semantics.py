@@ -6,7 +6,7 @@ from collections import defaultdict
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SOURCE_ROOTS = ("veqpy", "veqlib")
+SOURCE_ROOTS = ("veqpy",)
 
 PUBLIC_EXPORTS = {
     "veqpy": {
@@ -35,41 +35,6 @@ PUBLIC_EXPORTS = {
     "veqpy.model": {
         "Boundary",
         "Geqdsk",
-    },
-    "veqlib": {
-        "Kernel",
-        "KernelBoundary",
-        "KernelConfig",
-        "KernelPrepareResult",
-        "KernelRecipe",
-        "KernelSource",
-        "KernelTopology",
-        "SolveResult",
-        "build",
-        "solve",
-    },
-    "veqlib.facade": {
-        "CleanResult",
-        "Kernel",
-        "KernelBoundary",
-        "KernelConfig",
-        "KernelLoadError",
-        "KernelPrepareResult",
-        "KernelRecipe",
-        "KernelRegistry",
-        "KernelSource",
-        "KernelTopology",
-        "LoadedKernel",
-        "PrepareError",
-        "PrepareResult",
-        "SolveResult",
-        "SolverThreadError",
-        "TopologyError",
-        "VEQlibSolver",
-        "build",
-        "clean",
-        "prepare",
-        "solve",
     },
 }
 

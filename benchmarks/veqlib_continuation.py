@@ -44,8 +44,8 @@ from benchmarks._reporting import (
 from benchmarks._reporting import (
     console as reporting_console,
 )
-from veqlib.facade import Kernel as NativeKernel
-from veqlib.facade import KernelConfig, KernelRecipe
+from veqpy import Kernel as NativeKernel
+from veqpy import KernelConfig, KernelRecipe
 
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "benchmarks" / "results" / "veqlib_continuation"
 UPDATE_CHOICES = ("ip", "boundary", "source", "mixed")

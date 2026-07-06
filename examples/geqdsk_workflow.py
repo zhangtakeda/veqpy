@@ -15,7 +15,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-from veqlib import Kernel, KernelBoundary, KernelConfig, KernelRecipe, KernelSource, KernelTopology
+from veqpy import Kernel, KernelBoundary, KernelConfig, KernelRecipe, KernelSource, KernelTopology
 from veqpy.model import Boundary, Geqdsk, Grid
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]

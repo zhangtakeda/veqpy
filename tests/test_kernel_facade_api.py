@@ -6,8 +6,8 @@ import numpy as np
 import pytest
 from numpy.testing import assert_allclose
 
-import veqlib.facade as facade
-from veqlib.facade import (
+import veqpy
+from veqpy import (
     Kernel,
     KernelBoundary,
     KernelConfig,
@@ -15,6 +15,7 @@ from veqlib.facade import (
     KernelSource,
     KernelTopology,
 )
+from veqpy.api import build
 from veqpy.kernels.abi.identity import recipe_identity_payload, topology_identity_payload
 from veqpy.kernels.abi.options import (
     RESIDUAL_NORMALIZATION_BALANCED,
@@ -22,6 +23,7 @@ from veqpy.kernels.abi.options import (
     SOLVER_METHOD_POWELL,
 )
 from veqpy.kernels.abi.source_semantics import materialize_kernel_source
+from veqpy.kernels.cxx_kernel.builder import prepare
 from veqpy.kernels.cxx_kernel.native_abi import solve_result_from_native
 
 MU0 = 4.0e-7 * np.pi
@@ -110,28 +112,18 @@ class RecordingRegistry:
         return self.solver
 
 
-def test_veqlib_facade_root_exports_semantic_surface() -> None:
-    assert facade.__all__ == [
+def test_veqpy_root_exports_kernel_surface() -> None:
+    assert veqpy.__all__ == [
         "Kernel",
-        "PrepareResult",
         "KernelBoundary",
+        "KernelConfig",
         "KernelPrepareResult",
         "KernelRecipe",
-        "PrepareError",
-        "CleanResult",
-        "KernelConfig",
         "KernelSource",
-        "KernelLoadError",
-        "KernelRegistry",
-        "SolveResult",
         "KernelTopology",
-        "LoadedKernel",
-        "SolverThreadError",
+        "SolveResult",
         "TopologyError",
-        "VEQlibSolver",
         "build",
-        "prepare",
-        "clean",
         "solve",
     ]
 
@@ -385,15 +377,15 @@ def test_kernel_dry_run_and_python_owned_result_snapshot(tmp_path: Path) -> None
     topology = make_kernel_topology()
     recipe = KernelRecipe(build="release", layout="family")
     kernel_config = KernelConfig(max_residual=4.0e-6)
-    handle = facade.build(
+    handle = build(
         topology=topology,
         recipe=recipe,
         config=kernel_config,
         cache_root=tmp_path,
         dry_run=True,
     )
-    artifact = facade.prepare(topology, recipe=recipe, cache_root=tmp_path, dry_run=True)
-    default_artifact = facade.prepare(
+    artifact = prepare(topology, recipe=recipe, cache_root=tmp_path, dry_run=True)
+    default_artifact = prepare(
         topology,
         recipe=KernelRecipe(build="fastmath", layout="degree"),
         cache_root=tmp_path,

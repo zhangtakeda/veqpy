@@ -1,15 +1,15 @@
 # Benchmarks
 
-This directory contains VEQPy/VEQlib benchmark entry points and result
-artifacts. Current scripts use the Kernel API directly: Python/Numba rows call
-`veqlib.Kernel` with `backend="numba"`, and native C++ rows call the same
-`veqlib.Kernel` surface with `backend="cxx"`.
+This directory contains VEQPy Kernel benchmark entry points and result artifacts.
+Current scripts use the Kernel API directly: Python/Numba rows call
+`veqpy.Kernel` with `backend="numba"`, and native C++ rows call the same
+`veqpy.Kernel` surface with `backend="cxx"`.
 
 The route and GEQDSK tables below report median `SolveResult.elapsed_ms`.
 Each measured repeat uses a fresh Kernel handle for the case, so accepted
 solutions are not reused between repeats. The JSON outputs also keep outer
 `wall_timing` samples, which include per-repeat Kernel construction and close.
-VEQlib artifact build time is not included in `Cxx ms`; build metadata and
+Cxx artifact build time is not included in `Cxx ms`; build metadata and
 sample timings are recorded in the JSON outputs.
 
 `veqlib_continuation.py` is the explicit continuation-policy benchmark. Its
@@ -17,10 +17,10 @@ table reports effective function evaluations rather than solve-time medians.
 
 ## Scripts
 
-- `veqpy_routes.py`: VEQPy/Numba synthetic route matrix through `veqlib.Kernel`.
-- `veqlib_routes.py`: VEQlib native route matrix compared with VEQPy/Numba Kernel.
-- `veqlib_geqdsk_pareto.py`: GEQDSK VEQlib native vs VEQPy/Numba Kernel matrix.
-- `veqlib_continuation.py`: VEQlib native continuation-policy benchmark.
+- `veqpy_routes.py`: VEQPy/Numba synthetic route matrix through `veqpy.Kernel`.
+- `veqlib_routes.py`: Cxx backend route matrix compared with VEQPy/Numba Kernel.
+- `veqlib_geqdsk_pareto.py`: GEQDSK Cxx backend vs VEQPy/Numba Kernel matrix.
+- `veqlib_continuation.py`: Cxx backend continuation-policy benchmark.
 - `_common.py`: shared Kernel-case construction, timing, route specs, and JSON helpers.
 
 ## Reproduce

@@ -53,10 +53,10 @@ and easier to reuse than full solver-native equilibrium or reconstruction pipeli
 - **Formula-oriented model objects**: `Profile` is used for serializable shape-profile
   snapshots on `Equilibrium`. `Grid` and `Equilibrium` use reactive derived properties
   to lazily reconstruct geometry and physics diagnostics by formula.
-- **Kernel API**: `veqlib.Kernel` is the backend-neutral runtime handle.
+- **Kernel API**: `veqpy.Kernel` is the backend-neutral runtime handle.
   It uses
   `KernelTopology + KernelRecipe + KernelBoundary + KernelSource + KernelConfig`
-  types from `veqlib`, keeps raw runtime source profiles in `KernelSource`, and
+  types from `veqpy`, keeps raw runtime source profiles in `KernelSource`, and
   selects the `cxx` or `numba` backend through `KernelRecipe.backend`.
 
 ## Installation
@@ -88,9 +88,10 @@ For a runtime-only install from a local source checkout, omit the `dev` extra:
 .venv/bin/python -m pip install .
 ```
 
-VEQlib under `veqlib/` owns Kernel construction, backend selection, and solving.
-Its public facade provides the Kernel types while private backend modules own
-Numba and native runtime details. The native C++ backend is optional for normal
+VEQPy is a single public package. `veqpy.model` owns model-layer objects,
+`veqpy.types` owns public Kernel dataclasses, `veqpy.kernels` owns the public
+Kernel wrapper plus private Numba/Cxx backends, and `veqpy.api` provides thin
+function-style entrypoints. The native C++ backend is optional for normal
 Python/Numba use and requires a local C++20 toolchain and native libraries such
 as CMake 3.24+, `clang++`, nanobind, GCEM, nlohmann-json, CMINPACK,
 LAPACKE/LAPACK, and OpenBLAS.
@@ -130,17 +131,17 @@ paper/data artifacts rather than user-demo outputs.
 Core local checks mirror the push/PR CI workflow.
 
 ```bash
-.venv/bin/python -m compileall -q veqpy veqlib tests examples benchmarks scripts
-.venv/bin/ruff check veqpy veqlib tests examples benchmarks scripts
+.venv/bin/python -m compileall -q veqpy tests examples benchmarks scripts
+.venv/bin/ruff check veqpy tests examples benchmarks scripts
 .venv/bin/python -m pytest
 ```
 
 ## Optional C++ Kernels
 
-VEQlib is the experimental C++/nanobind kernel layer used for topology-specific
-shared-library kernels and VEQPy-vs-native benchmarks.
+The Cxx backend is the native C++/nanobind kernel layer used for
+topology-specific shared-library kernels and VEQPy-vs-native benchmarks.
 
-Representative VEQlib-vs-Numba timing data retained in
+Representative Cxx-vs-Numba timing data retained in
 `benchmarks/results/veqlib_geqdsk.json` is summarized below. The three benchmark
 families are GEQDSK-backed cases:
 
@@ -149,11 +150,11 @@ families are GEQDSK-backed cases:
 - `X-point`: `data/EFIT.geqdsk`
 
 Timings are median full nonlinear-solve wall times in milliseconds after warmup;
-the VEQlib timing excludes native build time. `solution diff` is the maximum absolute
-VEQlib-vs-Numba solution-vector difference for the benchmark case. Bold rows mark the
+the Cxx timing excludes native build time. `solution diff` is the maximum absolute
+Cxx-vs-Numba solution-vector difference for the benchmark case. Bold rows mark the
 representative High configuration for each GEQDSK family.
 
-| case(params)    |  VEQlib (ms) |    Numba (ms) |     speedup | solution diff |
+| case(params)    |     Cxx (ms) |    Numba (ms) |     speedup | solution diff |
 | --------------- | -----------: | ------------: | ----------: | ------------: |
 | D-shaped(4)     |     0.077366 |      1.095349 |     14.158x |      1.17e-12 |
 | D-shaped(5)     |     0.089723 |      1.202812 |     13.406x |      3.14e-12 |
@@ -168,14 +169,14 @@ representative High configuration for each GEQDSK family.
 | **X-point(94)** | **2.502630** |  **9.804938** |  **3.918x** |  **8.34e-11** |
 | X-point(130)    |     6.209815 |     21.124163 |      3.402x |      2.99e-10 |
 
-The package-level VEQlib facade is intentionally semantic: users construct
+The package-level Kernel API is intentionally semantic: users construct
 `KernelTopology` for the solve topology, including `ip_constraint` and
 `beta_constraint` boolean source constraints, then pass it explicitly as
 `Kernel(topology=topology)` or `build(topology=topology, ...)`.
 `KernelBoundary`/`KernelSource` carry runtime cases, `KernelConfig` carries the
 handle-level default solve policy, and `KernelRecipe` remains the shared backend
 recipe type. `KernelSource` stores raw user-facing `heat_profile`,
-`current_profile`, `Ip`, and `beta` values; the facade materializes
+`current_profile`, `Ip`, and `beta` values; the Kernel runtime materializes
 route-dependent `mu0` scaling before calling backend kernels. `KernelRecipe`
 selects `backend="numba"` for the direct Numba runtime or `backend="cxx"` for the
 native backend. Both backends use the same public `Kernel` type and method
@@ -187,7 +188,7 @@ replace it with a one-off `config=...`, or override individual fields such as
 `method=...` for one call.
 
 The current production boundary is narrow: route/topology planning covers the
-benchmark matrix, while native execution is gated by the facade native-support
+benchmark matrix, while native execution is gated by the Cxx native-support
 validation helper. The artifact cache key is
 computed from the canonical topology, explicit artifact recipe, Python/toolchain
 ABI, the native CMake define contract, and a digest of native implementation
@@ -196,23 +197,23 @@ inputs. Artifacts are cached under `.veqpy-kernel-cache/` by default, or under
 Runtime boundary/source arrays, physical constraints, solver tolerances, and `x0`
 belong to the per-case solve call.
 
-The facade pins short native calls to one CPU by default to reduce scheduler
+The Cxx backend pins short native calls to one CPU by default to reduce scheduler
 noise. Set `VEQLIB_PIN_CPU=0` to disable scoped pinning, or
 `VEQLIB_PIN_CPU_ID=<cpu>` to request a specific allowed CPU. For high-volume
-loops, prefer one outer pinning scope via the facade handle rather than relying
+loops, prefer one outer pinning scope via the Kernel handle rather than relying
 on per-call affinity changes.
 
-Useful VEQlib checks from the repository root:
+Useful Kernel checks from the repository root:
 
 ```bash
-.venv/bin/python -m compileall -q veqlib tests/test_veqlib_facade_api.py
-.venv/bin/ruff check veqlib tests/test_veqlib_facade_api.py
-.venv/bin/python -m pytest tests/test_veqlib_facade_api.py
+.venv/bin/python -m compileall -q veqpy tests/test_kernel_facade_api.py
+.venv/bin/ruff check veqpy tests/test_kernel_facade_api.py
+.venv/bin/python -m pytest tests/test_kernel_facade_api.py
 ```
 
 Retained benchmark result artifacts live under `benchmarks/results/`. Future
 timing evidence should use the shared KernelTypes directly through
-`veqlib.Kernel`, selecting `backend="numba"` or `backend="cxx"` through
+`veqpy.Kernel`, selecting `backend="numba"` or `backend="cxx"` through
 `KernelRecipe`.
 
 ## Implementation Documentation

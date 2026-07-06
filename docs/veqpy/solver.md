@@ -1,10 +1,10 @@
 # Kernel Solve Flow
 
-VEQlib solves through `veqlib.Kernel`; VEQPy supplies model-layer inputs and
-receives `Equilibrium` snapshots.
+VEQPy solves through `veqpy.Kernel`; model-layer inputs and `Equilibrium`
+snapshots live in the same package.
 
 ```python
-from veqlib import Kernel, KernelConfig, KernelRecipe
+from veqpy import Kernel, KernelConfig, KernelRecipe
 
 kernel = Kernel(
     topology=topology,
