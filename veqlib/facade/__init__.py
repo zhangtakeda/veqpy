@@ -1,7 +1,8 @@
 """Python-facing VEQlib facade APIs.
 
-This package owns typed runtime arguments, artifact lifecycle, and Python handle
-helpers for the C++/CMake backend under :mod:`veqlib.cxx_core`.
+This package owns typed Kernel arguments, backend-neutral handle construction,
+source materialization, and public solve helpers. Backend-specific build and
+runtime details stay in private VEQlib implementation packages.
 """
 
 from __future__ import annotations

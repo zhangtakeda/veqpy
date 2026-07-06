@@ -5,10 +5,9 @@ Role:
 - Expose the engine package-root contract used by peer submodules.
 
 Notes:
-- Numba is the only supported execution backend.
-- Backend ABI and kernel modules remain internal to VEQPy, but cross-submodule
-  imports resolve them through this package root.
-- High-level Python orchestration lives in layout and operator binding modules.
+- This package owns model-layer numerical kernels and source helper routines used
+  by VEQlib's Numba backend.
+- Kernel construction, backend selection, and nonlinear solving live in VEQlib.
 """
 
 from __future__ import annotations
