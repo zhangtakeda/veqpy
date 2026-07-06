@@ -168,7 +168,7 @@ class _CxxKernelImpl:
             packed_x = self.result.x
         else:
             packed_x = self._packed_input(x, "x")
-        from veqpy.kernel.runtime import NumbaRuntime
+        from veqlib.numba_core.runtime import NumbaRuntime
 
         runtime = NumbaRuntime(self.topology)
         return runtime.build_equilibrium(packed_x, self._last_boundary, self._last_source)
@@ -427,7 +427,7 @@ def _make_kernel_impl(
     cache_root: Path | None,
     source_dir: Path | None,
     pin_cpu: bool | int | None,
-) -> _CxxKernelImpl:
+) -> Any:
     kernel_recipe = KernelRecipe() if recipe is None else recipe
     if not isinstance(kernel_recipe, KernelRecipe):
         raise TypeError(f"recipe must be KernelRecipe, got {type(kernel_recipe).__name__}")
@@ -441,7 +441,38 @@ def _make_kernel_impl(
             source_dir=source_dir,
             pin_cpu=pin_cpu,
         )
-    raise ValueError("KernelRecipe backend selection currently supports backend='cxx'")
+    if kernel_recipe.backend == "numba":
+        _validate_numba_options(
+            registry=registry,
+            cache_root=cache_root,
+            source_dir=source_dir,
+            pin_cpu=pin_cpu,
+        )
+        from veqlib.numba_core.kernel import _NumbaKernelImpl
+
+        return _NumbaKernelImpl(topology=topology, recipe=kernel_recipe, config=config)
+    raise ValueError("KernelRecipe backend selection supports backend='cxx' or backend='numba'")
+
+
+def _validate_numba_options(
+    *,
+    registry: KernelRegistry | None,
+    cache_root: Path | None,
+    source_dir: Path | None,
+    pin_cpu: bool | int | None,
+) -> None:
+    invalid = []
+    if registry is not None:
+        invalid.append("registry")
+    if cache_root is not None:
+        invalid.append("cache_root")
+    if source_dir is not None:
+        invalid.append("source_dir")
+    if pin_cpu is not None:
+        invalid.append("pin_cpu")
+    if invalid:
+        names = ", ".join(invalid)
+        raise ValueError(f"backend='numba' does not accept native-only option(s): {names}")
 
 
 def build(

@@ -3,6 +3,7 @@ from __future__ import annotations
 import tomllib
 from pathlib import Path
 
+import veqlib
 import veqpy
 import veqpy.facade as facade
 import veqpy.kernel as kernel
@@ -27,3 +28,5 @@ def test_core_public_imports_are_available() -> None:
     assert facade.NumbaKernel
     assert facade.KernelTopology
     assert kernel.NumbaKernel
+    assert veqlib.Kernel
+    assert veqlib.KernelRecipe

@@ -9,6 +9,7 @@ from helpers import MU0, pf_reference_profiles
 from numpy.linalg import norm
 from numpy.testing import assert_allclose
 
+from veqlib.facade import Kernel as UnifiedKernel
 from veqlib.facade import KernelBoundary, KernelConfig, KernelRecipe, KernelSource, KernelTopology
 from veqlib.facade.source_semantics import materialize_kernel_source
 from veqpy.kernel import NumbaKernel
@@ -142,6 +143,29 @@ def test_numba_kernel_recipe_validation_and_public_surface() -> None:
         NumbaKernel(topology=topology, recipe=KernelRecipe(backend="numba", layout="family"))
     with pytest.raises(ValueError, match="backend='numba'"):
         NumbaKernel(topology=topology, recipe=KernelRecipe(backend="cxx", layout="degree"))
+
+
+def test_unified_kernel_selects_numba_backend_and_rejects_native_options(tmp_path) -> None:
+    topology = make_kernel_topology()
+    kernel = UnifiedKernel(
+        topology=topology,
+        recipe=KernelRecipe(backend="numba", layout="degree"),
+    )
+
+    assert type(kernel).__name__ == "Kernel"
+    assert kernel.recipe.backend == "numba"
+    assert kernel.x_size == topology.x_size
+    prepared = kernel.prepare(dry_run=True)
+    assert prepared.backend == "numba"
+    assert prepared.prepared is False
+    assert prepared.artifact is None
+
+    with pytest.raises(ValueError, match="native-only option"):
+        UnifiedKernel(
+            topology=topology,
+            recipe=KernelRecipe(backend="numba", layout="degree"),
+            cache_root=tmp_path,
+        )
 
 
 def test_numba_kernel_residual_is_repeatable_and_validates_buffers() -> None:

@@ -1,4 +1,4 @@
-"""Public explicit Numba Kernel facade."""
+"""Private Numba Kernel implementation for the VEQlib Kernel wrapper."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ _JVP_EPS_SCALE = float(np.sqrt(1.0e-12))
 _JACOBIAN_REL_STEP = 1.0e-7
 
 
-class NumbaKernel:
+class _NumbaKernelImpl:
     """Stateful Numba-backed Kernel API handle using direct Numba runtime."""
 
     def __init__(

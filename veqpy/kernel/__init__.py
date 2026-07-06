@@ -1,4 +1,4 @@
-"""Explicit Numba Kernel facade for the Kernel API migration."""
+"""Temporary VEQPy import bridge for the VEQlib-owned Numba backend."""
 
 from __future__ import annotations
 
@@ -9,9 +9,7 @@ __all__ = [
     "NumbaKernel",
 ]
 
-_EXPORTS = {
-    "NumbaKernel": ("veqpy.kernel.kernel", "NumbaKernel"),
-}
+_EXPORTS = {"NumbaKernel": ("veqlib.numba_core.kernel", "_NumbaKernelImpl")}
 
 
 def __getattr__(name: str) -> Any:
