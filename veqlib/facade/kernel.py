@@ -40,7 +40,7 @@ if TYPE_CHECKING:
     from veqpy.model import Equilibrium
 
 
-class Kernel:
+class _CxxKernelImpl:
     """Stateful VEQlib kernel handle backed by one topology-specific artifact."""
 
     def __init__(
@@ -298,6 +298,150 @@ class Kernel:
                     f"{name} length must be at most M_max + 1 ({max_offsets}), "
                     f"got {values.size}"
                 )
+
+
+class Kernel:
+    """Backend-neutral public Kernel wrapper selected by ``KernelRecipe.backend``."""
+
+    def __init__(
+        self,
+        *,
+        topology: KernelTopology,
+        recipe: KernelRecipe | None = None,
+        config: KernelConfig | None = None,
+        registry: KernelRegistry | None = None,
+        cache_root: Path | None = None,
+        source_dir: Path | None = None,
+        pin_cpu: bool | int | None = None,
+    ) -> None:
+        self._impl = _make_kernel_impl(
+            topology=topology,
+            recipe=recipe,
+            config=config,
+            registry=registry,
+            cache_root=cache_root,
+            source_dir=source_dir,
+            pin_cpu=pin_cpu,
+        )
+
+    @property
+    def topology(self) -> KernelTopology:
+        return self._impl.topology
+
+    @property
+    def recipe(self) -> KernelRecipe:
+        return self._impl.recipe
+
+    @property
+    def config(self) -> KernelConfig:
+        return self._impl.config
+
+    @property
+    def history(self) -> list[SolveResult]:
+        return self._impl.history
+
+    @property
+    def result(self) -> SolveResult | None:
+        return self._impl.result
+
+    @property
+    def x_size(self) -> int:
+        return self._impl.x_size
+
+    def prepare(self, *, force: bool = False, dry_run: bool = False) -> KernelPrepareResult:
+        return self._impl.prepare(force=force, dry_run=dry_run)
+
+    def solve(
+        self,
+        boundary: KernelBoundary,
+        source: KernelSource,
+        *,
+        config: KernelConfig | None = None,
+        case_name: str | None = None,
+        **config_overrides: Any,
+    ) -> SolveResult:
+        return self._impl.solve(
+            boundary,
+            source,
+            config=config,
+            case_name=case_name,
+            **config_overrides,
+        )
+
+    def residual(self, x: Any, boundary: KernelBoundary, source: KernelSource) -> np.ndarray:
+        return self._impl.residual(x, boundary, source)
+
+    def residual_into(
+        self,
+        out: np.ndarray,
+        x: Any,
+        boundary: KernelBoundary,
+        source: KernelSource,
+    ) -> None:
+        self._impl.residual_into(out, x, boundary, source)
+
+    def jvp(self, x: Any, v: Any, boundary: KernelBoundary, source: KernelSource) -> np.ndarray:
+        return self._impl.jvp(x, v, boundary, source)
+
+    def jvp_into(
+        self,
+        out: np.ndarray,
+        x: Any,
+        v: Any,
+        boundary: KernelBoundary,
+        source: KernelSource,
+    ) -> None:
+        self._impl.jvp_into(out, x, v, boundary, source)
+
+    def jacobian(self, x: Any, boundary: KernelBoundary, source: KernelSource) -> np.ndarray:
+        return self._impl.jacobian(x, boundary, source)
+
+    def jacobian_into(
+        self,
+        out: np.ndarray,
+        x: Any,
+        boundary: KernelBoundary,
+        source: KernelSource,
+    ) -> None:
+        self._impl.jacobian_into(out, x, boundary, source)
+
+    def build_equilibrium(self, x: Any | None = None) -> Equilibrium:
+        return self._impl.build_equilibrium(x)
+
+    def clear(self) -> None:
+        self._impl.clear()
+
+    def close(self) -> None:
+        self._impl.close()
+
+    def pinned(self) -> AbstractContextManager[None, bool | None]:
+        return self._impl.pinned()
+
+
+def _make_kernel_impl(
+    *,
+    topology: KernelTopology,
+    recipe: KernelRecipe | None,
+    config: KernelConfig | None,
+    registry: KernelRegistry | None,
+    cache_root: Path | None,
+    source_dir: Path | None,
+    pin_cpu: bool | int | None,
+) -> _CxxKernelImpl:
+    kernel_recipe = KernelRecipe() if recipe is None else recipe
+    if not isinstance(kernel_recipe, KernelRecipe):
+        raise TypeError(f"recipe must be KernelRecipe, got {type(kernel_recipe).__name__}")
+    if kernel_recipe.backend == "cxx":
+        return _CxxKernelImpl(
+            topology=topology,
+            recipe=kernel_recipe,
+            config=config,
+            registry=registry,
+            cache_root=cache_root,
+            source_dir=source_dir,
+            pin_cpu=pin_cpu,
+        )
+    raise ValueError("KernelRecipe backend selection currently supports backend='cxx'")
 
 
 def build(

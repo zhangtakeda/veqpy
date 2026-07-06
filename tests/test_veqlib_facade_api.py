@@ -98,6 +98,17 @@ class RecordingSolver:
         alpha = np.zeros(2, dtype=np.float64)
         return (0.0, True, 1, 2, 3, 4, 5, 6, 7, 8.0, 9.0, x, x, x, alpha)
 
+    def residual_var_into(self, out: np.ndarray, x: np.ndarray) -> None:
+        out.fill(0.0)
+
+
+class RecordingRegistry:
+    def __init__(self, solver: RecordingSolver) -> None:
+        self.solver = solver
+
+    def create_solver(self, *args: object, **kwargs: object) -> RecordingSolver:
+        return self.solver
+
 
 def test_veqlib_facade_root_exports_semantic_surface() -> None:
     assert facade.__all__ == [
@@ -233,20 +244,17 @@ def test_kernel_source_materialization_errors_use_raw_field_names() -> None:
 
 def test_kernel_runtime_case_must_match_topology_before_native() -> None:
     topology = make_kernel_topology()
-    handle = Kernel(topology=topology)
     recorder = RecordingSolver()
-    handle._solver = recorder  # type: ignore[assignment]
+    handle = Kernel(topology=topology, registry=RecordingRegistry(recorder))  # type: ignore[arg-type]
 
     bad_source_length = KernelSource(
         heat_profile=np.ones(topology.sample_count - 1, dtype=np.float64),
         current_profile=np.ones(topology.sample_count - 1, dtype=np.float64),
     )
     with pytest.raises(ValueError, match="case does not match kernel topology: heat_profile"):
-        handle._set_runtime(
+        handle.solve(
             tiny_kernel_boundary(),
             bad_source_length,
-            KernelConfig(),
-            case_name=None,
         )
     assert recorder.runtime_args is None
 
@@ -258,11 +266,9 @@ def test_kernel_runtime_case_must_match_topology_before_native() -> None:
         c_offsets=np.zeros(topology.M_max + 2, dtype=np.float64),
     )
     with pytest.raises(ValueError, match="case does not match kernel topology: c_offsets"):
-        handle._set_runtime(
+        handle.solve(
             too_many_c_offsets,
             tiny_kernel_source(),
-            KernelConfig(),
-            case_name=None,
         )
     assert recorder.runtime_args is None
 
@@ -274,18 +280,15 @@ def test_kernel_runtime_case_must_match_topology_before_native() -> None:
         s_offsets=np.zeros(topology.M_max + 2, dtype=np.float64),
     )
     with pytest.raises(ValueError, match="case does not match kernel topology: s_offsets"):
-        handle._set_runtime(
+        handle.solve(
             too_many_s_offsets,
             tiny_kernel_source(),
-            KernelConfig(),
-            case_name=None,
         )
     assert recorder.runtime_args is None
 
-    handle._set_runtime(
+    handle.solve(
         tiny_kernel_boundary(),
         tiny_kernel_source(),
-        KernelConfig(),
         case_name="override",
     )
     assert recorder.runtime_args is not None
@@ -303,9 +306,12 @@ def test_kernel_solve_uses_handle_default_config_with_per_call_overrides() -> No
         max_evaluations=123,
         norm="balanced",
     )
-    handle = Kernel(topology=topology, config=default_config)
-    recorder = RecordingSolver(x_size=handle.x_size)
-    handle._solver = recorder  # type: ignore[assignment]
+    recorder = RecordingSolver(x_size=topology.x_size)
+    handle = Kernel(
+        topology=topology,
+        config=default_config,
+        registry=RecordingRegistry(recorder),  # type: ignore[arg-type]
+    )
 
     handle.solve(tiny_kernel_boundary(), source=tiny_kernel_source(), case_name="default")
     assert recorder.runtime_args is not None
@@ -343,9 +349,8 @@ def test_kernel_solve_uses_handle_default_config_with_per_call_overrides() -> No
 
 def test_kernel_build_equilibrium_uses_last_runtime_case() -> None:
     topology = make_kernel_topology()
-    handle = Kernel(topology=topology)
-    recorder = RecordingSolver(x_size=handle.x_size)
-    handle._solver = recorder  # type: ignore[assignment]
+    recorder = RecordingSolver(x_size=topology.x_size)
+    handle = Kernel(topology=topology, registry=RecordingRegistry(recorder))  # type: ignore[arg-type]
     boundary = tiny_kernel_boundary()
     source = tiny_kernel_source()
     x = np.zeros(handle.x_size, dtype=np.float64)
@@ -353,7 +358,7 @@ def test_kernel_build_equilibrium_uses_last_runtime_case() -> None:
     with pytest.raises(RuntimeError, match="previous Kernel runtime case"):
         handle.build_equilibrium(x)
 
-    handle._set_runtime(boundary, source, KernelConfig(), case_name=None)
+    handle.residual(x, boundary, source)
     with pytest.raises(RuntimeError, match=r"build_equilibrium\(x=None\)"):
         handle.build_equilibrium()
 
