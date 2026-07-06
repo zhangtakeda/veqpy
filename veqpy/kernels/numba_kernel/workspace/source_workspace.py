@@ -8,7 +8,7 @@ Public API:
 - SourceWorkspace
 
 Notes:
-- Source planning and validation live in the shared facade semantics and
+- Source planning and validation live in shared Kernel source semantics and
   backend-local runtime modules.
 - Source numerical kernels live in the Numba backend package.
 """

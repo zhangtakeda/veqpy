@@ -1,4 +1,4 @@
-"""Private C++ backend implementation modules for VEQlib Kernel."""
+"""Private C++ backend implementation modules for Kernel."""
 
 from __future__ import annotations
 

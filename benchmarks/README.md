@@ -62,11 +62,11 @@ table reports effective function evaluations rather than solve-time medians.
 | PQ_rho_uniform_Ip   | passed | 12  | 0.933022 | 29   | 6.60e-08 | 1.35e-04 | 2.81e-05  | 1.34e-03   |
 | PQ_psin_uniform_Ip  | passed | 18  | 1.409089 | 42   | 2.64e-09 | 5.00e-03 | 2.56e-03  | 2.18e-02   |
 
-### VEQlib synthetic route matrix
+### Cxx Synthetic Route Matrix
 
 - scope: `ip-uniform`; build: `fastmath`; layout: `degree`; warmup: `5`; repeat: `100`; summary: `12/12 passed`.
 - timing source: `SolveResult.elapsed_ms`; native policy: `initial=cold`, `continue=cold`, `norm=fast`.
-- `diff` is `x_max_abs` between the VEQlib and VEQPy packed solutions.
+- `diff` is `x_max_abs` between the VEQPy Kernel packed solutions.
 
 | case                | status | x   | Cxx ms   | Numba ms | speedup | diff     |
 | ------------------- | ------ | --- | -------- | -------- | ------- | -------- |
@@ -83,11 +83,11 @@ table reports effective function evaluations rather than solve-time medians.
 | PQ_rho_uniform_Ip   | passed | 12  | 0.188252 | 0.966788 | 5.136x  | 2.15e-11 |
 | PQ_psin_uniform_Ip  | passed | 18  | 0.303669 | 1.437389 | 4.733x  | 2.07e-11 |
 
-### VEQlib GEQDSK Low/Medium/High/Ref
+### Cxx GEQDSK Low/Medium/High/Ref
 
 - build: `fastmath`; warmup: `5`; repeat: `100`; validation atol: `1e-06`.
 - timing source: `SolveResult.elapsed_ms`; native policy: `initial=cold`, `continue=cold`, `norm=fast`.
-- `diff` is `x_max_abs` between the VEQlib and VEQPy packed solutions.
+- `diff` is `x_max_abs` between the VEQPy Kernel packed solutions.
 
 | case    | status | config | x   | Cxx ms    | Numba ms  | speedup | diff     |
 | ------- | ------ | ------ | --- | --------- | --------- | ------- | -------- |
@@ -104,7 +104,7 @@ table reports effective function evaluations rather than solve-time medians.
 | efit    | passed | High   | 94  | 2.502630  | 9.804938  | 3.918x  | 8.34e-11 |
 | efit    | passed | Ref    | 130 | 6.209815  | 21.124163 | 3.402x  | 2.99e-10 |
 
-### VEQlib continuation effective nfev
+### Cxx Continuation Effective Nfev
 
 - cases: `chease, efit, solovev`; configs: `Ref`; updates: `ip, boundary, source, mixed`; points: `11`; warmup: `1`; repeat: `5`.
 - Policy columns are mean `effective_nfev`; `vs cold` is the evaluation-count reduction of the best policy relative to cold.
@@ -128,7 +128,7 @@ table reports effective function evaluations rather than solve-time medians.
 
 - The default route and GEQDSK tables are cold-repeat Kernel benchmarks.
 - Warm-start behavior is isolated in the continuation benchmark.
-- VEQlib tables exclude first-run C++/nanobind build cost; inspect JSON `artifact.*` fields for build timing.
+- Cxx tables exclude first-run C++/nanobind build cost; inspect JSON `artifact.*` fields for build timing.
 - This WSL2 run records solve-time medians only; it does not claim PMU, cache, IPC, or Roofline evidence.
 - Regenerate this file after changing Kernel API benchmark entry points, solver
   policy, route topology, profile layout, compiler flags, or hardware.

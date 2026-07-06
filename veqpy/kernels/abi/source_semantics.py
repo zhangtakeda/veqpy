@@ -21,7 +21,7 @@ SETUP_PHYSICAL_ABS_MIN = SETUP_NORMALIZED_ABS_MIN / MU0
 SETUP_PHYSICAL_ABS_MAX = SETUP_NORMALIZED_ABS_MAX / MU0
 CURRENT_PROFILE_ROUTES = frozenset({"PI", "PJ1", "PJ2"})
 KERNEL_SOURCE_ADVICE = (
-    "Pass raw case values to KernelSource; facade materialization applies mu0 scaling once."
+    "Pass raw case values to KernelSource; source lowering applies mu0 scaling once."
 )
 
 

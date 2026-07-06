@@ -1,4 +1,4 @@
-"""Nanobind ABI lowering helpers for VEQlib facade dataclasses."""
+"""Nanobind ABI lowering helpers for Kernel dataclasses."""
 
 from __future__ import annotations
 

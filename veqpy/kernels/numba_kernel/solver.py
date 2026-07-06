@@ -1,4 +1,4 @@
-"""Low-level solve/residual facade backed by direct Numba runtime."""
+"""Low-level solve/residual adapter backed by direct Numba runtime."""
 
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ class _SolveOutcome:
 
 
 class NumbaSolver:
-    """Direct KernelTypes-to-Numba runtime solve facade."""
+    """Direct KernelTypes-to-Numba runtime solve adapter."""
 
     def __init__(self, topology: KernelTopology) -> None:
         self.topology = topology

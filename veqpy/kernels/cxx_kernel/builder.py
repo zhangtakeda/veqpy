@@ -1,4 +1,4 @@
-"""Artifact preparation, build, and cache metadata for VEQlib kernels.
+"""Artifact preparation, build, and cache metadata for Kernels.
 
 Artifact identity is a setup-time contract: topology, artifact recipe, toolchain
 ABI, and source digests define reusable native modules. Runtime
@@ -30,23 +30,23 @@ from veqpy.kernels.abi.identity import recipe_identity_payload, topology_identit
 from veqpy.types import KernelRecipe as Recipe
 from veqpy.types import KernelTopology as Topology
 
-from .validation import validate_supported_for_veqlib_native
+from .validation import validate_supported_for_cxx_backend
 
 GENERATOR_VERSION = "veqlib.kernel.builder.v1"
 ARTIFACT_SCHEMA = "veqlib.kernel_artifact.v1"
 SOURCE_DIGEST_SCHEMA = "veqlib.source_digest.v1"
 PYTHON_SOURCE_DIGEST_SCHEMA = "veqlib.kernel_python_source_digest.v1"
 NANOBIND_STATIC_SCHEMA = "veqlib.nanobind_static_artifact.v1"
-VEQLIB_CXX = "clang++-18"
+DEFAULT_CXX_COMPILER = "clang++-18"
 
 
 class PrepareError(RuntimeError):
-    """Raised when a VEQlib kernel artifact cannot be planned or built."""
+    """Raised when a Kernel artifact cannot be planned or built."""
 
 
 @dataclass(frozen=True, slots=True)
 class PrepareResult:
-    """Resolved on-disk VEQlib kernel artifact."""
+    """Resolved on-disk Kernel artifact."""
 
     topology: Topology
     recipe: Recipe
@@ -93,7 +93,7 @@ def prepare(
     force: bool = False,
     dry_run: bool = False,
 ) -> PrepareResult:
-    """Resolve, optionally build, and record a VEQlib artifact for ``topology``/``recipe``.
+    """Resolve, optionally build, and record a Cxx artifact for ``topology``/``recipe``.
 
     ``dry_run=True`` writes the same planning metadata and CMake arguments but does not invoke
     CMake. It is the fast validation path used before the nanobind production API is finalized.
@@ -103,14 +103,14 @@ def prepare(
     if not isinstance(recipe, Recipe):
         raise TypeError(f"recipe must be KernelRecipe, got {type(recipe).__name__}")
     if recipe.backend != "cxx":
-        raise ValueError("VEQlib C++ artifact preparation requires KernelRecipe backend='cxx'")
+        raise ValueError("Cxx artifact preparation requires KernelRecipe backend='cxx'")
     if not dry_run:
-        validate_supported_for_veqlib_native(topology)
+        validate_supported_for_cxx_backend(topology)
     source_dir = _default_source_dir() if source_dir is None else source_dir.resolve()
     if not source_dir.exists():
-        raise PrepareError(f"VEQlib source directory does not exist: {source_dir}")
+        raise PrepareError(f"Cxx source directory does not exist: {source_dir}")
 
-    cxx = VEQLIB_CXX
+    cxx = DEFAULT_CXX_COMPILER
     build_identity = _build_identity(topology, recipe, source_dir=source_dir, cxx=cxx)
     artifact_id = _compute_artifact_id(topology, recipe, build_identity)
     root = (cache_root or default_kernel_cache_root()).expanduser()
@@ -463,7 +463,7 @@ SHARED_LIBRARY = Path(__file__).with_name("veqlib.so")
 def load():
     spec = importlib.util.spec_from_file_location(MODULE_NAME, SHARED_LIBRARY)
     if spec is None or spec.loader is None:
-        raise ImportError(f"cannot load VEQlib kernel artifact {{ARTIFACT_ID}}")
+        raise ImportError(f"cannot load Kernel artifact {{ARTIFACT_ID}}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -664,8 +664,8 @@ nanobind_build_library(nanobind-static AS_SYSINCLUDE)
 def _native_build_contract(topology: Topology, recipe: Recipe, *, cxx: str) -> dict[str, Any]:
     """Return the Python-emitted native contract that participates in artifact identity.
 
-    Python facade/helper source changes should not force a native rebuild by themselves.
-    The artifact key is tied to the topology, toolchain ABI, VEQlib sources, and the
+    Python helper source changes should not force a native rebuild by themselves.
+    The artifact key is tied to the topology, toolchain ABI, Cxx sources, and the
     concrete CMake definitions that select generated native code.
     """
 
@@ -728,7 +728,7 @@ def _build_identity(
             "nanobind": _package_version("nanobind"),
         },
         "native_build_contract": _native_build_contract(topology, recipe, cxx=cxx),
-        "veqlib_source_digest": _source_digest(source_dir),
+        "cxx_source_digest": _source_digest(source_dir),
     }
 
 

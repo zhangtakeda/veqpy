@@ -3,7 +3,7 @@ Module: numba_core.initialize
 
 Role:
 - Build kernel-owned packed initial states.
-- Keep geometric initializer formulas out of the direct runtime facade.
+- Keep geometric initializer formulas out of the direct residual runtime.
 
 Public API:
 - build_boundary_slope_initial_state

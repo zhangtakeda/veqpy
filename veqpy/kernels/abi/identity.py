@@ -1,4 +1,4 @@
-"""Canonical VEQlib facade payloads used for artifact identity and metadata."""
+"""Canonical Kernel payloads used for artifact identity and metadata."""
 
 from __future__ import annotations
 

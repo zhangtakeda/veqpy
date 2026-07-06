@@ -28,14 +28,14 @@ from .native_abi import (
     source_runtime_args,
 )
 from .registry import KernelRegistry
-from .solver import VEQlibSolver
+from .solver import CxxSolver
 
 if TYPE_CHECKING:
     from veqpy.model import Equilibrium
 
 
 class _CxxKernelImpl:
-    """Stateful VEQlib kernel handle backed by one topology-specific artifact."""
+    """Stateful Kernel handle backed by one topology-specific artifact."""
 
     def __init__(
         self,
@@ -60,7 +60,7 @@ class _CxxKernelImpl:
             source_dir=source_dir,
             pin_cpu=pin_cpu,
         )
-        self._solver: VEQlibSolver | None = None
+        self._solver: CxxSolver | None = None
         self.history: list[SolveResult] = []
         self.result: SolveResult | None = None
         self._last_boundary: KernelBoundary | None = None
@@ -71,7 +71,7 @@ class _CxxKernelImpl:
         return self.topology.x_size
 
     def prepare(self, *, force: bool = False, dry_run: bool = False) -> KernelPrepareResult:
-        artifact = self._veqlib_solver().prepare(force=force, dry_run=dry_run)
+        artifact = self._cxx_solver().prepare(force=force, dry_run=dry_run)
         return KernelPrepareResult(
             backend=self.recipe.backend,
             topology=self.topology,
@@ -115,7 +115,7 @@ class _CxxKernelImpl:
         packed_out = self._packed_output(out, (self.x_size,), "out")
         packed_x = self._packed_input(x, "x")
         self._set_runtime(boundary, source, self.config, case_name=None)
-        self._veqlib_solver().residual_var_into(packed_out, packed_x)
+        self._cxx_solver().residual_var_into(packed_out, packed_x)
 
     def jvp(self, x: Any, v: Any, boundary: KernelBoundary, source: KernelSource) -> np.ndarray:
         out = np.empty(self.x_size, dtype=np.float64)
@@ -134,7 +134,7 @@ class _CxxKernelImpl:
         packed_x = self._packed_input(x, "x")
         packed_v = self._packed_input(v, "v")
         self._set_runtime(boundary, source, self.config, case_name=None)
-        self._veqlib_solver().jvp_into(packed_out, packed_x, packed_v)
+        self._cxx_solver().jvp_into(packed_out, packed_x, packed_v)
 
     def jacobian(self, x: Any, boundary: KernelBoundary, source: KernelSource) -> np.ndarray:
         out = np.empty((self.x_size, self.x_size), dtype=np.float64)
@@ -151,7 +151,7 @@ class _CxxKernelImpl:
         matrix_out = self._packed_output(out, (self.x_size, self.x_size), "out")
         packed_x = self._packed_input(x, "x")
         self._set_runtime(boundary, source, self.config, case_name=None)
-        self._veqlib_solver().jacobian_into(matrix_out, packed_x)
+        self._cxx_solver().jacobian_into(matrix_out, packed_x)
 
     def build_equilibrium(self, x: Any | None = None) -> Equilibrium:
         if self._last_boundary is None or self._last_source is None:
@@ -183,9 +183,9 @@ class _CxxKernelImpl:
 
         return pinned_cpu(self.pin_cpu)
 
-    def _veqlib_solver(self) -> VEQlibSolver:
+    def _cxx_solver(self) -> CxxSolver:
         if self._solver is None:
-            self._solver = VEQlibSolver(
+            self._solver = CxxSolver(
                 self.topology,
                 recipe=self.recipe,
                 registry=self.registry,
@@ -228,12 +228,12 @@ class _CxxKernelImpl:
         config: KernelConfig,
         *,
         case_name: str | None,
-    ) -> VEQlibSolver:
+    ) -> CxxSolver:
         kernel_boundary = self._kernel_boundary(boundary)
         kernel_source = self._kernel_source(source, case_name=case_name)
         materialized_source = materialize_kernel_source(self.topology, kernel_source)
         self._validate_runtime_case_adaptability(kernel_boundary, materialized_source)
-        solver = self._veqlib_solver()
+        solver = self._cxx_solver()
         solver.set_kernel_runtime(
             "" if materialized_source.case_name is None else materialized_source.case_name,
             *boundary_runtime_args(kernel_boundary),
@@ -247,7 +247,7 @@ class _CxxKernelImpl:
     @staticmethod
     def _validate_native_recipe(recipe: KernelRecipe) -> None:
         if recipe.backend != "cxx":
-            raise ValueError("VEQlib native Kernel requires KernelRecipe backend='cxx'")
+            raise ValueError("Cxx Kernel requires KernelRecipe backend='cxx'")
 
     @staticmethod
     def _kernel_config(config: KernelConfig) -> KernelConfig:

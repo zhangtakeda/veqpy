@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Continuation-policy benchmark for VEQlib Kernel handles."""
+"""Continuation-policy benchmark for Kernel handles."""
 
 from __future__ import annotations
 
@@ -341,7 +341,7 @@ def _write_markdown(rows: list[dict[str, Any]], path: Path) -> None:
     policy_header = " | ".join(SUMMARY_POLICIES)
     policy_align = " | ".join("---:" for _ in SUMMARY_POLICIES)
     lines = [
-        "# VEQlib Continuation nfev Benchmark",
+        "# Cxx Continuation nfev Benchmark",
         "",
         "The policy columns are mean effective nfev across repeats.",
         "",

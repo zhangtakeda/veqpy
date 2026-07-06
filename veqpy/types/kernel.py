@@ -78,7 +78,7 @@ _DEFAULT_ENZYME_JACOBIAN_BATCH_WIDTH = 0
 
 @dataclass(frozen=True, slots=True)
 class KernelRecipe:
-    """Artifact recipe and packed-layout configuration for one VEQlib kernel."""
+    """Artifact recipe and packed-layout configuration for one Kernel."""
 
     backend: str = "cxx"
     layout: str = "degree"
@@ -138,7 +138,7 @@ class KernelRecipe:
 
 @dataclass(frozen=True, slots=True)
 class KernelBoundary:
-    """Native VEQlib boundary scalars and Fourier offsets."""
+    """Native Cxx boundary scalars and Fourier offsets."""
 
     a: float
     R0: float
@@ -164,7 +164,7 @@ class KernelBoundary:
 
 @dataclass(frozen=True, slots=True)
 class KernelTopology:
-    """VEQlib native topology independent from artifact recipe."""
+    """Cxx topology independent from artifact recipe."""
 
     h_count: int
     v_count: int
@@ -302,7 +302,7 @@ class KernelTopology:
 
 @dataclass(frozen=True, slots=True)
 class KernelSource:
-    """Runtime source and physical constraints for one VEQlib kernel solve."""
+    """Runtime source and physical constraints for one Kernel solve."""
 
     heat_profile: np.ndarray | list[float] | tuple[float, ...]
     current_profile: np.ndarray | list[float] | tuple[float, ...]
@@ -328,7 +328,7 @@ class KernelSource:
 
 @dataclass(frozen=True, slots=True)
 class KernelConfig:
-    """Runtime configuration for one VEQlib kernel invocation."""
+    """Runtime configuration for one Kernel invocation."""
 
     method: str = "powell"
     max_residual: float = 1.0e-6
@@ -404,7 +404,7 @@ class KernelPrepareResult:
 
 @dataclass(frozen=True, slots=True)
 class SolveResult:
-    """Python-owned snapshot of one VEQlib solve result."""
+    """Python-owned snapshot of one Kernel solve result."""
 
     elapsed_ms: float
     success: bool

@@ -1,11 +1,11 @@
-"""Validation helpers for VEQlib facade values at native execution boundaries."""
+"""Validation helpers for Cxx backend execution boundaries."""
 
 from __future__ import annotations
 
 from veqpy.types import KernelTopology, TopologyError
 
 
-def validate_supported_for_veqlib_native(topology: KernelTopology) -> None:
+def validate_supported_for_cxx_backend(topology: KernelTopology) -> None:
     mismatches: list[str] = []
     if topology.quadrature != "legendre":
         mismatches.append(f"quadrature={topology.quadrature!r}")
@@ -23,4 +23,4 @@ def validate_supported_for_veqlib_native(topology: KernelTopology) -> None:
     if topology.source_active_family != "psin" and topology.psin_count > 0:
         mismatches.append("source-owned topology does not accept psin_count > 0")
     if mismatches:
-        raise TopologyError("unsupported VEQlib native topology: " + "; ".join(mismatches))
+        raise TopologyError("unsupported Cxx topology: " + "; ".join(mismatches))

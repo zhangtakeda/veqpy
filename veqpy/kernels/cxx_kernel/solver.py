@@ -17,11 +17,11 @@ from veqpy.types import KernelTopology as Topology
 
 from .builder import PrepareResult
 from .registry import KernelRegistry, SolverThreadError, ThreadOwnedNativeSolver
-from .validation import validate_supported_for_veqlib_native
+from .validation import validate_supported_for_cxx_backend
 
 
-class VEQlibSolver:
-    """Experimental Solver facade for the new VEQlib/nanobind architecture."""
+class CxxSolver:
+    """Experimental solver wrapper for the Cxx/nanobind architecture."""
 
     def __init__(
         self,
@@ -34,7 +34,7 @@ class VEQlibSolver:
         solver: str = "powell",
         pin_cpu: bool | int | None = None,
     ) -> None:
-        validate_supported_for_veqlib_native(topology)
+        validate_supported_for_cxx_backend(topology)
         self.topology = topology
         self.recipe = Recipe() if recipe is None else recipe
         if not isinstance(self.recipe, Recipe):
@@ -58,7 +58,7 @@ class VEQlibSolver:
         current = threading.get_ident()
         if current != self._owner_thread_id:
             raise SolverThreadError(
-                "VEQlibSolver cannot be used across threads; create one solver per thread "
+                "CxxSolver cannot be used across threads; create one solver per thread "
                 f"or use KernelRegistry.get_thread_solver(). owner={self._owner_thread_id}, "
                 f"current={current}"
             )

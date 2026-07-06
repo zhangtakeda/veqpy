@@ -1,4 +1,4 @@
-"""Native module registry and thread-owned VEQlib solvers.
+"""Native module registry and thread-owned Cxx solvers.
 
 The registry caches loaded topology artifacts at process scope, but each
 ``NativeSolver`` guard owns mutable C++ workspace and is bound to the Python
@@ -26,15 +26,15 @@ from .builder import prepare as prepare_kernel
 
 
 class KernelLoadError(ImportError):
-    """Raised when a built VEQlib kernel artifact cannot be imported."""
+    """Raised when a built Kernel artifact cannot be imported."""
 
 
 class SolverThreadError(RuntimeError):
-    """Raised when a thread-owned VEQlib solver is used from another thread."""
+    """Raised when a thread-owned Cxx solver is used from another thread."""
 
 
 class SolverClosedError(RuntimeError):
-    """Raised when a closed VEQlib solver guard is used again."""
+    """Raised when a closed Cxx solver guard is used again."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,7 +65,7 @@ class ThreadOwnedNativeSolver:
         current = threading.get_ident()
         if current != self._owner_thread_id:
             raise SolverThreadError(
-                "VEQlib NativeSolver owns mutable C++ workspace and cannot be used "
+                "Cxx NativeSolver owns mutable C++ workspace and cannot be used "
                 f"from thread {current}; owner thread is {self._owner_thread_id}"
             )
 
@@ -121,7 +121,7 @@ class ThreadOwnedNativeSolver:
 
     def _require_solver(self) -> Any:
         if self._solver is None:
-            raise SolverClosedError("VEQlib NativeSolver guard is closed")
+            raise SolverClosedError("Cxx NativeSolver guard is closed")
         return self._solver
 
     def _call_native(self, method: Any, *args: Any) -> Any:
@@ -132,7 +132,7 @@ class ThreadOwnedNativeSolver:
 
 
 class KernelRegistry:
-    """Process cache for VEQlib nanobind modules and per-thread C++ solvers."""
+    """Process cache for Cxx nanobind modules and per-thread C++ solvers."""
 
     def __init__(
         self,
@@ -235,7 +235,7 @@ class KernelRegistry:
 
 def _load_artifact_module(artifact: PrepareResult) -> ModuleType:
     if not artifact.shared_library_path.exists():
-        raise KernelLoadError(f"VEQlib shared library is missing: {artifact.shared_library_path}")
+        raise KernelLoadError(f"Cxx shared library is missing: {artifact.shared_library_path}")
     module_name = _module_name_for_artifact(artifact.artifact_id)
     cached = sys.modules.get(module_name)
     if cached is not None:

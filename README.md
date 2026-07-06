@@ -206,9 +206,9 @@ on per-call affinity changes.
 Useful Kernel checks from the repository root:
 
 ```bash
-.venv/bin/python -m compileall -q veqpy tests/test_kernel_facade_api.py
-.venv/bin/ruff check veqpy tests/test_kernel_facade_api.py
-.venv/bin/python -m pytest tests/test_kernel_facade_api.py
+.venv/bin/python -m compileall -q veqpy tests/test_kernel_contract_api.py
+.venv/bin/ruff check veqpy tests/test_kernel_contract_api.py
+.venv/bin/python -m pytest tests/test_kernel_contract_api.py
 ```
 
 Retained benchmark result artifacts live under `benchmarks/results/`. Future

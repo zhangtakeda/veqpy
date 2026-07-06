@@ -1,4 +1,4 @@
-"""Private Numba backend implementation modules for VEQlib Kernel."""
+"""Private Numba backend implementation modules for Kernel."""
 
 from __future__ import annotations
 

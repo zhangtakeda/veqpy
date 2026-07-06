@@ -114,7 +114,7 @@ def main() -> None:
     )
     kernel.prepare()
 
-    # 3. Prepare typed raw runtime source data; facade materialization applies
+    # 3. Prepare typed raw runtime source data; source lowering applies
     #    route-dependent mu0 scaling before backend entry.
     kernel_boundary = build_boundary()
     kernel_source = build_source()

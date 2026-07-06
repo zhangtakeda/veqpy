@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""GEQDSK VEQlib native vs VEQPy Numba Kernel benchmark."""
+"""GEQDSK Cxx backend vs VEQPy Numba Kernel benchmark."""
 
 from __future__ import annotations
 

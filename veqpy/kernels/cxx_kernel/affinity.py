@@ -1,8 +1,8 @@
-"""CPU affinity helpers for short VEQlib native calls.
+"""CPU affinity helpers for short Cxx backend calls.
 
 Pinning is intentionally a scoped runtime policy, not part of artifact identity.
 Nested calls are tracked per Python thread so benchmark loops can pin once
-around many native solves without fighting lower-level facade calls.
+around many native solves without fighting lower-level pin scopes.
 """
 
 from __future__ import annotations
@@ -29,14 +29,14 @@ def current_cpu_affinity() -> tuple[int, ...] | None:
 
 
 def cpu_pin_scope_active() -> bool:
-    """Return whether this thread is already inside a VEQlib pinning scope."""
+    """Return whether this thread is already inside a Cxx pinning scope."""
 
     return int(getattr(_PIN_STATE, "depth", 0)) > 0
 
 
 @contextmanager
 def pinned_cpu(policy: bool | int | None = None) -> Iterator[None]:
-    """Temporarily pin the current thread/process to one CPU for VEQlib calls.
+    """Temporarily pin the current thread/process to one CPU for Cxx calls.
 
     ``policy=None`` reads the environment and defaults to enabled auto pinning.
     Auto pinning chooses the smallest CPU from the current affinity set so an

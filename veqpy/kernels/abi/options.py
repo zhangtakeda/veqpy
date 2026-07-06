@@ -1,6 +1,6 @@
-"""Python mirrors of VEQlib C++ ABI option codes.
+"""Python mirrors of Cxx ABI option codes.
 
-Python facade inputs use canonical string tokens. Native kernels consume integer
+Python Kernel inputs use canonical string tokens. Native kernels consume integer
 ABI enum codes derived from those strings. Keep these constants synchronized with
 the native core ABI enum header.
 """

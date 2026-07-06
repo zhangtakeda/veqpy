@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Route benchmark comparing VEQlib native Kernel with VEQPy Numba Kernel."""
+"""Route benchmark comparing Cxx Kernel with VEQPy Numba Kernel."""
 
 from __future__ import annotations
 
