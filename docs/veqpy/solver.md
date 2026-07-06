@@ -1,9 +1,16 @@
 # Kernel Solve Flow
 
-VEQPy solves through `veqpy.facade.Kernel`.
+VEQlib solves through `veqlib.Kernel`; VEQPy supplies model-layer inputs and
+receives `Equilibrium` snapshots.
 
 ```python
-kernel = Kernel(topology=topology, config=KernelConfig(method="levenberg-marquardt"))
+from veqlib import Kernel, KernelConfig, KernelRecipe
+
+kernel = Kernel(
+    topology=topology,
+    recipe=KernelRecipe(backend="numba", layout="degree"),
+    config=KernelConfig(method="levenberg-marquardt"),
+)
 result = kernel.solve(boundary, source)
 equilibrium = kernel.build_equilibrium()
 ```

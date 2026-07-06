@@ -2,7 +2,8 @@
 
 This directory contains VEQPy/VEQlib benchmark entry points and result
 artifacts. Current scripts use the Kernel API directly: Python/Numba rows call
-`veqpy.facade.Kernel`, and native C++ rows call `veqlib.facade.Kernel`.
+`veqlib.Kernel` with `backend="numba"`, and native C++ rows call the same
+`veqlib.Kernel` surface with `backend="cxx"`.
 
 The route and GEQDSK tables below report median `SolveResult.elapsed_ms`.
 Each measured repeat uses a fresh Kernel handle for the case, so accepted
@@ -16,7 +17,7 @@ table reports effective function evaluations rather than solve-time medians.
 
 ## Scripts
 
-- `veqpy_routes.py`: VEQPy/Numba synthetic route matrix through `veqpy.facade.Kernel`.
+- `veqpy_routes.py`: VEQPy/Numba synthetic route matrix through `veqlib.Kernel`.
 - `veqlib_routes.py`: VEQlib native route matrix compared with VEQPy/Numba Kernel.
 - `veqlib_geqdsk_pareto.py`: GEQDSK VEQlib native vs VEQPy/Numba Kernel matrix.
 - `veqlib_continuation.py`: VEQlib native continuation-policy benchmark.

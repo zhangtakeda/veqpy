@@ -53,12 +53,11 @@ and easier to reuse than full solver-native equilibrium or reconstruction pipeli
 - **Formula-oriented model objects**: `Profile` is used for serializable shape-profile
   snapshots on `Equilibrium`. `Grid` and `Equilibrium` use reactive derived properties
   to lazily reconstruct geometry and physics diagnostics by formula.
-- **Kernel API**: `veqpy.facade.Kernel` is the default Numba-backed runtime handle.
-  It reuses the shared
+- **Kernel API**: `veqlib.Kernel` is the backend-neutral runtime handle.
+  It uses
   `KernelTopology + KernelRecipe + KernelBoundary + KernelSource + KernelConfig`
-  types from `veqlib.facade`, keeps raw runtime source profiles in `KernelSource`,
-  and applies the shared route-dependent source materialization table before
-  residuals, solves, and equilibrium snapshots.
+  types from `veqlib`, keeps raw runtime source profiles in `KernelSource`, and
+  selects the `cxx` or `numba` backend through `KernelRecipe.backend`.
 
 ## Installation
 
@@ -89,12 +88,12 @@ For a runtime-only install from a local source checkout, omit the `dev` extra:
 .venv/bin/python -m pip install .
 ```
 
-The optional VEQlib C++ kernel layer under `veqlib/` is not required for normal
-Python/Numba use. Its `facade/` tree provides `veqlib.facade`, its `core/` tree
-holds the C++/CMake implementation, and the top-level `benchmarks/` package holds
-comparison scripts. It is intentionally separate from VEQPy internals. Building it requires a local
-C++20 toolchain and native libraries such as CMake 3.24+, `clang++`, nanobind,
-GCEM, nlohmann-json, CMINPACK, LAPACKE/LAPACK, and OpenBLAS.
+VEQlib under `veqlib/` owns Kernel construction, backend selection, and solving.
+Its public facade provides the Kernel types while private backend modules own
+Numba and native runtime details. The native C++ backend is optional for normal
+Python/Numba use and requires a local C++20 toolchain and native libraries such
+as CMake 3.24+, `clang++`, nanobind, GCEM, nlohmann-json, CMINPACK,
+LAPACKE/LAPACK, and OpenBLAS.
 
 All commands below use `.venv` explicitly; activating the environment is optional.
 
@@ -131,8 +130,8 @@ paper/data artifacts rather than user-demo outputs.
 Core local checks mirror the push/PR CI workflow.
 
 ```bash
-.venv/bin/python -m compileall -q veqpy tests examples veqlib/facade benchmarks scripts
-.venv/bin/ruff check veqpy tests examples veqlib/facade benchmarks scripts
+.venv/bin/python -m compileall -q veqpy veqlib tests examples benchmarks scripts
+.venv/bin/ruff check veqpy veqlib tests examples benchmarks scripts
 .venv/bin/python -m pytest
 ```
 
@@ -156,20 +155,20 @@ representative High configuration for each GEQDSK family.
 
 | case(params)    |  VEQlib (ms) |    Numba (ms) |     speedup | solution diff |
 | --------------- | -----------: | ------------: | ----------: | ------------: |
-| D-shaped(4)     |     0.038843 |      0.988233 |     25.442x |      2.73e-09 |
-| D-shaped(5)     |     0.044019 |      1.076983 |     24.466x |      9.20e-09 |
-| **D-shaped(9)** | **0.066897** |  **1.384216** | **20.692x** |  **1.25e-08** |
-| D-shaped(75)    |     0.778386 |      6.778595 |      8.709x |      1.47e-08 |
-| H-mode(27)      |     0.220681 |      5.020843 |     22.752x |      1.89e-07 |
-| H-mode(36)      |     0.294272 |      6.077891 |     20.654x |      3.87e-08 |
-| **H-mode(60)**  | **0.551778** | **13.426837** | **24.334x** |  **3.46e-09** |
-| H-mode(130)     |     2.537298 |     42.276592 |     16.662x |      1.36e-07 |
-| X-point(19)     |     0.138631 |      2.667478 |     19.242x |      3.51e-09 |
-| X-point(29)     |     0.243494 |      3.624370 |     14.885x |      4.51e-08 |
-| **X-point(94)** | **1.315509** | **10.269229** |  **7.806x** |  **3.44e-08** |
-| X-point(130)    |     2.530054 |     21.647612 |      8.556x |      1.24e-09 |
+| D-shaped(4)     |     0.077366 |      1.095349 |     14.158x |      1.17e-12 |
+| D-shaped(5)     |     0.089723 |      1.202812 |     13.406x |      3.14e-12 |
+| **D-shaped(9)** | **0.129603** |  **1.515981** | **11.697x** |  **8.04e-12** |
+| D-shaped(75)    |     1.218136 |      6.718363 |      5.515x |      1.48e-10 |
+| H-mode(27)      |     0.615500 |      4.967208 |      8.070x |      3.12e-11 |
+| H-mode(36)      |     0.783802 |      6.142815 |      7.837x |      2.76e-11 |
+| **H-mode(60)**  | **2.053660** | **13.310995** |  **6.482x** |  **1.46e-08** |
+| H-mode(130)     |    12.440129 |     41.164805 |      3.309x |      6.11e-09 |
+| X-point(19)     |     0.263450 |      2.660089 |     10.097x |      1.55e-11 |
+| X-point(29)     |     0.443195 |      3.635614 |      8.203x |      3.92e-11 |
+| **X-point(94)** | **2.502630** |  **9.804938** |  **3.918x** |  **8.34e-11** |
+| X-point(130)    |     6.209815 |     21.124163 |      3.402x |      2.99e-10 |
 
-The package-level Python facade is intentionally semantic: users construct
+The package-level VEQlib facade is intentionally semantic: users construct
 `KernelTopology` for the solve topology, including `ip_constraint` and
 `beta_constraint` boolean source constraints, then pass it explicitly as
 `Kernel(topology=topology)` or `build(topology=topology, ...)`.
@@ -177,13 +176,11 @@ The package-level Python facade is intentionally semantic: users construct
 handle-level default solve policy, and `KernelRecipe` remains the shared backend
 recipe type. `KernelSource` stores raw user-facing `heat_profile`,
 `current_profile`, `Ip`, and `beta` values; the facade materializes
-route-dependent `mu0` scaling before calling backend kernels. `veqpy.kernel.NumbaKernel`
-and `veqpy.facade.Kernel` accept the same `KernelTopology`, `KernelBoundary`,
-`KernelSource`, `KernelConfig`, `KernelRecipe`, and `SolveResult` types for the
-explicit Numba path; they currently support degree layout, evaluate residuals and
-solves through a topology-native Numba runtime, build `Equilibrium` snapshots, and
-provide finite-difference JVP/Jacobian calls with the same public signatures as the
-native Kernel handle.
+route-dependent `mu0` scaling before calling backend kernels. `KernelRecipe`
+selects `backend="numba"` for the direct Numba runtime or `backend="cxx"` for the
+native backend. Both backends use the same public `Kernel` type and method
+surface, including residuals, solves, finite-difference JVP/Jacobian calls, and
+`build_equilibrium()`.
 `build(topology=..., recipe=None, config=None)` creates a reusable `Kernel` and
 caches that default policy on the handle; `Kernel.solve(...)` can use it as-is,
 replace it with a one-off `config=...`, or override individual fields such as
@@ -193,9 +190,9 @@ The current production boundary is narrow: route/topology planning covers the
 benchmark matrix, while native execution is gated by the facade native-support
 validation helper. The artifact cache key is
 computed from the canonical topology, explicit artifact recipe, Python/toolchain
-ABI, the native CMake define contract, and a digest of implementation inputs under
-`veqlib/cxx_core/core` (`.h`, `.cpp`, `.in`, and `CMakeLists.txt`). Artifacts are cached
-under `veqlib/artifact/` by default, or under `VEQLIB_KERNEL_CACHE` when set.
+ABI, the native CMake define contract, and a digest of native implementation
+inputs. Artifacts are cached under `veqlib/artifact/` by default, or under
+`VEQLIB_KERNEL_CACHE` when set.
 Runtime boundary/source arrays, physical constraints, solver tolerances, and `x0`
 belong to the per-case solve call.
 
@@ -208,15 +205,15 @@ on per-call affinity changes.
 Useful VEQlib checks from the repository root:
 
 ```bash
-.venv/bin/python -m compileall -q veqlib/facade tests/test_veqlib_facade_api.py
-.venv/bin/ruff check veqlib/facade tests/test_veqlib_facade_api.py
+.venv/bin/python -m compileall -q veqlib tests/test_veqlib_facade_api.py
+.venv/bin/ruff check veqlib tests/test_veqlib_facade_api.py
 .venv/bin/python -m pytest tests/test_veqlib_facade_api.py
 ```
 
 Retained benchmark result artifacts live under `benchmarks/results/`. Future
 timing evidence should use the shared KernelTypes directly through
-`veqpy.facade.Kernel` and, when native C++ comparison is needed,
-`veqlib.facade`.
+`veqlib.Kernel`, selecting `backend="numba"` or `backend="cxx"` through
+`KernelRecipe`.
 
 ## Implementation Documentation
 
