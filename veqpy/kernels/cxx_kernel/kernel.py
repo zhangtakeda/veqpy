@@ -31,7 +31,7 @@ from .registry import KernelRegistry
 from .solver import CxxSolver
 
 if TYPE_CHECKING:
-    from veqpy.model.equilibrium import Equilibrium
+    from veqpy.model import Equilibrium
 
 
 class _CxxKernelImpl:

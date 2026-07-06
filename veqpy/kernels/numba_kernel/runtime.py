@@ -14,7 +14,7 @@ from veqpy.kernels.types import (
     KernelSource,
     KernelTopology,
 )
-from veqpy.model.grid import Grid
+from veqpy.model import Grid
 from veqpy.numerics import (
     SOURCE_INTERP_DEFAULT,
     normalize_source_interpolation_kind,

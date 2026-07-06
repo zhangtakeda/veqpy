@@ -15,7 +15,7 @@ from veqpy.kernels.types import (
     KernelTopology,
     SolveResult,
 )
-from veqpy.model.equilibrium import Equilibrium
+from veqpy.model import Equilibrium
 
 from .residual_scale import make_residual_scale
 from .result import solve_result_from_runtime

@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from veqpy.model.equilibrium import Equilibrium
-from veqpy.model.profile import Profile
+from veqpy.model import Equilibrium, Profile
 
 from .packed_layout import decode_packed_blocks
 

@@ -2,11 +2,17 @@ from __future__ import annotations
 
 import ast
 import importlib
+import importlib.util
 from collections import defaultdict
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SOURCE_ROOTS = ("veqpy",)
+FIRST_LEVEL_SUBMODULES = {"base", "kernels", "model", "numerics"}
+REMOVED_SOURCE_PACKAGES = (
+    REPO_ROOT / "veqpy" / "types",
+    REPO_ROOT / "veqpy" / "model" / "numerics",
+)
 
 PUBLIC_EXPORTS = {
     "veqpy": {
@@ -96,6 +102,22 @@ def _submodule_name(module: str) -> str | None:
     return ".".join(parts[:2])
 
 
+def _first_level_package(module: str) -> str | None:
+    parts = module.split(".")
+    if len(parts) < 2 or parts[0] not in SOURCE_ROOTS:
+        return None
+    return parts[1]
+
+
+def _first_level_for_path(path: Path) -> str | None:
+    parts = path.relative_to(REPO_ROOT).with_suffix("").parts
+    if len(parts) == 1:
+        return parts[0]
+    if parts[1] == "__init__":
+        return parts[0]
+    return parts[1]
+
+
 def _tree(path: Path) -> ast.Module:
     return ast.parse(path.read_text(), filename=str(path))
 
@@ -141,6 +163,79 @@ def test_only_package_roots_declare_all() -> None:
                 and node.target.id == "__all__"
             ):
                 violations.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
+    assert violations == []
+
+
+def test_no_lazy_exports_or_legacy_export_maps() -> None:
+    violations: list[str] = []
+    for path in _source_files():
+        for node in ast.walk(_tree(path)):
+            if (
+                isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and node.name == "__getattr__"
+            ):
+                violations.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}:__getattr__")
+            elif isinstance(node, ast.Name) and node.id == "_EXPORTS":
+                violations.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}:_EXPORTS")
+    assert violations == []
+
+
+def test_removed_compat_packages_have_no_source_files() -> None:
+    violations = [
+        str(path.relative_to(REPO_ROOT))
+        for package in REMOVED_SOURCE_PACKAGES
+        if package.exists()
+        for path in package.rglob("*.py")
+    ]
+    assert violations == []
+
+
+def test_removed_public_paths_are_not_importable() -> None:
+    assert importlib.util.find_spec("veqpy." + "types") is None
+    assert importlib.util.find_spec("veqpy.model." + "numerics") is None
+
+
+def test_model_does_not_import_kernel_layer() -> None:
+    violations: list[str] = []
+    for path in (REPO_ROOT / "veqpy" / "model").glob("*.py"):
+        for node in ast.walk(_tree(path)):
+            if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith(
+                "veqpy.kernels"
+            ):
+                violations.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}:{node.module}")
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name.startswith("veqpy.kernels"):
+                        violations.append(
+                            f"{path.relative_to(REPO_ROOT)}:{node.lineno}:{alias.name}"
+                        )
+    assert violations == []
+
+
+def test_cross_submodule_imports_use_package_roots() -> None:
+    violations: list[str] = []
+    for path in _source_files():
+        importer = _first_level_for_path(path)
+        for node in ast.walk(_tree(path)):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                imported = _first_level_package(node.module)
+                if (
+                    imported in FIRST_LEVEL_SUBMODULES
+                    and imported != importer
+                    and node.module != f"veqpy.{imported}"
+                ):
+                    violations.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}:{node.module}")
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    imported = _first_level_package(alias.name)
+                    if (
+                        imported in FIRST_LEVEL_SUBMODULES
+                        and imported != importer
+                        and alias.name != f"veqpy.{imported}"
+                    ):
+                        violations.append(
+                            f"{path.relative_to(REPO_ROOT)}:{node.lineno}:{alias.name}"
+                        )
     assert violations == []
 
 

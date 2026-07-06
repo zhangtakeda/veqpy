@@ -17,7 +17,7 @@ from veqpy.kernels.types import (
     KernelTopology,
     SolveResult,
 )
-from veqpy.model.equilibrium import Equilibrium
+from veqpy.model import Equilibrium
 
 from .solver import NumbaSolver
 
