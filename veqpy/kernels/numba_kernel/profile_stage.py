@@ -1,5 +1,5 @@
 """
-Module: model.numerics.profile_eval
+Module: kernels.numba_kernel.profile_stage
 
 Role:
 - Compute profile fields.

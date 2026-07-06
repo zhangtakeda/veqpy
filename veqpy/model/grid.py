@@ -31,7 +31,6 @@ from veqpy.numerics import (
     make_calculus,
     make_quadrature,
 )
-from veqpy.model.numerics.fast import colwise_weighted_sum_into, dot, rowwise_sum_into
 
 
 class Grid(Reactive, Serial):
@@ -216,16 +215,12 @@ class Grid(Reactive, Serial):
         if out is None:
             if axis is None:
                 if f.ndim == 1:
-                    return dot(f, self.weights)
+                    return float(np.dot(f, self.weights))
                 if f.ndim != 2:
                     raise ValueError(f"Expected a 1D or 2D array, got shape {f.shape}")
                 # 2D integrals use radial quadrature first and uniform theta
                 # averaging second; this matches the engine's row-major fields.
-                scratch = np.empty(f.shape[1], dtype=f.dtype)
-                colwise_weighted_sum_into(scratch, f, self.weights)
-                total = 0.0
-                for j in range(f.shape[1]):
-                    total += scratch[j]
+                total = float(np.sum(self.weights @ f))
                 return (2.0 * np.pi / f.shape[1]) * total
 
             if f.ndim != 2:
@@ -239,10 +234,10 @@ class Grid(Reactive, Serial):
 
         if axis == RHO_AXIS:
             # Contract rho and leave theta samples.
-            colwise_weighted_sum_into(out, f, self.weights)
+            np.copyto(out, self.weights @ f)
         elif axis == THETA_AXIS:
             nt = f.shape[1]
-            rowwise_sum_into(out, f)
+            np.sum(f, axis=1, out=out)
             # Theta nodes are uniform over [0, 2*pi), so the quadrature weight is
             # a single constant after rowwise summation.
             out *= 2.0 * np.pi / nt

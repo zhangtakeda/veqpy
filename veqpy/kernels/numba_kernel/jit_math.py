@@ -1,5 +1,5 @@
 """
-Module: math.fast
+Module: kernels.numba_kernel.jit_math
 
 Role:
 - Provide small Numba kernels for reusable dense float64 math operations.

@@ -28,7 +28,7 @@ import numpy as np
 from numba import njit
 
 from veqpy.base import Registry
-from veqpy.model.numerics.fast import (
+from veqpy.kernels.numba_kernel.jit_math import (
     copy_into,
     dot,
     matvec_into,

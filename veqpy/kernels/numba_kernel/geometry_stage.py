@@ -1,5 +1,5 @@
 """
-Module: model.numerics.geometry
+Module: kernels.numba_kernel.geometry_stage
 
 Role:
 - Materialize geometry fields.

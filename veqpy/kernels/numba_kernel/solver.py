@@ -8,8 +8,14 @@ from time import perf_counter
 import numpy as np
 from scipy.optimize import least_squares, root
 
+from veqpy.kernels.types import (
+    KernelBoundary,
+    KernelConfig,
+    KernelSource,
+    KernelTopology,
+    SolveResult,
+)
 from veqpy.model.equilibrium import Equilibrium
-from veqpy.kernels.types import KernelBoundary, KernelConfig, KernelSource, KernelTopology, SolveResult
 
 from .residual_scale import make_residual_scale
 from .result import solve_result_from_runtime

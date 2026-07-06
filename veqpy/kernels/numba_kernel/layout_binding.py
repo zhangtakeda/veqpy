@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-import veqpy.kernels.numba_kernel.profile_eval as numba_profile
+import veqpy.kernels.numba_kernel.profile_stage as numba_profile
 
 from . import numba_operator
 from .geometry_binding import build_geometry_stage_runner

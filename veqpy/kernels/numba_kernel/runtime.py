@@ -8,16 +8,16 @@ import numpy as np
 
 from veqpy.kernels.abi.source_semantics import materialize_kernel_source
 from veqpy.kernels.numba_kernel.workspace import allocate_runtime_state
-from veqpy.model.grid import Grid
 from veqpy.kernels.numba_kernel.workspace.grid_workspace import GridWorkspace
-from veqpy.numerics import (
-    SOURCE_INTERP_DEFAULT,
-    normalize_source_interpolation_kind,
-)
 from veqpy.kernels.types import (
     KernelBoundary,
     KernelSource,
     KernelTopology,
+)
+from veqpy.model.grid import Grid
+from veqpy.numerics import (
+    SOURCE_INTERP_DEFAULT,
+    normalize_source_interpolation_kind,
 )
 
 from . import backend_abi

@@ -21,7 +21,7 @@ from __future__ import annotations
 import numpy as np
 from numba import njit
 
-from veqpy.model.numerics.fast import (
+from veqpy.kernels.numba_kernel.jit_math import (
     indexed_matvec_into,
     rowwise_sum_into,
     rowwise_weighted_sum_into,
