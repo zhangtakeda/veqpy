@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import fields, replace
+from dataclasses import dataclass, fields, replace
 from typing import Any
 
 import numpy as np
+from numpy.linalg import norm
 
 from veqlib.facade import (
     KernelBoundary,
@@ -18,6 +19,19 @@ from veqlib.facade import (
 from veqpy.model import Equilibrium
 
 from .solver import NumbaSolver
+
+
+@dataclass(frozen=True, slots=True)
+class NumbaPrepareResult:
+    """Summary returned after preparing a Numba kernel handle."""
+
+    topology: KernelTopology
+    recipe: KernelRecipe
+    x_size: int
+    residual_size: int
+    warmed: bool
+    dry_run: bool
+    raw_norm: float
 
 
 class NumbaKernel:
@@ -43,14 +57,40 @@ class NumbaKernel:
         self.result: SolveResult | None = None
         self._last_boundary: KernelBoundary | None = None
         self._last_source: KernelSource | None = None
+        self._prepare_result: NumbaPrepareResult | None = None
 
     @property
     def x_size(self) -> int:
         return self.topology.x_size
 
-    def prepare(self, *, force: bool = False, dry_run: bool = False) -> None:
-        del force, dry_run
+    def prepare(self, *, force: bool = False, dry_run: bool = False) -> NumbaPrepareResult:
         self._validate_numba_recipe(self.recipe)
+        if self._prepare_result is not None and not force and not dry_run:
+            return self._prepare_result
+        if dry_run:
+            return NumbaPrepareResult(
+                topology=self.topology,
+                recipe=self.recipe,
+                x_size=self.x_size,
+                residual_size=self.x_size,
+                warmed=False,
+                dry_run=True,
+                raw_norm=float("nan"),
+            )
+        boundary = _prepare_boundary(self.topology)
+        source = _prepare_source(self.topology)
+        _, raw = self._solver.prepare(boundary, source, self.config)
+        prepared = NumbaPrepareResult(
+            topology=self.topology,
+            recipe=self.recipe,
+            x_size=self.x_size,
+            residual_size=int(raw.size),
+            warmed=True,
+            dry_run=False,
+            raw_norm=float(norm(raw)),
+        )
+        self._prepare_result = prepared
+        return prepared
 
     def solve(
         self,
@@ -214,3 +254,29 @@ def _config_with_overrides(config: KernelConfig, **overrides: Any) -> KernelConf
         names = ", ".join(unknown)
         raise TypeError(f"Unsupported KernelConfig override(s): {names}")
     return replace(config, **overrides)
+
+
+def _prepare_boundary(topology: KernelTopology) -> KernelBoundary:
+    offset_size = max(1, int(topology.M_max) + 1)
+    return KernelBoundary(
+        a=0.5,
+        R0=1.0,
+        Z0=0.0,
+        B0=3.0,
+        ka=1.0,
+        c_offsets=np.zeros(offset_size, dtype=np.float64),
+        s_offsets=np.zeros(offset_size, dtype=np.float64),
+    )
+
+
+def _prepare_source(topology: KernelTopology) -> KernelSource:
+    sample_count = int(topology.sample_count)
+    heat_profile = np.full(sample_count, 1.0e6, dtype=np.float64)
+    current_value = 1.0e6 if topology.route in {"PI", "PJ1", "PJ2"} else 1.0
+    current_profile = np.full(sample_count, current_value, dtype=np.float64)
+    return KernelSource(
+        heat_profile=heat_profile,
+        current_profile=current_profile,
+        Ip=1.0e6,
+        beta=0.5 if topology.beta_constraint else np.nan,
+    )

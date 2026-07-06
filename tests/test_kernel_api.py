@@ -110,8 +110,25 @@ def test_numba_kernel_recipe_validation_and_public_surface() -> None:
     assert kernel.x_size == topology.x_size
     assert kernel.recipe.backend == "numba"
     assert kernel.recipe.layout == "degree"
-    assert kernel.prepare() is None
-    assert kernel.prepare(force=True, dry_run=True) is None
+    dry_run = kernel.prepare(dry_run=True)
+    assert dry_run.topology is topology
+    assert dry_run.recipe is kernel.recipe
+    assert dry_run.warmed is False
+    assert dry_run.dry_run is True
+    assert np.isnan(dry_run.raw_norm)
+
+    prepared = kernel.prepare()
+    assert prepared.topology is topology
+    assert prepared.recipe is kernel.recipe
+    assert prepared.x_size == topology.x_size
+    assert prepared.residual_size == topology.x_size
+    assert prepared.warmed is True
+    assert prepared.dry_run is False
+    assert np.isfinite(prepared.raw_norm)
+    assert kernel.prepare() is prepared
+    refreshed = kernel.prepare(force=True)
+    assert refreshed is not prepared
+    assert refreshed.warmed is True
     assert kernel.close() is None
     assert kernel.close() is None
 

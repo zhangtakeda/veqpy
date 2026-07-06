@@ -45,6 +45,21 @@ class NumbaSolver:
     ) -> None:
         self.runtime.residual_into(out, x, boundary, source)
 
+    def prepare(
+        self,
+        boundary: KernelBoundary,
+        source: KernelSource,
+        config: KernelConfig,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        x = self.runtime.initial_state(
+            boundary,
+            source,
+            initial=config.initial,
+            x0=None,
+        )
+        raw = self.runtime.residual_for_current_case(x)
+        return x.copy(), raw.copy()
+
     def solve(
         self,
         boundary: KernelBoundary,
