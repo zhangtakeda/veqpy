@@ -26,7 +26,7 @@ from veqpy.kernels.numba_kernel.workspace.source_workspace import SourceWorkspac
 
 if TYPE_CHECKING:
     from veqpy.kernels.numba_kernel.backend_abi import SourceExecutionABI
-    from veqpy.model.numerics import GridWorkspace
+    from veqpy.model.numerics.grid_workspace import GridWorkspace
 
 
 def allocate_runtime_state(

@@ -31,7 +31,7 @@ from veqpy.model.numerics.field_rows import (
 )
 
 if TYPE_CHECKING:
-    from veqpy.model import Grid
+    from veqpy.model.grid import Grid
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,7 +191,7 @@ class GridWorkspace:
     def to_grid(self) -> Grid:
         """Rebuild a full Grid from the snapshot for Equilibrium materialization and
         other callers that need a real Grid."""
-        from veqpy.model import Grid
+        from veqpy.model.grid import Grid
 
         return Grid(
             Nr=self.Nr,

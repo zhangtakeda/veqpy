@@ -21,7 +21,7 @@ from veqpy.types import (
 from .dispatch import _make_kernel_impl
 
 if TYPE_CHECKING:
-    from veqpy.model import Equilibrium
+    from veqpy.model.equilibrium import Equilibrium
 
 
 class Kernel:

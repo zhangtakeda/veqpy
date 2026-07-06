@@ -28,8 +28,18 @@ import numpy as np
 from numba import njit
 
 from veqpy.base import Registry
-from veqpy.model.numerics import (
-    DEFAULT_LOCAL_BARYCENTRIC_STENCIL,
+from veqpy.model.numerics.fast import (
+    copy_into,
+    dot,
+    matvec_into,
+    product_into,
+    scale_into,
+    scaled_product_into,
+    scaled_product_ratio_into,
+    scaled_ratio_into,
+    weighted_dot,
+)
+from veqpy.model.numerics.field_rows import (
     GEOMETRY_RADIAL_KN,
     GEOMETRY_RADIAL_KN_R,
     GEOMETRY_RADIAL_LN_R,
@@ -41,16 +51,10 @@ from veqpy.model.numerics import (
     RESIDUAL_ROOT_PSIN,
     RESIDUAL_ROOT_PSIN_R,
     RESIDUAL_ROOT_PSIN_RR,
+)
+from veqpy.model.numerics.interpolate import (
+    DEFAULT_LOCAL_BARYCENTRIC_STENCIL,
     build_uniform_source_interpolation_matrix,
-    copy_into,
-    dot,
-    matvec_into,
-    product_into,
-    scale_into,
-    scaled_product_into,
-    scaled_product_ratio_into,
-    scaled_ratio_into,
-    weighted_dot,
 )
 
 # PJ2-psin-uniform is the only route that materializes psin by a

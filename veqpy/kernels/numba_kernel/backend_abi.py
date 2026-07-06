@@ -36,7 +36,7 @@ if TYPE_CHECKING:
         ResidualWorkspace,
         SourceWorkspace,
     )
-    from veqpy.model.numerics import GridWorkspace
+    from veqpy.model.numerics.grid_workspace import GridWorkspace
 
 
 RouteKey = tuple[str, str, str]

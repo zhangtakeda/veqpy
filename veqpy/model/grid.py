@@ -21,19 +21,15 @@ from rich.console import Console
 from rich.tree import Tree
 
 from veqpy.base import Reactive, Serial
-from veqpy.model.numerics import (
+from veqpy.model.numerics.axes import RHO_AXIS, THETA_AXIS
+from veqpy.model.numerics.calculus import (
     DEFAULT_CALCULUS,
-    DEFAULT_QUADRATURE,
-    RHO_AXIS,
-    THETA_AXIS,
     apply_accumulation,
     apply_differentiation,
-    colwise_weighted_sum_into,
-    dot,
     make_calculus,
-    make_quadrature,
-    rowwise_sum_into,
 )
+from veqpy.model.numerics.fast import colwise_weighted_sum_into, dot, rowwise_sum_into
+from veqpy.model.numerics.quadrature import DEFAULT_QUADRATURE, make_quadrature
 
 
 class Grid(Reactive, Serial):

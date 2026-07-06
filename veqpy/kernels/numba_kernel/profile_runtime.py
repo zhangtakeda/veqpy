@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from veqpy.model.numerics import GridWorkspace
+from veqpy.model.numerics.grid_workspace import GridWorkspace
 
 
 def build_profile_parameter_arrays(

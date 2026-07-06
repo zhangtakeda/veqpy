@@ -16,7 +16,7 @@ from collections.abc import Callable
 
 import numpy as np
 
-from veqpy.model.numerics import update_geometry_hot_auto
+from veqpy.model.numerics.geometry import update_geometry_hot_auto
 
 from .numba_source import update_fourier_family_fields
 

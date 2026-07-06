@@ -34,7 +34,10 @@ PUBLIC_EXPORTS = {
     },
     "veqpy.model": {
         "Boundary",
+        "Equilibrium",
         "Geqdsk",
+        "Grid",
+        "Profile",
     },
 }
 
@@ -124,8 +127,12 @@ def test_veqpy_all_exports_match_cross_contract_plus_public_api() -> None:
     checked_packages = set(PUBLIC_EXPORTS) | set(cross_imports)
     for package_name in sorted(checked_packages):
         package = importlib.import_module(package_name)
-        exported = set(package.__all__)
         required = cross_imports.get(package_name, set())
+        if not hasattr(package, "__all__"):
+            assert required == set(), package_name
+            assert all(hasattr(package, name) for name in PUBLIC_EXPORTS[package_name])
+            continue
+        exported = set(package.__all__)
         allowed = required | PUBLIC_EXPORTS.get(package_name, set())
         assert required <= exported, package_name
         assert exported <= allowed, package_name

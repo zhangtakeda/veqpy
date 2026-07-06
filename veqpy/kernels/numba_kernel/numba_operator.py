@@ -44,8 +44,9 @@ from veqpy.kernels.numba_kernel.numba_source import (
     _update_pj2_from_psin_uniform_inputs_with_scratch,
     uniform_barycentric_weights,
 )
-from veqpy.model.numerics import build_uniform_source_interpolation_coefficients
 from veqpy.model.numerics.geometry import update_geometry_hot_auto
+from veqpy.model.numerics.grid_workspace import GridWorkspace
+from veqpy.model.numerics.interpolate import build_uniform_source_interpolation_coefficients
 from veqpy.model.numerics.profile_eval import update_profiles_packed_bulk
 
 if TYPE_CHECKING:
@@ -55,7 +56,6 @@ if TYPE_CHECKING:
         ResidualWorkspace,
         SourceWorkspace,
     )
-    from veqpy.model.numerics import GridWorkspace
 
 
 def bind_source_eval_runner(

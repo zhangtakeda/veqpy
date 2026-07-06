@@ -8,10 +8,10 @@ import numpy as np
 
 from veqpy.kernels.abi.source_semantics import materialize_kernel_source
 from veqpy.kernels.numba_kernel.workspace import allocate_runtime_state
-from veqpy.model import Grid
-from veqpy.model.numerics import (
+from veqpy.model.grid import Grid
+from veqpy.model.numerics.grid_workspace import GridWorkspace
+from veqpy.model.numerics.interpolate import (
     SOURCE_INTERP_DEFAULT,
-    GridWorkspace,
     normalize_source_interpolation_kind,
 )
 from veqpy.types import (

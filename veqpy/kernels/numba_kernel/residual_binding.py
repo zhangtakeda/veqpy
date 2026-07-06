@@ -26,7 +26,7 @@ if TYPE_CHECKING:
         ResidualWorkspace,
         SourceWorkspace,
     )
-    from veqpy.model.numerics import GridWorkspace
+    from veqpy.model.numerics.grid_workspace import GridWorkspace
 
 
 def build_residual_full_stage_runner_into(

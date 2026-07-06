@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from veqpy.model.numerics import profile_eval as numba_profile
+import veqpy.model.numerics.profile_eval as numba_profile
 
 from . import numba_operator
 from .geometry_binding import build_geometry_stage_runner
@@ -36,7 +36,7 @@ if TYPE_CHECKING:
         ResidualWorkspace,
         SourceWorkspace,
     )
-    from veqpy.model.numerics import GridWorkspace
+    from veqpy.model.numerics.grid_workspace import GridWorkspace
 
 from .layout import KernelLayout
 

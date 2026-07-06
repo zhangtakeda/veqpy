@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import tomllib
-from importlib import import_module
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
+from veqpy.api import build, solve
+from veqpy.kernels import Kernel
 from veqpy.types import (
     KernelBoundary,
     KernelConfig,
@@ -17,12 +18,6 @@ from veqpy.types import (
     SolveResult,
     TopologyError,
 )
-
-_LAZY_EXPORTS = {
-    "Kernel": ("veqpy.kernels", "Kernel"),
-    "build": ("veqpy.api", "build"),
-    "solve": ("veqpy.api", "solve"),
-}
 
 __all__ = [
     "Kernel",
@@ -49,16 +44,6 @@ try:
     __version__ = version("veqpy")
 except PackageNotFoundError:
     __version__ = _source_tree_version()
-
-
-def __getattr__(name: str) -> object:
-    target = _LAZY_EXPORTS.get(name)
-    if target is None:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    module_name, attribute_name = target
-    value = getattr(import_module(module_name), attribute_name)
-    globals()[name] = value
-    return value
 
 
 def __dir__() -> list[str]:
