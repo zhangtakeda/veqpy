@@ -9,7 +9,6 @@ Runtime tables report median solve/runtime time only. VEQlib artifact build time
 ## Scripts
 
 - `veqpy_routes.py`: VEQPy/Numba synthetic route matrix through `veqpy.facade.Kernel`.
-- `veqpy_geqdsk_routes.py`: GEQDSK-backed VEQPy/Numba route matrix.
 - `veqlib_routes.py`: VEQlib native route matrix compared with VEQPy/Numba Kernel.
 - `veqlib_geqdsk_pareto.py`: GEQDSK VEQlib native vs VEQPy/Numba Kernel matrix.
 - `veqlib_continuation.py`: VEQlib native continuation-policy benchmark.
@@ -19,7 +18,6 @@ Runtime tables report median solve/runtime time only. VEQlib artifact build time
 
 ```bash
 .venv/bin/python benchmarks/veqpy_routes.py --quiet-progress
-.venv/bin/python benchmarks/veqpy_geqdsk_routes.py --quiet-progress
 .venv/bin/python benchmarks/veqlib_routes.py --quiet-progress
 .venv/bin/python benchmarks/veqlib_geqdsk_pareto.py --quiet-progress
 .venv/bin/python benchmarks/veqlib_continuation.py --quiet-progress
@@ -53,26 +51,6 @@ Runtime tables report median solve/runtime time only. VEQlib artifact build time
 | PJ2_psin_uniform_Ip | passed | 18  | 1.991445 | 66   | 2.97e-09 | 3.50e-03 | 1.80e-03  | 1.18e-02   |
 | PQ_rho_uniform_Ip   | passed | 12  | 0.915662 | 29   | 6.60e-08 | 1.35e-04 | 2.81e-05  | 1.34e-03   |
 | PQ_psin_uniform_Ip  | passed | 18  | 1.355589 | 42   | 2.64e-09 | 5.00e-03 | 2.56e-03  | 2.18e-02   |
-
-### VEQPy GEQDSK route matrix
-
-- scope: `ip-uniform`; GEQDSK: `EFIT.geqdsk`; warmup: `5`; repeat: `1`; summary: `9/12 passed`.
-- Failed rows are tolerance failures; timing and diagnostics are still written to JSON: `PP_psin_uniform_Ip`, `PJ2_rho_uniform_Ip`, `PJ2_psin_uniform_Ip`.
-
-| case                | status | x   | Numba ms  | nfev | residual | shape    | psi_r RMS | FF_psi RMS |
-| ------------------- | ------ | --- | --------- | ---- | -------- | -------- | --------- | ---------- |
-| PF_rho_uniform_Ip   | passed | 120 | 35.853889 | 4    | 8.82e-16 | 2.48e-03 | 5.49e-04  | 1.98e-02   |
-| PF_psin_uniform_Ip  | passed | 130 | 42.631155 | 4    | 7.35e-16 | 4.05e-03 | 1.07e-03  | 1.16e-03   |
-| PP_rho_uniform_Ip   | passed | 120 | 37.356181 | 4    | 6.36e-16 | 7.12e-03 | 6.00e-04  | 3.28e-03   |
-| PP_psin_uniform_Ip  | failed | 130 | 58.602281 | 5    | 7.51e-16 | 1.16e-02 | 2.99e-03  | 5.42e-03   |
-| PI_rho_uniform_Ip   | passed | 120 | 33.524309 | 4    | 7.31e-16 | 6.12e-03 | 8.45e-04  | 6.86e-03   |
-| PI_psin_uniform_Ip  | passed | 130 | 40.176811 | 4    | 6.21e-16 | 2.84e-03 | 1.87e-03  | 5.52e-03   |
-| PJ1_rho_uniform_Ip  | passed | 120 | 33.791879 | 4    | 6.48e-16 | 2.28e-03 | 5.18e-04  | 2.49e-03   |
-| PJ1_psin_uniform_Ip | passed | 130 | 38.939923 | 4    | 4.48e-16 | 3.95e-03 | 1.59e-03  | 1.75e-03   |
-| PJ2_rho_uniform_Ip  | failed | 125 | 43.598342 | 5    | 1.14e-14 | 4.57e-01 | 3.81e-02  | 3.29e-02   |
-| PJ2_psin_uniform_Ip | failed | 125 | 66.583221 | 7    | 4.02e-11 | 2.29e-01 | 2.16e-02  | 2.07e-02   |
-| PQ_rho_uniform_Ip   | passed | 120 | 40.578132 | 4    | 5.18e-14 | 2.90e-03 | 1.05e-03  | 4.18e-03   |
-| PQ_psin_uniform_Ip  | passed | 130 | 53.065577 | 5    | 5.49e-14 | 8.92e-03 | 3.73e-03  | 6.73e-03   |
 
 ### VEQlib synthetic route matrix
 

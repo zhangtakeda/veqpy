@@ -288,21 +288,24 @@ def test_numba_kernel_success_is_raw_residual_gated(
     assert result.info == 0
 
 
-def test_numba_kernel_powell_uses_lm_fallback(
+def test_numba_kernel_powell_uses_hybr_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     kernel = NumbaKernel(topology=make_kernel_topology())
     boundary = tiny_kernel_boundary()
     source = tiny_kernel_source()
     calls: list[str] = []
+    budgets: list[int] = []
 
     def fake_root(*args: object, **kwargs: object) -> SimpleNamespace:
-        del args, kwargs
+        del args
         calls.append("hybr")
+        options = kwargs["options"]
+        budgets.append(int(options["maxfev"]))
         return SimpleNamespace(
-            x=np.full(kernel.x_size, 1.0e4, dtype=np.float64),
-            success=False,
-            message="synthetic root failure",
+            x=np.zeros(kernel.x_size, dtype=np.float64),
+            success=True,
+            message="synthetic root success",
             nfev=3,
             njev=0,
             nit=0,
@@ -310,15 +313,7 @@ def test_numba_kernel_powell_uses_lm_fallback(
 
     def fake_least_squares(*args: object, **kwargs: object) -> SimpleNamespace:
         del args, kwargs
-        calls.append("lm")
-        return SimpleNamespace(
-            x=np.zeros(kernel.x_size, dtype=np.float64),
-            success=False,
-            message="synthetic lm fallback",
-            nfev=4,
-            njev=0,
-            nit=0,
-        )
+        raise AssertionError("powell solve should not invoke least_squares")
 
     kernel_solver = import_module("veqpy.kernel.solver")
     monkeypatch.setattr(kernel_solver, "root", fake_root)
@@ -336,8 +331,9 @@ def test_numba_kernel_powell_uses_lm_fallback(
         ),
     )
 
-    assert calls == ["hybr", "lm"]
-    assert result.nfev == 7
+    assert calls == ["hybr"]
+    assert budgets == [2]
+    assert result.nfev == 3
     assert result.success
 
 

@@ -17,7 +17,7 @@ from .runtime import NumbaRuntime
 
 
 @dataclass(frozen=True, slots=True)
-class _SolveAttempt:
+class _SolveOutcome:
     method: str
     x: np.ndarray
     success: bool
@@ -75,11 +75,11 @@ class NumbaSolver:
             x0=x0,
         )
         started = perf_counter()
-        attempt = self._solve_with_fallbacks(x_guess, config)
-        x_final = self.runtime.coerce_x(attempt.x).copy()
-        nfev = int(attempt.nfev)
-        njev = int(attempt.njev)
-        iterations = int(attempt.iterations)
+        outcome = self._solve_once(x_guess, config)
+        x_final = self.runtime.coerce_x(outcome.x).copy()
+        nfev = int(outcome.nfev)
+        njev = int(outcome.njev)
+        iterations = int(outcome.iterations)
 
         raw = self.runtime.residual_for_current_case(x_final)
         alpha = self.runtime.alpha.copy()
@@ -100,25 +100,16 @@ class NumbaSolver:
             config=config,
         )
 
-    def _solve_with_fallbacks(self, x_guess: np.ndarray, config: KernelConfig) -> _SolveAttempt:
-        attempts: list[_SolveAttempt] = []
-        for method in _method_sequence(config):
-            attempt = self._try_solve_attempt(x_guess, config, method=method)
-            attempts.append(attempt)
-            if attempt.success:
-                return _aggregate_attempts(attempts, selected=attempt)
-        best = _best_attempt(attempts)
-        if best is None:
-            raise RuntimeError("NumbaKernel solve produced no usable attempt")
-        return _aggregate_attempts(attempts, selected=best)
+    def _solve_once(self, x_guess: np.ndarray, config: KernelConfig) -> _SolveOutcome:
+        return self._try_solve_once(x_guess, config, method=_solver_method(config))
 
-    def _try_solve_attempt(
+    def _try_solve_once(
         self,
         x_guess: np.ndarray,
         config: KernelConfig,
         *,
         method: str,
-    ) -> _SolveAttempt:
+    ) -> _SolveOutcome:
         x_initial = self.runtime.coerce_x(x_guess).copy()
         try:
             residual_fun, optimizer_x0, decode_x = self._optimizer_problem(
@@ -137,7 +128,7 @@ class NumbaSolver:
                 message = f"{message} [rejected by residual={raw_norm:.6e}]"
             elif not bool(getattr(opt, "success", False)) and accepted:
                 message = f"{message} [accepted by residual]"
-            return _SolveAttempt(
+            return _SolveOutcome(
                 method=method,
                 x=x_final,
                 success=accepted,
@@ -150,7 +141,7 @@ class NumbaSolver:
         except Exception as exc:
             raw_norm = _safe_raw_norm(self.runtime, x_initial)
             accepted = _residual_within_acceptance(raw_norm, config)
-            return _SolveAttempt(
+            return _SolveOutcome(
                 method=method,
                 x=x_initial,
                 success=accepted,
@@ -230,19 +221,19 @@ def _run_optimizer(residual_fun, x_guess: np.ndarray, config: KernelConfig, *, m
     )
 
 
-def _method_sequence(config: KernelConfig) -> tuple[str, ...]:
+def _solver_method(config: KernelConfig) -> str:
     if config.method == "powell":
-        return ("hybr", "lm")
+        return "hybr"
     if config.method == "levenberg-marquardt":
-        return ("lm",)
+        return "lm"
     raise NotImplementedError(f"NumbaKernel does not support KernelConfig.method={config.method!r}")
 
 
 def _root_options(config: KernelConfig, *, default_max_evaluations: int) -> dict[str, object]:
     options: dict[str, object] = {"eps": 1.0e-6}
-    max_evaluations = _max_evaluations(config, fallback=default_max_evaluations)
+    max_evaluations = _max_evaluations(config, default=default_max_evaluations)
     if max_evaluations > 0:
-        options["maxfev"] = max(max_evaluations, 500)
+        options["maxfev"] = max_evaluations
     if config.norm != "none":
         options["factor"] = 1.0
     return options
@@ -259,17 +250,17 @@ def _least_squares_kwargs(
         "xtol": float(config.max_residual),
         "gtol": float(config.max_residual),
     }
-    max_evaluations = _max_evaluations(config, fallback=default_max_evaluations)
+    max_evaluations = _max_evaluations(config, default=default_max_evaluations)
     if max_evaluations > 0:
-        kwargs["max_nfev"] = max(max_evaluations, 500)
+        kwargs["max_nfev"] = max_evaluations
     if config.norm != "none" and method == "lm":
         kwargs["x_scale"] = 1.0
     return kwargs
 
 
-def _max_evaluations(config: KernelConfig, *, fallback: int) -> int:
+def _max_evaluations(config: KernelConfig, *, default: int) -> int:
     if config.max_evaluations is None:
-        return int(fallback)
+        return int(default)
     return int(config.max_evaluations)
 
 
@@ -285,36 +276,6 @@ def _safe_raw_norm(runtime: NumbaRuntime, x: np.ndarray) -> float:
         return float(np.linalg.norm(runtime.residual_for_current_case(x)))
     except Exception:
         return float("inf")
-
-
-def _best_attempt(attempts: list[_SolveAttempt]) -> _SolveAttempt | None:
-    finite = [attempt for attempt in attempts if np.isfinite(attempt.raw_norm)]
-    if not finite:
-        return attempts[-1] if attempts else None
-    return min(finite, key=lambda attempt: attempt.raw_norm)
-
-
-def _aggregate_attempts(attempts: list[_SolveAttempt], *, selected: _SolveAttempt) -> _SolveAttempt:
-    return _SolveAttempt(
-        method=selected.method,
-        x=selected.x,
-        success=selected.success,
-        raw_norm=selected.raw_norm,
-        nfev=sum(attempt.nfev for attempt in attempts),
-        njev=sum(attempt.njev for attempt in attempts),
-        iterations=sum(attempt.iterations for attempt in attempts),
-        message=_attempts_message(attempts, selected=selected),
-        error=selected.error,
-    )
-
-
-def _attempts_message(attempts: list[_SolveAttempt], *, selected: _SolveAttempt) -> str:
-    parts = []
-    for attempt in attempts:
-        state = "succeeded" if attempt.success else "failed"
-        parts.append(f"attempt(method={attempt.method}) {state}: {attempt.message}")
-    parts.append(f"selected method={selected.method}")
-    return "; ".join(parts)
 
 
 def _residual_within_acceptance(residual_norm: float, config: KernelConfig) -> bool:

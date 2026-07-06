@@ -818,8 +818,8 @@ def source_profiles_from_geqdsk(
     axis = np.linspace(0.0, 1.0, int(sample_count), dtype=np.float64)
     source_axis = axis if coordinate == "psin" else axis * axis
     geqdsk_axis = np.linspace(0.0, 1.0, max(int(geqdsk.P_psi.size), 2), dtype=np.float64)
-    p_psi = _finite_or_fallback(geqdsk.P_psi, geqdsk_axis.size, scale=1.0e6)
-    ff_psi = _finite_or_fallback(geqdsk.FF_psi, geqdsk_axis.size, scale=1.0)
+    p_psi = _finite_or_default_profile(geqdsk.P_psi, geqdsk_axis.size, scale=1.0e6)
+    ff_psi = _finite_or_default_profile(geqdsk.FF_psi, geqdsk_axis.size, scale=1.0)
     heat_profile = np.interp(source_axis, geqdsk_axis, p_psi)
     current_profile = np.interp(source_axis, geqdsk_axis, ff_psi)
     if coordinate == "rho":
@@ -830,7 +830,7 @@ def source_profiles_from_geqdsk(
     return heat_profile.astype(np.float64), current_profile.astype(np.float64)
 
 
-def _finite_or_fallback(values: np.ndarray, size: int, *, scale: float) -> np.ndarray:
+def _finite_or_default_profile(values: np.ndarray, size: int, *, scale: float) -> np.ndarray:
     arr = np.asarray(values, dtype=np.float64)
     if arr.ndim == 1 and arr.size == size and np.all(np.isfinite(arr)):
         return arr

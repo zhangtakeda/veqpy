@@ -10,9 +10,9 @@ equilibrium = kernel.build_equilibrium()
 
 `KernelConfig` controls the runtime solve method, residual normalization,
 initial-state policy, continuation policy, residual acceptance threshold, and
-evaluation limits. The current Numba backend supports Powell-style `hybr` with
-LM fallback through `method="powell"` and a direct LM path through
-`method="levenberg-marquardt"`.
+evaluation limits. The current Numba backend maps `method="powell"` to the
+Powell-style `hybr` solver and `method="levenberg-marquardt"` to SciPy's LM
+solver.
 
 `SolveResult` records the final packed state, raw residual, scaled residual,
 source `alpha` values, function/iteration counters, success flag, and elapsed
