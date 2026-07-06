@@ -16,7 +16,6 @@ from .builder import (
 from .kernel import Kernel, build, solve
 from .registry import KernelLoadError, KernelRegistry, LoadedKernel, SolverThreadError
 from .solver import VEQlibSolver
-from .source_semantics import materialize_kernel_source
 from .types import (
     KernelBoundary,
     KernelConfig,
@@ -48,5 +47,4 @@ __all__ = [
     "prepare",
     "clean",
     "solve",
-    "materialize_kernel_source",
 ]

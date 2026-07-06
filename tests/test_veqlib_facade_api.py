@@ -150,7 +150,6 @@ def test_veqlib_facade_root_exports_semantic_surface() -> None:
         "prepare",
         "clean",
         "solve",
-        "materialize_kernel_source",
     ]
 
 

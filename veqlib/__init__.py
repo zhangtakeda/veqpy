@@ -7,9 +7,4 @@ C++/CMake implementation.
 
 from __future__ import annotations
 
-from .source_semantics import MaterializedSourceInputs, materialize_source_inputs
-
-__all__ = [
-    "MaterializedSourceInputs",
-    "materialize_source_inputs",
-]
+__all__: list[str] = []

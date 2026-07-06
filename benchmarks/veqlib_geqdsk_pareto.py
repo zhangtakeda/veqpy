@@ -8,6 +8,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from rich.table import Table
+from rich.text import Text
+
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -22,7 +25,6 @@ from benchmarks._common import (
     RouteBenchmarkSpec,
     cpu_affinity,
     engine_payload,
-    format_float,
     geqdsk_kernel_case,
     geqdsk_signature,
     max_abs,
@@ -32,8 +34,22 @@ from benchmarks._common import (
     selected_configs,
     solve_native_case,
     solve_numba_case,
-    timing_median_ms,
     write_json,
+)
+from benchmarks._reporting import (
+    REPORT_TABLE_BOX,
+    format_optional_float,
+    format_optional_sci,
+    format_optional_speedup,
+    print_config_tree,
+    print_outputs_tree,
+    progress_context,
+    progress_phase,
+    status_cell,
+    timing_median_ms,
+)
+from benchmarks._reporting import (
+    console as reporting_console,
 )
 from veqlib.facade import KernelRecipe
 from veqlib.facade.builder import default_kernel_cache_root
@@ -149,8 +165,16 @@ def _measure_case(args: argparse.Namespace, case_key: str, config_label: str) ->
     return base_row
 
 
-def _print_rows(rows: list[dict[str, Any]]) -> None:
-    print("case,config,status,x,cxx_ms,numba_ms,speedup,x_max_abs")
+def _print_summary(console, rows: list[dict[str, Any]]) -> None:
+    table = Table(box=REPORT_TABLE_BOX, show_lines=False, expand=False, padding=(0, 1))
+    table.add_column("case", no_wrap=True)
+    table.add_column("status", no_wrap=True)
+    table.add_column("config", no_wrap=True)
+    table.add_column("x", justify="right")
+    table.add_column(Text("Cxx (ms)"), justify="right")
+    table.add_column(Text("Numba (ms)"), justify="right")
+    table.add_column("speedup", justify="right")
+    table.add_column("diff", justify="right")
     for row in rows:
         engines = row.get("engines", {})
         native_key = next((key for key in engines if key.startswith("veqlib-")), "")
@@ -158,24 +182,19 @@ def _print_rows(rows: list[dict[str, Any]]) -> None:
         numba = engines.get("veqpy-numba-hybr")
         cxx_ms = timing_median_ms(native)
         numba_ms = timing_median_ms(numba)
-        speedup = numba_ms / cxx_ms if cxx_ms > 0.0 else float("nan")
-        print(
-            ",".join(
-                [
-                    str(row["case"]),
-                    str(row["config"]),
-                    str(row["status"]),
-                    str(row["x_size"]),
-                    format_float(cxx_ms),
-                    format_float(numba_ms),
-                    format_float(speedup),
-                    format_float(
-                        float(row.get("closeness_to_numba", {}).get("x_max_abs", float("nan"))),
-                        precision=3,
-                    ),
-                ]
-            )
+        compare = row.get("closeness_to_numba")
+        compare = compare if isinstance(compare, dict) else {}
+        table.add_row(
+            str(row.get("case", "n/a")),
+            status_cell(row.get("status", "n/a")),
+            str(row.get("config", "n/a")),
+            str(row.get("x_size", "n/a")),
+            format_optional_float(cxx_ms),
+            format_optional_float(numba_ms),
+            format_optional_speedup(numba_ms, cxx_ms),
+            format_optional_sci(compare.get("x_max_abs")),
         )
+    console.print(table)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -199,13 +218,53 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-write", action="store_true")
     parser.add_argument("--quiet-progress", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+    if args.warmup < 0 or args.repeat <= 0:
+        raise ValueError("--warmup must be >= 0 and --repeat must be > 0")
+
+    console = reporting_console()
     cache_root = args.cache_root or default_kernel_cache_root()
 
-    rows = [
-        _measure_case(args, case_key, config_label)
-        for case_key in selected_cases(args.case)
-        for config_label in selected_configs(args.config)
+    case_keys = selected_cases(args.case)
+    config_labels = selected_configs(args.config)
+    row_plan = [
+        (case_key, config_label)
+        for case_key in case_keys
+        for config_label in config_labels
     ]
+    rows: list[dict[str, Any]] = []
+    if not args.quiet_progress:
+        print_config_tree(
+            console,
+            (
+                f"cases: [green]{len(row_plan)}[/]",
+                f"build: [green]{args.build}[/]",
+                f"initial: [green]{NATIVE_SOLVER_INITIAL_POLICY}[/]",
+                f"continue: [green]{NATIVE_SOLVER_CONTINUATION_POLICY}[/]",
+                f"norm: [green]{NATIVE_SOLVER_NORMALIZATION}[/]",
+                f"warmup: [green]{args.warmup}[/]",
+                f"repeat: [green]{args.repeat}[/]",
+            ),
+        )
+        console.print()
+        console.print(Text("[progress]", style="bold cyan"))
+    with progress_context(console, quiet=args.quiet_progress) as progress:
+        task_id = None
+        if progress is not None:
+            task_id = progress.add_task(
+                "geqdsk",
+                total=len(row_plan),
+                current="-",
+                phase="[cyan]run[/]",
+            )
+        for case_key, config_label in row_plan:
+            current = f"{case_key}:{config_label.lower()}"
+            if progress is not None and task_id is not None:
+                progress.update(task_id, current=current, phase="[cyan]run[/]")
+            row = _measure_case(args, case_key, config_label)
+            rows.append(row)
+            if progress is not None and task_id is not None:
+                progress.update(task_id, phase=progress_phase(row.get("status")))
+                progress.advance(task_id)
     payload = {
         "schema": "veqlib.geqdsk_configs.v1",
         "build": str(args.build),
@@ -231,9 +290,10 @@ def main(argv: list[str] | None = None) -> int:
     }
     if not args.no_write:
         write_json(args.output, payload)
-    if not args.quiet_progress:
-        _print_rows(rows)
-        print(f"wrote: {args.output}")
+        if not args.quiet_progress:
+            console.print()
+            print_outputs_tree(console, {"json": args.output}, repo_root=REPO_ROOT)
+    _print_summary(console, rows)
     return 0
 
 

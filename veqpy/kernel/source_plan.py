@@ -17,7 +17,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from veqlib import materialize_source_inputs
+from veqlib.source_semantics import materialize_source_inputs
 from veqpy.engine import (
     COORDINATE_CODES,
     source_parameterization_for_route_key,

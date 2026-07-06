@@ -8,6 +8,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from rich.table import Table
+from rich.text import Text
+
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -22,7 +25,6 @@ from benchmarks._common import (
     RouteBenchmarkSpec,
     cpu_affinity,
     filter_route_specs,
-    format_float,
     geqdsk_kernel_case,
     grid_payload,
     iter_route_specs,
@@ -33,8 +35,25 @@ from benchmarks._common import (
     runtime_payload,
     solve_numba_case,
     summarize_runtime_rows,
-    timing_median_ms,
     write_json,
+)
+from benchmarks._reporting import (
+    REPORT_TABLE_BOX,
+    format_optional_float,
+    format_optional_sci,
+    nfev_median,
+    print_config_tree,
+    print_outputs_tree,
+    print_runtime_failures,
+    print_runtime_summary,
+    progress_context,
+    progress_phase,
+    runtime_engine_payload,
+    status_cell,
+    timing_median_ms,
+)
+from benchmarks._reporting import (
+    console as reporting_console,
 )
 
 DEFAULT_OUTPUT = REPO_ROOT / "benchmarks" / "results" / "veqpy_geqdsk_routes.json"
@@ -119,25 +138,33 @@ def _plan_row(geqdsk_path: Path, spec: RouteBenchmarkSpec) -> dict[str, Any]:
     }
 
 
-def _print_rows(rows: list[dict[str, Any]]) -> None:
-    print("case,status,x,median_ms,nfev,raw_norm")
+def _print_timing_table(console, rows: list[dict[str, Any]]) -> None:
+    table = Table(box=REPORT_TABLE_BOX, show_lines=False, expand=False, padding=(0, 1))
+    table.add_column("case", no_wrap=True)
+    table.add_column("status", no_wrap=True)
+    table.add_column("x", justify="right")
+    table.add_column(Text("Numba (ms)"), justify="right")
+    table.add_column("nfev", justify="right")
+    table.add_column("residual", justify="right")
+    table.add_column("shape", justify="right")
+    table.add_column("psi_r", justify="right")
+    table.add_column("FF_psi", justify="right")
     for row in rows:
         runtime = row["runtime"]
-        engine = runtime.get("engines", {}).get(ENGINE_LABEL)
-        print(
-            ",".join(
-                [
-                    str(row["case"]),
-                    str(runtime["status"]),
-                    str(runtime.get("x_size", "n/a")),
-                    format_float(timing_median_ms(engine)),
-                    format_float(float(engine["nfev"]["median"]) if engine else float("nan")),
-                    format_float(
-                        float(engine["raw_norm"]) if engine else float("nan"), precision=3
-                    ),
-                ]
-            )
+        engine = runtime_engine_payload(runtime, ENGINE_LABEL)
+        diagnostics = runtime.get("diagnostics", {})
+        table.add_row(
+            str(row.get("case", "n/a")),
+            status_cell(runtime["status"]),
+            str(runtime.get("x_size", "n/a")),
+            format_optional_float(timing_median_ms(engine)),
+            nfev_median(engine),
+            format_optional_sci(None if engine is None else engine.get("raw_norm")),
+            format_optional_sci(diagnostics.get("shape_error")),
+            format_optional_sci(diagnostics.get("psi_r_rel_rms_error")),
+            format_optional_sci(diagnostics.get("ff_psi_rel_rms_error")),
         )
+    console.print(table)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -170,12 +197,48 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--quiet-progress", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
 
+    if args.warmup < 0 or args.repeat <= 0:
+        raise ValueError("--warmup must be >= 0 and --repeat must be > 0")
+
+    console = reporting_console()
     args.geqdsk = args.geqdsk.expanduser().resolve()
     specs = filter_route_specs(
         iter_route_specs(args.scope, default_scope=DEFAULT_SCOPE, allow_grid=False),
         args.case,
     )
-    rows = [_measure_row(args, spec) for spec in specs]
+    rows: list[dict[str, Any]] = []
+    if not args.quiet_progress:
+        print_config_tree(
+            console,
+            (
+                f"scope: [green]{args.scope}[/]",
+                f"geqdsk: [green]{args.geqdsk}[/]",
+                f"route cases: [green]{len(specs)}[/]",
+                f"engine: [green]{ENGINE_LABEL}[/]",
+                f"mode: [green]{'plan-only' if args.no_run else 'run'}[/]",
+                f"warmup: [green]{args.warmup}[/]",
+                f"repeat: [green]{args.repeat}[/]",
+            ),
+        )
+        console.print()
+        console.print(Text("[progress]", style="bold cyan"))
+    with progress_context(console, quiet=args.quiet_progress) as progress:
+        task_id = None
+        if progress is not None:
+            task_id = progress.add_task(
+                "veqpy-geqdsk-routes",
+                total=len(specs),
+                current="-",
+                phase="[cyan]run[/]",
+            )
+        for spec in specs:
+            if progress is not None and task_id is not None:
+                progress.update(task_id, current=route_spec_selector(spec), phase="[cyan]run[/]")
+            row = _measure_row(args, spec)
+            rows.append(row)
+            if progress is not None and task_id is not None:
+                progress.update(task_id, phase=progress_phase(row["runtime"]["status"]))
+                progress.advance(task_id)
     summary = summarize_runtime_rows(rows)
     payload = {
         "schema": "veqpy.geqdsk_routes.v1",
@@ -189,8 +252,8 @@ def main(argv: list[str] | None = None) -> int:
         "repeat": int(args.repeat),
         "warmup": int(args.warmup),
         "timing_note": (
-            "wall time around Kernel.solve(...); "
-            "Kernel handle construction is included per repeat"
+            "Kernel solve elapsed time after runtime case setup; "
+            "Kernel handle construction is excluded per repeat"
         ),
         "cpu_affinity": cpu_affinity(),
         "env": runtime_env(),
@@ -228,9 +291,16 @@ def main(argv: list[str] | None = None) -> int:
     }
     if not args.no_write:
         write_json(args.output, payload)
-    if not args.quiet_progress:
-        _print_rows(rows)
-        print(f"wrote: {args.output}")
+        if not args.quiet_progress:
+            console.print()
+            print_outputs_tree(console, {"json": args.output}, repo_root=REPO_ROOT)
+    print_runtime_summary(
+        console,
+        summary,
+        ("total", "runtime_passed", "runtime_failed", "runtime_not_requested"),
+    )
+    print_runtime_failures(console, rows)
+    _print_timing_table(console, rows)
     return 0
 
 

@@ -10,8 +10,8 @@ from veqlib.facade import (
     KernelBoundary,
     KernelSource,
     KernelTopology,
-    materialize_kernel_source,
 )
+from veqlib.facade.source_semantics import materialize_kernel_source
 from veqpy.engine import backend_abi, source_parameterization_for_route_key, validate_route
 from veqpy.layout import KernelLayout, build_kernel_layout
 from veqpy.math import SOURCE_INTERP_DEFAULT, normalize_source_interpolation_kind

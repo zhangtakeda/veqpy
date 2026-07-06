@@ -8,6 +8,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from rich.table import Table
+from rich.text import Text
+
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -21,7 +24,6 @@ from benchmarks._common import (
     cpu_affinity,
     engine_payload,
     filter_route_specs,
-    format_float,
     iter_route_specs,
     max_abs,
     measure_solver,
@@ -33,8 +35,25 @@ from benchmarks._common import (
     solve_native_case,
     solve_numba_case,
     summarize_runtime_rows,
-    timing_median_ms,
     write_json,
+)
+from benchmarks._reporting import (
+    REPORT_TABLE_BOX,
+    format_optional_float,
+    format_optional_sci,
+    format_optional_speedup,
+    print_config_tree,
+    print_outputs_tree,
+    print_runtime_failures,
+    print_runtime_summary,
+    progress_context,
+    progress_phase,
+    runtime_engine_payload,
+    status_cell,
+    timing_median_ms,
+)
+from benchmarks._reporting import (
+    console as reporting_console,
 )
 from veqlib.facade import KernelRecipe
 from veqlib.facade.builder import default_kernel_cache_root
@@ -144,33 +163,47 @@ def _measure_row(args: argparse.Namespace, spec) -> dict[str, Any]:
     return base_row
 
 
-def _print_rows(rows: list[dict[str, Any]]) -> None:
-    print("case,status,x,cxx_ms,numba_ms,speedup,x_max_abs")
+def _summarize(rows: list[dict[str, Any]]) -> dict[str, int]:
+    runtime = summarize_runtime_rows(rows)
+    return {
+        "total": len(rows),
+        "topology_planned": len(rows),
+        "topology_invalid": 0,
+        "native_blocked": 0,
+        "native_ready": len(rows),
+        **runtime,
+    }
+
+
+def _print_timing_table(console, rows: list[dict[str, Any]]) -> None:
+    table = Table(box=REPORT_TABLE_BOX, show_lines=False, expand=False, padding=(0, 1))
+    table.add_column("case", no_wrap=True)
+    table.add_column("status", no_wrap=True)
+    table.add_column("x", justify="right")
+    table.add_column(Text("Cxx (ms)"), justify="right")
+    table.add_column(Text("Numba (ms)"), justify="right")
+    table.add_column("speedup", justify="right")
+    table.add_column("diff", justify="right")
     for row in rows:
         runtime = row["runtime"]
         engines = runtime.get("engines", {})
         native_key = next((key for key in engines if key.startswith("veqlib-")), "")
-        native = engines.get(native_key)
-        numba = engines.get(SYNTHETIC_SOLVER_LABEL)
+        native = runtime_engine_payload(runtime, native_key)
+        numba = runtime_engine_payload(runtime, SYNTHETIC_SOLVER_LABEL)
         cxx_ms = timing_median_ms(native)
         numba_ms = timing_median_ms(numba)
-        speedup = numba_ms / cxx_ms if cxx_ms > 0.0 else float("nan")
-        print(
-            ",".join(
-                [
-                    str(row["case"]),
-                    str(runtime["status"]),
-                    str(runtime.get("x_size", "n/a")),
-                    format_float(cxx_ms),
-                    format_float(numba_ms),
-                    format_float(speedup),
-                    format_float(
-                        float(runtime.get("closeness_to_numba", {}).get("x_max_abs", float("nan"))),
-                        precision=3,
-                    ),
-                ]
-            )
+        closeness = runtime.get("closeness_to_numba")
+        closeness = closeness if isinstance(closeness, dict) else {}
+        table.add_row(
+            str(row.get("case", "n/a")),
+            status_cell(runtime["status"]),
+            str(runtime.get("x_size", "n/a")),
+            format_optional_float(cxx_ms),
+            format_optional_float(numba_ms),
+            format_optional_speedup(numba_ms, cxx_ms),
+            format_optional_sci(closeness.get("x_max_abs")),
         )
+    console.print(table)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -201,11 +234,47 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-write", action="store_true")
     parser.add_argument("--quiet-progress", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
-    cache_root = args.cache_root or default_kernel_cache_root()
+    if args.warmup < 0 or args.repeat <= 0:
+        raise ValueError("--warmup must be >= 0 and --repeat must be > 0")
 
+    console = reporting_console()
+    cache_root = args.cache_root or default_kernel_cache_root()
     specs = filter_route_specs(iter_route_specs(args.scope), args.case)
-    rows = [_measure_row(args, spec) for spec in specs]
-    summary = summarize_runtime_rows(rows)
+    rows: list[dict[str, Any]] = []
+    if not args.quiet_progress:
+        print_config_tree(
+            console,
+            (
+                f"scope: [green]{args.scope}[/]",
+                f"cases: [green]{len(specs)}[/]",
+                f"build: [green]{args.build}/{args.layout}[/]",
+                f"initial: [green]{NATIVE_SOLVER_INITIAL_POLICY}[/]",
+                f"continue: [green]{NATIVE_SOLVER_CONTINUATION_POLICY}[/]",
+                f"norm: [green]{NATIVE_SOLVER_NORMALIZATION}[/]",
+                f"warmup: [green]{args.warmup}[/]",
+                f"repeat: [green]{args.repeat}[/]",
+            ),
+        )
+        console.print()
+        console.print(Text("[progress]", style="bold cyan"))
+    with progress_context(console, quiet=args.quiet_progress) as progress:
+        task_id = None
+        if progress is not None:
+            task_id = progress.add_task(
+                "routes",
+                total=len(specs),
+                current="-",
+                phase="[cyan]run[/]",
+            )
+        for spec in specs:
+            if progress is not None and task_id is not None:
+                progress.update(task_id, current=route_spec_selector(spec), phase="[cyan]run[/]")
+            row = _measure_row(args, spec)
+            rows.append(row)
+            if progress is not None and task_id is not None:
+                progress.update(task_id, phase=progress_phase(row["runtime"]["status"]))
+                progress.advance(task_id)
+    summary = _summarize(rows)
     payload = {
         "schema": "veqlib.routes.v2",
         "scope": args.scope,
@@ -234,9 +303,24 @@ def main(argv: list[str] | None = None) -> int:
     }
     if not args.no_write:
         write_json(args.output, payload)
-    if not args.quiet_progress:
-        _print_rows(rows)
-        print(f"wrote: {args.output}")
+        if not args.quiet_progress:
+            console.print()
+            print_outputs_tree(console, {"json": args.output}, repo_root=REPO_ROOT)
+    print_runtime_summary(
+        console,
+        summary,
+        (
+            "total",
+            "topology_planned",
+            "native_ready",
+            "native_blocked",
+            "runtime_passed",
+            "runtime_failed",
+            "runtime_not_requested",
+        ),
+    )
+    print_runtime_failures(console, rows)
+    _print_timing_table(console, rows)
     return 0
 
 

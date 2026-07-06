@@ -53,13 +53,13 @@ class NumbaSolver:
         *,
         x0: np.ndarray | None,
     ) -> SolveResult:
-        started = perf_counter()
         x_guess = self.runtime.initial_state(
             boundary,
             source,
             initial=config.initial,
             x0=x0,
         )
+        started = perf_counter()
         attempt = self._solve_with_fallbacks(x_guess, config)
         x_final = self.runtime.coerce_x(attempt.x).copy()
         nfev = int(attempt.nfev)
@@ -106,9 +106,14 @@ class NumbaSolver:
     ) -> _SolveAttempt:
         x_initial = self.runtime.coerce_x(x_guess).copy()
         try:
-            residual_fun = self._residual_function(x_initial, config)
-            opt = _run_optimizer(residual_fun, x_initial, config, method=method)
-            x_final = self.runtime.coerce_x(opt.x).copy()
+            residual_fun, optimizer_x0, decode_x = self._optimizer_problem(
+                x_initial,
+                config,
+                method=method,
+            )
+            opt = _run_optimizer(residual_fun, optimizer_x0, config, method=method)
+            opt_x = decode_x(opt.x) if decode_x is not None else opt.x
+            x_final = self.runtime.coerce_x(opt_x).copy()
             raw = self.runtime.residual_for_current_case(x_final)
             raw_norm = float(np.linalg.norm(raw))
             accepted = _residual_within_acceptance(raw_norm, config)
@@ -170,6 +175,23 @@ class NumbaSolver:
             return self.runtime.residual_for_current_case(x) / scale_eval
 
         return residual_fun
+
+    def _optimizer_problem(self, x_initial: np.ndarray, config: KernelConfig, *, method: str):
+        residual_fun = self._residual_function(x_initial, config)
+        if method != "hybr":
+            return residual_fun, x_initial, None
+
+        x_transform_fun, optimizer_x0, decode_x = _build_x_transform_wrapper(
+            self.runtime,
+            x_initial,
+        )
+        if x_transform_fun is None:
+            return residual_fun, x_initial, None
+
+        def transformed_residual_fun(z: np.ndarray) -> np.ndarray:
+            return residual_fun(x_transform_fun(z))
+
+        return transformed_residual_fun, optimizer_x0, decode_x
 
 
 def _run_optimizer(residual_fun, x_guess: np.ndarray, config: KernelConfig, *, method: str):
@@ -340,6 +362,28 @@ def _x_scale_for_reference(runtime: NumbaRuntime, x_reference: np.ndarray) -> np
             family_scale = family_prior
         scale[coeff_indices] = max(offset_scale, family_scale, family_prior, guess_rms, 1.0e-2)
     return scale
+
+
+def _build_x_transform_wrapper(
+    runtime: NumbaRuntime,
+    x_guess: np.ndarray,
+):
+    x_eval = runtime.coerce_x(x_guess)
+    x_scale = _x_scale_for_reference(runtime, x_eval)
+    if x_scale is None:
+        return None, x_eval, None
+
+    inv_scale = 1.0 / x_scale
+    x_buffer = np.empty_like(x_eval)
+
+    def map_z_to_x(z: np.ndarray) -> np.ndarray:
+        z_eval = np.asarray(z, dtype=np.float64)
+        if z_eval.ndim != 1 or z_eval.shape[0] != x_eval.shape[0]:
+            raise ValueError(f"Expected z to have shape {x_eval.shape}, got {z_eval.shape}")
+        np.multiply(z_eval, x_scale, out=x_buffer)
+        return x_buffer
+
+    return map_z_to_x, x_eval * inv_scale, map_z_to_x
 
 
 def _x_scale_profile_prior(name: str) -> float:

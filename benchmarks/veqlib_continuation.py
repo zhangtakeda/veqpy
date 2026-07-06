@@ -11,6 +11,9 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from rich.table import Table
+from rich.text import Text
+
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -24,12 +27,21 @@ from benchmarks._common import (
     continuation_points,
     cpu_affinity,
     float_stats,
-    format_float,
     geqdsk_kernel_case,
     int_stats,
     runtime_env,
     selected_cases,
     write_json,
+)
+from benchmarks._reporting import (
+    REPORT_TABLE_BOX,
+    print_config_tree,
+    print_outputs_tree,
+    progress_context,
+    progress_phase,
+)
+from benchmarks._reporting import (
+    console as reporting_console,
 )
 from veqlib.facade import Kernel as NativeKernel
 from veqlib.facade import KernelConfig, KernelRecipe
@@ -213,20 +225,23 @@ def geqdsk_signature_for_continuation(case_key: str, config_label: str) -> dict[
     return geqdsk_signature(case_key, config_label)
 
 
-def _print_rows(rows: list[dict[str, Any]]) -> None:
-    print("experiment,case,cold,warm-fixed,warm-predict,warm-chord,best,vs_cold")
+def _print_summary(console, rows: list[dict[str, Any]], *, policies: tuple[str, ...]) -> None:
+    table = Table(box=REPORT_TABLE_BOX, show_lines=False, expand=False, padding=(0, 1))
+    table.add_column("experiment", no_wrap=True)
+    table.add_column("case", no_wrap=True)
+    for policy in SUMMARY_POLICIES:
+        table.add_column(policy, justify="right")
+    table.add_column("best", no_wrap=True)
+    table.add_column("vs cold", justify="right")
     for row in rows:
-        print(
-            ",".join(
-                [
-                    str(row["experiment"]),
-                    str(row["case"]),
-                    *(_format_policy_nfev(row, policy) for policy in SUMMARY_POLICIES),
-                    str(row["best"]),
-                    _format_vs_cold(row),
-                ]
-            )
+        table.add_row(
+            str(row["experiment"]),
+            str(row["case"]),
+            *(_format_policy_nfev(row, policy) for policy in SUMMARY_POLICIES),
+            str(row["best"]),
+            _format_vs_cold(row),
         )
+    console.print(table)
 
 
 def _selected_configs_for_continuation(values: list[str] | None) -> tuple[str, ...]:
@@ -291,7 +306,7 @@ def _format_policy_nfev(row: dict[str, Any], policy: str) -> str:
 def _format_nfev(value: float) -> str:
     if value != value:
         return "-"
-    return str(int(value)) if float(value).is_integer() else format_float(value)
+    return str(int(value)) if float(value).is_integer() else f"{value:.1f}"
 
 
 def _format_vs_cold(row: dict[str, Any]) -> str:
@@ -366,17 +381,59 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-write", action="store_true")
     parser.add_argument("--quiet-progress", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+    if args.points <= 0:
+        raise ValueError("--points must be positive")
+    if args.warmup < 0 or args.repeat <= 0:
+        raise ValueError("--warmup must be >= 0 and --repeat must be > 0")
 
+    console = reporting_console()
+    case_keys = selected_cases(args.case)
+    config_labels = _selected_configs_for_continuation(args.config)
     updates = tuple(args.update) if args.update else UPDATE_CHOICES
     spans = _selected_spans(args.span)
     policies = tuple(args.policy) if args.policy else DEFAULT_POLICIES
-    rows = [
-        _measure_case(args, case_key, config_label, update, span, policies)
-        for case_key in selected_cases(args.case)
-        for config_label in _selected_configs_for_continuation(args.config)
+    row_plan = [
+        (case_key, config_label, update, span)
+        for case_key in case_keys
+        for config_label in config_labels
         for update in updates
         for span in spans
     ]
+    rows: list[dict[str, Any]] = []
+    if not args.quiet_progress:
+        print_config_tree(
+            console,
+            (
+                f"cases: [green]{', '.join(case_keys)}[/]",
+                f"configs: [green]{', '.join(config_labels)}[/]",
+                f"updates: [green]{', '.join(updates)}[/]",
+                f"spans: [green]{', '.join(f'{span:g}' for span in spans)}[/]",
+                f"policies: [green]{', '.join(policies)}[/]",
+                f"points: [green]{args.points}[/]",
+                f"warmup: [green]{args.warmup}[/]",
+                f"repeat: [green]{args.repeat}[/]",
+            ),
+        )
+        console.print()
+        console.print(Text("[progress]", style="bold cyan"))
+    with progress_context(console, quiet=args.quiet_progress, width=32) as progress:
+        task_id = None
+        if progress is not None:
+            task_id = progress.add_task(
+                "continuation",
+                total=len(row_plan),
+                current="-",
+                phase="[cyan]run[/]",
+            )
+        for case_key, config_label, update, span in row_plan:
+            current = f"{update}:{span:g}:{case_key}:{config_label.lower()}"
+            if progress is not None and task_id is not None:
+                progress.update(task_id, current=current, phase="[cyan]run[/]")
+            row = _measure_case(args, case_key, config_label, update, span, policies)
+            rows.append(row)
+            if progress is not None and task_id is not None:
+                progress.update(task_id, phase=progress_phase(row.get("status")))
+                progress.advance(task_id)
     payload = {
         "schema": "veqlib.continuation_nfev.v1",
         "metric": "effective_nfev",
@@ -385,8 +442,8 @@ def main(argv: list[str] | None = None) -> int:
             "over the continuation sequence."
         ),
         "build": str(args.build),
-        "cases": list(selected_cases(args.case)),
-        "configs": list(_selected_configs_for_continuation(args.config)),
+        "cases": list(case_keys),
+        "configs": list(config_labels),
         "updates": list(updates),
         "spans": [float(span) for span in spans],
         "repeat": int(args.repeat),
@@ -410,8 +467,14 @@ def main(argv: list[str] | None = None) -> int:
         _write_csv(comparison_rows, csv_path)
         _write_markdown(comparison_rows, md_path)
     if not args.quiet_progress:
-        _print_rows(comparison_rows)
-        print(f"wrote: {args.output_dir}")
+        if not args.no_write:
+            console.print()
+            print_outputs_tree(
+                console,
+                {"json": raw_path, "csv": csv_path, "md": md_path},
+                repo_root=REPO_ROOT,
+            )
+    _print_summary(console, comparison_rows, policies=policies)
     return 0
 
 

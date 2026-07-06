@@ -7,7 +7,7 @@ names and topology lengths to the package-level Python-side conversion table.
 
 from __future__ import annotations
 
-from veqlib import MaterializedSourceInputs, materialize_source_inputs
+from veqlib.source_semantics import MaterializedSourceInputs, materialize_source_inputs
 
 from .types import KernelSource, KernelTopology
 

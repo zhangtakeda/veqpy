@@ -41,18 +41,18 @@ Runtime tables report median solve/runtime time only. VEQlib artifact build time
 
 | case                | status | x   | Numba ms | nfev | residual | shape    | psi_r RMS | FF_psi RMS |
 | ------------------- | ------ | --- | -------- | ---- | -------- | -------- | --------- | ---------- |
-| PF_rho_uniform_Ip   | passed | 12  | 0.686798 | 29   | 4.06e-10 | 1.66e-04 | 8.53e-05  | 2.51e-03   |
-| PF_psin_uniform_Ip  | passed | 18  | 0.980646 | 40   | 9.81e-09 | 2.95e-03 | 1.43e-03  | 3.84e-03   |
-| PP_rho_uniform_Ip   | passed | 12  | 0.808259 | 39   | 3.83e-11 | 2.05e-04 | 4.94e-05  | 4.21e-03   |
-| PP_psin_uniform_Ip  | passed | 18  | 1.184529 | 52   | 5.56e-10 | 6.23e-03 | 2.61e-03  | 2.40e-02   |
-| PI_rho_uniform_Ip   | passed | 12  | 0.630345 | 28   | 7.50e-08 | 1.52e-04 | 3.86e-05  | 1.38e-03   |
-| PI_psin_uniform_Ip  | passed | 18  | 1.276317 | 55   | 2.87e-12 | 1.91e-03 | 6.64e-04  | 9.37e-03   |
-| PJ1_rho_uniform_Ip  | passed | 12  | 0.650989 | 29   | 1.11e-09 | 1.68e-04 | 4.40e-05  | 3.39e-04   |
-| PJ1_psin_uniform_Ip | passed | 18  | 0.987413 | 40   | 8.15e-09 | 3.13e-03 | 1.52e-03  | 9.67e-03   |
-| PJ2_rho_uniform_Ip  | passed | 18  | 1.630445 | 82   | 7.99e-09 | 1.26e-04 | 4.30e-05  | 8.81e-04   |
-| PJ2_psin_uniform_Ip | passed | 18  | 1.995853 | 66   | 2.76e-09 | 3.50e-03 | 1.80e-03  | 1.18e-02   |
-| PQ_rho_uniform_Ip   | passed | 12  | 0.859657 | 29   | 6.60e-08 | 1.35e-04 | 2.81e-05  | 1.34e-03   |
-| PQ_psin_uniform_Ip  | passed | 18  | 1.310679 | 42   | 2.63e-09 | 5.00e-03 | 2.56e-03  | 2.18e-02   |
+| PF_rho_uniform_Ip   | passed | 12  | 0.697539 | 29   | 4.06e-10 | 1.66e-04 | 8.53e-05  | 2.51e-03   |
+| PF_psin_uniform_Ip  | passed | 18  | 1.008759 | 40   | 9.81e-09 | 2.95e-03 | 1.43e-03  | 3.84e-03   |
+| PP_rho_uniform_Ip   | passed | 12  | 0.835449 | 39   | 3.83e-11 | 2.05e-04 | 4.94e-05  | 4.21e-03   |
+| PP_psin_uniform_Ip  | passed | 18  | 1.228613 | 52   | 5.56e-10 | 6.23e-03 | 2.61e-03  | 2.40e-02   |
+| PI_rho_uniform_Ip   | passed | 12  | 0.662337 | 28   | 7.50e-08 | 1.52e-04 | 3.86e-05  | 1.38e-03   |
+| PI_psin_uniform_Ip  | passed | 18  | 1.312616 | 55   | 2.87e-12 | 1.91e-03 | 6.64e-04  | 9.37e-03   |
+| PJ1_rho_uniform_Ip  | passed | 12  | 0.668788 | 29   | 1.11e-09 | 1.68e-04 | 4.40e-05  | 3.39e-04   |
+| PJ1_psin_uniform_Ip | passed | 18  | 1.023991 | 40   | 8.15e-09 | 3.13e-03 | 1.52e-03  | 9.67e-03   |
+| PJ2_rho_uniform_Ip  | passed | 18  | 1.635518 | 82   | 7.99e-09 | 1.26e-04 | 4.30e-05  | 8.81e-04   |
+| PJ2_psin_uniform_Ip | passed | 18  | 1.991445 | 66   | 2.97e-09 | 3.50e-03 | 1.80e-03  | 1.18e-02   |
+| PQ_rho_uniform_Ip   | passed | 12  | 0.915662 | 29   | 6.60e-08 | 1.35e-04 | 2.81e-05  | 1.34e-03   |
+| PQ_psin_uniform_Ip  | passed | 18  | 1.355589 | 42   | 2.64e-09 | 5.00e-03 | 2.56e-03  | 2.18e-02   |
 
 ### VEQPy GEQDSK route matrix
 
@@ -137,6 +137,6 @@ Runtime tables report median solve/runtime time only. VEQlib artifact build time
 ## Notes
 
 - VEQlib tables exclude first-run C++/nanobind build cost; inspect JSON `artifact.*` fields for build timing.
-- This WSL2 run records script wall-time medians only; it does not claim PMU, cache, IPC, or Roofline evidence.
+- This WSL2 run records solve-time medians only; it does not claim PMU, cache, IPC, or Roofline evidence.
 - Regenerate this file after adding Kernel API benchmark entrypoints or changing
   solver policy, route topology, profile layout, compiler flags, or hardware.

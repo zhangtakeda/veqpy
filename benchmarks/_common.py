@@ -28,6 +28,12 @@ from veqlib.facade import (  # noqa: E402
     SolveResult,
 )
 from veqpy.facade import Kernel as NumbaKernel  # noqa: E402
+from veqpy.kernel.packed_layout import (  # noqa: E402
+    build_profile_index,
+    build_profile_layout,
+    build_profile_names,
+    build_shape_profile_names,
+)
 from veqpy.model import Boundary, Geqdsk, Grid  # noqa: E402
 
 THIS_FILE = Path(__file__).resolve()
@@ -61,6 +67,8 @@ SYNTHETIC_SOLVER_MAX_RESIDUAL = 1.0e-6
 SYNTHETIC_SOLVER_MAX_EVALUATIONS = 1000
 SYNTHETIC_ROUTE_SIGNATURE = {"h": 3, "k": 6, "s1": 3}
 SYNTHETIC_PSIN_ROUTE_SIGNATURE = {**SYNTHETIC_ROUTE_SIGNATURE, "psin": 6}
+ROUTE_SHAPE_MATCH_TOL = 1.0e-2
+ROUTE_DIAGNOSTIC_SIGN_CHANGE_WINDOW = 8
 
 CASE_KEYS = ("solovev", "chease", "efit")
 CONFIG_LABELS = ("Low", "Medium", "High", "Ref")
@@ -133,6 +141,7 @@ class RouteReference:
     ref_profiles: dict[str, np.ndarray | float]
     rho_axis: np.ndarray
     psin_axis: np.ndarray
+    reference_shape_x: np.ndarray
 
 
 def runtime_env() -> dict[str, Any]:
@@ -452,7 +461,7 @@ def synthetic_route_reference() -> RouteReference:
         max_evaluations=SYNTHETIC_SOLVER_MAX_EVALUATIONS,
         initial="cold",
         continuation="cold",
-        norm="none",
+        norm="fast",
     )
     result, kernel = solve_numba_case(
         KernelCase("synthetic_reference", topology, synthetic_boundary(), source, config)
@@ -468,6 +477,7 @@ def synthetic_route_reference() -> RouteReference:
             ref_profiles=build_route_reference_profiles(equilibrium),
             rho_axis=rho_axis,
             psin_axis=psin_axis,
+            reference_shape_x=extract_shape_x(topology, result.x),
         )
     finally:
         kernel.close()
@@ -640,13 +650,162 @@ def profile_interp(
     values: np.ndarray,
     target_axis: np.ndarray,
 ) -> np.ndarray:
+    from scipy.interpolate import PchipInterpolator
+
     source = np.asarray(source_axis, dtype=np.float64)
     vals = np.asarray(values, dtype=np.float64)
     target = np.asarray(target_axis, dtype=np.float64)
     order = np.argsort(source)
-    sorted_axis = source[order]
-    sorted_values = vals[order]
-    return np.interp(target, sorted_axis, sorted_values)
+    sorted_axis, unique_index = np.unique(source[order], return_index=True)
+    sorted_values = vals[order][unique_index]
+    if sorted_axis.size < 2:
+        fill_value = float(sorted_values[0] if sorted_values.size else 0.0)
+        return np.full_like(target, fill_value, dtype=np.float64)
+    if sorted_axis.size < 3:
+        return np.interp(target, sorted_axis, sorted_values).astype(np.float64, copy=False)
+    return np.asarray(PchipInterpolator(sorted_axis, sorted_values, extrapolate=True)(target))
+
+
+def active_profiles_from_topology(topology: KernelTopology) -> dict[str, int]:
+    active: dict[str, int] = {}
+    for name, count in (
+        ("h", topology.h_count),
+        ("v", topology.v_count),
+        ("k", topology.kappa_count),
+        ("psin", topology.psin_count),
+        ("F", topology.F_count),
+    ):
+        if count > 0:
+            active[name] = int(count)
+    for order, count in enumerate(topology.c_counts):
+        if count > 0:
+            active[f"c{order}"] = int(count)
+    for order, count in enumerate(topology.s_counts, start=1):
+        if count > 0:
+            active[f"s{order}"] = int(count)
+    return active
+
+
+def extract_shape_x(topology: KernelTopology, x: np.ndarray) -> np.ndarray:
+    active_profiles = active_profiles_from_topology(topology)
+    profile_names = build_profile_names(topology.M_max)
+    shape_profile_names = build_shape_profile_names(topology.M_max)
+    profile_index = build_profile_index(profile_names)
+    _, coeff_index, _ = build_profile_layout(active_profiles, profile_names=profile_names)
+    shape_values: list[float] = []
+    for degree in range(coeff_index.shape[1]):
+        for name in shape_profile_names:
+            idx = int(coeff_index[profile_index[name], degree])
+            if idx >= 0:
+                shape_values.append(float(x[idx]))
+    return np.asarray(shape_values, dtype=np.float64)
+
+
+def shape_error(reference_x: np.ndarray, current_x: np.ndarray) -> float:
+    n = min(reference_x.shape[0], current_x.shape[0])
+    if n == 0:
+        return 0.0
+    return float(np.max(np.abs(reference_x[:n] - current_x[:n])))
+
+
+def relative_profile_errors(
+    reference_values: np.ndarray,
+    current_values: np.ndarray,
+) -> tuple[float, float]:
+    ref = np.asarray(reference_values, dtype=np.float64)
+    cur = np.asarray(current_values, dtype=np.float64)
+    n = min(ref.shape[0], cur.shape[0])
+    if n == 0:
+        return 0.0, 0.0
+    ref = ref[:n]
+    cur = cur[:n]
+    diff = cur - ref
+    scale = max(float(np.max(np.abs(ref))), 1.0e-12)
+    return float(np.sqrt(np.mean(diff * diff)) / scale), float(np.max(np.abs(diff)) / scale)
+
+
+def window_derivative_sign_changes(
+    values: np.ndarray,
+    *,
+    side: str,
+    window: int = ROUTE_DIAGNOSTIC_SIGN_CHANGE_WINDOW,
+) -> int:
+    arr = np.asarray(values, dtype=np.float64)
+    count = min(int(window), arr.shape[0])
+    if side == "head":
+        sample = arr[:count]
+    elif side == "tail":
+        sample = arr[-count:]
+    else:
+        raise ValueError(f"unsupported side {side!r}")
+    signs = np.sign(np.diff(sample))
+    nonzero = signs[signs != 0.0]
+    if nonzero.size < 2:
+        return 0
+    return int(np.sum(nonzero[1:] * nonzero[:-1] < 0.0))
+
+
+def diagnostic_profile_metrics(
+    reference_axis: np.ndarray,
+    reference_values: np.ndarray,
+    current_axis: np.ndarray,
+    current_values: np.ndarray,
+) -> tuple[float, float, int, int]:
+    reference_on_current = profile_interp(reference_axis, reference_values, current_axis)
+    rel_rms, rel_max = relative_profile_errors(reference_on_current, current_values)
+    return (
+        rel_rms,
+        rel_max,
+        window_derivative_sign_changes(current_values, side="head"),
+        window_derivative_sign_changes(current_values, side="tail"),
+    )
+
+
+def benchmark_route_case_diagnostics(
+    reference: RouteReference,
+    equilibrium: Any,
+    shape_x: np.ndarray,
+) -> dict[str, float | int]:
+    psi_r_rel_rms_error, psi_r_rel_max_error, psi_r_head_changes, psi_r_tail_changes = (
+        diagnostic_profile_metrics(
+            reference.rho_axis,
+            np.asarray(reference.ref_profiles["psi_r"], dtype=np.float64),
+            equilibrium.rho,
+            equilibrium.alpha2 * equilibrium.psin_r,
+        )
+    )
+    ff_rel_rms_error, ff_rel_max_error, ff_head_changes, ff_tail_changes = (
+        diagnostic_profile_metrics(
+            reference.rho_axis,
+            np.asarray(reference.ref_profiles["FF_psi"], dtype=np.float64),
+            equilibrium.rho,
+            equilibrium.alpha1 * equilibrium.FFn_psin,
+        )
+    )
+    mu0_p_rel_rms_error, mu0_p_rel_max_error, mu0_p_head_changes, mu0_p_tail_changes = (
+        diagnostic_profile_metrics(
+            reference.rho_axis,
+            np.asarray(reference.ref_profiles["mu0_P_psi"], dtype=np.float64),
+            equilibrium.rho,
+            equilibrium.alpha1 * equilibrium.Pn_psin,
+        )
+    )
+    return {
+        "shape_error": shape_error(reference.reference_shape_x, shape_x),
+        "shape_match_tol": ROUTE_SHAPE_MATCH_TOL,
+        "psi_r_rel_rms_error": psi_r_rel_rms_error,
+        "psi_r_rel_max_error": psi_r_rel_max_error,
+        "psi_r_head_sign_changes": psi_r_head_changes,
+        "psi_r_tail_sign_changes": psi_r_tail_changes,
+        "ff_psi_rel_rms_error": ff_rel_rms_error,
+        "ff_psi_rel_max_error": ff_rel_max_error,
+        "ff_psi_head_sign_changes": ff_head_changes,
+        "ff_psi_tail_sign_changes": ff_tail_changes,
+        "mu0_p_psi_rel_rms_error": mu0_p_rel_rms_error,
+        "mu0_p_psi_rel_max_error": mu0_p_rel_max_error,
+        "mu0_p_psi_head_sign_changes": mu0_p_head_changes,
+        "mu0_p_psi_tail_sign_changes": mu0_p_tail_changes,
+    }
 
 
 def source_profiles_from_geqdsk(
@@ -690,7 +849,7 @@ def route_kernel_case(
     max_evaluations: int | None = SYNTHETIC_SOLVER_MAX_EVALUATIONS,
     pj2_f_count: int = 6,
     initial: str = "cold",
-    norm: str = "none",
+    norm: str = "fast",
 ) -> KernelCase:
     count = int(nr if spec.nodes == "grid" else (sample_count or DEFAULT_ROUTE_SAMPLE_COUNT))
     ip_constraint, beta_constraint = constraint_flags(spec.constraint)
@@ -955,6 +1114,7 @@ def measure_solver(
             raise RuntimeError("warmup solve did not return SolveResult")
 
     timings: list[float] = []
+    wall_timings: list[float] = []
     results: list[SolveResult] = []
     nfev: list[int] = []
     njev: list[int] = []
@@ -966,7 +1126,8 @@ def measure_solver(
     for _ in range(max(1, int(repeat))):
         started = time.perf_counter_ns()
         result, kernel = solve_once()
-        timings.append(float(time.perf_counter_ns() - started) / 1.0e6)
+        wall_timings.append(float(time.perf_counter_ns() - started) / 1.0e6)
+        timings.append(float(result.elapsed_ms))
         results.append(result)
         nfev.append(int(result.nfev))
         njev.append(int(result.njev))
@@ -981,6 +1142,7 @@ def measure_solver(
         last_kernel = kernel
     return {
         "timings_ms": timings,
+        "wall_timings_ms": wall_timings,
         "median_ms": median(timings),
         "result": results[-1],
         "kernel": last_kernel,
@@ -1032,7 +1194,8 @@ def engine_payload(measure: dict[str, Any]) -> dict[str, Any]:
         "success_all": bool(measure["success"]),
         "info": int(result.info),
         "timing": float_stats(measure["timings_ms"]),
-        "inner_timing": float_stats([float(result.elapsed_ms)]),
+        "wall_timing": float_stats(measure.get("wall_timings_ms", [])),
+        "inner_timing": float_stats(measure["timings_ms"]),
         "nfev": int_stats(measure["nfev"]),
         "njev": int_stats(measure["njev"]),
         "iterations": int_stats(measure["iterations"]),
