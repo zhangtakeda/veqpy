@@ -6,18 +6,18 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from veqlib.facade import (
-    KernelBoundary,
-    KernelSource,
-    KernelTopology,
-)
-from veqlib.facade.source_semantics import materialize_kernel_source
+from veqpy.kernels.abi.source_semantics import materialize_kernel_source
 from veqpy.kernels.numba_kernel.workspace import allocate_runtime_state
 from veqpy.model import Grid
 from veqpy.model.numerics import (
     SOURCE_INTERP_DEFAULT,
     GridWorkspace,
     normalize_source_interpolation_kind,
+)
+from veqpy.types import (
+    KernelBoundary,
+    KernelSource,
+    KernelTopology,
 )
 
 from . import backend_abi

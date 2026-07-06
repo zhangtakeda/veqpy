@@ -17,7 +17,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from veqlib.facade.source_semantics import materialize_source_inputs
+from veqpy.kernels.abi.source_semantics import materialize_source_inputs
 from veqpy.model.numerics import (
     SOURCE_INTERP_DEFAULT,
     normalize_source_interpolation_kind,

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 from numpy.linalg import norm
 
-from veqlib.facade import KernelConfig, SolveResult
+from veqpy.types import KernelConfig, SolveResult
 
 from .residual_scale import make_residual_scale
 

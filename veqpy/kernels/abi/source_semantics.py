@@ -1,7 +1,7 @@
-"""KernelSource semantic lowering for the VEQlib facade.
+"""KernelSource semantic lowering shared by Kernel backends.
 
 ``KernelSource`` is the public raw case input. Native runtimes still consume the
-same scaled arrays as the existing VEQlib core, so this module binds Kernel field
+same scaled arrays as the existing backend cores, so this module binds Kernel field
 names and topology lengths to the package-level Python-side conversion table.
 """
 
@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .types import KernelSource, KernelTopology
+from veqpy.types import KernelSource, KernelTopology
 
 MU0 = 4.0e-7 * np.pi
 SETUP_NORMALIZED_ABS_MIN = 1.0e-3

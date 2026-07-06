@@ -17,7 +17,7 @@ from veqlib.facade import (
     KernelSource,
     KernelTopology,
 )
-from veqlib.facade.source_semantics import materialize_kernel_source
+from veqpy.kernels.abi.source_semantics import materialize_kernel_source
 from veqpy.kernels.numba_kernel.residual_scale import make_residual_scale
 
 ROUTE_PARITY_CASES = (

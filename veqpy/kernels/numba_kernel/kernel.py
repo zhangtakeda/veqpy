@@ -8,7 +8,8 @@ from typing import Any
 import numpy as np
 from numpy.linalg import norm
 
-from veqlib.facade import (
+from veqpy.model import Equilibrium
+from veqpy.types import (
     KernelBoundary,
     KernelConfig,
     KernelPrepareResult,
@@ -17,7 +18,6 @@ from veqlib.facade import (
     KernelTopology,
     SolveResult,
 )
-from veqpy.model import Equilibrium
 
 from .solver import NumbaSolver
 

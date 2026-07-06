@@ -6,8 +6,8 @@ from typing import Any
 
 import numpy as np
 
-from veqlib.facade.source_semantics import MaterializedKernelSource
-from veqlib.facade.types import KernelBoundary, KernelConfig, SolveResult
+from veqpy.kernels.abi.source_semantics import MaterializedKernelSource
+from veqpy.types import KernelBoundary, KernelConfig, SolveResult
 
 
 def boundary_runtime_args(boundary: KernelBoundary) -> tuple[Any, ...]:

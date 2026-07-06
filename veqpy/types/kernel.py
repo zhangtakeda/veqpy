@@ -1,8 +1,8 @@
-"""Typed VEQlib facade values canonicalized before native ABI lowering.
+"""Typed Kernel values canonicalized before backend ABI lowering.
 
 The dataclasses in this module own stable Python data only. Construction
 normalizes Python-facing inputs and freezes derived scalar fields; separate
-facade helpers lower these objects to artifact identity payloads and nanobind
+backend helpers lower these objects to artifact identity payloads and native
 runtime tuples.
 """
 
@@ -13,8 +13,21 @@ from typing import Any
 
 import numpy as np
 
-from .identity import compute_topology_key
-from .options import (
+from veqpy.kernels.abi.enums import (
+    LAYOUT_CODES,
+    SOURCE_ACTIVE_FAMILY_CODES,
+    SOURCE_CONSTRAINT_CODES_BY_FLAGS,
+    SOURCE_CONSTRAINT_FLAG_ORDER,
+    SOURCE_CONSTRAINT_FLAGS_BY_ROUTE,
+    SOURCE_CONSTRAINT_LABELS_BY_FLAGS,
+    SOURCE_COORDINATE_CODES,
+    SOURCE_NODES_CODES,
+    SOURCE_PARAMETERIZATION_CODES,
+    SOURCE_ROUTE_CODES,
+    SUPPORTED_BACKENDS,
+)
+from veqpy.kernels.abi.identity import compute_topology_key
+from veqpy.kernels.abi.options import (
     continue_policy_code,
     initial_policy_code,
     normalize_continue_policy,
@@ -24,43 +37,8 @@ from .options import (
     residual_normalization_code,
     solver_method_code,
 )
+from veqpy.types.errors import TopologyError
 
-# These integer wire values mirror the generated C++ ABI enum contract.
-# Changing them is a cross-language compatibility change, not a Python refactor.
-_SOURCE_ROUTE_CODES = {
-    "PF": 1,
-    "PP": 2,
-    "PI": 3,
-    "PJ1": 4,
-    "PJ2": 5,
-    "PQ": 6,
-}
-_SOURCE_COORDINATE_CODES = {"rho": 1, "psin": 2}
-_SOURCE_CONSTRAINT_CODES_BY_FLAGS = {
-    (False, False): 0,
-    (True, False): 1,
-    (False, True): 2,
-    (True, True): 3,
-}
-_SOURCE_CONSTRAINT_LABELS_BY_FLAGS = {
-    (False, False): "null",
-    (True, False): "Ip",
-    (False, True): "beta",
-    (True, True): "Ip_beta",
-}
-_SOURCE_CONSTRAINT_FLAG_ORDER = ((True, True), (True, False), (False, True), (False, False))
-_SOURCE_NODES_CODES = {"uniform": 1, "grid": 2}
-_SOURCE_ACTIVE_FAMILY_CODES = {"none": 0, "psin": 1, "F": 2}
-_SOURCE_PARAMETERIZATION_CODES = {"identity": 0, "sqrt_psin": 1}
-_SOURCE_CONSTRAINT_FLAGS_BY_ROUTE = {
-    "PF": frozenset({(False, False), (True, False), (False, True)}),
-    "PP": frozenset(_SOURCE_CONSTRAINT_CODES_BY_FLAGS),
-    "PI": frozenset(_SOURCE_CONSTRAINT_CODES_BY_FLAGS),
-    "PJ1": frozenset(_SOURCE_CONSTRAINT_CODES_BY_FLAGS),
-    "PJ2": frozenset(_SOURCE_CONSTRAINT_CODES_BY_FLAGS),
-    "PQ": frozenset(_SOURCE_CONSTRAINT_CODES_BY_FLAGS),
-}
-_LAYOUT_CODES = {"degree": 0, "family": 1}
 _BUILD_PRESET_KWARGS: dict[str, dict[str, object]] = {
     "fastmath": {
         "cmake_build_type": "Release",
@@ -96,10 +74,6 @@ _BUILD_PRESET_KWARGS: dict[str, dict[str, object]] = {
     },
 }
 _DEFAULT_ENZYME_JACOBIAN_BATCH_WIDTH = 0
-
-
-class TopologyError(ValueError):
-    """Raised when a VEQlib kernel topology cannot be canonicalized."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,7 +129,7 @@ class KernelRecipe:
             "enzyme_jacobian_batch_width": _canonical_enzyme_jacobian_batch_width(
                 self.enzyme_jacobian_batch_width
             ),
-            "layout_code": _LAYOUT_CODES[layout],
+            "layout_code": LAYOUT_CODES[layout],
             "layout_profile_first": layout == "family",
         }
         for name, value in normalized_values.items():
@@ -247,13 +221,13 @@ class KernelTopology:
             raise TopologyError("Nt must be at least 4")
 
         route = _normalize_token(self.route, "route").upper()
-        if route not in _SOURCE_ROUTE_CODES:
+        if route not in SOURCE_ROUTE_CODES:
             raise TopologyError(f"unsupported route {route!r}")
         coordinate = _normalize_token(self.coordinate, "coordinate").lower()
-        if coordinate not in _SOURCE_COORDINATE_CODES:
+        if coordinate not in SOURCE_COORDINATE_CODES:
             raise TopologyError(f"unsupported coordinate {coordinate!r}")
         nodes = _normalize_token(self.nodes, "nodes").lower()
-        if nodes not in _SOURCE_NODES_CODES:
+        if nodes not in SOURCE_NODES_CODES:
             raise TopologyError(f"unsupported source nodes {nodes!r}")
         ip_constraint = _canonical_bool(self.ip_constraint, "ip_constraint")
         beta_constraint = _canonical_bool(self.beta_constraint, "beta_constraint")
@@ -280,7 +254,7 @@ class KernelTopology:
         )
         source_parameterization = _source_parameterization(route, coordinate, nodes)
         constraint_flags = (ip_constraint, beta_constraint)
-        constraint_label = _SOURCE_CONSTRAINT_LABELS_BY_FLAGS[constraint_flags]
+        constraint_label = SOURCE_CONSTRAINT_LABELS_BY_FLAGS[constraint_flags]
         active_profiles = _active_profiles_tuple(profile_counts, c_counts, s_counts)
         normalized_values: dict[str, Any] = {
             **profile_counts,
@@ -302,15 +276,15 @@ class KernelTopology:
             "active_profiles": active_profiles,
             "x_size": sum(count for _, count in active_profiles),
             "source_route_key": (route, coordinate, nodes),
-            "source_route_code": _SOURCE_ROUTE_CODES[route],
-            "source_coordinate_code": _SOURCE_COORDINATE_CODES[coordinate],
+            "source_route_code": SOURCE_ROUTE_CODES[route],
+            "source_coordinate_code": SOURCE_COORDINATE_CODES[coordinate],
             "constraint_label": constraint_label,
-            "source_constraint_code": _SOURCE_CONSTRAINT_CODES_BY_FLAGS[constraint_flags],
-            "source_nodes_code": _SOURCE_NODES_CODES[nodes],
+            "source_constraint_code": SOURCE_CONSTRAINT_CODES_BY_FLAGS[constraint_flags],
+            "source_nodes_code": SOURCE_NODES_CODES[nodes],
             "source_active_family": source_active_family,
-            "source_active_family_code": _SOURCE_ACTIVE_FAMILY_CODES[source_active_family],
+            "source_active_family_code": SOURCE_ACTIVE_FAMILY_CODES[source_active_family],
             "source_parameterization": source_parameterization,
-            "source_parameterization_code": _SOURCE_PARAMETERIZATION_CODES[source_parameterization],
+            "source_parameterization_code": SOURCE_PARAMETERIZATION_CODES[source_parameterization],
             "source_supported_constraints": _supported_constraint_labels(route),
             "source_uses_ip_constraint": ip_constraint,
             "source_uses_beta_constraint": beta_constraint,
@@ -477,21 +451,21 @@ def _normalize_build(value: str) -> str:
 
 def _validate_source_constraint(route: str, ip_constraint: bool, beta_constraint: bool) -> None:
     flags = (ip_constraint, beta_constraint)
-    if flags not in _SOURCE_CONSTRAINT_FLAGS_BY_ROUTE[route]:
-        label = _SOURCE_CONSTRAINT_LABELS_BY_FLAGS[flags]
+    if flags not in SOURCE_CONSTRAINT_FLAGS_BY_ROUTE[route]:
+        label = SOURCE_CONSTRAINT_LABELS_BY_FLAGS[flags]
         raise TopologyError(f"{route} source topology does not support constraint {label!r}")
 
 
 def _normalize_layout(value: str) -> str:
     normalized = _normalize_token(value, "layout").lower()
-    if normalized in _LAYOUT_CODES:
+    if normalized in LAYOUT_CODES:
         return normalized
     raise TopologyError("layout must be degree or family")
 
 
 def _normalize_backend(value: str) -> str:
     normalized = _normalize_token(value, "backend").lower()
-    if normalized in {"cxx", "numba"}:
+    if normalized in SUPPORTED_BACKENDS:
         return normalized
     raise TopologyError("backend must be cxx or numba")
 
@@ -523,10 +497,10 @@ def _validate_source_active_family(
 
 
 def _supported_constraint_labels(route: str) -> tuple[str, ...]:
-    supported = _SOURCE_CONSTRAINT_FLAGS_BY_ROUTE[route]
+    supported = SOURCE_CONSTRAINT_FLAGS_BY_ROUTE[route]
     return tuple(
-        _SOURCE_CONSTRAINT_LABELS_BY_FLAGS[flags]
-        for flags in _SOURCE_CONSTRAINT_FLAG_ORDER
+        SOURCE_CONSTRAINT_LABELS_BY_FLAGS[flags]
+        for flags in SOURCE_CONSTRAINT_FLAG_ORDER
         if flags in supported
     )
 

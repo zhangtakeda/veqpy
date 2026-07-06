@@ -16,9 +16,9 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-from veqlib.facade.options import solver_method_code
-from veqlib.facade.types import KernelRecipe as Recipe
-from veqlib.facade.types import KernelTopology as Topology
+from veqpy.kernels.abi.options import solver_method_code
+from veqpy.types import KernelRecipe as Recipe
+from veqpy.types import KernelTopology as Topology
 
 from .affinity import cpu_pin_scope_active, pinned_cpu
 from .builder import PrepareResult, touch_artifact_used

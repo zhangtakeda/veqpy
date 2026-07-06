@@ -16,13 +16,13 @@ from veqlib.facade import (
     KernelSource,
     KernelTopology,
 )
-from veqlib.facade.identity import recipe_identity_payload, topology_identity_payload
-from veqlib.facade.options import (
+from veqpy.kernels.abi.identity import recipe_identity_payload, topology_identity_payload
+from veqpy.kernels.abi.options import (
     RESIDUAL_NORMALIZATION_BALANCED,
     SOLVER_METHOD_LEVENBERG_MARQUARDT,
     SOLVER_METHOD_POWELL,
 )
-from veqlib.facade.source_semantics import materialize_kernel_source
+from veqpy.kernels.abi.source_semantics import materialize_kernel_source
 
 MU0 = 4.0e-7 * np.pi
 

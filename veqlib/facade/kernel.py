@@ -23,9 +23,8 @@ from veqlib.cxx_core.abi import (
 from veqlib.cxx_core.affinity import pinned_cpu
 from veqlib.cxx_core.registry import KernelRegistry
 from veqlib.cxx_core.solver import VEQlibSolver
-
-from .source_semantics import MaterializedKernelSource, materialize_kernel_source
-from .types import (
+from veqpy.kernels.abi.source_semantics import MaterializedKernelSource, materialize_kernel_source
+from veqpy.types import (
     KernelBoundary,
     KernelConfig,
     KernelPrepareResult,

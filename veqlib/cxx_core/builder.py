@@ -26,9 +26,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
-from veqlib.facade.identity import recipe_identity_payload, topology_identity_payload
-from veqlib.facade.types import KernelRecipe as Recipe
-from veqlib.facade.types import KernelTopology as Topology
+from veqpy.kernels.abi.identity import recipe_identity_payload, topology_identity_payload
+from veqpy.types import KernelRecipe as Recipe
+from veqpy.types import KernelTopology as Topology
 
 from .validation import validate_supported_for_veqlib_native
 
