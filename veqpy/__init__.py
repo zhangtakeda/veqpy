@@ -1,27 +1,42 @@
-"""
-Module: veqpy
-
-Role:
-- Define package metadata and top-level package exports.
-
-Public API:
-- base
-- engine
-- layout
-- model
-- workspace
-
-Notes:
-- Package roots are the only modules that declare ``__all__``.
-- VEQPy owns model-layer data structures and Numba-ready model workspaces.
-- VEQlib owns Kernel construction, backend selection, and solving.
-"""
+"""VEQPy public package root."""
 
 from __future__ import annotations
 
 import tomllib
+from importlib import import_module
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
+
+from veqpy.types import (
+    KernelBoundary,
+    KernelConfig,
+    KernelPrepareResult,
+    KernelRecipe,
+    KernelSource,
+    KernelTopology,
+    SolveResult,
+    TopologyError,
+)
+
+_LAZY_EXPORTS = {
+    "Kernel": ("veqpy.kernels", "Kernel"),
+    "build": ("veqpy.api", "build"),
+    "solve": ("veqpy.api", "solve"),
+}
+
+__all__ = [
+    "Kernel",
+    "KernelBoundary",
+    "KernelConfig",
+    "KernelPrepareResult",
+    "KernelRecipe",
+    "KernelSource",
+    "KernelTopology",
+    "SolveResult",
+    "TopologyError",
+    "build",
+    "solve",
+]
 
 
 def _source_tree_version() -> str:
@@ -34,6 +49,21 @@ try:
     __version__ = version("veqpy")
 except PackageNotFoundError:
     __version__ = _source_tree_version()
+
+
+def __getattr__(name: str) -> object:
+    target = _LAZY_EXPORTS.get(name)
+    if target is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module_name, attribute_name = target
+    value = getattr(import_module(module_name), attribute_name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted({*globals(), *__all__})
+
 
 if __name__ == "__main__":
     print(

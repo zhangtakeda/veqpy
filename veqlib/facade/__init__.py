@@ -21,7 +21,7 @@ from veqpy.types import (
 )
 
 _LAZY_EXPORTS = {
-    "Kernel": ("veqlib.facade.kernel", "Kernel"),
+    "Kernel": ("veqpy.kernels", "Kernel"),
     "PrepareResult": ("veqpy.kernels.cxx_kernel.builder", "PrepareResult"),
     "PrepareError": ("veqpy.kernels.cxx_kernel.builder", "PrepareError"),
     "CleanResult": ("veqpy.kernels.cxx_kernel.builder", "CleanResult"),
@@ -30,10 +30,10 @@ _LAZY_EXPORTS = {
     "LoadedKernel": ("veqpy.kernels.cxx_kernel.registry", "LoadedKernel"),
     "SolverThreadError": ("veqpy.kernels.cxx_kernel.registry", "SolverThreadError"),
     "VEQlibSolver": ("veqpy.kernels.cxx_kernel.solver", "VEQlibSolver"),
-    "build": ("veqlib.facade.kernel", "build"),
+    "build": ("veqpy.api", "build"),
     "prepare": ("veqpy.kernels.cxx_kernel.builder", "prepare"),
     "clean": ("veqpy.kernels.cxx_kernel.builder", "clean"),
-    "solve": ("veqlib.facade.kernel", "solve"),
+    "solve": ("veqpy.api", "solve"),
 }
 
 __all__ = [

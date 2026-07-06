@@ -9,7 +9,22 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SOURCE_ROOTS = ("veqpy", "veqlib")
 
 PUBLIC_EXPORTS = {
+    "veqpy": {
+        "Kernel",
+        "KernelBoundary",
+        "KernelConfig",
+        "KernelPrepareResult",
+        "KernelRecipe",
+        "KernelSource",
+        "KernelTopology",
+        "SolveResult",
+        "TopologyError",
+        "build",
+        "solve",
+    },
+    "veqpy.api": {"build", "solve"},
     "veqpy.base": {"depends_on"},
+    "veqpy.kernels": {"Kernel"},
     "veqpy.model.numerics": {
         "barycentric_log_weights",
         "GridWorkspace",

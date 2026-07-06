@@ -9,7 +9,7 @@ from helpers import MU0, pf_reference_profiles
 from numpy.linalg import norm
 from numpy.testing import assert_allclose
 
-from veqlib.facade import (
+from veqpy import (
     Kernel,
     KernelBoundary,
     KernelConfig,
