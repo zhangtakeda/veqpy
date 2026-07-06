@@ -20,13 +20,8 @@ import numpy as np
 from veqpy.engine import numba_operator, numba_residual
 
 if TYPE_CHECKING:
-    from veqpy.workspace import (
-        GeometryWorkspace,
-        GridWorkspace,
-        ProfileWorkspace,
-        ResidualWorkspace,
-        SourceWorkspace,
-    )
+    from veqpy.model.numerics import GridWorkspace
+    from veqpy.workspace import GeometryWorkspace, ProfileWorkspace, ResidualWorkspace, SourceWorkspace
 
 
 def build_residual_full_stage_runner_into(

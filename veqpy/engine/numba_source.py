@@ -28,7 +28,7 @@ import numpy as np
 from numba import njit
 
 from veqpy.base import Registry
-from veqpy.math import (
+from veqpy.model.numerics import (
     DEFAULT_LOCAL_BARYCENTRIC_STENCIL,
     build_uniform_source_interpolation_matrix,
     copy_into,
@@ -41,7 +41,7 @@ from veqpy.math import (
     scaled_ratio_into,
     weighted_dot,
 )
-from veqpy.workspace import (
+from veqpy.model.numerics import (
     GEOMETRY_RADIAL_KN,
     GEOMETRY_RADIAL_KN_R,
     GEOMETRY_RADIAL_LN_R,

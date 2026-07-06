@@ -19,11 +19,11 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from veqpy.engine import update_profile
-from veqpy.workspace.field_rows import PROFILE_R, PROFILE_RR, PROFILE_VALUE
+from veqpy.model.numerics import update_profile
+from veqpy.model.numerics.field_rows import PROFILE_R, PROFILE_RR, PROFILE_VALUE
 
 if TYPE_CHECKING:
-    from veqpy.workspace.grid_workspace import GridWorkspace
+    from veqpy.model.numerics import GridWorkspace
 
 
 @dataclass(init=False, slots=True)

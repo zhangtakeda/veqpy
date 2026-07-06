@@ -1,5 +1,5 @@
 """
-Module: engine.numba_geometry
+Module: model.numerics.geometry
 
 Role:
 - Materialize geometry fields.
@@ -19,7 +19,7 @@ from __future__ import annotations
 import numpy as np
 from numba import njit
 
-from veqpy.workspace import (
+from veqpy.model.numerics.field_rows import (
     GEOMETRY_RADIAL_KN,
     GEOMETRY_RADIAL_KN_R,
     GEOMETRY_RADIAL_LN_R,

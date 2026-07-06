@@ -14,12 +14,13 @@ from veqlib.facade import (
 from veqlib.facade.source_semantics import materialize_kernel_source
 from veqpy.engine import backend_abi, source_parameterization_for_route_key, validate_route
 from veqpy.layout import KernelLayout, build_kernel_layout
-from veqpy.math import SOURCE_INTERP_DEFAULT, normalize_source_interpolation_kind
-from veqpy.model import Grid
-from veqpy.workspace import (
+from veqpy.model.numerics import (
     GridWorkspace,
-    allocate_runtime_state,
+    SOURCE_INTERP_DEFAULT,
+    normalize_source_interpolation_kind,
 )
+from veqpy.model import Grid
+from veqpy.workspace import allocate_runtime_state
 
 from .initialize import build_boundary_slope_initial_state
 from .packed_layout import (

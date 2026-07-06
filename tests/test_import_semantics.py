@@ -19,9 +19,12 @@ PUBLIC_EXPORTS = {
         "full_differentiation",
         "full_integration",
     },
-    "veqpy.math": {
+    "veqpy.model.numerics": {
         "barycentric_log_weights",
+        "GridWorkspace",
         "interpolation_matrix",
+        "update_geometry_hot_auto",
+        "update_profile",
     },
     "veqpy.model": {
         "Boundary",

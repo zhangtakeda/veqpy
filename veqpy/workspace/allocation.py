@@ -26,7 +26,7 @@ from veqpy.workspace.source_workspace import SourceWorkspace
 
 if TYPE_CHECKING:
     from veqpy.engine import SourceExecutionABI
-    from veqpy.workspace.grid_workspace import GridWorkspace
+    from veqpy.model.numerics import GridWorkspace
 
 
 def allocate_runtime_state(

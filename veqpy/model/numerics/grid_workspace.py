@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Self
 
 import numpy as np
 
-from veqpy.workspace.field_rows import (
+from veqpy.model.numerics.field_rows import (
     GRID_POLOIDAL_COS_MTHETA_START,
     GRID_POLOIDAL_THETA,
     GRID_RADIAL_RHO,

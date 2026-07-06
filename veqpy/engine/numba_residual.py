@@ -21,12 +21,12 @@ from __future__ import annotations
 import numpy as np
 from numba import njit
 
-from veqpy.math import (
+from veqpy.model.numerics import (
     indexed_matvec_into,
     rowwise_sum_into,
     rowwise_weighted_sum_into,
 )
-from veqpy.workspace import (
+from veqpy.model.numerics import (
     GEOMETRY_SURFACE_GRTDIVJR_T,
     GEOMETRY_SURFACE_GTTDIVJR,
     GEOMETRY_SURFACE_GTTDIVJR_R,

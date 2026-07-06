@@ -1,5 +1,5 @@
 """
-Module: engine.numba_profile
+Module: model.numerics.profile_eval
 
 Role:
 - Compute profile fields.
@@ -21,7 +21,7 @@ from __future__ import annotations
 import numpy as np
 from numba import njit
 
-from veqpy.workspace import GRID_RADIAL_RHO_POWERS_START
+from veqpy.model.numerics.field_rows import GRID_RADIAL_RHO_POWERS_START
 
 _AMPLITUDE_POWER_FLOOR = 1.0e-10
 

@@ -10,7 +10,7 @@ Public API:
 
 Notes:
 - `Grid` is an immutable model-layer configuration object.
-- Pure mathematical matrix construction is delegated to `veqpy.math`.
+- Pure mathematical matrix construction is delegated to `veqpy.model.numerics`.
 - Does not own source routes, residual assembly, or solver runtime state.
 """
 
@@ -21,7 +21,7 @@ from rich.console import Console
 from rich.tree import Tree
 
 from veqpy.base import Reactive, Serial
-from veqpy.math import (
+from veqpy.model.numerics import (
     DEFAULT_CALCULUS,
     DEFAULT_QUADRATURE,
     RHO_AXIS,

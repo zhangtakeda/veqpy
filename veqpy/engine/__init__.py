@@ -29,27 +29,23 @@ __all__ = [
     "full_differentiation",
     "full_integration",
     "numba_operator",
-    "numba_profile",
     "numba_residual",
     "numba_source",
     "resolve_source_inputs",
     "source_parameterization_for_route_key",
     "update_fourier_family_fields",
-    "update_geometry_hot_auto",
-    "update_profile",
 ]
 
 _MODULE_EXPORTS = {
     "backend_abi": "veqpy.engine.backend_abi",
     "numba_operator": "veqpy.engine.numba_operator",
-    "numba_profile": "veqpy.engine.numba_profile",
     "numba_residual": "veqpy.engine.numba_residual",
     "numba_source": "veqpy.engine.numba_source",
 }
 
 _EXPORTS = {
-    "RHO_AXIS": ("veqpy.math", "RHO_AXIS"),
-    "THETA_AXIS": ("veqpy.math", "THETA_AXIS"),
+    "RHO_AXIS": ("veqpy.model.numerics", "RHO_AXIS"),
+    "THETA_AXIS": ("veqpy.model.numerics", "THETA_AXIS"),
     "COORDINATE_NAMES": ("veqpy.engine.numba_source", "COORDINATE_NAMES"),
     "COORDINATE_CODES": ("veqpy.engine.numba_source", "COORDINATE_CODES"),
     "PSIN_COORDINATE": ("veqpy.engine.numba_source", "PSIN_COORDINATE"),
@@ -68,8 +64,6 @@ _EXPORTS = {
         "veqpy.engine.numba_source",
         "update_fourier_family_fields",
     ),
-    "update_geometry_hot_auto": ("veqpy.engine.numba_geometry", "update_geometry_hot_auto"),
-    "update_profile": ("veqpy.engine.numba_profile", "update_profile"),
 }
 
 

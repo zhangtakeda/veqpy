@@ -20,7 +20,7 @@ from veqpy.engine import (
     build_source_remap_cache,
     resolve_source_inputs,
 )
-from veqpy.math import build_uniform_source_interpolation_coefficients
+from veqpy.model.numerics import build_uniform_source_interpolation_coefficients
 
 from .source_plan import SourcePlan
 

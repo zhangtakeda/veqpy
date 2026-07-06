@@ -18,7 +18,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from veqpy.workspace.field_rows import (
+from veqpy.model.numerics.field_rows import (
     GEOMETRY_RADIAL_KN,
     GEOMETRY_RADIAL_KN_R,
     GEOMETRY_RADIAL_LN_R,

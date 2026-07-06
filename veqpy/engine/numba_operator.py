@@ -27,8 +27,8 @@ import numpy as np
 from numba import njit
 
 import veqpy.engine.backend_abi as backend_abi
-from veqpy.engine.numba_geometry import update_geometry_hot_auto
-from veqpy.engine.numba_profile import update_profiles_packed_bulk
+from veqpy.model.numerics.geometry import update_geometry_hot_auto
+from veqpy.model.numerics.profile_eval import update_profiles_packed_bulk
 from veqpy.engine.numba_residual import (
     run_residual_blocks_packed_precomputed_auto,
     update_residual_compact,
@@ -46,16 +46,11 @@ from veqpy.engine.numba_source import (
     _update_pj2_from_psin_uniform_inputs_with_scratch,
     uniform_barycentric_weights,
 )
-from veqpy.math import build_uniform_source_interpolation_coefficients
+from veqpy.model.numerics import build_uniform_source_interpolation_coefficients
 
 if TYPE_CHECKING:
-    from veqpy.workspace import (
-        GeometryWorkspace,
-        GridWorkspace,
-        ProfileWorkspace,
-        ResidualWorkspace,
-        SourceWorkspace,
-    )
+    from veqpy.model.numerics import GridWorkspace
+    from veqpy.workspace import GeometryWorkspace, ProfileWorkspace, ResidualWorkspace, SourceWorkspace
 
 
 def bind_source_eval_runner(
