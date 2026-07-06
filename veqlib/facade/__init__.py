@@ -11,6 +11,7 @@ from importlib import import_module
 from .types import (
     KernelBoundary,
     KernelConfig,
+    KernelPrepareResult,
     KernelRecipe,
     KernelSource,
     KernelTopology,
@@ -38,6 +39,7 @@ __all__ = [
     "Kernel",
     "PrepareResult",
     "KernelBoundary",
+    "KernelPrepareResult",
     "KernelRecipe",
     "PrepareError",
     "CleanResult",

@@ -47,6 +47,7 @@ PUBLIC_EXPORTS = {
         "KernelBoundary",
         "KernelConfig",
         "KernelLoadError",
+        "KernelPrepareResult",
         "KernelRecipe",
         "KernelRegistry",
         "KernelSource",

@@ -21,7 +21,6 @@ from veqlib.cxx_core.abi import (
     source_runtime_args,
 )
 from veqlib.cxx_core.affinity import pinned_cpu
-from veqlib.cxx_core.builder import PrepareResult
 from veqlib.cxx_core.registry import KernelRegistry
 from veqlib.cxx_core.solver import VEQlibSolver
 
@@ -29,6 +28,7 @@ from .source_semantics import MaterializedKernelSource, materialize_kernel_sourc
 from .types import (
     KernelBoundary,
     KernelConfig,
+    KernelPrepareResult,
     KernelRecipe,
     KernelSource,
     KernelTopology,
@@ -76,8 +76,18 @@ class Kernel:
     def x_size(self) -> int:
         return self.topology.x_size
 
-    def prepare(self, *, force: bool = False, dry_run: bool = False) -> PrepareResult:
-        return self._veqlib_solver().prepare(force=force, dry_run=dry_run)
+    def prepare(self, *, force: bool = False, dry_run: bool = False) -> KernelPrepareResult:
+        artifact = self._veqlib_solver().prepare(force=force, dry_run=dry_run)
+        return KernelPrepareResult(
+            backend=self.recipe.backend,
+            topology=self.topology,
+            recipe=self.recipe,
+            x_size=self.x_size,
+            residual_size=self.x_size,
+            prepared=not dry_run,
+            dry_run=dry_run,
+            artifact=artifact,
+        )
 
     def solve(
         self,

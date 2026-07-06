@@ -413,6 +413,22 @@ class KernelConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class KernelPrepareResult:
+    """Public preparation snapshot returned by Kernel handles for all backends."""
+
+    backend: str
+    topology: KernelTopology
+    recipe: KernelRecipe
+    x_size: int
+    residual_size: int
+    prepared: bool
+    dry_run: bool
+    artifact: object | None = None
+    warmed: bool = False
+    raw_norm: float = np.nan
+
+
+@dataclass(frozen=True, slots=True)
 class SolveResult:
     """Python-owned snapshot of one VEQlib solve result."""
 

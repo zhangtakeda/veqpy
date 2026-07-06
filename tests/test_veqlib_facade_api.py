@@ -104,6 +104,7 @@ def test_veqlib_facade_root_exports_semantic_surface() -> None:
         "Kernel",
         "PrepareResult",
         "KernelBoundary",
+        "KernelPrepareResult",
         "KernelRecipe",
         "PrepareError",
         "CleanResult",
@@ -453,12 +454,17 @@ def test_kernel_artifact_identity_excludes_runtime_case_and_solver_config(tmp_pa
     first_artifact = first.prepare(dry_run=True)
     second_artifact = second.prepare(dry_run=True)
 
-    assert first_artifact.artifact_id == second_artifact.artifact_id
-    assert first_artifact.metadata["topology"] == topology_identity_payload(topology)
-    assert first_artifact.metadata["recipe"] == recipe_identity_payload(recipe)
-    assert "config" not in first_artifact.metadata
-    assert "source" not in first_artifact.metadata
-    assert "x0" not in first_artifact.metadata
+    assert first_artifact.backend == "cxx"
+    assert first_artifact.prepared is False
+    assert first_artifact.dry_run is True
+    assert first_artifact.artifact is not None
+    assert second_artifact.artifact is not None
+    assert first_artifact.artifact.artifact_id == second_artifact.artifact.artifact_id
+    assert first_artifact.artifact.metadata["topology"] == topology_identity_payload(topology)
+    assert first_artifact.artifact.metadata["recipe"] == recipe_identity_payload(recipe)
+    assert "config" not in first_artifact.artifact.metadata
+    assert "source" not in first_artifact.artifact.metadata
+    assert "x0" not in first_artifact.artifact.metadata
 
 
 @pytest.mark.slow
@@ -470,9 +476,12 @@ def test_kernel_python_build_and_solve_native_flow(tmp_path: Path) -> None:
         cache_root=tmp_path,
     )
 
-    artifact = handle.prepare()
-    assert artifact.built is True
-    assert artifact.shared_library_path.exists()
+    prepared = handle.prepare()
+    assert prepared.backend == "cxx"
+    assert prepared.prepared is True
+    assert prepared.artifact is not None
+    assert prepared.artifact.built is True
+    assert prepared.artifact.shared_library_path.exists()
 
     kernel_boundary = tiny_kernel_boundary()
     kernel_source = tiny_kernel_source()

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields, replace
+from dataclasses import fields, replace
 from typing import Any
 
 import numpy as np
@@ -11,6 +11,7 @@ from numpy.linalg import norm
 from veqlib.facade import (
     KernelBoundary,
     KernelConfig,
+    KernelPrepareResult,
     KernelRecipe,
     KernelSource,
     KernelTopology,
@@ -22,19 +23,6 @@ from .solver import NumbaSolver
 
 _JVP_EPS_SCALE = float(np.sqrt(1.0e-12))
 _JACOBIAN_REL_STEP = 1.0e-7
-
-
-@dataclass(frozen=True, slots=True)
-class NumbaPrepareResult:
-    """Summary returned after preparing a Numba kernel handle."""
-
-    topology: KernelTopology
-    recipe: KernelRecipe
-    x_size: int
-    residual_size: int
-    warmed: bool
-    dry_run: bool
-    raw_norm: float
 
 
 class NumbaKernel:
@@ -60,36 +48,42 @@ class NumbaKernel:
         self.result: SolveResult | None = None
         self._last_boundary: KernelBoundary | None = None
         self._last_source: KernelSource | None = None
-        self._prepare_result: NumbaPrepareResult | None = None
+        self._prepare_result: KernelPrepareResult | None = None
 
     @property
     def x_size(self) -> int:
         return self.topology.x_size
 
-    def prepare(self, *, force: bool = False, dry_run: bool = False) -> NumbaPrepareResult:
+    def prepare(self, *, force: bool = False, dry_run: bool = False) -> KernelPrepareResult:
         self._validate_numba_recipe(self.recipe)
         if self._prepare_result is not None and not force and not dry_run:
             return self._prepare_result
         if dry_run:
-            return NumbaPrepareResult(
+            return KernelPrepareResult(
+                backend=self.recipe.backend,
                 topology=self.topology,
                 recipe=self.recipe,
                 x_size=self.x_size,
                 residual_size=self.x_size,
-                warmed=False,
+                prepared=False,
                 dry_run=True,
+                artifact=None,
+                warmed=False,
                 raw_norm=float("nan"),
             )
         boundary = _prepare_boundary(self.topology)
         source = _prepare_source(self.topology)
         _, raw = self._solver.prepare(boundary, source, self.config)
-        prepared = NumbaPrepareResult(
+        prepared = KernelPrepareResult(
+            backend=self.recipe.backend,
             topology=self.topology,
             recipe=self.recipe,
             x_size=self.x_size,
             residual_size=int(raw.size),
-            warmed=True,
+            prepared=True,
             dry_run=False,
+            artifact=None,
+            warmed=True,
             raw_norm=float(norm(raw)),
         )
         self._prepare_result = prepared
