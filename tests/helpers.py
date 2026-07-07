@@ -2,20 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from veqpy import KernelBoundary
-
 MU0 = 4.0e-7 * np.pi
-
-
-def tiny_boundary() -> KernelBoundary:
-    return KernelBoundary(
-        a=0.5,
-        R0=1.0,
-        Z0=0.0,
-        B0=3.0,
-        ka=1.7,
-        s_offsets=(float(np.arcsin(0.2)),),
-    )
 
 
 def pf_reference_profiles(psin: np.ndarray) -> tuple[np.ndarray, np.ndarray]:

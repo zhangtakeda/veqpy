@@ -52,6 +52,6 @@ have stable meaning for plotting, comparison, and GEQDSK export. Finer local
 derivative combinations, residual projection matrices, and backend workspaces
 remain in the Kernel runtime layer and do not become public snapshot API.
 
-## Model Boundary
+## Snapshot Responsibilities
 
 The model layer follows the principle "minimal independent state plus interpretable derived quantities." It gives users an equilibrium object that can be read, plotted, compared, and serialized. It does not solve the Grad--Shafranov equation again and does not perform high-frequency residual refreshes. New diagnostics should usually be added as `Equilibrium` properties derived from existing root state, rather than by exposing solver or engine internals directly.
