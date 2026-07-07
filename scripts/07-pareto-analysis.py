@@ -86,6 +86,25 @@ from matplotlib.ticker import (
     MaxNLocator,
     NullLocator,
 )
+from scipy.optimize import least_squares, root
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return bool(default)
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_int(name: str, default: int) -> int:
+    value = os.environ.get(name)
+    return int(default) if value is None else int(value)
+
+
+def _env_float(name: str, default: float) -> float:
+    value = os.environ.get(name)
+    return float(default) if value is None else float(value)
+
 
 FIGURE_SIZE = (DOUBLE_COLUMN_WIDTH, 6)
 FIGURE_LEFT_RIGHT_WIDTH_RATIOS = (1.0, 0.75)
@@ -98,19 +117,23 @@ FIGURE_WSPACE = 0.5
 FIGURE_HSPACE = 0.08
 PNG_PATH = figure_path("07-pareto-analysis.png")
 PDF_PATH = None
-RUN_BACKEND = "numba"
-RUN_TEST_NR = 32
-RUN_TEST_NT = 32
-RUN_REPEAT_COUNT = 10
+RUN_BACKEND = os.environ.get("VEQPY_07_BACKEND", "numba")
+RUN_TEST_NR = _env_int("VEQPY_07_TEST_NR", 32)
+RUN_TEST_NT = _env_int("VEQPY_07_TEST_NT", 32)
+RUN_REPEAT_COUNT = _env_int("VEQPY_07_REPEAT_COUNT", 10)
 # Script entrypoint mode.  ``DEFAULT_SWEEP_MODE`` below only applies to helper
 # calls, while ``main()`` reads this value directly.
-RUN_SWEEP_MODE = "full"
-RUN_RECOMPUTE_FULL = False
-RUN_CASE_WORKERS = 4
-RUN_CASE_WORKER_INNER_THREADS = 1
-RUN_FRONTIER_MIN_REL_IMPROVEMENT = 0.05
-RUN_RANDOM_SIGNATURE_COUNT = 5
-RUN_RANDOM_SIGNATURE_SEED = 20260407
+RUN_SWEEP_MODE = os.environ.get("VEQPY_07_SWEEP_MODE", "full")
+RUN_RECOMPUTE_FULL = _env_bool("VEQPY_07_RECOMPUTE_FULL", False)
+RUN_CASE_WORKERS = _env_int("VEQPY_07_CASE_WORKERS", 4)
+RUN_CASE_WORKER_INNER_THREADS = _env_int("VEQPY_07_CASE_WORKER_INNER_THREADS", 1)
+RUN_FRONTIER_MIN_REL_IMPROVEMENT = _env_float("VEQPY_07_FRONTIER_MIN_REL_IMPROVEMENT", 0.05)
+RUN_RANDOM_SIGNATURE_COUNT = _env_int("VEQPY_07_RANDOM_SIGNATURE_COUNT", 5)
+RUN_RANDOM_SIGNATURE_SEED = _env_int("VEQPY_07_RANDOM_SIGNATURE_SEED", 20260407)
+RUN_USE_NUMBA_SWEEP_SOLVER = _env_bool("VEQPY_07_USE_NUMBA_SWEEP_SOLVER", True)
+RUN_SWEEP_VALIDATE_SAMPLE_COUNT = _env_int("VEQPY_07_SWEEP_VALIDATE_SAMPLE_COUNT", 12)
+RUN_SWEEP_VALIDATE_ATOL = _env_float("VEQPY_07_SWEEP_VALIDATE_ATOL", 1.0e-8)
+RUN_SWEEP_VALIDATE_RTOL = _env_float("VEQPY_07_SWEEP_VALIDATE_RTOL", 1.0e-6)
 # Selected reduced rows target normalized shape errors E_ref/a.  D-shape has
 # enough low-order accuracy to use a tighter Medium/High ladder than the
 # GEQDSK-derived H-mode and X-point cases.
@@ -499,6 +522,8 @@ class Sample:
     signature: dict[str, int]
     sweep_step: str
     is_exact_reference: bool
+    solver_path: str = "per-topology-kernel"
+    sweep_setup_ms: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -517,6 +542,36 @@ class InitialSolveTimeoutError(RuntimeError):
             f"Initial solve exceeded {self.timeout_s:.{FIXED_DECIMALS}f} s "
             f"({self.elapsed_ms:.{FIXED_DECIMALS}f} ms)"
         )
+
+
+@dataclass(frozen=True)
+class SignatureView:
+    signature: dict[str, int]
+    active_profiles: dict[str, int]
+    x_indices: np.ndarray
+    residual_indices: np.ndarray
+    reduced_block_lengths: np.ndarray
+    parameter_count: int
+    x_profile_blocks: tuple[tuple[str, np.ndarray, float, float], ...]
+
+
+@dataclass(frozen=True)
+class ParetoSweepResult:
+    x: np.ndarray
+    raw: np.ndarray
+    scaled: np.ndarray
+    alpha: np.ndarray
+    x_full: np.ndarray
+    raw_norm: float
+    scaled_norm: float
+    success: bool
+    nfev: int
+    njev: int
+    nit: int
+    elapsed_ms: float
+    solver_ms: float
+    preprocess_ms: float
+    postprocess_ms: float
 
 
 class ParetoProgressDisplay:
@@ -2250,7 +2305,651 @@ def solve_with_timing(
     return final_result, final_eq, float(np.median(elapsed_values))
 
 
+class ParetoNumbaSweepSolver:
+    """07-only reduced-signature solver backed by one max-topology Numba runtime."""
+
+    def __init__(self, benchmark, reference: ReferenceCase, grid, solver_config) -> None:
+        if str(benchmark.BACKEND) != "numba":
+            raise ValueError("ParetoNumbaSweepSolver requires backend='numba'")
+        self.benchmark = benchmark
+        self.reference = reference
+        self.grid = grid
+        self.config = solver_config
+        self._views: dict[tuple[tuple[str, int], ...], SignatureView] = {}
+
+        _min_lengths, max_lengths = get_case_length_bounds(reference.case_key)
+        max_signature = {
+            name: int(length) for name, length in max_lengths.items() if int(length) > 0
+        }
+        setup_started = time.perf_counter()
+        self.max_case = build_pf_case(benchmark, reference, grid, max_signature)
+        self.kernel = benchmark.Kernel(
+            topology=self.max_case.topology,
+            recipe=benchmark.KernelRecipe(backend="numba"),
+            config=solver_config,
+        )
+        # Compile and populate the private Numba runtime once.  Setup time is kept
+        # separate from per-signature elapsed_ms.
+        self.kernel.solve(self.max_case.boundary, self.max_case.source, config=solver_config)
+        self.runtime = _numba_runtime_from_kernel(self.kernel)
+        self.runtime.set_case(self.max_case.boundary, self.max_case.source)
+        self.sweep_setup_ms = (time.perf_counter() - setup_started) * 1000.0
+        self._full_x = np.zeros(int(self.runtime.x_size), dtype=np.float64)
+
+    def close(self) -> None:
+        self.kernel.close()
+
+    def view_for(self, signature: dict[str, int]) -> SignatureView:
+        key = signature_key(signature)
+        cached = self._views.get(key)
+        if cached is not None:
+            return cached
+
+        _min_lengths, max_lengths = get_case_length_bounds(self.reference.case_key)
+        active_profiles = active_profiles_from_coeffs(
+            make_profile_coeffs(signature, max_lengths=max_lengths)
+        )
+        components = _load_veqpy_components()
+        profile_names = tuple(self.runtime.plan.profile_names)
+        profile_index = dict(self.runtime.plan.profile_index)
+        _reduced_profile_l, reduced_coeff_index, _ = components["build_profile_layout"](
+            active_profiles,
+            profile_names=profile_names,
+        )
+        max_coeff_index = np.asarray(self.runtime.plan.coeff_index, dtype=np.int64)
+        parameter_count = int(sum(int(length) for length in active_profiles.values()))
+        x_indices = np.full(parameter_count, -1, dtype=np.int64)
+        x_profile_blocks: list[tuple[str, np.ndarray, float, float]] = []
+        block_lengths: list[int] = []
+
+        max_blocks_by_name = {
+            str(name): (
+                np.asarray(coeff_indices, dtype=np.int64),
+                float(offset),
+                float(profile_scale),
+            )
+            for _profile_id, name, coeff_indices, offset, profile_scale in (
+                self.runtime.active_profile_blocks()
+            )
+        }
+
+        for name, length_value in active_profiles.items():
+            length = int(length_value)
+            if length <= 0:
+                continue
+            if name not in profile_index:
+                raise KeyError(f"Unknown profile name {name!r} in Pareto signature")
+            if name not in max_blocks_by_name:
+                raise ValueError(f"Max Numba runtime does not contain active profile {name!r}")
+            p = int(profile_index[name])
+            for degree in range(length):
+                reduced_idx = int(reduced_coeff_index[p, degree])
+                max_idx = int(max_coeff_index[p, degree])
+                if reduced_idx < 0 or max_idx < 0:
+                    raise ValueError(
+                        f"Invalid packed index for profile {name!r} degree {degree}: "
+                        f"reduced={reduced_idx}, max={max_idx}"
+                    )
+                x_indices[reduced_idx] = max_idx
+
+        for _profile_id, name, coeff_indices, offset, profile_scale in (
+            self.runtime.active_profile_blocks()
+        ):
+            profile_name = str(name)
+            length = int(active_profiles.get(profile_name, 0))
+            if length <= 0:
+                continue
+            p = int(profile_index[profile_name])
+            reduced_indices = np.asarray(reduced_coeff_index[p, :length], dtype=np.int64)
+            full_prefix = np.asarray(coeff_indices[:length], dtype=np.int64)
+            if np.any(reduced_indices < 0) or np.any(full_prefix < 0):
+                raise ValueError(f"Invalid reduced view indices for profile {profile_name!r}")
+            if not _is_strictly_increasing(full_prefix):
+                raise ValueError(f"Full indices for profile {profile_name!r} are not increasing")
+            block_lengths.append(length)
+            x_profile_blocks.append(
+                (
+                    profile_name,
+                    reduced_indices.copy(),
+                    float(offset),
+                    float(profile_scale),
+                )
+            )
+
+        if np.any(x_indices < 0):
+            missing = np.flatnonzero(x_indices < 0).tolist()
+            raise ValueError(f"Incomplete reduced-to-full view; missing x positions {missing}")
+        if np.unique(x_indices).size != x_indices.size:
+            raise ValueError("Reduced-to-full x indices must be unique")
+        if np.any(x_indices >= int(self.runtime.x_size)):
+            raise ValueError("Reduced-to-full x index exceeds max runtime size")
+
+        reduced_block_lengths = np.asarray(block_lengths, dtype=np.int64)
+        if int(np.sum(reduced_block_lengths)) != int(parameter_count):
+            raise ValueError(
+                "Reduced residual block lengths do not sum to parameter_count "
+                f"({int(np.sum(reduced_block_lengths))} != {parameter_count})"
+            )
+        view = SignatureView(
+            signature={name: int(length) for name, length in signature.items()},
+            active_profiles=dict(active_profiles),
+            x_indices=x_indices,
+            residual_indices=x_indices.copy(),
+            reduced_block_lengths=reduced_block_lengths,
+            parameter_count=int(parameter_count),
+            x_profile_blocks=tuple(x_profile_blocks),
+        )
+        self._views[key] = view
+        return view
+
+    def solve(
+        self,
+        signature: dict[str, int],
+        repeat_count: int,
+        *,
+        initial_solve_timeout_s: float = INITIAL_SOLVE_TIMEOUT_S,
+    ) -> tuple[ParetoSweepResult, object, float]:
+        view = self.view_for(signature)
+        probe_started = time.perf_counter()
+        result = self._solve_once(view)
+        probe_elapsed_ms = (time.perf_counter() - probe_started) * 1000.0
+        probe_elapsed_ms = max(probe_elapsed_ms, float(result.elapsed_ms))
+        if probe_elapsed_ms > float(initial_solve_timeout_s) * 1000.0:
+            raise InitialSolveTimeoutError(
+                elapsed_ms=probe_elapsed_ms,
+                timeout_s=initial_solve_timeout_s,
+            )
+
+        elapsed_values: list[float] = []
+        final_result: ParetoSweepResult | None = None
+        for _ in range(max(int(repeat_count), 1)):
+            final_result = self._solve_once(view)
+            elapsed_values.append(float(final_result.elapsed_ms))
+        if final_result is None:
+            raise RuntimeError("No sweep solver result returned")
+        equilibrium = self.runtime.build_equilibrium(
+            final_result.x_full,
+            self.max_case.boundary,
+            self.max_case.source,
+        )
+        return final_result, equilibrium, float(np.median(elapsed_values))
+
+    def _solve_once(self, view: SignatureView) -> ParetoSweepResult:
+        elapsed_started = time.perf_counter()
+        preprocess_started = time.perf_counter()
+        full_initial = self.runtime.initial_state(
+            self.max_case.boundary,
+            self.max_case.source,
+            initial=self.config.initial,
+            x0=None,
+        )
+        x_initial = np.asarray(full_initial[view.x_indices], dtype=np.float64).copy()
+        preprocess_ms = (time.perf_counter() - preprocess_started) * 1000.0
+
+        solver_started = time.perf_counter()
+        outcome_x, nfev, njev, nit = self._solve_optimizer_problem(view, x_initial)
+        solver_ms = (time.perf_counter() - solver_started) * 1000.0
+
+        postprocess_started = time.perf_counter()
+        x_final = np.asarray(outcome_x, dtype=np.float64).copy()
+        x_full = self._scatter_full(view, x_final, copy=True)
+        raw_full = self.runtime.residual_for_current_case(x_full)
+        raw = np.asarray(raw_full[view.residual_indices], dtype=np.float64).copy()
+        raw_norm = float(np.linalg.norm(raw))
+        scaled = self._scaled_residual(view, raw, x_initial)
+        scaled_norm = float(np.linalg.norm(scaled))
+        postprocess_ms = (time.perf_counter() - postprocess_started) * 1000.0
+        elapsed_ms = (time.perf_counter() - elapsed_started) * 1000.0
+        return ParetoSweepResult(
+            x=x_final,
+            raw=raw,
+            scaled=scaled,
+            alpha=np.asarray(self.runtime.alpha, dtype=np.float64).copy(),
+            x_full=x_full,
+            raw_norm=raw_norm,
+            scaled_norm=scaled_norm,
+            success=_residual_within_acceptance(raw_norm, self.config),
+            nfev=int(nfev),
+            njev=int(njev),
+            nit=int(nit),
+            elapsed_ms=float(elapsed_ms),
+            solver_ms=float(solver_ms),
+            preprocess_ms=float(preprocess_ms),
+            postprocess_ms=float(postprocess_ms),
+        )
+
+    def _solve_optimizer_problem(
+        self,
+        view: SignatureView,
+        x_initial: np.ndarray,
+    ) -> tuple[np.ndarray, int, int, int]:
+        method = _sweep_solver_method(self.config)
+        residual_fun = self._residual_function(view, x_initial)
+        optimizer_x0 = np.asarray(x_initial, dtype=np.float64).copy()
+        decode_x = None
+        if method == "hybr":
+            transform_fun, optimizer_x0, decode_x = _build_reduced_x_transform_wrapper(
+                view,
+                optimizer_x0,
+            )
+            if transform_fun is not None:
+                original_residual_fun = residual_fun
+
+                def transformed_residual_fun(z: np.ndarray) -> np.ndarray:
+                    return original_residual_fun(transform_fun(z))
+
+                residual_fun = transformed_residual_fun
+
+        try:
+            opt = _run_sweep_optimizer(residual_fun, optimizer_x0, self.config, method=method)
+            opt_x = decode_x(opt.x) if decode_x is not None else opt.x
+            return (
+                np.asarray(opt_x, dtype=np.float64).copy(),
+                _count_opt_attr(opt, "nfev"),
+                _count_opt_attr(opt, "njev"),
+                _count_opt_attr(opt, "nit"),
+            )
+        except Exception:
+            return np.asarray(x_initial, dtype=np.float64).copy(), 0, 0, 0
+
+    def _residual_function(self, view: SignatureView, x_reference: np.ndarray):
+        if self.config.norm == "none":
+            return lambda x: self._residual_reduced(view, x)
+        reference_raw = self._residual_reduced(view, x_reference)
+        scale = self._residual_scale(view, reference_raw, x_reference)
+        if scale is None:
+            return lambda x: self._residual_reduced(view, x)
+        scale_eval = np.asarray(scale, dtype=np.float64)
+
+        def residual_fun(x: np.ndarray) -> np.ndarray:
+            return self._residual_reduced(view, x) / scale_eval
+
+        return residual_fun
+
+    def _residual_reduced(self, view: SignatureView, x_reduced: np.ndarray) -> np.ndarray:
+        x_full = self._scatter_full(view, x_reduced, copy=False)
+        raw_full = self.runtime.residual_for_current_case(x_full)
+        return np.asarray(raw_full[view.residual_indices], dtype=np.float64).copy()
+
+    def _scatter_full(
+        self,
+        view: SignatureView,
+        x_reduced: np.ndarray,
+        *,
+        copy: bool,
+    ) -> np.ndarray:
+        x_eval = np.asarray(x_reduced, dtype=np.float64)
+        if x_eval.ndim != 1 or x_eval.shape[0] != view.parameter_count:
+            raise ValueError(
+                f"Expected reduced x shape ({view.parameter_count},), got {x_eval.shape}"
+            )
+        self._full_x.fill(0.0)
+        self._full_x[view.x_indices] = x_eval
+        return self._full_x.copy() if copy else self._full_x
+
+    def _scaled_residual(
+        self,
+        view: SignatureView,
+        raw: np.ndarray,
+        x_reference: np.ndarray,
+    ) -> np.ndarray:
+        if self.config.norm == "none":
+            return raw.copy()
+        reference_raw = self._residual_reduced(view, x_reference)
+        scale = self._residual_scale(view, reference_raw, x_reference)
+        if scale is None:
+            return raw.copy()
+        return raw / np.asarray(scale, dtype=np.float64)
+
+    def _residual_scale(
+        self,
+        view: SignatureView,
+        reference_raw: np.ndarray,
+        x_reference: np.ndarray,
+    ) -> np.ndarray | None:
+        from veqpy.kernels.numba_kernel.residual_scale import make_residual_scale
+
+        params: dict[str, object] = {}
+        if self.config.norm in {"balanced", "safe"}:
+            params.update(
+                floor=self.config.residual_normalization_floor,
+                max_ratio=self.config.residual_normalization_max_ratio,
+                huber_tau=self.config.residual_normalization_huber_tau,
+            )
+        if self.config.norm == "safe":
+            params.update(
+                residual_fun=lambda x: self._residual_reduced(view, x),
+                x_guess=x_reference,
+                x_scale=_reduced_x_scale_for_reference(view, x_reference),
+                probe_count=self.config.residual_normalization_probe_count,
+                probe_step=self.config.residual_normalization_probe_step,
+                sensitivity_lambda=self.config.residual_normalization_sensitivity_lambda,
+            )
+        scale = make_residual_scale(
+            self.config.norm,
+            reference_raw,
+            view.reduced_block_lengths,
+            **params,
+        )
+        if scale is None:
+            return None
+        return np.asarray(scale, dtype=np.float64)
+
+
+def _numba_runtime_from_kernel(kernel):
+    impl = getattr(kernel, "_impl", None)
+    recipe = getattr(impl, "recipe", None)
+    if getattr(recipe, "backend", None) != "numba":
+        raise ValueError("Expected a Kernel with recipe.backend='numba'")
+    solver = getattr(impl, "_solver", None)
+    runtime = getattr(solver, "runtime", None)
+    required = (
+        "active_profile_blocks",
+        "residual_block_lengths",
+        "residual_for_current_case",
+        "initial_state",
+        "set_case",
+        "build_equilibrium",
+    )
+    missing = [name for name in required if not hasattr(runtime, name)]
+    if runtime is None or missing:
+        raise RuntimeError(f"Unexpected private Numba runtime shape; missing {missing}")
+    return runtime
+
+
+def _is_strictly_increasing(values: np.ndarray) -> bool:
+    arr = np.asarray(values, dtype=np.int64)
+    return bool(arr.ndim == 1 and (arr.size <= 1 or np.all(np.diff(arr) > 0)))
+
+
+def _run_sweep_optimizer(residual_fun, x_guess: np.ndarray, config, *, method: str):
+    if method == "hybr":
+        return root(
+            residual_fun,
+            x_guess,
+            method="hybr",
+            tol=float(config.max_residual),
+            options=_root_options(config, default_max_evaluations=x_guess.size * x_guess.size),
+        )
+    return least_squares(
+        residual_fun,
+        x_guess,
+        method=method,
+        **_least_squares_kwargs(
+            config,
+            method=method,
+            default_max_evaluations=x_guess.size * x_guess.size,
+        ),
+    )
+
+
+def _sweep_solver_method(config) -> str:
+    if config.method == "powell":
+        return "hybr"
+    if config.method == "levenberg-marquardt":
+        return "lm"
+    raise NotImplementedError(
+        f"Numba sweep solver does not support KernelConfig.method={config.method!r}"
+    )
+
+
+def _root_options(config, *, default_max_evaluations: int) -> dict[str, object]:
+    options: dict[str, object] = {"eps": 1.0e-6}
+    max_evaluations = _max_evaluations(config, default=default_max_evaluations)
+    if max_evaluations > 0:
+        options["maxfev"] = max_evaluations
+    if config.norm != "none":
+        options["factor"] = 1.0
+    return options
+
+
+def _least_squares_kwargs(
+    config,
+    *,
+    method: str,
+    default_max_evaluations: int,
+) -> dict[str, object]:
+    kwargs: dict[str, object] = {
+        "ftol": float(config.max_residual),
+        "xtol": float(config.max_residual),
+        "gtol": float(config.max_residual),
+    }
+    max_evaluations = _max_evaluations(config, default=default_max_evaluations)
+    if max_evaluations > 0:
+        kwargs["max_nfev"] = max_evaluations
+    if config.norm != "none" and method == "lm":
+        kwargs["x_scale"] = 1.0
+    return kwargs
+
+
+def _max_evaluations(config, *, default: int) -> int:
+    if config.max_evaluations is None:
+        return int(default)
+    return int(config.max_evaluations)
+
+
+def _count_opt_attr(opt, name: str) -> int:
+    value = getattr(opt, name, 0)
+    if value is None:
+        return 0
+    return int(value)
+
+
+def _residual_within_acceptance(residual_norm: float, config) -> bool:
+    accepted = max(
+        float(config.max_residual) * float(config.accepted_residual_factor),
+        float(config.accepted_residual_floor),
+    )
+    return bool(np.isfinite(residual_norm) and residual_norm <= accepted)
+
+
+def _build_reduced_x_transform_wrapper(view: SignatureView, x_guess: np.ndarray):
+    x_eval = np.asarray(x_guess, dtype=np.float64)
+    x_scale = _reduced_x_scale_for_reference(view, x_eval)
+    if x_scale is None:
+        return None, x_eval, None
+    inv_scale = 1.0 / x_scale
+    x_buffer = np.empty_like(x_eval)
+
+    def map_z_to_x(z: np.ndarray) -> np.ndarray:
+        z_eval = np.asarray(z, dtype=np.float64)
+        if z_eval.ndim != 1 or z_eval.shape[0] != x_eval.shape[0]:
+            raise ValueError(f"Expected z to have shape {x_eval.shape}, got {z_eval.shape}")
+        np.multiply(z_eval, x_scale, out=x_buffer)
+        return x_buffer
+
+    return map_z_to_x, x_eval * inv_scale, map_z_to_x
+
+
+def _reduced_x_scale_for_reference(
+    view: SignatureView,
+    x_reference: np.ndarray,
+) -> np.ndarray | None:
+    x_eval = np.asarray(x_reference, dtype=np.float64)
+    if x_eval.ndim != 1 or x_eval.shape[0] != view.parameter_count:
+        return None
+    scale = np.ones_like(x_eval)
+    for profile_name, reduced_indices, offset, profile_scale in view.x_profile_blocks:
+        coeff_indices = np.asarray(reduced_indices, dtype=np.int64)
+        length = int(coeff_indices.size)
+        if length <= 0:
+            continue
+        if np.any(coeff_indices < 0) or np.any(coeff_indices >= x_eval.size):
+            return None
+        block_guess = x_eval[coeff_indices]
+        guess_rms = float(np.linalg.norm(block_guess) / np.sqrt(length))
+        offset_scale = 0.0 if profile_name in {"h", "v", "psin"} else abs(float(offset))
+        family_scale = abs(float(profile_scale))
+        family_prior = _x_scale_profile_prior(profile_name)
+        if abs(family_scale - 1.0) <= 1.0e-12:
+            family_scale = family_prior
+        scale[coeff_indices] = max(offset_scale, family_scale, family_prior, guess_rms, 1.0e-2)
+    return scale
+
+
+def _x_scale_profile_prior(name: str) -> float:
+    if name in {"h", "v", "psin"}:
+        return 1.5e-1
+    if name == "k":
+        return 1.0
+    if name.startswith(("c", "s")):
+        return 5.0e-2
+    if name == "F":
+        return 2.5e-1
+    return 5.0e-2
+
+
 _CASE_WORKER_STATE: dict[str, object] = {}
+
+
+def use_numba_sweep_solver_for_backend(backend: str) -> bool:
+    return bool(RUN_USE_NUMBA_SWEEP_SOLVER) and str(backend) == "numba"
+
+
+def solve_signature_record_sample(
+    benchmark,
+    *,
+    case_key: str,
+    reference: ReferenceCase,
+    grid,
+    repeat_count: int,
+    solver_config,
+    method: str,
+    record: SignatureRecord,
+    sweep_solver: ParetoNumbaSweepSolver | None = None,
+) -> Sample:
+    signature = record.signature
+    result = None
+    equilibrium = None
+    elapsed_ms = None
+    active_profiles = None
+    solver_path = "per-topology-kernel"
+    sweep_setup_ms = 0.0
+
+    if sweep_solver is not None:
+        try:
+            result, equilibrium, elapsed_ms = sweep_solver.solve(
+                signature,
+                repeat_count,
+            )
+            active_profiles = sweep_solver.view_for(signature).active_profiles
+            solver_path = "numba-sweep"
+            sweep_setup_ms = float(sweep_solver.sweep_setup_ms)
+        except InitialSolveTimeoutError:
+            raise
+        except Exception:
+            result = None
+            equilibrium = None
+            elapsed_ms = None
+            active_profiles = None
+
+    if result is None or equilibrium is None or elapsed_ms is None or active_profiles is None:
+        case = build_pf_case(benchmark, reference, grid, signature)
+        result, equilibrium, elapsed_ms = solve_with_timing(
+            benchmark,
+            case,
+            grid,
+            repeat_count,
+            method=method,
+            solver_config=solver_config,
+        )
+        active_profiles = case.active_profiles
+
+    shape_x = benchmark._extract_shape_x(active_profiles, result.x)
+    aggregate, shape_err, surf_err, psi_r_err, ff_psi_err, mu0_p_psi_err, q_err = (
+        compute_metrics(
+            benchmark,
+            reference,
+            equilibrium,
+            shape_x,
+        )
+    )
+    return Sample(
+        case_key=case_key,
+        parameter_count=int(np.size(result.x)),
+        elapsed_ms=float(elapsed_ms),
+        aggregate_rel_error=float(aggregate),
+        shape_rel_error=float(shape_err),
+        surface_rel_rms_error=float(surf_err),
+        psi_r_rel_rms_error=float(psi_r_err),
+        ff_psi_rel_rms_error=float(ff_psi_err),
+        mu0_p_psi_rel_rms_error=float(mu0_p_psi_err),
+        q_rel_rms_error=float(q_err),
+        nfev=result_nfev(result),
+        nit=result_nit(result),
+        residual_norm_final=float(result.raw_norm),
+        strategy_name=str(record.strategy_name),
+        strategy_names=list(record.strategy_names),
+        signature=dict(signature),
+        sweep_step=record.sweep_step,
+        is_exact_reference=False,
+        solver_path=solver_path,
+        sweep_setup_ms=sweep_setup_ms,
+    )
+
+
+def validate_numba_sweep_solver(
+    sweep_solver: ParetoNumbaSweepSolver,
+    benchmark,
+    reference: ReferenceCase,
+    grid,
+    records: list[SignatureRecord],
+    solver_config,
+    *,
+    count: int,
+) -> None:
+    selected = list(records[: max(int(count), 0)])
+    if not selected:
+        return
+    max_x_delta = 0.0
+    max_raw_norm_delta = 0.0
+    for record in selected:
+        case = build_pf_case(benchmark, reference, grid, record.signature)
+        view = sweep_solver.view_for(record.signature)
+        if int(view.parameter_count) != int(case.topology.x_size):
+            raise ValueError(
+                f"parameter_count mismatch for {record.sweep_step}: "
+                f"{view.parameter_count} != {case.topology.x_size}"
+            )
+        old_result, _old_equilibrium, _old_elapsed_ms = solve_with_timing(
+            benchmark,
+            case,
+            grid,
+            repeat_count=1,
+            method=CASE_SOLVER_METHODS[reference.case_key],
+            solver_config=solver_config,
+        )
+        new_result, _new_equilibrium, _new_elapsed_ms = sweep_solver.solve(
+            record.signature,
+            repeat_count=1,
+        )
+        x_delta = float(np.max(np.abs(np.asarray(new_result.x) - np.asarray(old_result.x))))
+        raw_norm_delta = abs(float(new_result.raw_norm) - float(old_result.raw_norm))
+        max_x_delta = max(max_x_delta, x_delta)
+        max_raw_norm_delta = max(max_raw_norm_delta, raw_norm_delta)
+        x_scale = max(float(np.max(np.abs(np.asarray(old_result.x, dtype=np.float64)))), 1.0)
+        raw_norm_scale = max(float(abs(old_result.raw_norm)), 1.0)
+        if x_delta > max(
+            float(RUN_SWEEP_VALIDATE_ATOL),
+            float(RUN_SWEEP_VALIDATE_RTOL) * x_scale,
+        ):
+            raise ValueError(
+                f"sweep x mismatch for {record.sweep_step}: max_abs_delta={x_delta:.6e}"
+            )
+        if raw_norm_delta > max(
+            float(RUN_SWEEP_VALIDATE_ATOL),
+            float(RUN_SWEEP_VALIDATE_RTOL) * raw_norm_scale,
+        ):
+            raise ValueError(
+                f"sweep raw_norm mismatch for {record.sweep_step}: "
+                f"delta={raw_norm_delta:.6e}"
+            )
+    SCRIPT_CONSOLE.print(
+        f"[pareto] validated Numba sweep solver for {CASE_LABELS[reference.case_key]}: "
+        f"{len(selected)} signatures, max |dx|={max_x_delta:.{SCIENTIFIC_DECIMALS}e}, "
+        f"max raw-norm delta={max_raw_norm_delta:.{SCIENTIFIC_DECIMALS}e}",
+        markup=False,
+    )
 
 
 def set_inner_thread_environment(inner_threads: int) -> None:
@@ -2285,6 +2984,7 @@ def _case_worker_initializer(
     test_nt: int,
     repeat_count: int,
     inner_threads: int,
+    use_sweep_solver: bool,
 ) -> None:
     os.environ[REFERENCE_CHECK_SUPPRESS_ENV] = "1"
     set_inner_thread_environment(inner_threads)
@@ -2304,18 +3004,28 @@ def _case_worker_initializer(
         L_max=int(benchmark.REFERENCE_GRID.L_max),
         M_max=int(benchmark.REFERENCE_GRID.M_max),
     )
+    solver_config = get_case_solver_config(benchmark, str(case_key))
+    state = {
+        "benchmark": benchmark,
+        "case_key": str(case_key),
+        "reference": reference,
+        "grid": grid,
+        "repeat_count": int(repeat_count),
+        "solver_config": solver_config,
+        "method": CASE_SOLVER_METHODS[str(case_key)],
+    }
+    if bool(use_sweep_solver):
+        try:
+            state["sweep_solver"] = ParetoNumbaSweepSolver(
+                benchmark,
+                reference,
+                grid,
+                solver_config,
+            )
+        except Exception as exc:
+            state["sweep_solver_error"] = f"{type(exc).__name__}: {exc}"
     _CASE_WORKER_STATE.clear()
-    _CASE_WORKER_STATE.update(
-        {
-            "benchmark": benchmark,
-            "case_key": str(case_key),
-            "reference": reference,
-            "grid": grid,
-            "repeat_count": int(repeat_count),
-            "solver_config": get_case_solver_config(benchmark, str(case_key)),
-            "method": CASE_SOLVER_METHODS[str(case_key)],
-        }
-    )
+    _CASE_WORKER_STATE.update(state)
 
 
 def solve_signature_record_worker(
@@ -2329,47 +3039,19 @@ def solve_signature_record_worker(
     repeat_count = int(_CASE_WORKER_STATE["repeat_count"])
     solver_config = _CASE_WORKER_STATE["solver_config"]
     method = str(_CASE_WORKER_STATE["method"])
+    sweep_solver = _CASE_WORKER_STATE.get("sweep_solver")
 
-    sweep_step = record.sweep_step
-    signature = record.signature
-    case = build_pf_case(benchmark, reference, grid, signature)
     try:
-        result, equilibrium, elapsed_ms = solve_with_timing(
+        sample = solve_signature_record_sample(
             benchmark,
-            case,
-            grid,
-            repeat_count,
+            case_key=case_key,
+            reference=reference,
+            grid=grid,
+            repeat_count=repeat_count,
             method=method,
             solver_config=solver_config,
-        )
-        shape_x = benchmark._extract_shape_x(case.active_profiles, result.x)
-        aggregate, shape_err, surf_err, psi_r_err, ff_psi_err, mu0_p_psi_err, q_err = (
-            compute_metrics(
-                benchmark,
-                reference,
-                equilibrium,
-                shape_x,
-            )
-        )
-        sample = Sample(
-            case_key=case_key,
-            parameter_count=int(np.size(result.x)),
-            elapsed_ms=float(elapsed_ms),
-            aggregate_rel_error=float(aggregate),
-            shape_rel_error=float(shape_err),
-            surface_rel_rms_error=float(surf_err),
-            psi_r_rel_rms_error=float(psi_r_err),
-            ff_psi_rel_rms_error=float(ff_psi_err),
-            mu0_p_psi_rel_rms_error=float(mu0_p_psi_err),
-            q_rel_rms_error=float(q_err),
-            nfev=result_nfev(result),
-            nit=result_nit(result),
-            residual_norm_final=float(result.raw_norm),
-            strategy_name=str(record.strategy_name),
-            strategy_names=list(record.strategy_names),
-            signature=dict(signature),
-            sweep_step=sweep_step,
-            is_exact_reference=False,
+            record=record,
+            sweep_solver=sweep_solver if isinstance(sweep_solver, ParetoNumbaSweepSolver) else None,
         )
         return int(idx), sample, float(sample.elapsed_ms), False, None
     except InitialSolveTimeoutError as exc:
@@ -2859,6 +3541,8 @@ def sample_case(
     missing_records = list(enumerate(signature_records))
 
     reference: ReferenceCase | None = None
+    serial_sweep_solver: ParetoNumbaSweepSolver | None = None
+    use_sweep_solver = use_numba_sweep_solver_for_backend(backend)
 
     if progress is not None:
         progress.preparing(case_key)
@@ -2890,17 +3574,58 @@ def sample_case(
                 )
             return reference, solver_config, grid
 
+        def ensure_serial_sweep_solver() -> ParetoNumbaSweepSolver | None:
+            nonlocal serial_sweep_solver
+            if not use_sweep_solver:
+                return None
+            ref, config, solve_grid = ensure_serial_context()
+            if serial_sweep_solver is None:
+                serial_sweep_solver = ParetoNumbaSweepSolver(
+                    benchmark,
+                    ref,
+                    solve_grid,
+                    config,
+                )
+            return serial_sweep_solver
+
+        if use_sweep_solver and int(RUN_SWEEP_VALIDATE_SAMPLE_COUNT) > 0:
+            try:
+                sweep_solver = ensure_serial_sweep_solver()
+                if sweep_solver is not None:
+                    ref, config, solve_grid = ensure_serial_context()
+                    validate_numba_sweep_solver(
+                        sweep_solver,
+                        benchmark,
+                        ref,
+                        solve_grid,
+                        [record for _idx, record in missing_records],
+                        config,
+                        count=RUN_SWEEP_VALIDATE_SAMPLE_COUNT,
+                    )
+            except Exception as exc:
+                use_sweep_solver = False
+                if serial_sweep_solver is not None:
+                    serial_sweep_solver.close()
+                    serial_sweep_solver = None
+                SCRIPT_CONSOLE.print(
+                    f"[pareto] disabling Numba sweep solver for {CASE_LABELS[case_key]}: "
+                    f"{type(exc).__name__}: {exc}",
+                    markup=False,
+                )
+
         def solve_record_serial(idx: int, record: SignatureRecord) -> None:
             ref, config, solve_grid = ensure_serial_context()
-            case = build_pf_case(benchmark, ref, solve_grid, record.signature)
             try:
-                result, equilibrium, elapsed_ms = solve_with_timing(
+                sample = solve_signature_record_sample(
                     benchmark,
-                    case,
-                    solve_grid,
-                    repeat_count,
+                    case_key=case_key,
+                    reference=ref,
+                    grid=solve_grid,
+                    repeat_count=repeat_count,
                     method=CASE_SOLVER_METHODS[case_key],
                     solver_config=config,
+                    record=record,
+                    sweep_solver=ensure_serial_sweep_solver(),
                 )
             except InitialSolveTimeoutError as exc:
                 if progress is not None:
@@ -2911,35 +3636,6 @@ def sample_case(
                         skipped=True,
                     )
                 return
-            shape_x = benchmark._extract_shape_x(case.active_profiles, result.x)
-            aggregate, shape_err, surf_err, psi_r_err, ff_psi_err, mu0_p_psi_err, q_err = (
-                compute_metrics(
-                    benchmark,
-                    ref,
-                    equilibrium,
-                    shape_x,
-                )
-            )
-            sample = Sample(
-                case_key=case_key,
-                parameter_count=int(np.size(result.x)),
-                elapsed_ms=float(elapsed_ms),
-                aggregate_rel_error=float(aggregate),
-                shape_rel_error=float(shape_err),
-                surface_rel_rms_error=float(surf_err),
-                psi_r_rel_rms_error=float(psi_r_err),
-                ff_psi_rel_rms_error=float(ff_psi_err),
-                mu0_p_psi_rel_rms_error=float(mu0_p_psi_err),
-                q_rel_rms_error=float(q_err),
-                nfev=result_nfev(result),
-                nit=result_nit(result),
-                residual_norm_final=float(result.raw_norm),
-                strategy_name=str(record.strategy_name),
-                strategy_names=list(record.strategy_names),
-                signature=dict(record.signature),
-                sweep_step=record.sweep_step,
-                is_exact_reference=False,
-            )
             samples_by_index[idx] = sample
             if progress is not None:
                 progress.update(
@@ -2964,6 +3660,7 @@ def sample_case(
                         int(test_nt),
                         int(repeat_count),
                         int(case_worker_inner_threads),
+                        bool(use_sweep_solver),
                     ),
                 ) as executor:
                     futures = {
@@ -3002,6 +3699,8 @@ def sample_case(
         else:
             for idx, record in missing_records:
                 solve_record_serial(idx, record)
+        if serial_sweep_solver is not None:
+            serial_sweep_solver.close()
 
     samples: list[Sample] = [sample for sample in samples_by_index if sample is not None]
     if reference is None:
@@ -4387,6 +5086,22 @@ def write_json(
                 "test_nt": int(test_nt),
                 "backend": backend,
                 "sweep_mode": str(sweep_mode),
+                "numba_sweep_solver_requested": bool(RUN_USE_NUMBA_SWEEP_SOLVER),
+                "solver_paths": sorted(
+                    {
+                        str(sample.solver_path)
+                        for samples in samples_by_case.values()
+                        for sample in samples
+                    }
+                ),
+                "sweep_setup_ms_max": max(
+                    (
+                        float(sample.sweep_setup_ms)
+                        for samples in samples_by_case.values()
+                        for sample in samples
+                    ),
+                    default=0.0,
+                ),
                 "signature_version": FULL_SWEEP_SIGNATURE_VERSION
                 if str(sweep_mode) == "full"
                 else "partial-table05",
@@ -4551,6 +5266,7 @@ def main() -> None:
             ("grid", f"{RUN_TEST_NR}x{RUN_TEST_NT}"),
             ("repeat", RUN_REPEAT_COUNT),
             ("workers", RUN_CASE_WORKERS),
+            ("numba sweep", RUN_USE_NUMBA_SWEEP_SOLVER),
         ),
     )
     if sweep_mode == "full" and not bool(RUN_RECOMPUTE_FULL):
