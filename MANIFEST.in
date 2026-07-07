@@ -3,7 +3,6 @@ include LICENSE README.md pyproject.toml demo.py
 recursive-include veqpy/kernels/cxx_kernel/core CMakeLists.txt *.cpp *.h *.in
 recursive-include docs *.md *.svg *.py
 recursive-include data *.geqdsk
-recursive-include scripts *.py
 recursive-include benchmarks *.py *.md
 recursive-include tests *.py
 

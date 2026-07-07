@@ -111,17 +111,16 @@ fixed-boundary PF(`psin`) Kernel case directly with the public `veqpy` API:
 ```
 
 It writes `demo_init.png`, `demo_result.png`, and `demo_equilibrium.json` in the
-current directory. Manuscript-oriented reproduction workflows live under
-[`scripts/`][scripts]; they are heavier data/figure generators rather than
-introductory examples.
+current directory. This branch keeps the public package, demo, benchmark helpers,
+and current Kernel architecture aligned.
 
 ## Development Checks
 
 Core local checks mirror the push/PR CI workflow.
 
 ```bash
-.venv/bin/python -m compileall -q veqpy tests benchmarks scripts demo.py
-.venv/bin/ruff check veqpy tests benchmarks scripts demo.py
+.venv/bin/python -m compileall -q veqpy tests benchmarks demo.py
+.venv/bin/ruff check veqpy tests benchmarks demo.py
 .venv/bin/python -m pytest
 ```
 
@@ -138,25 +137,24 @@ families are GEQDSK-backed cases:
 - `H-mode`: `data/CHEASE.geqdsk`
 - `X-point`: `data/EFIT.geqdsk`
 
-Timings are median full nonlinear-solve wall times in milliseconds after warmup;
-the Cxx timing excludes native build time. `solution diff` is the maximum absolute
-Cxx-vs-Numba solution-vector difference for the benchmark case. Bold rows mark the
-representative High configuration for each GEQDSK family.
+`solution diff` is the maximum absolute Cxx-vs-Numba packed solution-vector
+difference. Bold rows mark the representative High configuration for each GEQDSK
+family.
 
-| case(params)    |     Cxx (ms) |    Numba (ms) |     speedup | solution diff |
-| --------------- | -----------: | ------------: | ----------: | ------------: |
-| D-shaped(4)     |     0.077366 |      1.095349 |     14.158x |      1.17e-12 |
-| D-shaped(5)     |     0.089723 |      1.202812 |     13.406x |      3.14e-12 |
-| **D-shaped(9)** | **0.129603** |  **1.515981** | **11.697x** |  **8.04e-12** |
-| D-shaped(75)    |     1.218136 |      6.718363 |      5.515x |      1.48e-10 |
-| H-mode(27)      |     0.615500 |      4.967208 |      8.070x |      3.12e-11 |
-| H-mode(36)      |     0.783802 |      6.142815 |      7.837x |      2.76e-11 |
-| **H-mode(60)**  | **2.053660** | **13.310995** |  **6.482x** |  **1.46e-08** |
-| H-mode(130)     |    12.440129 |     41.164805 |      3.309x |      6.11e-09 |
-| X-point(19)     |     0.263450 |      2.660089 |     10.097x |      1.55e-11 |
-| X-point(29)     |     0.443195 |      3.635614 |      8.203x |      3.92e-11 |
-| **X-point(94)** | **2.502630** |  **9.804938** |  **3.918x** |  **8.34e-11** |
-| X-point(130)    |     6.209815 |     21.124163 |      3.402x |      2.99e-10 |
+| case(params)    |     Cxx (ms) |    Numba (ms) |    speedup | solution diff |
+| --------------- | -----------: | ------------: | ---------: | ------------: |
+| D-shaped(4)     |     0.246913 |      1.943412 |     7.871x |      1.17e-12 |
+| D-shaped(5)     |     0.233480 |      2.052858 |     8.792x |      3.14e-12 |
+| **D-shaped(9)** | **0.324843** |  **2.651577** | **8.163x** |  **8.04e-12** |
+| D-shaped(75)    |     1.525350 |      7.799670 |     5.113x |      1.48e-10 |
+| H-mode(27)      |     0.833330 |      5.856498 |     7.028x |      3.12e-11 |
+| H-mode(36)      |     1.030506 |      7.133881 |     6.923x |      2.75e-11 |
+| **H-mode(60)**  | **2.336699** | **14.254966** | **6.100x** |  **4.45e-08** |
+| H-mode(130)     |    12.946364 |     42.713799 |     3.299x |      2.55e-09 |
+| X-point(19)     |     0.486021 |      3.708758 |     7.631x |      1.55e-11 |
+| X-point(29)     |     0.683057 |      4.524502 |     6.624x |      3.92e-11 |
+| **X-point(94)** | **2.889962** | **11.066233** | **3.829x** |  **8.34e-11** |
+| X-point(130)    |     6.871710 |     22.346156 |     3.252x |      2.99e-10 |
 
 The package-level Kernel API is intentionally semantic: users construct
 `KernelTopology` for the solve topology, including `ip_constraint` and
@@ -227,10 +225,8 @@ quadrature, and calculus now live in the corresponding source module headers.
 
 VEQPy is associated with the companion manuscript **"VEQ: a fast parametric
 Grad--Shafranov solver for fixed-boundary tokamak equilibria with flexible source
-inputs"**. The repository includes manuscript-oriented figure scripts under
-[`scripts/`][scripts] and benchmark helpers under [`benchmarks/`][benchmarks]. Tagged
-release artifacts can pin rendered figures, generated reference data, and dependency
-metadata for archival reproduction.
+inputs"**. The current branch keeps the maintained package surface and benchmark
+helpers under [`benchmarks/`][benchmarks].
 
 Related VEQ-family and representation papers include:
 
@@ -272,7 +268,6 @@ Related VEQ-family and representation papers include:
 [ci]: https://github.com/zhangtakeda/veqpy/actions/workflows/ci.yml
 [license]: LICENSE
 [tests]: tests/
-[scripts]: scripts/
 [benchmarks]: benchmarks/
 [architecture-doc]: docs/veqpy/architecture.md
 [model-doc]: docs/veqpy/model.md

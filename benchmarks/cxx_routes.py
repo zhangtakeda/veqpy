@@ -27,14 +27,12 @@ from benchmarks._common import (
     filter_route_specs,
     iter_route_specs,
     max_abs,
-    measure_solver,
+    measure_kernel_case,
     route_kernel_case,
     route_spec_label,
     route_spec_selector,
     route_topology_payload,
     runtime_env,
-    solve_native_case,
-    solve_numba_case,
     summarize_runtime_rows,
     write_json,
 )
@@ -106,13 +104,15 @@ def _measure_row(args: argparse.Namespace, spec) -> dict[str, Any]:
         return base_row
 
     try:
-        numba_measure = measure_solver(
-            lambda: solve_numba_case(case),
+        numba_measure = measure_kernel_case(
+            case,
+            recipe=KernelRecipe(backend="numba", layout="degree"),
             warmup=args.warmup,
             repeat=args.repeat,
         )
-        native_measure = measure_solver(
-            lambda: solve_native_case(case, recipe=recipe),
+        native_measure = measure_kernel_case(
+            case,
+            recipe=recipe,
             warmup=args.warmup,
             repeat=args.repeat,
         )

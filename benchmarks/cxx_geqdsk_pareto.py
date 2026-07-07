@@ -30,12 +30,10 @@ from benchmarks._common import (
     geqdsk_kernel_case,
     geqdsk_signature,
     max_abs,
-    measure_solver,
+    measure_kernel_case,
     runtime_env,
     selected_cases,
     selected_configs,
-    solve_native_case,
-    solve_numba_case,
     write_json,
 )
 from benchmarks._reporting import (
@@ -93,9 +91,6 @@ def _measure_case(args: argparse.Namespace, case_key: str, config_label: str) ->
         max_evaluations=args.max_evaluations,
         initial=args.initial,
         norm=args.norm,
-        boundary_fit_m=args.boundary_fit_m,
-        boundary_fit_n=args.boundary_fit_n,
-        boundary_maxtol=args.boundary_maxtol,
     )
     recipe = _recipe(args)
     base_row: dict[str, Any] = {
@@ -117,11 +112,15 @@ def _measure_case(args: argparse.Namespace, case_key: str, config_label: str) ->
         return base_row
 
     try:
-        numba_measure = measure_solver(
-            lambda: solve_numba_case(case), warmup=args.warmup, repeat=args.repeat
+        numba_measure = measure_kernel_case(
+            case,
+            recipe=KernelRecipe(backend="numba", layout="degree"),
+            warmup=args.warmup,
+            repeat=args.repeat,
         )
-        native_measure = measure_solver(
-            lambda: solve_native_case(case, recipe=recipe),
+        native_measure = measure_kernel_case(
+            case,
+            recipe=recipe,
             warmup=args.warmup,
             repeat=args.repeat,
         )
@@ -209,9 +208,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--initial", default="cold")
     parser.add_argument("--norm", default="fast")
     parser.add_argument("--max-evaluations", type=int, default=REFERENCE_SOLVER_MAXFEV)
-    parser.add_argument("--boundary-fit-m", type=int, default=10)
-    parser.add_argument("--boundary-fit-n", type=int, default=10)
-    parser.add_argument("--boundary-maxtol", type=float, default=1.0)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--cache-root", type=Path, default=None)
     parser.add_argument("--source-dir", type=Path, default=CORE_DIR)

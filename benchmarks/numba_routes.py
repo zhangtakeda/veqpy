@@ -34,13 +34,12 @@ from benchmarks._common import (
     filter_route_specs,
     grid_payload,
     iter_route_specs,
-    measure_solver,
+    measure_kernel_case,
     route_kernel_case,
     route_spec_label,
     route_spec_selector,
     runtime_env,
     runtime_payload,
-    solve_numba_case,
     summarize_runtime_rows,
     synthetic_route_reference,
     write_json,
@@ -63,6 +62,7 @@ from benchmarks._reporting import (
 from benchmarks._reporting import (
     console as reporting_console,
 )
+from veqpy import KernelRecipe
 
 DEFAULT_OUTPUT = REPO_ROOT / "benchmarks" / "results" / "numba_routes.json"
 
@@ -80,8 +80,9 @@ def _measure_row(args: argparse.Namespace, spec) -> dict[str, Any]:
     if args.no_run:
         return base_row
     try:
-        measure = measure_solver(
-            lambda: solve_numba_case(case),
+        measure = measure_kernel_case(
+            case,
+            recipe=KernelRecipe(backend="numba", layout="degree"),
             warmup=args.warmup,
             repeat=args.repeat,
         )
