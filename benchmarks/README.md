@@ -21,6 +21,7 @@ table reports effective function evaluations rather than solve-time medians.
 - `cxx_routes.py`: Cxx backend route matrix compared with the Numba backend.
 - `cxx_geqdsk_pareto.py`: GEQDSK Cxx backend matrix compared with the Numba backend.
 - `cxx_continuation.py`: Cxx backend continuation-policy benchmark.
+- `boundary_qr_fitters.py`: boundary R/Z scatter-to-coefficient QR fitter comparison.
 - `_common.py`: shared Kernel-case construction, timing, route specs, and JSON helpers.
 
 ## Reproduce
@@ -30,6 +31,7 @@ table reports effective function evaluations rather than solve-time medians.
 .venv/bin/python benchmarks/cxx_routes.py --quiet-progress
 .venv/bin/python benchmarks/cxx_geqdsk_pareto.py --quiet-progress
 .venv/bin/python benchmarks/cxx_continuation.py --quiet-progress
+.venv/bin/python benchmarks/boundary_qr_fitters.py --quiet-progress
 ```
 
 ## Environment
@@ -123,6 +125,25 @@ table reports effective function evaluations rather than solve-time medians.
 | C4 mixed    | solovev | 1088 | 899        | 197          | 194        | warm-chord   | 5.61x   |
 | C4 mixed    | chease  | 6501 | 1934       | 719          | 714        | warm-chord   | 9.11x   |
 | C4 mixed    | efit    | 3132 | 1642       | 436          | 432        | warm-chord   | 7.25x   |
+
+### Boundary QR Fitter Comparison
+
+- cases: `solovev, chease, efit`; order: `10/10`; warmup: `5`; repeat: `100`.
+- timing source: wall time around one scatter-to-coefficient fit call.
+- `coeff diff` is the max absolute parameter/coefficient difference versus the NumPy QR baseline.
+- The Cxx fitter is a standalone native module cached under `.veqpy-kernel-cache/fastmath/_boundary_fit`; its identity is independent of Kernel topology, source route, and solver config.
+
+| case    | backend | points | median ms | fit rms  | curve    | coeff diff |
+| ------- | ------- | ------ | --------- | -------- | -------- | ---------- |
+| solovev | numpy   | 512    | 7.839196  | 5.37e-04 | 1.02e-02 | 0.00e+00   |
+| solovev | numba   | 512    | 0.783640  | 5.37e-04 | 1.02e-02 | 1.11e-16   |
+| solovev | cxx     | 512    | 0.190371  | 5.37e-04 | 1.02e-02 | 2.59e-12   |
+| chease  | numpy   | 300    | 2.640611  | 3.54e-03 | 1.27e-02 | 0.00e+00   |
+| chease  | numba   | 300    | 0.324443  | 3.54e-03 | 1.27e-02 | 1.39e-16   |
+| chease  | cxx     | 300    | 0.099039  | 3.54e-03 | 1.27e-02 | 3.70e-12   |
+| efit    | numpy   | 106    | 0.726909  | 1.36e-03 | 9.81e-03 | 0.00e+00   |
+| efit    | numba   | 106    | 0.075393  | 1.36e-03 | 9.81e-03 | 2.22e-16   |
+| efit    | cxx     | 106    | 0.030602  | 1.36e-03 | 9.81e-03 | 3.43e-12   |
 
 ## Notes
 
