@@ -69,7 +69,7 @@ jobs:
         run: python -m build
 
       - name: Check package metadata
-        run: twine check dist/*
+        run: python -m twine check dist/*
 
       - name: Install wheel in an isolated virtual environment
         shell: bash
@@ -84,10 +84,11 @@ jobs:
           "${smoke_env}/bin/python" - <<'PY'
           import importlib.metadata as metadata
           import os
+          from importlib.resources import files
           from pathlib import Path
 
           import veqpy
-          from veqpy import Kernel, KernelBoundary, KernelSource, KernelTopology
+          from veqpy import Kernel, KernelBoundary, KernelRecipe, KernelSource, KernelTopology
           from veqpy.model import Grid
 
           module_path = Path(veqpy.__file__).resolve()
@@ -102,7 +103,42 @@ jobs:
               Grid.__name__,
               Kernel.__name__,
               KernelBoundary.__name__,
+              KernelRecipe.__name__,
               KernelSource.__name__,
               KernelTopology.__name__,
           )
+
+          topology = KernelTopology(
+              h_count=1,
+              v_count=0,
+              kappa_count=0,
+              psin_count=1,
+              F_count=0,
+              c_counts=(),
+              s_counts=(),
+              Nr=4,
+              Nt=4,
+              route="PF",
+              coordinate="psin",
+              nodes="uniform",
+              ip_constraint=True,
+              sample_count=5,
+          )
+          prepared = Kernel(
+              topology=topology,
+              recipe=KernelRecipe(backend="cxx"),
+          ).prepare(dry_run=True)
+          if not prepared.dry_run or prepared.prepared or prepared.backend != "cxx":
+              raise SystemExit(f"unexpected Cxx dry-run result: {prepared!r}")
+          expected_sources = {"CMakeLists.txt", "bindings.cpp", "kernel_runtime.h"}
+          cxx_core = files("veqpy.kernels.cxx_kernel") / "core"
+          missing = sorted(name for name in expected_sources if not (cxx_core / name).is_file())
+          if missing:
+              raise SystemExit(f"Cxx core package data missing from wheel: {missing}")
+          source_file_count = prepared.artifact.metadata["build_identity"]["cxx_source_digest"][
+              "file_count"
+          ]
+          if source_file_count < len(expected_sources):
+              raise SystemExit(f"Cxx source digest did not see packaged core files: {source_file_count}")
+          print("cxx dry-run artifact", prepared.artifact.artifact_id)
           PY

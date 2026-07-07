@@ -1,0 +1,17 @@
+include LICENSE README.md pyproject.toml demo.py
+
+recursive-include veqpy/kernels/cxx_kernel/core CMakeLists.txt *.cpp *.h *.in
+recursive-include docs *.md *.svg *.py
+recursive-include data *.geqdsk
+recursive-include scripts *.py
+recursive-include benchmarks *.py *.md
+recursive-include tests *.py
+
+prune benchmarks/results
+prune .veqpy-kernel-cache
+global-exclude *.py[cod]
+global-exclude __pycache__
+global-exclude .DS_Store
+exclude demo_equilibrium.json demo_init.png demo_result.png
+exclude Zhang2026-VEQ.*
+exclude texput.fls
