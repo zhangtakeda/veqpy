@@ -61,6 +61,11 @@ from contourpy import contour_generator
 from matplotlib.ticker import MultipleLocator
 
 import veqpy as veq
+from veqpy.kernels.boundary_materialization import (
+    materialize_kernel_boundary,
+    materialized_boundary_fit_payload,
+)
+from veqpy.kernels.types import kernel_boundary_shape_orders
 from veqpy.model import Geqdsk, Grid
 
 MU0 = 4.0e-7 * np.pi
@@ -1005,16 +1010,7 @@ def build_boundary(
         s_order=int(fit_n),
         fit_maxtol=BOUNDARY_MAXTOL,
     )
-    normalized = {
-        "rms": float(boundary.fit_rms),
-        "max_curve_error": float(boundary.fit_max_curve_error),
-        "a": float(boundary.a),
-        "R0": float(boundary.R0),
-        "Z0": float(boundary.Z0),
-        "ka": float(boundary.ka),
-        "c_offsets": np.asarray(boundary.c_offsets, dtype=np.float64),
-        "s_offsets": np.concatenate(([0.0], np.asarray(boundary.s_offsets, dtype=np.float64))),
-    }
+    normalized = materialized_boundary_fit_payload(materialize_kernel_boundary(boundary))
     return boundary, normalized
 
 
@@ -1030,11 +1026,8 @@ def build_solver_case(
 
 def build_solver(case: KernelProblemSpec, solve_grid: Grid) -> KernelSolveHandle:
     active_profiles = active_profiles_from_coeffs(case.profile_coeffs)
-    boundary_m_max = max(
-        int(np.asarray(case.boundary.c_offsets, dtype=np.float64).size) - 1,
-        int(np.asarray(case.boundary.s_offsets, dtype=np.float64).size),
-        int(solve_grid.M_max),
-    )
+    c_order, s_order = kernel_boundary_shape_orders(case.boundary)
+    boundary_m_max = max(c_order, s_order, int(solve_grid.M_max))
     topology = build_kernel_topology(
         active_profiles,
         nr=int(solve_grid.Nr),

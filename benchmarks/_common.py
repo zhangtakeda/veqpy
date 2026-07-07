@@ -28,12 +28,14 @@ from veqpy import (  # noqa: E402
     KernelTopology,
     SolveResult,
 )
+from veqpy.kernels.boundary_materialization import materialize_kernel_boundary  # noqa: E402
 from veqpy.kernels.numba_kernel.packed_layout import (  # noqa: E402
     build_profile_index,
     build_profile_layout,
     build_profile_names,
     build_shape_profile_names,
 )
+from veqpy.kernels.types import kernel_boundary_shape_orders  # noqa: E402
 from veqpy.model import Geqdsk, Grid  # noqa: E402
 
 THIS_FILE = Path(__file__).resolve()
@@ -934,11 +936,8 @@ def geqdsk_kernel_case(
         if spec.nodes == "grid"
         else (sample_count or max(int(geqdsk.P_psi.size), int(geqdsk.FF_psi.size), 9))
     )
-    m_max = max(
-        int(np.asarray(boundary.c_offsets, dtype=np.float64).size) - 1,
-        int(np.asarray(boundary.s_offsets, dtype=np.float64).size),
-        1,
-    )
+    c_order, s_order = kernel_boundary_shape_orders(boundary)
+    m_max = max(c_order, s_order, 1)
     ip_constraint, beta_constraint = constraint_flags(spec.constraint)
     heat_profile, current_profile = source_profiles_from_geqdsk(
         geqdsk,
@@ -1293,6 +1292,7 @@ def _updated_case(case: KernelCase, *, update: str, offset: float, index: int) -
     boundary = case.boundary
     source = case.source
     if update in {"boundary", "mixed"}:
+        boundary = materialize_kernel_boundary(boundary).boundary
         boundary = replace(
             boundary,
             c_offsets=_scale_array(boundary.c_offsets, offset, strength=0.5, keep_first=False),

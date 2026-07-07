@@ -82,13 +82,17 @@ def load_veqpy_components() -> dict[str, object]:
         KernelSource,
         KernelTopology,
     )
+    from veqpy.kernels.boundary_materialization import (
+        materialize_kernel_boundary,
+        materialized_boundary_fit_payload,
+    )
     from veqpy.kernels.numba_kernel.packed_layout import (
         build_profile_index,
         build_profile_layout,
         build_profile_names,
         build_shape_profile_names,
     )
-    from veqpy.kernels.types import kernel_boundary_s_offsets_with_s0
+    from veqpy.kernels.types import kernel_boundary_shape_orders
     from veqpy.model import Equilibrium, Geqdsk, Grid
 
     return {
@@ -105,7 +109,9 @@ def load_veqpy_components() -> dict[str, object]:
         "build_profile_layout": build_profile_layout,
         "build_profile_names": build_profile_names,
         "build_shape_profile_names": build_shape_profile_names,
-        "kernel_boundary_s_offsets_with_s0": kernel_boundary_s_offsets_with_s0,
+        "kernel_boundary_shape_orders": kernel_boundary_shape_orders,
+        "materialize_kernel_boundary": materialize_kernel_boundary,
+        "materialized_boundary_fit_payload": materialized_boundary_fit_payload,
     }
 
 
@@ -325,16 +331,8 @@ def build_geqdsk_boundary(geqdsk, *, fit_m: int, fit_n: int, return_fit: bool = 
         s_order=int(fit_n),
         fit_maxtol=BOUNDARY_MAXTOL,
     )
-    fit = {
-        "rms": float(boundary.fit_rms),
-        "max_curve_error": float(boundary.fit_max_curve_error),
-        "a": float(boundary.a),
-        "R0": float(boundary.R0),
-        "Z0": float(boundary.Z0),
-        "ka": float(boundary.ka),
-        "c_offsets": np.asarray(boundary.c_offsets, dtype=np.float64),
-        "s_offsets": components["kernel_boundary_s_offsets_with_s0"](boundary),
-    }
+    materialized = components["materialize_kernel_boundary"](boundary)
+    fit = components["materialized_boundary_fit_payload"](materialized)
     return (boundary, fit) if return_fit else boundary
 
 
@@ -405,12 +403,8 @@ def build_pf_case(benchmark, reference: PfReferenceCase, signature: dict[str, in
             max_lengths=CASE_REFERENCE_PROFILE_LENGTHS[reference.case_key],
         )
     )
-    boundary_m_max = max(
-        int(np.asarray(reference.boundary.c_offsets).size) - 1,
-        int(np.asarray(reference.boundary.s_offsets).size),
-        int(grid.M_max),
-        1,
-    )
+    c_order, s_order = components["kernel_boundary_shape_orders"](reference.boundary)
+    boundary_m_max = max(c_order, s_order, int(grid.M_max), 1)
     topology = build_kernel_topology(
         normalized_signature,
         nr=int(grid.Nr),

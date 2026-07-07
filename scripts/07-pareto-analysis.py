@@ -1026,16 +1026,8 @@ def build_boundary(geqdsk, *, fit_m: int, fit_n: int, boundary_maxtol: float = B
         s_order=int(fit_n),
         fit_maxtol=float(boundary_maxtol),
     )
-    fit = {
-        "rms": float(boundary.fit_rms),
-        "max_curve_error": float(boundary.fit_max_curve_error),
-        "a": float(boundary.a),
-        "R0": float(boundary.R0),
-        "Z0": float(boundary.Z0),
-        "ka": float(boundary.ka),
-        "c_offsets": np.asarray(boundary.c_offsets, dtype=np.float64),
-        "s_offsets": components["kernel_boundary_s_offsets_with_s0"](boundary),
-    }
+    materialized = components["materialize_kernel_boundary"](boundary)
+    fit = components["materialized_boundary_fit_payload"](materialized)
     return boundary, fit
 
 
@@ -1068,11 +1060,8 @@ def solve_equilibrium(case, *, method: str):
     )
     del method
     active_profiles = active_profiles_from_coeffs(case.profile_coeffs)
-    boundary_m_max = max(
-        int(np.asarray(case.boundary.c_offsets, dtype=np.float64).size) - 1,
-        int(np.asarray(case.boundary.s_offsets, dtype=np.float64).size),
-        int(solve_grid.M_max),
-    )
+    c_order, s_order = modules["kernel_boundary_shape_orders"](case.boundary)
+    boundary_m_max = max(c_order, s_order, int(solve_grid.M_max))
     topology = build_kernel_topology(
         active_profiles,
         nr=int(solve_grid.Nr),
@@ -2231,11 +2220,8 @@ def build_pf_case(benchmark, reference: ReferenceCase, grid, signature: dict[str
     active_profiles = active_profiles_from_coeffs(
         make_profile_coeffs(signature, max_lengths=max_lengths)
     )
-    boundary_m_max = max(
-        int(np.asarray(reference.boundary.c_offsets, dtype=np.float64).size) - 1,
-        int(np.asarray(reference.boundary.s_offsets, dtype=np.float64).size),
-        int(grid.M_max),
-    )
+    c_order, s_order = components["kernel_boundary_shape_orders"](reference.boundary)
+    boundary_m_max = max(c_order, s_order, int(grid.M_max))
     topology = build_kernel_topology(
         active_profiles,
         nr=int(grid.Nr),

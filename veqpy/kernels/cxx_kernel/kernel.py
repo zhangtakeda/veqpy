@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from veqpy.kernels.abi.source_semantics import MaterializedKernelSource, materialize_kernel_source
+from veqpy.kernels.boundary_materialization import materialize_kernel_boundary
 from veqpy.kernels.types import (
     KernelBoundary,
     KernelConfig,
@@ -264,7 +265,7 @@ class _CxxKernelImpl:
     def _kernel_boundary(boundary: KernelBoundary) -> KernelBoundary:
         if not isinstance(boundary, KernelBoundary):
             raise TypeError(f"boundary must be KernelBoundary, got {type(boundary).__name__}")
-        return boundary
+        return materialize_kernel_boundary(boundary).boundary
 
     @staticmethod
     def _kernel_source(source: KernelSource, *, case_name: str | None) -> KernelSource:

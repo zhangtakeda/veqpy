@@ -23,9 +23,10 @@ from veqpy.kernels.abi.options import (
     SOLVER_METHOD_POWELL,
 )
 from veqpy.kernels.abi.source_semantics import materialize_kernel_source
+from veqpy.kernels.boundary_materialization import materialize_kernel_boundary
 from veqpy.kernels.cxx_kernel.builder import prepare
 from veqpy.kernels.cxx_kernel.native_abi import solve_result_from_native
-from veqpy.kernels.types import kernel_boundary_s_offsets_with_s0
+from veqpy.kernels.types import kernel_boundary_has_raw_points, kernel_boundary_s_offsets_with_s0
 
 MU0 = 4.0e-7 * np.pi
 
@@ -115,17 +116,26 @@ def test_kernel_boundary_accepts_parameterized_and_rz_inputs() -> None:
         s_order=0,
         fit_maxtol=1.0e-8,
     )
-    assert_allclose(fitted.a, 0.5, rtol=0.0, atol=1.0e-8)
-    assert_allclose(fitted.R0, 1.0, rtol=0.0, atol=1.0e-8)
-    assert_allclose(fitted.Z0, 0.1, rtol=0.0, atol=1.0e-8)
-    assert_allclose(fitted.B0, 3.0)
-    assert_allclose(fitted.ka, 1.7, rtol=0.0, atol=1.0e-8)
-    assert_allclose(fitted.c_offsets, [0.0], atol=1.0e-8)
-    assert fitted.s_offsets == ()
-    assert fitted.fit_rms is not None and fitted.fit_rms < 1.0e-8
-    assert fitted.fit_max_curve_error is not None and fitted.fit_max_curve_error < 1.0e-8
-    assert fitted.fit_c_order == 0
-    assert fitted.fit_s_order == 0
+    assert kernel_boundary_has_raw_points(fitted)
+    assert fitted.a is None
+    assert fitted.R0 is None
+    assert fitted.Z0 is None
+    assert fitted.fit_rms is None
+
+    materialized = materialize_kernel_boundary(fitted)
+    materialized_boundary = materialized.boundary
+    assert_allclose(materialized_boundary.a, 0.5, rtol=0.0, atol=1.0e-8)
+    assert_allclose(materialized_boundary.R0, 1.0, rtol=0.0, atol=1.0e-8)
+    assert_allclose(materialized_boundary.Z0, 0.1, rtol=0.0, atol=1.0e-8)
+    assert_allclose(materialized_boundary.B0, 3.0)
+    assert_allclose(materialized_boundary.ka, 1.7, rtol=0.0, atol=1.0e-8)
+    assert_allclose(materialized_boundary.c_offsets, [0.0], atol=1.0e-8)
+    assert materialized_boundary.s_offsets == ()
+    assert materialized.fit_rms is not None and materialized.fit_rms < 1.0e-8
+    assert materialized.fit_max_curve_error is not None
+    assert materialized.fit_max_curve_error < 1.0e-8
+    assert materialized.fit_c_order == 0
+    assert materialized.fit_s_order == 0
 
     with pytest.raises(ValueError, match="provided together"):
         KernelBoundary(B0=3.0, R_boundary=R_boundary, Z_boundary=Z_boundary, c_order=0)

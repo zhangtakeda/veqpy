@@ -13,6 +13,7 @@ from typing import Any
 import numpy as np
 from numpy.linalg import norm
 
+from veqpy.kernels.boundary_materialization import materialize_kernel_boundary
 from veqpy.kernels.types import (
     KernelBoundary,
     KernelConfig,
@@ -227,7 +228,7 @@ class _NumbaKernelImpl:
     def _kernel_boundary(boundary: KernelBoundary) -> KernelBoundary:
         if not isinstance(boundary, KernelBoundary):
             raise TypeError(f"boundary must be KernelBoundary, got {type(boundary).__name__}")
-        return boundary
+        return materialize_kernel_boundary(boundary).boundary
 
     @staticmethod
     def _kernel_source(source: KernelSource, *, case_name: str | None) -> KernelSource:
