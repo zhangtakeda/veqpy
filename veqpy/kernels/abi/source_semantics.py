@@ -17,8 +17,12 @@ from dataclasses import dataclass
 import numpy as np
 
 from veqpy.kernels.types import KernelSource, KernelTopology
+from veqpy.numerics import make_quadrature
 
 MU0 = 4.0e-7 * np.pi
+DEFAULT_SOURCE_FIX_RHO = 0.05
+SOURCE_REGULARITY_RTOL = 5.0e-2
+SOURCE_REGULARITY_ATOL = 1.0e-10
 SETUP_NORMALIZED_ABS_MIN = 1.0e-3
 SETUP_NORMALIZED_ABS_MAX = 1.0e3
 SETUP_PHYSICAL_ABS_MIN = SETUP_NORMALIZED_ABS_MIN / MU0
@@ -63,6 +67,12 @@ def materialize_kernel_source(
     _validate_source_length(topology, source)
     return materialize_source_inputs(
         route=topology.route,
+        coordinate=topology.coordinate,
+        nodes=topology.nodes,
+        sample_count=topology.sample_count,
+        grid_size=topology.Nr,
+        quadrature=topology.quadrature,
+        parameterization=topology.source_parameterization,
         heat=source.heat_profile,
         current=source.current_profile,
         Ip=source.Ip,
@@ -90,6 +100,9 @@ def _validate_source_length(topology: KernelTopology, source: KernelSource) -> N
 def materialize_source_inputs(
     *,
     route: str,
+    coordinate: str,
+    nodes: str,
+    sample_count: int,
     heat: np.ndarray,
     current: np.ndarray,
     Ip: float,
@@ -98,14 +111,39 @@ def materialize_source_inputs(
     current_name: str,
     advice: str,
     case_name: str | None = None,
+    grid_size: int | None = None,
+    quadrature: str = "legendre",
+    parameterization: str = "identity",
+    fix_rho: float = DEFAULT_SOURCE_FIX_RHO,
 ) -> MaterializedKernelSource:
     """Lower raw route inputs to the shared backend-internal source units."""
 
     route_key = str(route).upper()
+    coordinate_key = str(coordinate).lower()
+    nodes_key = str(nodes).lower()
+    rho = _source_rho_axis(
+        coordinate=coordinate_key,
+        nodes=nodes_key,
+        sample_count=int(sample_count),
+        grid_size=grid_size,
+        quadrature=quadrature,
+        parameterization=parameterization,
+    )
+    regular_heat, regular_current = _regularize_source_profiles(
+        route=route_key,
+        coordinate=coordinate_key,
+        nodes=nodes_key,
+        rho=rho,
+        heat=heat,
+        current=current,
+        heat_name=heat_name,
+        current_name=current_name,
+        fix_rho=float(fix_rho),
+    )
     return MaterializedKernelSource(
-        scaled_heat=_scale_pressure_like_input(heat, name=heat_name, advice=advice),
+        scaled_heat=_scale_pressure_like_input(regular_heat, name=heat_name, advice=advice),
         scaled_current=_scale_current_input(
-            current,
+            regular_current,
             route=route_key,
             name=current_name,
             advice=advice,
@@ -114,6 +152,163 @@ def materialize_source_inputs(
         beta=beta,
         case_name=case_name,
     )
+
+
+def _source_rho_axis(
+    *,
+    coordinate: str,
+    nodes: str,
+    sample_count: int,
+    grid_size: int | None,
+    quadrature: str,
+    parameterization: str,
+) -> np.ndarray:
+    if nodes == "grid":
+        size = sample_count if grid_size is None else int(grid_size)
+        rho, _ = make_quadrature(size, scheme=quadrature)
+        return np.asarray(rho, dtype=np.float64)
+
+    axis = np.linspace(0.0, 1.0, sample_count, dtype=np.float64)
+    if coordinate == "psin" and parameterization != "sqrt_psin":
+        return np.sqrt(axis)
+    return axis
+
+
+def _regularize_source_profiles(
+    *,
+    route: str,
+    coordinate: str,
+    nodes: str,
+    rho: np.ndarray,
+    heat: np.ndarray,
+    current: np.ndarray,
+    heat_name: str,
+    current_name: str,
+    fix_rho: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    heat_array = np.asarray(heat, dtype=np.float64)
+    current_array = np.asarray(current, dtype=np.float64)
+    heat_kind, current_kind = _source_regularity_kinds(route, coordinate)
+    context = f"{route}/{coordinate}/{nodes}"
+    return (
+        _regularize_source_profile_if_needed(
+            heat_array,
+            rho=rho,
+            kind=heat_kind,
+            name=heat_name,
+            context=context,
+            fix_rho=fix_rho,
+        ),
+        _regularize_source_profile_if_needed(
+            current_array,
+            rho=rho,
+            kind=current_kind,
+            name=current_name,
+            context=context,
+            fix_rho=fix_rho,
+        ),
+    )
+
+
+def _source_regularity_kinds(route: str, coordinate: str) -> tuple[str, str]:
+    heat_kind = "linear" if coordinate == "rho" else "even"
+    if route in {"PF"}:
+        current_kind = "linear" if coordinate == "rho" else "even"
+    elif route == "PP":
+        current_kind = "linear"
+    elif route == "PI":
+        current_kind = "quadratic"
+    elif route in {"PJ1", "PJ2", "PQ"}:
+        current_kind = "even"
+    else:
+        current_kind = "even"
+    return heat_kind, current_kind
+
+
+def _regularize_source_profile_if_needed(
+    value: np.ndarray,
+    *,
+    rho: np.ndarray,
+    kind: str,
+    name: str,
+    context: str,
+    fix_rho: float,
+) -> np.ndarray:
+    array = np.asarray(value, dtype=np.float64)
+    n_fix = int(np.searchsorted(rho, fix_rho))
+    if n_fix <= 0 or n_fix + 1 >= array.size:
+        return array
+    if not np.all(np.isfinite(array)):
+        return array
+
+    repaired = array.copy()
+    if kind == "linear":
+        _regularize_axis_linear(repaired, rho, n_fix)
+    elif kind == "quadratic":
+        _regularize_axis_quadratic(repaired, rho, n_fix)
+    else:
+        _regularize_axis_even(repaired, rho, n_fix)
+
+    head_original = array[:n_fix]
+    head_repaired = repaired[:n_fix]
+    abs_delta = float(np.max(np.abs(head_original - head_repaired)))
+    scale = max(
+        float(np.max(np.abs(array))),
+        float(np.max(np.abs(repaired))),
+        1.0,
+    )
+    if abs_delta <= SOURCE_REGULARITY_ATOL + SOURCE_REGULARITY_RTOL * scale:
+        return array
+
+    message = (
+        f"Adjusted source axis regularity: {name} on {context} deviates from "
+        f"{kind} magnetic-axis behavior by {abs_delta:.6g}."
+    )
+    warnings.warn(message, RuntimeWarning, stacklevel=3)
+    return repaired
+
+
+def _regularize_axis_linear(profile: np.ndarray, rho: np.ndarray, n_fix: int) -> None:
+    anchor0 = n_fix
+    anchor1 = n_fix + 1
+    rho0 = rho[anchor0]
+    rho1 = rho[anchor1]
+    x0 = rho0 * rho0
+    x1 = rho1 * rho1
+    ratio0 = profile[anchor0] / rho0
+    ratio1 = profile[anchor1] / rho1
+    gradient = (ratio1 - ratio0) / (x1 - x0)
+    for i in range(n_fix):
+        x = rho[i] * rho[i]
+        profile[i] = rho[i] * (ratio0 + gradient * (x - x0))
+
+
+def _regularize_axis_quadratic(profile: np.ndarray, rho: np.ndarray, n_fix: int) -> None:
+    anchor0 = n_fix
+    anchor1 = n_fix + 1
+    rho0 = rho[anchor0]
+    rho1 = rho[anchor1]
+    x0 = rho0 * rho0
+    x1 = rho1 * rho1
+    ratio0 = profile[anchor0] / x0
+    ratio1 = profile[anchor1] / x1
+    gradient = (ratio1 - ratio0) / (x1 - x0)
+    for i in range(n_fix):
+        x = rho[i] * rho[i]
+        profile[i] = x * (ratio0 + gradient * (x - x0))
+
+
+def _regularize_axis_even(profile: np.ndarray, rho: np.ndarray, n_fix: int) -> None:
+    anchor0 = n_fix
+    anchor1 = n_fix + 1
+    x0 = rho[anchor0] * rho[anchor0]
+    x1 = rho[anchor1] * rho[anchor1]
+    value0 = profile[anchor0]
+    value1 = profile[anchor1]
+    gradient = (value1 - value0) / (x1 - x0)
+    for i in range(n_fix):
+        x = rho[i] * rho[i]
+        profile[i] = value0 + gradient * (x - x0)
 
 
 def _scale_pressure_like_input(value: np.ndarray, *, name: str, advice: str) -> np.ndarray:

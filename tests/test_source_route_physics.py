@@ -6,6 +6,7 @@ from numpy.testing import assert_allclose
 
 from veqpy import KernelSource, KernelTopology
 from veqpy.kernels.abi.source_semantics import MU0, materialize_kernel_source
+from veqpy.numerics import make_quadrature
 
 SOURCE_ROUTE_CASES = (
     ("PF", "rho", "uniform"),
@@ -46,6 +47,42 @@ def _topology(route: str, coordinate: str, nodes: str, *, sample_count: int = 9)
     )
 
 
+def _source_rho_axis(topology: KernelTopology) -> np.ndarray:
+    if topology.nodes == "grid":
+        rho, _ = make_quadrature(topology.Nr, scheme=topology.quadrature)
+        return np.asarray(rho, dtype=np.float64)
+    axis = np.linspace(0.0, 1.0, topology.sample_count, dtype=np.float64)
+    if topology.route == "PP" and topology.coordinate == "psin" and topology.nodes == "uniform":
+        return axis
+    if topology.coordinate == "psin":
+        return np.sqrt(axis)
+    return axis
+
+
+def _route_source_profiles(topology: KernelTopology) -> tuple[np.ndarray, np.ndarray]:
+    rho = _source_rho_axis(topology)
+    heat = (
+        rho * (1.0e6 + 0.4e6 * rho * rho)
+        if topology.coordinate == "rho"
+        else 1.0e6 + 0.4e6 * rho * rho
+    )
+    if topology.route == "PI":
+        current = rho * rho * (1.0e6 + 0.8e6 * rho * rho)
+    elif topology.route in {"PJ1", "PJ2"}:
+        current = 1.0e6 + 0.8e6 * rho * rho
+    elif topology.route == "PP":
+        current = rho * (1.0e6 + 0.8e6 * rho * rho)
+    elif topology.route == "PF":
+        current = (
+            rho * (1.0e6 + 0.8e6 * rho * rho)
+            if topology.coordinate == "rho"
+            else 1.0e6 + 0.8e6 * rho * rho
+        )
+    else:
+        current = 1.0e6 + 0.8e6 * rho * rho
+    return heat.astype(np.float64), current.astype(np.float64)
+
+
 @pytest.mark.parametrize(("route", "coordinate", "nodes"), SOURCE_ROUTE_CASES)
 def test_route_source_lowering_preserves_raw_user_physics(
     route: str,
@@ -53,8 +90,7 @@ def test_route_source_lowering_preserves_raw_user_physics(
     nodes: str,
 ) -> None:
     topology = _topology(route, coordinate, nodes)
-    heat = np.linspace(1.0e6, 1.4e6, topology.sample_count, dtype=np.float64)
-    current = np.linspace(1.0e6, 1.8e6, topology.sample_count, dtype=np.float64)
+    heat, current = _route_source_profiles(topology)
     source = KernelSource(heat_profile=heat, current_profile=current, Ip=3.0e6, beta=0.02)
 
     materialized = materialize_kernel_source(topology, source)
@@ -84,8 +120,7 @@ def test_source_lowering_accepts_large_physical_profiles_when_constraints_are_va
 
 def test_source_lowering_rejects_nonfinite_route_profiles() -> None:
     topology = _topology("PI", "rho", "uniform")
-    heat = np.ones(topology.sample_count, dtype=np.float64)
-    current = np.ones(topology.sample_count, dtype=np.float64)
+    heat, current = _route_source_profiles(topology)
     current[-1] = np.nan
 
     with pytest.raises(ValueError, match="current_profile must contain only finite values"):

@@ -134,6 +134,9 @@ def build_source_plan(
 def _scaled_source_inputs(case: object) -> tuple[np.ndarray, np.ndarray, float, float]:
     materialized = materialize_source_inputs(
         route=str(case.route).upper(),
+        coordinate=str(case.coordinate).lower(),
+        nodes=str(case.nodes).lower(),
+        sample_count=int(np.asarray(case.heat_input, dtype=np.float64).size),
         heat=case.heat_input,
         current=case.current_input,
         Ip=float(case.Ip),
@@ -141,6 +144,15 @@ def _scaled_source_inputs(case: object) -> tuple[np.ndarray, np.ndarray, float, 
         heat_name="heat_input",
         current_name="current_input",
         advice="Pass unnormalized runtime values; SourcePlan applies mu0 scaling once.",
+        grid_size=int(getattr(case, "Nr", np.asarray(case.heat_input, dtype=np.float64).size)),
+        quadrature=str(getattr(case, "quadrature", "legendre")),
+        parameterization=source_parameterization_for_route_key(
+            (
+                str(case.route).upper(),
+                str(case.coordinate).lower(),
+                str(case.nodes).lower(),
+            )
+        ),
     )
     return (
         materialized.scaled_heat,

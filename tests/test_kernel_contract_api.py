@@ -241,12 +241,12 @@ def test_kernel_topology_and_runtime_source_is_user_facing_contract() -> None:
 @pytest.mark.parametrize(
     ("route", "current_profile", "expected_current"),
     [
-        ("PF", np.array([1.0, 2.0, 3.0], dtype=np.float64), np.array([1.0, 2.0, 3.0])),
-        ("PP", np.array([1.0, 2.0, 3.0], dtype=np.float64), np.array([1.0, 2.0, 3.0])),
-        ("PI", np.array([1.0e6, 2.0e6, 3.0e6]), np.array([1.0e6, 2.0e6, 3.0e6]) * MU0),
-        ("PJ1", np.array([1.0e6, 2.0e6, 3.0e6]), np.array([1.0e6, 2.0e6, 3.0e6]) * MU0),
-        ("PJ2", np.array([1.0e6, 2.0e6, 3.0e6]), np.array([1.0e6, 2.0e6, 3.0e6]) * MU0),
-        ("PQ", np.array([1.0, 2.0, 3.0], dtype=np.float64), np.array([1.0, 2.0, 3.0])),
+        ("PF", np.array([0.0, 0.75, 3.0], dtype=np.float64), np.array([0.0, 0.75, 3.0])),
+        ("PP", np.array([0.0, 0.75, 3.0], dtype=np.float64), np.array([0.0, 0.75, 3.0])),
+        ("PI", np.array([0.0, 3.75e5, 3.0e6]), np.array([0.0, 3.75e5, 3.0e6]) * MU0),
+        ("PJ1", np.array([1.0e6, 1.5e6, 3.0e6]), np.array([1.0e6, 1.5e6, 3.0e6]) * MU0),
+        ("PJ2", np.array([1.0e6, 1.5e6, 3.0e6]), np.array([1.0e6, 1.5e6, 3.0e6]) * MU0),
+        ("PQ", np.array([1.0, 1.5, 3.0], dtype=np.float64), np.array([1.0, 1.5, 3.0])),
     ],
 )
 def test_kernel_source_materialization_locks_route_scaling(
@@ -266,7 +266,7 @@ def test_kernel_source_materialization_locks_route_scaling(
         kappa_count=0,
         s_counts=(),
     )
-    heat_profile = np.array([1.0e6, 1.2e6, 1.4e6], dtype=np.float64)
+    heat_profile = np.array([0.0, 5.5e5, 1.4e6], dtype=np.float64)
     source = KernelSource(
         heat_profile=heat_profile,
         current_profile=current_profile,
@@ -296,8 +296,8 @@ def test_kernel_source_materialization_does_not_reject_profile_magnitude() -> No
         kappa_count=0,
         s_counts=(),
     )
-    heat_profile = np.array([1.0e12, -2.0e12, 3.0e12], dtype=np.float64)
-    current_profile = np.array([4.0e9, -5.0e9, 6.0e9], dtype=np.float64)
+    heat_profile = np.array([0.0, -2.0e12, 3.0e12], dtype=np.float64)
+    current_profile = np.array([0.0, -5.0e9, 6.0e9], dtype=np.float64)
     source = KernelSource(
         heat_profile=heat_profile,
         current_profile=current_profile,
@@ -311,6 +311,38 @@ def test_kernel_source_materialization_does_not_reject_profile_magnitude() -> No
     assert materialized.beta == 0.03
 
 
+def test_kernel_source_materialization_repairs_irregular_axis_profiles() -> None:
+    topology = make_kernel_topology(
+        route="PF",
+        coordinate="rho",
+        nodes="uniform",
+        sample_count=9,
+        ip_constraint=True,
+        psin_count=0,
+        h_count=1,
+        kappa_count=0,
+        s_counts=(),
+    )
+    rho = np.linspace(0.0, 1.0, topology.sample_count, dtype=np.float64)
+    heat_profile = rho * (1.0e6 + 0.4e6 * rho * rho)
+    current_profile = rho * (1.0 + 2.0 * rho * rho)
+    heat_profile[0] = 7.0e6
+    current_profile[0] = 9.0
+    source = KernelSource(
+        heat_profile=heat_profile,
+        current_profile=current_profile,
+        Ip=3.0e6,
+    )
+
+    with pytest.warns(RuntimeWarning, match="Adjusted source axis regularity"):
+        materialized = materialize_kernel_source(topology, source)
+
+    assert materialized.scaled_heat[0] == pytest.approx(0.0)
+    assert materialized.scaled_current[0] == pytest.approx(0.0)
+    assert_allclose(materialized.scaled_heat[1:], heat_profile[1:] * MU0)
+    assert_allclose(materialized.scaled_current[1:], current_profile[1:])
+
+
 def test_kernel_source_materialization_errors_use_raw_field_names() -> None:
     topology = make_kernel_topology(coordinate="rho", psin_count=0, sample_count=3)
     source = KernelSource(
@@ -320,9 +352,10 @@ def test_kernel_source_materialization_errors_use_raw_field_names() -> None:
     with pytest.raises(ValueError, match="heat_profile and current_profile"):
         materialize_kernel_source(topology, source)
 
+    rho = np.linspace(0.0, 1.0, 3, dtype=np.float64)
     prescaled_ip_source = KernelSource(
-        heat_profile=np.full(3, 1.0e6, dtype=np.float64),
-        current_profile=np.ones(3, dtype=np.float64),
+        heat_profile=rho * (1.0e6 + 0.4e6 * rho * rho),
+        current_profile=rho * (1.0 + 2.0 * rho * rho),
         Ip=3.0e6 * MU0,
     )
     with pytest.warns(RuntimeWarning, match="Pass raw case values"):

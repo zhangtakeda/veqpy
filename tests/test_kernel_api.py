@@ -19,6 +19,7 @@ from veqpy import (
 )
 from veqpy.kernels.abi.source_semantics import materialize_kernel_source
 from veqpy.kernels.numba_kernel.residual_scale import make_residual_scale
+from veqpy.numerics import make_quadrature
 
 ROUTE_PARITY_CASES = (
     ("PF", "psin", "uniform"),
@@ -96,17 +97,64 @@ def route_kernel_topology(route: str, coordinate: str, nodes: str) -> KernelTopo
     return KernelTopology(**params)  # type: ignore[arg-type]
 
 
-def route_kernel_source(route: str, sample_count: int) -> KernelSource:
-    heat_profile = np.linspace(1.0e6, 1.4e6, sample_count, dtype=np.float64)
-    if route in {"PI", "PJ1", "PJ2"}:
-        current_profile = np.linspace(1.0e6, 3.0e6, sample_count, dtype=np.float64)
+def route_kernel_source(
+    route: str,
+    sample_count: int,
+    *,
+    coordinate: str = "psin",
+    nodes: str = "uniform",
+    nr: int = 8,
+) -> KernelSource:
+    rho = route_source_rho_axis(
+        route=route,
+        coordinate=coordinate,
+        nodes=nodes,
+        sample_count=sample_count,
+        nr=nr,
+    )
+    heat_profile = (
+        rho * (1.0e6 + 0.4e6 * rho * rho)
+        if coordinate == "rho"
+        else 1.0e6 + 0.4e6 * rho * rho
+    )
+    if route == "PI":
+        current_profile = rho * rho * (1.0e6 + 2.0e6 * rho * rho)
+    elif route in {"PJ1", "PJ2"}:
+        current_profile = 1.0e6 + 2.0e6 * rho * rho
+    elif route == "PP":
+        current_profile = rho * (1.0 + 2.0 * rho * rho)
+    elif route == "PF":
+        current_profile = (
+            rho * (1.0 + 2.0 * rho * rho)
+            if coordinate == "rho"
+            else 1.0 + 2.0 * rho * rho
+        )
     else:
-        current_profile = np.linspace(1.0, 3.0, sample_count, dtype=np.float64)
+        current_profile = 1.0 + 2.0 * rho * rho
     return KernelSource(
         heat_profile=heat_profile,
         current_profile=current_profile,
         Ip=3.0e6,
     )
+
+
+def route_source_rho_axis(
+    *,
+    route: str,
+    coordinate: str,
+    nodes: str,
+    sample_count: int,
+    nr: int,
+) -> np.ndarray:
+    if nodes == "grid":
+        rho, _ = make_quadrature(nr, scheme="legendre")
+        return np.asarray(rho, dtype=np.float64)
+    axis = np.linspace(0.0, 1.0, sample_count, dtype=np.float64)
+    if route == "PP" and coordinate == "psin" and nodes == "uniform":
+        return axis
+    if coordinate == "psin":
+        return np.sqrt(axis)
+    return axis
 
 
 def numba_kernel(
@@ -216,7 +264,13 @@ def test_kernel_source_materialization_route_matrix(
     nodes: str,
 ) -> None:
     topology = route_kernel_topology(route, coordinate, nodes)
-    source = route_kernel_source(route, topology.sample_count)
+    source = route_kernel_source(
+        route,
+        topology.sample_count,
+        coordinate=coordinate,
+        nodes=nodes,
+        nr=topology.Nr,
+    )
     materialized = materialize_kernel_source(topology, source)
 
     assert topology.source_route_key == (route, coordinate, nodes)
@@ -242,7 +296,13 @@ def test_kernel_numba_backend_residual_route_matrix_is_finite_and_repeatable(
     topology = route_kernel_topology(route, coordinate, nodes)
     kernel = numba_kernel(topology=topology)
     boundary = tiny_kernel_boundary()
-    source = route_kernel_source(route, topology.sample_count)
+    source = route_kernel_source(
+        route,
+        topology.sample_count,
+        coordinate=coordinate,
+        nodes=nodes,
+        nr=topology.Nr,
+    )
     x = np.zeros(kernel.x_size, dtype=np.float64)
 
     residual = kernel.residual(x, boundary, source)
