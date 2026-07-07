@@ -115,7 +115,7 @@ def default_kernel_cache_root() -> Path:
     override = os.environ.get("VEQPY_KERNEL_CACHE")
     if override:
         return Path(override).expanduser()
-    return REPO_ROOT / ".veqpy-kernel-cache"
+    return Path.cwd() / ".veqpy-kernel-cache"
 
 
 @dataclass(frozen=True, slots=True)

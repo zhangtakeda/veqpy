@@ -80,12 +80,12 @@ class CleanResult:
 
 
 def default_kernel_cache_root() -> Path:
-    """Return the repository-local VEQPy kernel cache root without creating it."""
+    """Return the cwd-local VEQPy kernel cache root without creating it."""
 
     override = os.environ.get("VEQPY_KERNEL_CACHE")
     if override:
         return Path(override).expanduser()
-    return _project_root() / ".veqpy-kernel-cache"
+    return Path.cwd() / ".veqpy-kernel-cache"
 
 
 def prepare(
@@ -892,10 +892,6 @@ def _cmake_list(values: tuple[int, ...]) -> str:
 
 def _cmake_bool(value: bool) -> str:
     return "ON" if value else "OFF"
-
-
-def _project_root() -> Path:
-    return Path(__file__).resolve().parents[3]
 
 
 def _default_source_dir() -> Path:

@@ -195,8 +195,8 @@ benchmark matrix, while native execution is gated by the Cxx native-support
 validation helper. The artifact cache key is
 computed from the canonical topology, explicit artifact recipe, Python/toolchain
 ABI, the native CMake define contract, and a digest of native implementation
-inputs. Artifacts are cached under `.veqpy-kernel-cache/` by default, or under
-`VEQPY_KERNEL_CACHE` when set.
+inputs. Artifacts are cached under `.veqpy-kernel-cache/` in the current working
+directory by default, or under `VEQPY_KERNEL_CACHE` when set.
 Runtime boundary/source arrays, physical constraints, solver tolerances, and `x0`
 belong to the per-case solve call.
 
