@@ -84,5 +84,4 @@ addopts = "-p no:cacheprovider"
 markers = [
     "slow: tests that may build kernels or run nonlinear solves",
     "demo: tests that execute the user-facing root demo",
-    "paper: manuscript reproduction artifact checks",
 ]
