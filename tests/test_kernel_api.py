@@ -529,8 +529,9 @@ def test_kernel_numba_backend_warm_continuation_passes_previous_solution(
         config_arg: KernelConfig,
         *,
         x0: np.ndarray | None,
+        **kwargs: object,
     ):
-        del boundary_arg, source_arg, config_arg
+        del boundary_arg, source_arg, config_arg, kwargs
         captured["x0"] = None if x0 is None else x0.copy()
         return first
 
@@ -547,7 +548,9 @@ def test_kernel_numba_backend_warm_continuation_passes_previous_solution(
         ),
     )
 
-    assert second is first
+    assert_allclose(second.x, first.x)
+    assert_allclose(second.raw, first.raw)
+    assert second.nfev == first.nfev
     assert captured["x0"] is not None
     assert_allclose(captured["x0"], first.x)
 
