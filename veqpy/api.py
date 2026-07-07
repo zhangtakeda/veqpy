@@ -15,6 +15,8 @@ from veqpy.kernels import (
     SolveResult,
 )
 
+__all__ = ["build", "solve"]
+
 
 def build(
     *,

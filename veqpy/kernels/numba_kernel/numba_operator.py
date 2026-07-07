@@ -1,9 +1,9 @@
 """
-Module: engine.numba_operator
+Module: kernels.numba_kernel.numba_operator
 
 Role:
 - Provide the fused x -> residual hot runner.
-- Chain Stage A/B/C/D for common routes into a single engine binding entrypoint.
+- Chain Stage A/B/C/D for common routes into one backend binding entrypoint.
 
 Public API:
 - bind_fused_residual_runner

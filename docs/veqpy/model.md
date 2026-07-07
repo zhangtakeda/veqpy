@@ -21,9 +21,12 @@ The main source files live in `veqpy/model/`.
 | `Equilibrium` | Solved continuous equilibrium snapshot and diagnostic interface                                           |
 
 `Profile` represents a one-dimensional radial profile with scale, power,
-envelope, offset, and optional Chebyshev coefficients. Kernel runtime setup
-lowers active profile topology to flat arrays; `Profile` remains on the model
-side for `Equilibrium.shape_profiles` and other serializable snapshots.
+envelope, offset, and optional Chebyshev coefficients. Its persistent state is
+only those root parameters. When a `Grid` is bound, it lazily materializes
+`value`, `derivative`, and `second_derivative` on `grid.rho`; without a bound
+grid those fields are unavailable. Kernel runtime setup lowers active profile
+topology to flat arrays; `Profile` remains on the model side for
+`Equilibrium.shape_profiles` and other serializable snapshots.
 
 ## Equilibrium Snapshot
 

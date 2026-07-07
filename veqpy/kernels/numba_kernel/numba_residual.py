@@ -1,5 +1,5 @@
 """
-Module: engine.numba_residual
+Module: kernels.numba_kernel.numba_residual
 
 Role:
 - Update residual surface workspace.
@@ -10,8 +10,7 @@ Public API:
 - write_weighted_scaled_g_collocation_field_into
 
 Notes:
-- Keep only the minimal interface required by the numba hot path.
-- The old staged/binder residual API has been removed.
+- Keep the interface required by the numba hot path.
 - Packed residual block codes are layout ABI, not local magic numbers:
   0=h, 1=v, 2=k, 3=c0, 4=c_m, 5=s_m, 6=psin, 7=F.
 """

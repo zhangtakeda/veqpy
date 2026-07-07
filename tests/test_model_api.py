@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 import numpy as np
@@ -39,14 +38,29 @@ def test_boundary_and_profile_normalize_user_inputs() -> None:
     assert profile.power == 3
     assert_allclose(profile.coeff, [1.0, 2.0])
     assert not profile.coeff.flags.writeable
-    with pytest.raises(FrozenInstanceError):
-        profile.scale = 3.0
     with pytest.raises(ValueError, match="coeff must be 1D"):
         Profile(coeff=np.ones((1, 1)))
 
     boundary = Boundary(a=1, R0=2, Z0=0, B0=3, c_offsets=[0.1], s_offsets=[9.0, 0.3])
     assert boundary.a == 1.0
     assert_allclose(boundary.s_offsets, [0.0, 0.3])
+
+
+def test_profile_fields_are_reactive_when_grid_is_bound() -> None:
+    grid = Grid(Nr=6, Nt=8, quadrature_scheme="legendre")
+    profile = Profile(scale=3.0, power=2, envelope_power=0, offset=2.0)
+
+    with pytest.raises(RuntimeError, match="Profile.grid is required"):
+        _ = profile.value
+
+    profile.grid = grid
+    assert_allclose(profile.value, 6.0 * grid.rho**2)
+    assert_allclose(profile.derivative, 12.0 * grid.rho)
+    assert_allclose(profile.second_derivative, np.full(grid.Nr, 12.0))
+    assert profile.fields.shape == (3, grid.Nr)
+
+    profile.scale = 4.0
+    assert_allclose(profile.value, 8.0 * grid.rho**2)
 
 
 def test_boundary_and_geqdsk_roundtrip(tmp_path: Path) -> None:

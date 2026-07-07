@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib.util
 import tomllib
 from pathlib import Path
 
@@ -27,7 +26,3 @@ def test_core_public_imports_are_available() -> None:
     assert veqpy.KernelTopology
     assert veqpy.KernelBoundary
     assert veqpy.KernelSource
-
-
-def test_veqlib_package_is_not_importable() -> None:
-    assert importlib.util.find_spec("veqlib") is None

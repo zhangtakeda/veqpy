@@ -1,9 +1,9 @@
 """
-Module: engine.backend_abi
+Module: kernels.numba_kernel.backend_abi
 
 Role:
 - Define explicit ABI binding contracts used by the numba fused backend.
-- Move bind-time data selection out of numba implementation into the engine ABI module.
+- Keep bind-time data selection in Python-owned backend ABI objects.
 - Keep Python-side bundles coarse: sampled data travels as field slabs, while
   operators, metadata, scratch buffers, and state keep distinct names.
 

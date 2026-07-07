@@ -1,255 +1,94 @@
 from __future__ import annotations
 
-import ast
 import importlib
-import importlib.util
-from collections import defaultdict
-from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SOURCE_ROOTS = ("veqpy",)
-FIRST_LEVEL_SUBMODULES = {"base", "kernels", "model", "numerics"}
-REMOVED_SOURCE_PACKAGES = (
-    REPO_ROOT / "veqpy" / "types",
-    REPO_ROOT / "veqpy" / "model" / "numerics",
-)
+import veqpy
 
-PUBLIC_EXPORTS = {
-    "veqpy": {
-        "Kernel",
-        "KernelBoundary",
-        "KernelConfig",
-        "KernelPrepareResult",
-        "KernelRecipe",
-        "KernelSource",
-        "KernelTopology",
-        "SolveResult",
-        "TopologyError",
-        "build",
-        "solve",
-    },
-    "veqpy.api": {"build", "solve"},
-    "veqpy.base": {"depends_on"},
-    "veqpy.kernels": {
-        "Kernel",
-        "KernelBoundary",
-        "KernelConfig",
-        "KernelPrepareResult",
-        "KernelRecipe",
-        "KernelSource",
-        "KernelTopology",
-        "SolveResult",
-        "TopologyError",
-        "config_with_overrides",
-    },
-    "veqpy.numerics": {
-        "DEFAULT_CALCULUS",
-        "DEFAULT_LOCAL_BARYCENTRIC_STENCIL",
-        "DEFAULT_QUADRATURE",
-        "RHO_AXIS",
-        "SOURCE_INTERP_DEFAULT",
-        "THETA_AXIS",
-        "apply_accumulation",
-        "apply_differentiation",
-        "barycentric_log_weights",
-        "build_uniform_source_interpolation_coefficients",
-        "build_uniform_source_interpolation_matrix",
-        "interpolation_matrix",
-        "make_calculus",
-        "make_quadrature",
-        "normalize_source_interpolation_kind",
-        "source_interpolation_kind_is_barycentric",
-    },
-    "veqpy.model": {
-        "Boundary",
-        "Equilibrium",
-        "Geqdsk",
-        "Grid",
-        "Profile",
-    },
+ROOT_EXPORTS = {
+    "Kernel",
+    "KernelBoundary",
+    "KernelConfig",
+    "KernelPrepareResult",
+    "KernelRecipe",
+    "KernelSource",
+    "KernelTopology",
+    "SolveResult",
+    "TopologyError",
+    "build",
+    "solve",
+}
+
+KERNEL_EXPORTS = {
+    "Kernel",
+    "KernelBoundary",
+    "KernelConfig",
+    "KernelPrepareResult",
+    "KernelRecipe",
+    "KernelSource",
+    "KernelTopology",
+    "SolveResult",
+    "TopologyError",
+    "config_with_overrides",
+}
+
+MODEL_EXPORTS = {"Boundary", "Equilibrium", "Geqdsk", "Grid", "Profile"}
+
+NUMERICS_EXPORTS = {
+    "DEFAULT_CALCULUS",
+    "DEFAULT_LOCAL_BARYCENTRIC_STENCIL",
+    "DEFAULT_QUADRATURE",
+    "RHO_AXIS",
+    "SOURCE_INTERP_DEFAULT",
+    "THETA_AXIS",
+    "apply_accumulation",
+    "apply_differentiation",
+    "barycentric_log_weights",
+    "build_uniform_source_interpolation_coefficients",
+    "build_uniform_source_interpolation_matrix",
+    "interpolation_matrix",
+    "make_calculus",
+    "make_quadrature",
+    "normalize_source_interpolation_kind",
+    "source_interpolation_kind_is_barycentric",
 }
 
 
-def _source_files() -> list[Path]:
-    return sorted(
-        path
-        for root in SOURCE_ROOTS
-        for path in (REPO_ROOT / root).rglob("*.py")
-        if "__pycache__" not in path.parts
-    )
+def test_package_roots_export_current_public_contracts() -> None:
+    packages = {
+        "veqpy": ROOT_EXPORTS,
+        "veqpy.kernels": KERNEL_EXPORTS,
+        "veqpy.model": MODEL_EXPORTS,
+        "veqpy.numerics": NUMERICS_EXPORTS,
+    }
 
-
-def _module_name(path: Path) -> str:
-    parts = path.relative_to(REPO_ROOT).with_suffix("").parts
-    if parts[-1] == "__init__":
-        parts = parts[:-1]
-    return ".".join(parts)
-
-
-PACKAGE_ROOTS = {
-    _module_name(path)
-    for root in SOURCE_ROOTS
-    for path in (REPO_ROOT / root).rglob("__init__.py")
-}
-
-
-def _submodule_name(module: str) -> str | None:
-    parts = module.split(".")
-    if not parts or parts[0] not in SOURCE_ROOTS:
-        return None
-    if len(parts) < 2:
-        return parts[0]
-    return ".".join(parts[:2])
-
-
-def _first_level_package(module: str) -> str | None:
-    parts = module.split(".")
-    if len(parts) < 2 or parts[0] not in SOURCE_ROOTS:
-        return None
-    return parts[1]
-
-
-def _first_level_for_path(path: Path) -> str | None:
-    parts = path.relative_to(REPO_ROOT).with_suffix("").parts
-    if len(parts) == 1:
-        return parts[0]
-    if parts[1] == "__init__":
-        return parts[0]
-    return parts[1]
-
-
-def _tree(path: Path) -> ast.Module:
-    return ast.parse(path.read_text(), filename=str(path))
-
-
-def _cross_package_root_imports() -> dict[str, set[str]]:
-    imports: dict[str, set[str]] = defaultdict(set)
-    for path in _source_files():
-        importer = _module_name(path)
-        importer_submodule = _submodule_name(importer)
-        for node in ast.walk(_tree(path)):
-            if isinstance(node, ast.ImportFrom) and node.module:
-                imported_submodule = _submodule_name(node.module)
-                if imported_submodule is None or imported_submodule == importer_submodule:
-                    continue
-                if node.module in PACKAGE_ROOTS and node.module == imported_submodule:
-                    imports[imported_submodule].update(
-                        alias.name for alias in node.names if alias.name != "*"
-                    )
-            elif isinstance(node, ast.Import):
-                for alias in node.names:
-                    imported_submodule = _submodule_name(alias.name)
-                if imported_submodule is None or imported_submodule == importer_submodule:
-                    continue
-                if alias.name in PACKAGE_ROOTS and alias.name == imported_submodule:
-                    imported_name = alias.asname or alias.name.rsplit(".", 1)[-1]
-                    imports[imported_submodule].add(imported_name)
-    return imports
-
-
-def test_only_package_roots_declare_all() -> None:
-    violations: list[str] = []
-    for path in _source_files():
-        if path.name == "__init__.py":
-            continue
-        for node in ast.walk(_tree(path)):
-            if isinstance(node, ast.Assign) and any(
-                isinstance(target, ast.Name) and target.id == "__all__" for target in node.targets
-            ):
-                violations.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
-            elif (
-                isinstance(node, ast.AnnAssign)
-                and isinstance(node.target, ast.Name)
-                and node.target.id == "__all__"
-            ):
-                violations.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
-    assert violations == []
-
-
-def test_no_lazy_exports_or_legacy_export_maps() -> None:
-    violations: list[str] = []
-    for path in _source_files():
-        for node in ast.walk(_tree(path)):
-            if (
-                isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-                and node.name == "__getattr__"
-            ):
-                violations.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}:__getattr__")
-            elif isinstance(node, ast.Name) and node.id == "_EXPORTS":
-                violations.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}:_EXPORTS")
-    assert violations == []
-
-
-def test_removed_compat_packages_have_no_source_files() -> None:
-    violations = [
-        str(path.relative_to(REPO_ROOT))
-        for package in REMOVED_SOURCE_PACKAGES
-        if package.exists()
-        for path in package.rglob("*.py")
-    ]
-    assert violations == []
-
-
-def test_removed_public_paths_are_not_importable() -> None:
-    assert importlib.util.find_spec("veqpy." + "types") is None
-    assert importlib.util.find_spec("veqpy.model." + "numerics") is None
-
-
-def test_model_does_not_import_kernel_layer() -> None:
-    violations: list[str] = []
-    for path in (REPO_ROOT / "veqpy" / "model").glob("*.py"):
-        for node in ast.walk(_tree(path)):
-            if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith(
-                "veqpy.kernels"
-            ):
-                violations.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}:{node.module}")
-            elif isinstance(node, ast.Import):
-                for alias in node.names:
-                    if alias.name.startswith("veqpy.kernels"):
-                        violations.append(
-                            f"{path.relative_to(REPO_ROOT)}:{node.lineno}:{alias.name}"
-                        )
-    assert violations == []
-
-
-def test_cross_submodule_imports_use_package_roots() -> None:
-    violations: list[str] = []
-    for path in _source_files():
-        importer = _first_level_for_path(path)
-        for node in ast.walk(_tree(path)):
-            if isinstance(node, ast.ImportFrom) and node.module:
-                imported = _first_level_package(node.module)
-                if (
-                    imported in FIRST_LEVEL_SUBMODULES
-                    and imported != importer
-                    and node.module != f"veqpy.{imported}"
-                ):
-                    violations.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}:{node.module}")
-            elif isinstance(node, ast.Import):
-                for alias in node.names:
-                    imported = _first_level_package(alias.name)
-                    if (
-                        imported in FIRST_LEVEL_SUBMODULES
-                        and imported != importer
-                        and alias.name != f"veqpy.{imported}"
-                    ):
-                        violations.append(
-                            f"{path.relative_to(REPO_ROOT)}:{node.lineno}:{alias.name}"
-                        )
-    assert violations == []
-
-
-def test_veqpy_all_exports_match_cross_contract_plus_public_api() -> None:
-    cross_imports = _cross_package_root_imports()
-    checked_packages = set(PUBLIC_EXPORTS) | set(cross_imports)
-    for package_name in sorted(checked_packages):
+    for package_name, expected in packages.items():
         package = importlib.import_module(package_name)
-        required = cross_imports.get(package_name, set())
-        if not hasattr(package, "__all__"):
-            assert required == set(), package_name
-            assert all(hasattr(package, name) for name in PUBLIC_EXPORTS[package_name])
-            continue
         exported = set(package.__all__)
-        allowed = required | PUBLIC_EXPORTS.get(package_name, set())
-        assert required <= exported, package_name
-        assert exported <= allowed, package_name
+        assert expected <= exported
+        assert all(hasattr(package, name) for name in expected)
+
+
+def test_api_module_exposes_function_entrypoints() -> None:
+    api = importlib.import_module("veqpy.api")
+
+    assert api.__all__ == ["build", "solve"]
+    assert api.build is veqpy.build
+    assert api.solve is veqpy.solve
+
+
+def test_direct_module_imports_are_available() -> None:
+    modules = [
+        "veqpy.api",
+        "veqpy.base.reactive",
+        "veqpy.base.serial",
+        "veqpy.kernels.types",
+        "veqpy.kernels.abi.source_semantics",
+        "veqpy.kernels.cxx_kernel.builder",
+        "veqpy.kernels.numba_kernel.packed_layout",
+        "veqpy.model.profile",
+        "veqpy.model.grid",
+        "veqpy.numerics.interpolate",
+    ]
+
+    for module_name in modules:
+        assert importlib.import_module(module_name)

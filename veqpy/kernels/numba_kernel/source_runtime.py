@@ -1,5 +1,5 @@
 """
-Module: numba_core.source_runtime
+Module: kernels.numba_kernel.source_runtime
 
 Role:
 - Refresh source runtime memory from a bound ``SourcePlan`` and current psin state.

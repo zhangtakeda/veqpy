@@ -1,5 +1,5 @@
 """
-Module: numba_core.packed_layout
+Module: kernels.numba_kernel.packed_layout
 
 Role:
 - Build packed layout and profile metadata.
@@ -27,8 +27,8 @@ Notes:
 - It also handles state codecs for the same packed layout.
 - Does not own numerical kernels, residual assembly, or solver iteration control.
 - Treat this file as the single source of truth for both packed x ordering and
-  residual block ordering.  Engine kernels consume the integer metadata built
-  here and should not infer profile meaning from names.
+  residual block ordering.  Numba residual and source kernels consume the
+  integer metadata built here.
 """
 
 from __future__ import annotations

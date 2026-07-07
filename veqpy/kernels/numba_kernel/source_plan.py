@@ -1,5 +1,5 @@
 """
-Module: numba_core.source_plan
+Module: kernels.numba_kernel.source_plan
 
 Role:
 - Own source route plans and source input validation.

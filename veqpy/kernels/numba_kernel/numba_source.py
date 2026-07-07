@@ -1,5 +1,5 @@
 """
-Module: engine.numba_source
+Module: kernels.numba_kernel.numba_source
 
 Role:
 - Register concrete source routes.
@@ -13,7 +13,7 @@ Public API:
 
 Notes:
 - Source route routing stays here.
-- The operator layer only binds one source runner and uses it as the Stage-C entrypoint.
+- The runtime binding layer selects one source runner as the Stage-C entrypoint.
 - Each route must fill the same normalized root/source contract:
   psin, psin_r, psin_rr, Pn_psin, FFn_psin, alpha1, and alpha2.  The route
   name only changes which user source profile is treated as primitive.

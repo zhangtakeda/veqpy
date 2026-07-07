@@ -50,9 +50,10 @@ and easier to reuse than full solver-native equilibrium or reconstruction pipeli
   post-solve snapshots.
 - **GEQDSK workflow support**: GEQDSK I/O, fixed-boundary fitting from GEQDSK boundaries,
   snapshot export, flux-surface comparison, and common diagnostics.
-- **Formula-oriented model objects**: `Profile` is used for serializable shape-profile
-  snapshots on `Equilibrium`. `Grid` and `Equilibrium` use reactive derived properties
-  to lazily reconstruct geometry and physics diagnostics by formula.
+- **Formula-oriented model objects**: `Profile` stores serializable shape-profile
+  roots and, when bound to a `Grid`, lazily materializes value and radial
+  derivatives. `Grid` and `Equilibrium` use reactive derived properties to
+  reconstruct geometry and physics diagnostics by formula.
 - **Kernel API**: `veqpy.Kernel` is the backend-neutral runtime handle.
   It uses
   `KernelTopology + KernelRecipe + KernelBoundary + KernelSource + KernelConfig`

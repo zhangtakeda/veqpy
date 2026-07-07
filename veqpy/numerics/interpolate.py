@@ -21,10 +21,10 @@ Design notes:
   define the physical meaning of a source route, choose an ``Ip``/``beta``
   constraint, or repair profile ownership; those decisions live in operator
   source planning and source kernels.
-- Uniform-source helpers support the package source-remapping choices:
+- Uniform-source helpers support the canonical source-remapping choices:
   ``barycentric`` (default local barycentric stencil), ``not-a-knot`` spline,
-  ``linear``, ``quadratic``, and ``cubic``.  Environment and user spellings are
-  normalized to these registry keys through ``normalize_source_interpolation_kind``.
+  ``linear``, ``quadratic``, and ``cubic``.  Names are normalized only by
+  stripping whitespace, lowercasing, and treating underscores as hyphens.
 """
 from __future__ import annotations
 
@@ -44,29 +44,15 @@ SOURCE_INTERP_QUADRATIC = "quadratic"
 SOURCE_INTERP_CUBIC = "cubic"
 SOURCE_INTERP_DEFAULT = SOURCE_INTERP_BARYCENTRIC
 
-_SOURCE_INTERP_ALIASES = {
-    # Keep public spellings broad because this option is often set through env
-    # variables or examples; normalize to the registry keys below.
-    "barycentric": SOURCE_INTERP_BARYCENTRIC,
-    "local-barycentric": SOURCE_INTERP_BARYCENTRIC,
-    "8": SOURCE_INTERP_BARYCENTRIC,
-    "spline": SOURCE_INTERP_NOT_A_KNOT,
-    "notaknot": SOURCE_INTERP_NOT_A_KNOT,
-    "not-a-knot": SOURCE_INTERP_NOT_A_KNOT,
-    "not_a_knot": SOURCE_INTERP_NOT_A_KNOT,
-    "linear": SOURCE_INTERP_LINEAR,
-    "1": SOURCE_INTERP_LINEAR,
-    "local-linear": SOURCE_INTERP_LINEAR,
-    "quadratic": SOURCE_INTERP_QUADRATIC,
-    "2": SOURCE_INTERP_QUADRATIC,
-    "quadatic": SOURCE_INTERP_QUADRATIC,
-    "local-quadratic": SOURCE_INTERP_QUADRATIC,
-    "degree2": SOURCE_INTERP_QUADRATIC,
-    "cubic": SOURCE_INTERP_CUBIC,
-    "3": SOURCE_INTERP_CUBIC,
-    "local-cubic": SOURCE_INTERP_CUBIC,
-    "degree3": SOURCE_INTERP_CUBIC,
-}
+_SOURCE_INTERP_KINDS = frozenset(
+    {
+        SOURCE_INTERP_BARYCENTRIC,
+        SOURCE_INTERP_NOT_A_KNOT,
+        SOURCE_INTERP_LINEAR,
+        SOURCE_INTERP_QUADRATIC,
+        SOURCE_INTERP_CUBIC,
+    }
+)
 
 
 CoefficientBuilder = Callable[[np.ndarray], np.ndarray]
@@ -131,20 +117,16 @@ def interpolation_matrix(source_nodes: np.ndarray, evaluation_nodes: np.ndarray)
 
 
 def normalize_source_interpolation_kind(kind: str | None = None) -> str:
-    """Normalize public aliases for uniform-source interpolation schemes."""
+    """Normalize canonical uniform-source interpolation scheme names."""
 
     raw = os.environ.get(SOURCE_INTERP_KIND_ENV, SOURCE_INTERP_DEFAULT) if kind is None else kind
     key = str(raw).strip().lower().replace("_", "-")
-    try:
-        normalized = _SOURCE_INTERP_ALIASES[key]
-    except KeyError as exc:
+    if key not in _SOURCE_INTERP_KINDS:
         supported = ", ".join(sorted(uniform_source_interpolation_generator.registry))
-        raise ValueError(
-            f"Unsupported {SOURCE_INTERP_KIND_ENV}={raw!r}; supported: {supported}"
-        ) from exc
-    if normalized not in uniform_source_interpolation_generator:
-        raise ValueError(f"Uniform source interpolation scheme {normalized!r} is not registered")
-    return normalized
+        raise ValueError(f"Unsupported {SOURCE_INTERP_KIND_ENV}={raw!r}; supported: {supported}")
+    if key not in uniform_source_interpolation_generator:
+        raise ValueError(f"Uniform source interpolation scheme {key!r} is not registered")
+    return key
 
 
 def source_interpolation_kind_is_barycentric(kind: str | None = None) -> bool:

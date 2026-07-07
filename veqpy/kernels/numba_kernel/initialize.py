@@ -1,5 +1,5 @@
 """
-Module: numba_core.initialize
+Module: kernels.numba_kernel.initialize
 
 Role:
 - Build kernel-owned packed initial states.
@@ -87,8 +87,8 @@ def _seed_axis_and_boundary_shape_terms(
 def estimate_axis_shift_h0(case: object) -> float:
     """Estimate the geometric axis radial-shift coefficient from source moments.
 
-    The estimate keeps the large-aspect-ratio Shafranov scaling ``a / R0`` but
-    replaces the old hard source-class switch with a continuous roughness drive.
+    The estimate keeps the large-aspect-ratio Shafranov scaling ``a / R0`` and
+    uses a continuous source-roughness drive.
     Small source structure and small axis shifts are snapped to zero so
     numerically uniform sources do not perturb finite-difference solvers.
     """
