@@ -145,39 +145,61 @@ namespace math::detail
         return TaylorHornerStep<HighestPower - 2, LowestPower>::eval(r2, taylor_coefficient_v<HighestPower>);
     }
 
-    template <int SinOrder = 11, int CosOrder = (SinOrder == 0 ? 0 : SinOrder - 1)>
+    inline constexpr int relaxed_sin_order = 11;
+    inline constexpr int relaxed_cos_order = relaxed_sin_order - 1;
+
+    static_assert((relaxed_sin_order % 2) == 1, "relaxed sine order must be odd");
+    static_assert((relaxed_cos_order % 2) == 0, "relaxed cosine order must be even");
+
+    struct RelaxedTrigReduction
+    {
+        double   reduced;
+        double   r2;
+        unsigned quadrant;
+    };
+
+    inline RelaxedTrigReduction relaxed_trig_reduce(double value) noexcept
+    {
+        constexpr double inv_half_pi    = 2.0 / pi;
+        const double     scaled         = value * inv_half_pi;
+        const int        quadrant_index = static_cast<int>(scaled + (scaled >= 0.0 ? 0.5 : -0.5));
+        const double     q              = static_cast<double>(quadrant_index);
+        const double     reduced        = value - q * half_pi;
+        return {reduced, reduced * reduced, static_cast<unsigned>(quadrant_index) & 3U};
+    }
+
+    inline double relaxed_sin(double value) noexcept
+    {
+        const RelaxedTrigReduction reduced = relaxed_trig_reduce(value);
+        const bool                 odd     = (reduced.quadrant & 1U) != 0U;
+        const double               base =
+            odd ? evaluate_taylor_horner<relaxed_cos_order, 0>(reduced.r2)
+                : reduced.reduced * evaluate_taylor_horner<relaxed_sin_order, 1>(reduced.r2);
+        return reduced.quadrant < 2U ? base : -base;
+    }
+
+    inline double relaxed_cos(double value) noexcept
+    {
+        const RelaxedTrigReduction reduced = relaxed_trig_reduce(value);
+        const bool                 odd     = (reduced.quadrant & 1U) != 0U;
+        const double               base =
+            odd ? reduced.reduced * evaluate_taylor_horner<relaxed_sin_order, 1>(reduced.r2)
+                : evaluate_taylor_horner<relaxed_cos_order, 0>(reduced.r2);
+        return reduced.quadrant == 0U || reduced.quadrant == 3U ? base : -base;
+    }
+
     inline void relaxed_sincos(double value, double& sin_value, double& cos_value) noexcept
     {
-        static_assert(SinOrder >= 0 && CosOrder >= 0, "relaxed_sincos orders must be non-negative");
+        const RelaxedTrigReduction reduced = relaxed_trig_reduce(value);
+        const double sin_reduced = reduced.reduced * evaluate_taylor_horner<relaxed_sin_order, 1>(reduced.r2);
+        const double cos_reduced = evaluate_taylor_horner<relaxed_cos_order, 0>(reduced.r2);
 
-        if constexpr (SinOrder == 0 && CosOrder == 0)
-        {
-            sin_value = std::sin(value);
-            cos_value = std::cos(value);
-        }
-        else
-        {
-            static_assert((SinOrder % 2) == 1, "relaxed_sincos sine order must be odd");
-            static_assert((CosOrder % 2) == 0, "relaxed_sincos cosine order must be even");
+        const bool   odd      = (reduced.quadrant & 1U) != 0U;
+        const double sin_base = odd ? cos_reduced : sin_reduced;
+        const double cos_base = odd ? sin_reduced : cos_reduced;
 
-            constexpr double inv_half_pi    = 2.0 / pi;
-            const double     scaled         = value * inv_half_pi;
-            const int        quadrant_index = static_cast<int>(scaled + (scaled >= 0.0 ? 0.5 : -0.5));
-            const double     q              = static_cast<double>(quadrant_index);
-            const double     reduced        = value - q * half_pi;
-            const double     r2             = reduced * reduced;
-
-            const double sin_reduced = reduced * evaluate_taylor_horner<SinOrder, 1>(r2);
-            const double cos_reduced = evaluate_taylor_horner<CosOrder, 0>(r2);
-
-            const unsigned quadrant = static_cast<unsigned>(quadrant_index) & 3U;
-            const bool     odd      = (quadrant & 1U) != 0U;
-            const double   sin_base = odd ? cos_reduced : sin_reduced;
-            const double   cos_base = odd ? sin_reduced : cos_reduced;
-
-            sin_value = quadrant < 2U ? sin_base : -sin_base;
-            cos_value = quadrant == 0U || quadrant == 3U ? cos_base : -cos_base;
-        }
+        sin_value = reduced.quadrant < 2U ? sin_base : -sin_base;
+        cos_value = reduced.quadrant == 0U || reduced.quadrant == 3U ? cos_base : -cos_base;
     }
 
     constexpr double tan(double value)
@@ -891,6 +913,8 @@ namespace math
     using detail::log;
     using detail::sin;
     using detail::cos;
+    using detail::relaxed_sin;
+    using detail::relaxed_cos;
     using detail::relaxed_sincos;
     using detail::tan;
     using detail::arcsin;

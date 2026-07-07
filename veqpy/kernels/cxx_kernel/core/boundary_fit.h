@@ -38,22 +38,6 @@ namespace veqlib_boundary_fit
         double              max_curve_error;
     };
 
-    inline double relaxed_sin(double value) noexcept
-    {
-        double sin_value = 0.0;
-        double cos_value = 0.0;
-        math::detail::relaxed_sincos(value, sin_value, cos_value);
-        return sin_value;
-    }
-
-    inline double relaxed_cos(double value) noexcept
-    {
-        double sin_value = 0.0;
-        double cos_value = 0.0;
-        math::detail::relaxed_sincos(value, sin_value, cos_value);
-        return cos_value;
-    }
-
     inline double wrap_pi(double value) noexcept
     {
         double wrapped = std::fmod(value + pi, two_pi);
@@ -225,13 +209,13 @@ namespace veqlib_boundary_fit
         for (int order = 1; order <= c_order; ++order)
         {
             for (size_t row = 0; row < n_rows; ++row)
-                matrix[row * n_cols + col] = relaxed_cos(static_cast<double>(order) * theta[row]);
+                matrix[row * n_cols + col] = math::relaxed_cos(static_cast<double>(order) * theta[row]);
             ++col;
         }
         for (int order = 1; order <= s_order; ++order)
         {
             for (size_t row = 0; row < n_rows; ++row)
-                matrix[row * n_cols + col] = relaxed_sin(static_cast<double>(order) * theta[row]);
+                matrix[row * n_cols + col] = math::relaxed_sin(static_cast<double>(order) * theta[row]);
             ++col;
         }
         return matrix;
@@ -333,11 +317,11 @@ namespace veqlib_boundary_fit
         {
             double theta_bar = theta[row] + c_offsets[0];
             for (size_t order = 1; order < c_offsets.size(); ++order)
-                theta_bar += c_offsets[order] * relaxed_cos(static_cast<double>(order) * theta[row]);
+                theta_bar += c_offsets[order] * math::relaxed_cos(static_cast<double>(order) * theta[row]);
             for (size_t order = 1; order < s_offsets.size(); ++order)
-                theta_bar += s_offsets[order] * relaxed_sin(static_cast<double>(order) * theta[row]);
-            boundary[row * 2]     = R0 + a * relaxed_cos(theta_bar);
-            boundary[row * 2 + 1] = Z0 - a * ka * relaxed_sin(theta[row]);
+                theta_bar += s_offsets[order] * math::relaxed_sin(static_cast<double>(order) * theta[row]);
+            boundary[row * 2]     = R0 + a * math::relaxed_cos(theta_bar);
+            boundary[row * 2 + 1] = Z0 - a * ka * math::relaxed_sin(theta[row]);
         }
         return boundary;
     }

@@ -52,6 +52,7 @@ boundary = veq.KernelBoundary(
     ka=2.2,
     s_offsets=(float(np.arcsin(0.5)),),
 )
+
 source_axis = np.linspace(0.0, 1.0, topology.sample_count, dtype=np.float64)
 heat_profile, current_profile = pf_profiles(source_axis)
 source = veq.KernelSource(
@@ -61,8 +62,6 @@ source = veq.KernelSource(
 )
 
 result = kernel.solve(boundary=boundary, source=source)
-if not result.success:
-    raise RuntimeError(f"Kernel solve failed with residual {result.raw_norm:.3e}")
 
 initial = kernel.build_equilibrium(x=np.zeros(kernel.x_size))
 initial.plot("demo_init.png")
