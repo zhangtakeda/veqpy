@@ -78,3 +78,4 @@ veqlib/artifact/
 /benchmarks/results/
 /docs_cn/
 /*.png
+/*.json

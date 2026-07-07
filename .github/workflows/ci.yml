@@ -34,7 +34,7 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
 
-      - name: Install VEQlib native build dependencies
+      - name: Install Cxx Kernel native build dependencies
         shell: bash
         run: |
           sudo apt-get update

@@ -14,8 +14,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 @pytest.mark.demo
 def test_root_demo_runs_with_tmp_output(tmp_path: Path) -> None:
     env = os.environ.copy()
-    env["VEQPY_OUTPUT_DIR"] = str(tmp_path)
-    env.setdefault("MPLCONFIGDIR", str(tmp_path / "mplconfig"))
+    env["MPLCONFIGDIR"] = str(tmp_path / "mplconfig")
     existing_pythonpath = env.get("PYTHONPATH")
     env["PYTHONPATH"] = (
         str(PROJECT_ROOT)
@@ -25,7 +24,7 @@ def test_root_demo_runs_with_tmp_output(tmp_path: Path) -> None:
 
     result = subprocess.run(
         [sys.executable, str(PROJECT_ROOT / "demo.py")],
-        cwd=PROJECT_ROOT,
+        cwd=tmp_path,
         env=env,
         text=True,
         capture_output=True,

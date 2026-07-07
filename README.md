@@ -110,9 +110,8 @@ fixed-boundary PF(`psin`) Kernel case directly with the public `veqpy` API:
 .venv/bin/python demo.py
 ```
 
-By default it writes `demo_init.png`, `demo_result.png`, and
-`demo_equilibrium.json` in the current directory. Set `VEQPY_OUTPUT_DIR` to send
-those files elsewhere. Manuscript-oriented reproduction workflows live under
+It writes `demo_init.png`, `demo_result.png`, and `demo_equilibrium.json` in the
+current directory. Manuscript-oriented reproduction workflows live under
 [`scripts/`][scripts]; they are heavier data/figure generators rather than
 introductory examples.
 
@@ -129,10 +128,10 @@ Core local checks mirror the push/PR CI workflow.
 ## Optional C++ Kernels
 
 The Cxx backend is the native C++/nanobind kernel layer used for
-topology-specific shared-library kernels and VEQPy-vs-native benchmarks.
+topology-specific shared-library kernels and Cxx-vs-Numba benchmarks.
 
-Representative Cxx-vs-Numba timing data retained in
-`benchmarks/results/veqlib_geqdsk.json` is summarized below. The three benchmark
+Representative Cxx-vs-Numba timing data from
+`benchmarks/cxx_geqdsk_pareto.py` is summarized below. The three benchmark
 families are GEQDSK-backed cases:
 
 - `D-shaped`: `data/SOLOVEV.geqdsk`
@@ -214,10 +213,12 @@ User-facing architecture notes:
 
 - [`model.md`][model-doc]: responsibilities, snapshot boundaries, and diagnostic
   interfaces for `Grid`, `Profile`, `Boundary`, `Geqdsk`, and `Equilibrium`.
-- [`operator.md`][operator-doc]: Kernel runtime boundary, source materialization,
-  and packed runtime responsibilities.
-- [`solver.md`][solver-doc]: Kernel solve lifecycle, result semantics, residual
-  normalization, and warm continuation.
+- [`architecture.md`][architecture-doc]: package layers, dependency direction,
+  and public construction entry points.
+- [`kernel.md`][kernel-doc]: Kernel runtime boundary, solve lifecycle, result
+  semantics, and warm continuation.
+- [`backends.md`][backends-doc]: Numba/Cxx backend responsibilities, cache
+  behavior, and benchmark entry points.
 
 Low-level base/math design notes for `Reactive`, `Serial`, `Registry`, interpolation,
 quadrature, and calculus now live in the corresponding source module headers.
@@ -273,9 +274,10 @@ Related VEQ-family and representation papers include:
 [tests]: tests/
 [scripts]: scripts/
 [benchmarks]: benchmarks/
+[architecture-doc]: docs/veqpy/architecture.md
 [model-doc]: docs/veqpy/model.md
-[operator-doc]: docs/veqpy/operator.md
-[solver-doc]: docs/veqpy/solver.md
+[kernel-doc]: docs/veqpy/kernel.md
+[backends-doc]: docs/veqpy/backends.md
 [veq-arxiv]: https://arxiv.org/abs/2606.11821
 [veq-min-parameters-arxiv]: https://arxiv.org/abs/2601.02942
 [veqr-arxiv]: https://arxiv.org/abs/2602.11422

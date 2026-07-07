@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""VEQPy/Numba route benchmark matrix on the Kernel API."""
+"""Numba backend route benchmark matrix on the Kernel API."""
 
 from __future__ import annotations
 
@@ -64,7 +64,7 @@ from benchmarks._reporting import (
     console as reporting_console,
 )
 
-DEFAULT_OUTPUT = REPO_ROOT / "benchmarks" / "results" / "veqpy_routes.json"
+DEFAULT_OUTPUT = REPO_ROOT / "benchmarks" / "results" / "numba_routes.json"
 
 
 def _measure_row(args: argparse.Namespace, spec) -> dict[str, Any]:
@@ -207,7 +207,7 @@ def main(argv: list[str] | None = None) -> int:
         task_id = None
         if progress is not None:
             task_id = progress.add_task(
-                "veqpy-routes",
+                "numba-routes",
                 total=len(specs),
                 current="-",
                 phase="[cyan]run[/]",
@@ -222,7 +222,7 @@ def main(argv: list[str] | None = None) -> int:
                 progress.advance(task_id)
     summary = summarize_runtime_rows(rows)
     payload = {
-        "schema": "veqpy.routes.v1",
+        "schema": "veqpy.numba.routes.v1",
         "scope": args.scope,
         "case_count": len(rows),
         "engine": SYNTHETIC_SOLVER_LABEL,

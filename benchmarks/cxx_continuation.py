@@ -44,10 +44,9 @@ from benchmarks._reporting import (
 from benchmarks._reporting import (
     console as reporting_console,
 )
-from veqpy import Kernel as NativeKernel
-from veqpy import KernelConfig, KernelRecipe
+from veqpy import Kernel, KernelConfig, KernelRecipe
 
-DEFAULT_OUTPUT_DIR = REPO_ROOT / "benchmarks" / "results" / "veqlib_continuation"
+DEFAULT_OUTPUT_DIR = REPO_ROOT / "benchmarks" / "results" / "cxx_continuation"
 UPDATE_CHOICES = ("ip", "boundary", "source", "mixed")
 DEFAULT_SPANS = (0.01,)
 POLICY_CHOICES = (
@@ -95,7 +94,7 @@ def _sequence_once(points, *, recipe: KernelRecipe, config: KernelConfig) -> dic
     point_success: list[bool] = []
     point_raw_norm: list[float] = []
     first = points[0]
-    kernel = NativeKernel(topology=first.topology, recipe=recipe, config=config)
+    kernel = Kernel(topology=first.topology, recipe=recipe, config=config)
     try:
         for point in points:
             point = replace(point, config=config)
@@ -435,7 +434,7 @@ def main(argv: list[str] | None = None) -> int:
                 progress.update(task_id, phase=progress_phase(row.get("status")))
                 progress.advance(task_id)
     payload = {
-        "schema": "veqlib.continuation_nfev.v1",
+        "schema": "veqpy.cxx.continuation_nfev.v1",
         "metric": "effective_nfev",
         "metric_note": (
             "effective_nfev is the summed Kernel SolveResult.nfev "

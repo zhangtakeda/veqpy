@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""GEQDSK Cxx backend vs VEQPy Numba Kernel benchmark."""
+"""GEQDSK Cxx backend benchmark compared with the Numba backend."""
 
 from __future__ import annotations
 
@@ -22,6 +22,7 @@ from benchmarks._common import (
     REFERENCE_LAYOUT_NT,
     REFERENCE_SOLVER_MAXFEV,
     REPO_ROOT,
+    SYNTHETIC_SOLVER_LABEL,
     RouteBenchmarkSpec,
     cpu_affinity,
     default_kernel_cache_root,
@@ -54,7 +55,7 @@ from benchmarks._reporting import (
 )
 from veqpy import KernelRecipe
 
-DEFAULT_OUTPUT = REPO_ROOT / "benchmarks" / "results" / "veqlib_geqdsk.json"
+DEFAULT_OUTPUT = REPO_ROOT / "benchmarks" / "results" / "cxx_geqdsk.json"
 VALIDATION_ATOL = 1.0e-6
 NATIVE_SOLVER_METHOD = "powell"
 NATIVE_SOLVER_INITIAL_POLICY = "cold"
@@ -77,7 +78,7 @@ def _recipe_payload(recipe: KernelRecipe) -> dict[str, Any]:
 
 def _native_engine_label(args: argparse.Namespace) -> str:
     suffix = "lm" if args.method == "levenberg-marquardt" else "powell"
-    return f"veqlib-{args.build}-{suffix}"
+    return f"cxx-{args.build}-{suffix}"
 
 
 def _measure_case(args: argparse.Namespace, case_key: str, config_label: str) -> dict[str, Any]:
@@ -141,7 +142,7 @@ def _measure_case(args: argparse.Namespace, case_key: str, config_label: str) ->
                 "status": "passed" if passed else "failed",
                 "engines": {
                     _native_engine_label(args): native_engine,
-                    "veqpy-numba-hybr": numba_engine,
+                    SYNTHETIC_SOLVER_LABEL: numba_engine,
                 },
                 "closeness_to_numba": compare,
             }
@@ -177,9 +178,9 @@ def _print_summary(console, rows: list[dict[str, Any]]) -> None:
     table.add_column("diff", justify="right")
     for row in rows:
         engines = row.get("engines", {})
-        native_key = next((key for key in engines if key.startswith("veqlib-")), "")
+        native_key = next((key for key in engines if key.startswith("cxx-")), "")
         native = engines.get(native_key)
-        numba = engines.get("veqpy-numba-hybr")
+        numba = engines.get(SYNTHETIC_SOLVER_LABEL)
         cxx_ms = timing_median_ms(native)
         numba_ms = timing_median_ms(numba)
         compare = row.get("closeness_to_numba")
@@ -266,7 +267,7 @@ def main(argv: list[str] | None = None) -> int:
                 progress.update(task_id, phase=progress_phase(row.get("status")))
                 progress.advance(task_id)
     payload = {
-        "schema": "veqlib.geqdsk_configs.v1",
+        "schema": "veqpy.cxx.geqdsk_configs.v1",
         "build": str(args.build),
         "repeat": int(args.repeat),
         "warmup": int(args.warmup),

@@ -1,8 +1,8 @@
 # Benchmarks
 
 This directory contains VEQPy Kernel benchmark entry points and result artifacts.
-Current scripts use the Kernel API directly: Python/Numba rows call
-`veqpy.Kernel` with `backend="numba"`, and native C++ rows call the same
+Current scripts use the Kernel API directly: Numba rows call
+`veqpy.Kernel` with `backend="numba"`, and Cxx rows call the same
 `veqpy.Kernel` surface with `backend="cxx"`.
 
 The route and GEQDSK tables below report median `SolveResult.elapsed_ms`.
@@ -12,24 +12,24 @@ solutions are not reused between repeats. The JSON outputs also keep outer
 Cxx artifact build time is not included in `Cxx ms`; build metadata and
 sample timings are recorded in the JSON outputs.
 
-`veqlib_continuation.py` is the explicit continuation-policy benchmark. Its
+`cxx_continuation.py` is the explicit continuation-policy benchmark. Its
 table reports effective function evaluations rather than solve-time medians.
 
 ## Scripts
 
-- `veqpy_routes.py`: VEQPy/Numba synthetic route matrix through `veqpy.Kernel`.
-- `veqlib_routes.py`: Cxx backend route matrix compared with VEQPy/Numba Kernel.
-- `veqlib_geqdsk_pareto.py`: GEQDSK Cxx backend vs VEQPy/Numba Kernel matrix.
-- `veqlib_continuation.py`: Cxx backend continuation-policy benchmark.
+- `numba_routes.py`: Numba backend synthetic route matrix through `veqpy.Kernel`.
+- `cxx_routes.py`: Cxx backend route matrix compared with the Numba backend.
+- `cxx_geqdsk_pareto.py`: GEQDSK Cxx backend matrix compared with the Numba backend.
+- `cxx_continuation.py`: Cxx backend continuation-policy benchmark.
 - `_common.py`: shared Kernel-case construction, timing, route specs, and JSON helpers.
 
 ## Reproduce
 
 ```bash
-.venv/bin/python benchmarks/veqpy_routes.py --quiet-progress
-.venv/bin/python benchmarks/veqlib_routes.py --quiet-progress
-.venv/bin/python benchmarks/veqlib_geqdsk_pareto.py --quiet-progress
-.venv/bin/python benchmarks/veqlib_continuation.py --quiet-progress
+.venv/bin/python benchmarks/numba_routes.py --quiet-progress
+.venv/bin/python benchmarks/cxx_routes.py --quiet-progress
+.venv/bin/python benchmarks/cxx_geqdsk_pareto.py --quiet-progress
+.venv/bin/python benchmarks/cxx_continuation.py --quiet-progress
 ```
 
 ## Environment
@@ -42,7 +42,7 @@ table reports effective function evaluations rather than solve-time medians.
 
 ## Results
 
-### VEQPy synthetic route matrix
+### Numba Synthetic Route Matrix
 
 - scope: `ip-uniform`; warmup: `5`; repeat: `100`; summary: `12/12 passed`.
 - timing source: `SolveResult.elapsed_ms`; default initial policy: `cold`.
@@ -65,8 +65,8 @@ table reports effective function evaluations rather than solve-time medians.
 ### Cxx Synthetic Route Matrix
 
 - scope: `ip-uniform`; build: `fastmath`; layout: `degree`; warmup: `5`; repeat: `100`; summary: `12/12 passed`.
-- timing source: `SolveResult.elapsed_ms`; native policy: `initial=cold`, `continue=cold`, `norm=fast`.
-- `diff` is `x_max_abs` between the VEQPy Kernel packed solutions.
+- timing source: `SolveResult.elapsed_ms`; Cxx policy: `initial=cold`, `continue=cold`, `norm=fast`.
+- `diff` is `x_max_abs` between Cxx and Numba packed solutions.
 
 | case                | status | x   | Cxx ms   | Numba ms | speedup | diff     |
 | ------------------- | ------ | --- | -------- | -------- | ------- | -------- |
@@ -86,8 +86,8 @@ table reports effective function evaluations rather than solve-time medians.
 ### Cxx GEQDSK Low/Medium/High/Ref
 
 - build: `fastmath`; warmup: `5`; repeat: `100`; validation atol: `1e-06`.
-- timing source: `SolveResult.elapsed_ms`; native policy: `initial=cold`, `continue=cold`, `norm=fast`.
-- `diff` is `x_max_abs` between the VEQPy Kernel packed solutions.
+- timing source: `SolveResult.elapsed_ms`; Cxx policy: `initial=cold`, `continue=cold`, `norm=fast`.
+- `diff` is `x_max_abs` between Cxx and Numba packed solutions.
 
 | case    | status | config | x   | Cxx ms    | Numba ms  | speedup | diff     |
 | ------- | ------ | ------ | --- | --------- | --------- | ------- | -------- |

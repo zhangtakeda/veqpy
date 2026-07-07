@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Route benchmark comparing Cxx Kernel with VEQPy Numba Kernel."""
+"""Cxx backend route benchmark compared with the Numba backend."""
 
 from __future__ import annotations
 
@@ -58,7 +58,7 @@ from benchmarks._reporting import (
 )
 from veqpy import KernelRecipe
 
-DEFAULT_OUTPUT = REPO_ROOT / "benchmarks" / "results" / "veqlib_routes.json"
+DEFAULT_OUTPUT = REPO_ROOT / "benchmarks" / "results" / "cxx_routes.json"
 VALIDATION_ATOL = 1.0e-6
 NATIVE_SOLVER_INITIAL_POLICY = "cold"
 NATIVE_SOLVER_CONTINUATION_POLICY = "cold"
@@ -78,7 +78,7 @@ def _recipe(args: argparse.Namespace) -> KernelRecipe:
 
 def _native_engine_label(args: argparse.Namespace) -> str:
     suffix = "lm" if args.method == "levenberg-marquardt" else "powell"
-    return f"veqlib-{args.build}-{suffix}"
+    return f"cxx-{args.build}-{suffix}"
 
 
 def _measure_row(args: argparse.Namespace, spec) -> dict[str, Any]:
@@ -187,7 +187,7 @@ def _print_timing_table(console, rows: list[dict[str, Any]]) -> None:
     for row in rows:
         runtime = row["runtime"]
         engines = runtime.get("engines", {})
-        native_key = next((key for key in engines if key.startswith("veqlib-")), "")
+        native_key = next((key for key in engines if key.startswith("cxx-")), "")
         native = runtime_engine_payload(runtime, native_key)
         numba = runtime_engine_payload(runtime, SYNTHETIC_SOLVER_LABEL)
         cxx_ms = timing_median_ms(native)
@@ -276,7 +276,7 @@ def main(argv: list[str] | None = None) -> int:
                 progress.advance(task_id)
     summary = _summarize(rows)
     payload = {
-        "schema": "veqlib.routes.v2",
+        "schema": "veqpy.cxx.routes.v1",
         "scope": args.scope,
         "case_count": len(rows),
         "build": args.build,

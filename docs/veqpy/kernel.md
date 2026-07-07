@@ -1,4 +1,4 @@
-# Kernel Runtime
+# Kernel
 
 The public runtime entrypoint is the Kernel API:
 
@@ -23,5 +23,30 @@ to call the same `Kernel` methods.
 
 Public source inputs stay raw: `KernelSource.heat_profile`,
 `KernelSource.current_profile`, `KernelSource.Ip`, and `KernelSource.beta`.
-Route-dependent `mu0` scaling and the internal `scaled_*` arrays are materialized
-inside the Kernel runtime layer before residual evaluation.
+Route-dependent scaling and internal materialized source arrays are backend
+runtime details, not user-facing data fields.
+
+## Solve Flow
+
+```python
+from veqpy import Kernel, KernelConfig, KernelRecipe
+
+kernel = Kernel(
+    topology=topology,
+    recipe=KernelRecipe(backend="numba", layout="degree"),
+    config=KernelConfig(method="powell"),
+)
+result = kernel.solve(boundary, source)
+equilibrium = kernel.build_equilibrium()
+```
+
+`KernelConfig` controls the runtime solve method, residual normalization,
+initial-state policy, continuation policy, residual acceptance threshold, and
+evaluation limits. `SolveResult` records the final packed state, raw residual,
+scaled residual, source `alpha` values, function/iteration counters, success
+flag, and elapsed time. `Kernel.jvp(...)` and `Kernel.jacobian(...)` are
+finite-difference numerical queries over the same residual runtime.
+
+Warm continuation is handle-local: after a solve, the next `Kernel.solve(...)`
+can reuse the previous solution when the continuation policy is warm. Use
+`kernel.clear()` to drop the stored result and history.

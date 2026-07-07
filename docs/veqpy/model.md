@@ -42,7 +42,7 @@ topology to flat arrays; `Profile` remains on the model side for
 - flux and source derivatives: `psin`, `psin_r`, `psin_rr`, `FFn_psin`, `Pn_psin`;
 - scaling coefficients: `alpha1`, `alpha2`.
 
-These fields are sufficient to reconstruct common physical quantities, but they do not store temporary buffers from the operator hot path. When the user reads properties such as `R`, `Z`, `F`, `P`, `q`, `Ip`, `beta_t`, `jtor`, `jpara`, `jphi`, `Psi`, or `Phi`, the object computes the required values by formula and lets `Reactive` maintain dependency consistency.
+These fields are sufficient to reconstruct common physical quantities, but they do not store temporary buffers from the solver hot path. When the user reads properties such as `R`, `Z`, `F`, `P`, `q`, `Ip`, `beta_t`, `jtor`, `jpara`, `jphi`, `Psi`, or `Phi`, the object computes the required values by formula and lets `Reactive` maintain dependency consistency.
 
 ## Geometry and Diagnostics
 
