@@ -11,9 +11,9 @@ from types import SimpleNamespace
 
 import numpy as np
 from _cases import (
-    BOUNDARY_MAXTOL,
-    CASE_BOUNDARY_FIT_M,
-    CASE_BOUNDARY_FIT_N,
+    CASE_BOUNDARY_C_ORDER,
+    CASE_BOUNDARY_PARAMETERS,
+    CASE_BOUNDARY_S_ORDER,
     CASE_LABELS,
     CASE_REFERENCE_EQUILIBRIUM_JSONS,
     CASE_REFERENCE_GFILES,
@@ -82,10 +82,6 @@ def load_veqpy_components() -> dict[str, object]:
         KernelSource,
         KernelTopology,
     )
-    from veqpy.kernels.boundary_materialization import (
-        materialize_kernel_boundary,
-        materialized_boundary_fit_payload,
-    )
     from veqpy.kernels.numba_kernel.packed_layout import (
         build_profile_index,
         build_profile_layout,
@@ -110,8 +106,6 @@ def load_veqpy_components() -> dict[str, object]:
         "build_profile_names": build_profile_names,
         "build_shape_profile_names": build_shape_profile_names,
         "kernel_boundary_shape_orders": kernel_boundary_shape_orders,
-        "materialize_kernel_boundary": materialize_kernel_boundary,
-        "materialized_boundary_fit_payload": materialized_boundary_fit_payload,
     }
 
 
@@ -321,18 +315,34 @@ def solve_script_kernel_case(
     return result, kernel
 
 
-def build_geqdsk_boundary(geqdsk, *, fit_m: int, fit_n: int, return_fit: bool = False):
+def build_geqdsk_boundary(case_key: str, geqdsk, *, return_fit: bool = False):
     components = load_veqpy_components()
+    params = CASE_BOUNDARY_PARAMETERS[str(case_key)]
+    c_offsets = np.asarray(params["c_offsets"], dtype=np.float64)
+    s_offsets = np.asarray(params["s_offsets"], dtype=np.float64)
     boundary = components["KernelBoundary"](
+        a=float(params["a"]),
+        R0=float(params["R0"]),
+        Z0=float(params["Z0"]),
         B0=float(geqdsk.Bt0),
-        R_boundary=np.asarray(geqdsk.boundary[:, 0], dtype=np.float64),
-        Z_boundary=np.asarray(geqdsk.boundary[:, 1], dtype=np.float64),
-        c_order=int(fit_m),
-        s_order=int(fit_n),
-        fit_maxtol=BOUNDARY_MAXTOL,
+        ka=float(params["ka"]),
+        c_offsets=c_offsets,
+        s_offsets=s_offsets[1:],
     )
-    materialized = components["materialize_kernel_boundary"](boundary)
-    fit = components["materialized_boundary_fit_payload"](materialized)
+    fit = {
+        "fit_backend": "fixed",
+        "fit_elapsed_ms": 0.0,
+        "rms": float(params["fit_rms"]),
+        "max_curve_error": float(params["fit_max_curve_error"]),
+        "c_order": int(CASE_BOUNDARY_C_ORDER[str(case_key)]),
+        "s_order": int(CASE_BOUNDARY_S_ORDER[str(case_key)]),
+        "a": float(params["a"]),
+        "R0": float(params["R0"]),
+        "Z0": float(params["Z0"]),
+        "ka": float(params["ka"]),
+        "c_offsets": c_offsets,
+        "s_offsets": s_offsets,
+    }
     return (boundary, fit) if return_fit else boundary
 
 
@@ -350,7 +360,7 @@ def load_pf_benchmark(backend: str):
         max_evaluations=REFERENCE_SOLVER_MAXFEV,
         initial="cold",
         continuation="cold",
-        norm="none",
+        norm="fast",
     )
     return SimpleNamespace(
         BACKEND=str(backend),
@@ -365,11 +375,7 @@ def load_pf_benchmark(backend: str):
 def build_pf_reference_case(case_key: str) -> PfReferenceCase:
     equilibrium = load_equilibrium_json(CASE_REFERENCE_EQUILIBRIUM_JSONS[case_key])
     geqdsk = read_geqdsk(CASE_REFERENCE_GFILES[case_key])
-    boundary = build_geqdsk_boundary(
-        geqdsk,
-        fit_m=CASE_BOUNDARY_FIT_M[case_key],
-        fit_n=CASE_BOUNDARY_FIT_N[case_key],
-    )
+    boundary = build_geqdsk_boundary(case_key, geqdsk)
     return PfReferenceCase(
         case_key=case_key,
         boundary=boundary,
@@ -434,7 +440,7 @@ def build_pf_case(benchmark, reference: PfReferenceCase, signature: dict[str, in
             max_evaluations=REFERENCE_SOLVER_MAXFEV,
             initial="cold",
             continuation="cold",
-            norm="none",
+            norm="fast",
         ),
         active_profiles=active_profiles,
     )

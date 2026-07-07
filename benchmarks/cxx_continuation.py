@@ -174,9 +174,6 @@ def _measure_case(
         max_evaluations=args.max_evaluations,
         initial="cold",
         norm=args.norm,
-        boundary_fit_m=args.boundary_fit_m,
-        boundary_fit_n=args.boundary_fit_n,
-        boundary_maxtol=args.boundary_maxtol,
     )
     points = continuation_points(base, update=update, span=span, points=args.points)
     offsets = _scan_offsets(points=args.points, span=span)
@@ -370,9 +367,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--method", default="powell")
     parser.add_argument("--norm", default="fast")
     parser.add_argument("--max-evaluations", type=int, default=REFERENCE_SOLVER_MAXFEV)
-    parser.add_argument("--boundary-fit-m", type=int, default=10)
-    parser.add_argument("--boundary-fit-n", type=int, default=10)
-    parser.add_argument("--boundary-maxtol", type=float, default=1.0)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--cache-root", type=Path, default=None)
     parser.add_argument("--source-dir", type=Path, default=CORE_DIR)

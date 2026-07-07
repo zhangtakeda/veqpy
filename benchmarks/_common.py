@@ -254,6 +254,110 @@ GEQDSK_CONFIG_SIGNATURES = {
     },
     ("efit", "Ref"): GEQDSK_ROUTE_PROFILE_SIGNATURE,
 }
+GEQDSK_BOUNDARY_PARAMETERS = {
+    "solovev": {
+        "a": 1.999991815361528,
+        "R0": 6.199980064550139,
+        "Z0": -4.0265979758802695e-05,
+        "ka": 1.6999963725270892,
+        "fit_rms": 0.0003896377390478151,
+        "fit_max_curve_error": 0.010740887012215919,
+        "c_offsets": (
+            -5.2020273089148361e-06,
+            7.1653084700073520e-05,
+            9.0046463771700606e-06,
+            -9.7789815345071059e-06,
+            -2.4974793964430963e-05,
+            6.9834184194999052e-05,
+            7.2729999976377730e-06,
+            -1.0542591490004266e-05,
+            -2.4922126347913156e-05,
+            6.9894200998597234e-05,
+            -6.1688729054668674e-06,
+        ),
+        "s_offsets": (
+            0.0,
+            3.3418610987342229e-01,
+            1.1666700286207601e-03,
+            -2.0450964699343364e-03,
+            -1.5833379968858402e-04,
+            -3.8596504114596517e-05,
+            -4.1901619591027170e-05,
+            1.4968468916007242e-05,
+            2.6075948416621554e-05,
+            -4.8303378655747770e-05,
+            -3.4317843409700719e-05,
+        ),
+    },
+    "chease": {
+        "a": 0.6504127010781183,
+        "R0": 0.9999628382309164,
+        "Z0": 0.00016201215320952212,
+        "ka": 1.8353512314259297,
+        "fit_rms": 0.000690058644014939,
+        "fit_max_curve_error": 0.012183767841949586,
+        "c_offsets": (
+            -0.10093500947178713,
+            0.09953753013381786,
+            0.00263797964542851,
+            0.0002364648141952,
+            -0.00187058163436749,
+            -0.00015749468335108,
+            0.00250455340197678,
+            -0.00021010577314975,
+            -0.00138185135101046,
+            0.00046348834914139,
+            0.0010925753359023,
+        ),
+        "s_offsets": (
+            0.0,
+            0.39741190586126168,
+            0.30000064059401577,
+            -0.19752465029931532,
+            0.00012375584334904224,
+            -0.0028918496083633863,
+            0.00055728321961535845,
+            0.0020885844545475403,
+            -0.00065686603212885782,
+            -0.0016236488464970841,
+            0.0010090121427006112,
+        ),
+    },
+    "efit": {
+        "a": 0.6171676117603371,
+        "R0": 1.6613762798644713,
+        "Z0": -0.08363305046404519,
+        "ka": 1.7821260070974403,
+        "fit_rms": 0.00028107711744079425,
+        "fit_max_curve_error": 0.001729559104966416,
+        "c_offsets": (
+            0.07852828254669175,
+            0.06312715933508059,
+            -0.07905163910660493,
+            -0.01769724397809446,
+            0.02910897204124359,
+            0.02433733959900054,
+            -0.0055909769586503,
+            -0.00879177546686944,
+            0.00550482646737737,
+            0.00504000048961428,
+            0.00162409293766496,
+        ),
+        "s_offsets": (
+            0.0,
+            0.6133689729358927,
+            0.04214392213264707,
+            -0.12629878943384087,
+            0.01888688896953439,
+            0.02390779724943099,
+            0.02772395371056901,
+            -0.00865560279811922,
+            -0.00225943350361505,
+            0.00283741776166376,
+            0.004692674167182,
+        ),
+    },
+}
 
 
 def default_kernel_cache_root() -> Path:
@@ -1057,19 +1161,9 @@ def geqdsk_kernel_case(
     max_evaluations: int | None = 400,
     initial: str = "cold",
     norm: str = "none",
-    boundary_fit_m: int = 10,
-    boundary_fit_n: int = 10,
-    boundary_maxtol: float = 1.0,
 ) -> KernelCase:
     geqdsk = Geqdsk(CASE_REFERENCE_GFILES[case_key] if geqdsk_path is None else geqdsk_path)
-    boundary = KernelBoundary(
-        B0=float(geqdsk.Bt0),
-        R_boundary=np.asarray(geqdsk.boundary[:, 0], dtype=np.float64),
-        Z_boundary=np.asarray(geqdsk.boundary[:, 1], dtype=np.float64),
-        c_order=int(boundary_fit_m),
-        s_order=int(boundary_fit_n),
-        fit_maxtol=float(boundary_maxtol),
-    )
+    boundary = geqdsk_boundary(case_key, geqdsk)
     spec = route_spec or RouteBenchmarkSpec("PF", "psin", "uniform", "Ip")
     effective_signature = (
         dict(signature) if signature is not None else geqdsk_signature(case_key, config_label)
@@ -1138,6 +1232,21 @@ def geqdsk_signature(case_key: str, config_label: str) -> dict[str, int]:
         known = ", ".join(f"{case}:{config}" for case, config in GEQDSK_CONFIG_SIGNATURES)
         raise KeyError(f"missing benchmark signature for {case_key}:{config_label}; known: {known}")
     return {str(name): int(value) for name, value in signature.items() if int(value) > 0}
+
+
+def geqdsk_boundary(case_key: str, geqdsk: Geqdsk) -> KernelBoundary:
+    params = GEQDSK_BOUNDARY_PARAMETERS[str(case_key)]
+    c_offsets = np.asarray(params["c_offsets"], dtype=np.float64)
+    s_offsets = np.asarray(params["s_offsets"], dtype=np.float64)
+    return KernelBoundary(
+        a=float(params["a"]),
+        R0=float(params["R0"]),
+        Z0=float(params["Z0"]),
+        B0=float(geqdsk.Bt0),
+        ka=float(params["ka"]),
+        c_offsets=c_offsets,
+        s_offsets=s_offsets[1:],
+    )
 
 
 def topology_profile_counts(topology: KernelTopology) -> dict[str, Any]:
@@ -1254,6 +1363,64 @@ def measure_solver(
         "median_ms": median(timings),
         "result": results[-1],
         "kernel": last_kernel,
+        "success": all(bool(result.success) for result in results),
+        "nfev": nfev,
+        "njev": njev,
+        "iterations": iterations,
+        "callbacks": callbacks,
+        "jacobian_component_evaluations": jacobian_component_evaluations,
+        "jvp_evaluations": jvp_evaluations,
+        "nfev_median": median([float(value) for value in nfev]),
+    }
+
+
+def measure_kernel_case(
+    case: KernelCase,
+    *,
+    recipe: KernelRecipe,
+    warmup: int,
+    repeat: int,
+) -> dict[str, Any]:
+    kernel = Kernel(topology=case.topology, recipe=recipe, config=case.config)
+    try:
+        for _ in range(max(0, int(warmup))):
+            result = kernel.solve(case.boundary, case.source)
+            if not isinstance(result, SolveResult):
+                raise RuntimeError("warmup solve did not return SolveResult")
+
+        timings: list[float] = []
+        wall_timings: list[float] = []
+        results: list[SolveResult] = []
+        nfev: list[int] = []
+        njev: list[int] = []
+        iterations: list[int] = []
+        callbacks: list[int] = []
+        jacobian_component_evaluations: list[int] = []
+        jvp_evaluations: list[int] = []
+        for _ in range(max(1, int(repeat))):
+            started = time.perf_counter_ns()
+            result = kernel.solve(case.boundary, case.source)
+            wall_timings.append(float(time.perf_counter_ns() - started) / 1.0e6)
+            timings.append(float(result.elapsed_ms))
+            results.append(result)
+            nfev.append(int(result.nfev))
+            njev.append(int(result.njev))
+            iterations.append(int(result.linear_iterations))
+            callbacks.append(int(result.callbacks))
+            jacobian_component_evaluations.append(int(result.jacobian_component_evaluations))
+            jvp_evaluations.append(int(result.jvp_evaluations))
+    except Exception:
+        close = getattr(kernel, "close", None)
+        if close is not None:
+            close()
+        raise
+
+    return {
+        "timings_ms": timings,
+        "wall_timings_ms": wall_timings,
+        "median_ms": median(timings),
+        "result": results[-1],
+        "kernel": kernel,
         "success": all(bool(result.success) for result in results),
         "nfev": nfev,
         "njev": njev,

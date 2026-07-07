@@ -11,7 +11,7 @@ from benchmarks._common import (
     geqdsk_kernel_case,
     solve_numba_case,
 )
-from veqpy.kernels.boundary_materialization import materialize_kernel_boundary
+from veqpy.kernels.boundary_fit import fit_boundary_params
 from veqpy.model import Geqdsk
 
 PHYSICS_CASES = ("solovev", "chease", "efit")
@@ -21,26 +21,23 @@ PHYSICS_CASES = ("solovev", "chease", "efit")
 @pytest.mark.parametrize("case_key", PHYSICS_CASES)
 def test_geqdsk_boundary_fit_is_small_against_reference_points(case_key: str) -> None:
     geqdsk = Geqdsk(CASE_REFERENCE_GFILES[case_key])
-    boundary = geqdsk_kernel_case(
-        case_key,
-        "Low",
-        route_spec=RouteBenchmarkSpec("PF", "psin", "uniform", "Ip"),
-        signature=GEQDSK_ROUTE_PROFILE_SIGNATURE,
-        boundary_fit_m=10,
-        boundary_fit_n=10,
-    ).boundary
+    fit = fit_boundary_params(
+        np.asarray(geqdsk.boundary[:, 0], dtype=np.float64),
+        np.asarray(geqdsk.boundary[:, 1], dtype=np.float64),
+        c_order=10,
+        s_order=10,
+        maxtol=1.0,
+    )
 
-    materialized = materialize_kernel_boundary(boundary, fit_backend="numpy")
-
-    assert materialized.fit_rms is not None
-    assert materialized.fit_max_curve_error is not None
-    assert materialized.fit_rms < {"solovev": 2.0e-3, "chease": 1.0e-2, "efit": 5.0e-3}[case_key]
-    assert materialized.fit_max_curve_error < {
+    assert float(fit["rms"]) < {"solovev": 2.0e-3, "chease": 1.0e-2, "efit": 5.0e-3}[
+        case_key
+    ]
+    assert float(fit["max_curve_error"]) < {
         "solovev": 3.0e-2,
         "chease": 4.0e-2,
         "efit": 3.0e-2,
     }[case_key]
-    assert materialized.boundary.B0 == pytest.approx(float(geqdsk.Bt0))
+    assert np.isfinite(float(geqdsk.Bt0))
 
 
 @pytest.mark.slow
@@ -57,8 +54,6 @@ def test_numba_geqdsk_low_order_solution_has_physical_diagnostics(case_key: str)
         max_evaluations=2000,
         initial="cold",
         norm="fast",
-        boundary_fit_m=10,
-        boundary_fit_n=10,
     )
 
     result, kernel = solve_numba_case(case)

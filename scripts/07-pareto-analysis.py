@@ -25,9 +25,6 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 from _cases import (
-    BOUNDARY_MAXTOL,
-    CASE_BOUNDARY_FIT_M,
-    CASE_BOUNDARY_FIT_N,
     CASE_COLORS,
     CASE_KEYS,
     CASE_LABELS,
@@ -79,6 +76,7 @@ from _reporting import (
     SCRIPT_CONSOLE,
     print_output_table,
     print_script_config,
+    script_display_path,
     script_progress,
 )
 from matplotlib.ticker import (
@@ -292,59 +290,49 @@ TABLE05_SELECTED_SIGNATURES: dict[str, tuple[dict[str, int], ...]] = {
     "solovev": (
         {"psin": 1, "h": 1, "k": 1, "s1": 1},
         {"psin": 1, "h": 1, "k": 2, "s1": 1},
-        {"psin": 4, "h": 2, "k": 2, "s1": 2},
+        {"psin": 3, "h": 2, "k": 2, "s1": 2},
     ),
     "chease": (
         {
-            "psin": 6,
+            "psin": 4,
             "h": 6,
-            "k": 4,
-            "v": 1,
-            "c0": 4,
+            "k": 2,
+            "v": 3,
+            "c0": 3,
             "s1": 3,
-            "c1": 1,
-            "s2": 1,
-            "c2": 1,
-            "s3": 1,
-        },
-        {
-            "psin": 3,
-            "h": 8,
-            "k": 5,
-            "v": 5,
-            "c0": 4,
-            "s1": 4,
             "c1": 2,
             "s2": 2,
             "c2": 1,
             "s3": 1,
-            "c3": 1,
-            "s4": 1,
-            "c4": 1,
-            "s5": 1,
+        },
+        {
+            "psin": 5,
+            "h": 10,
+            "k": 4,
+            "v": 3,
+            "c0": 3,
+            "s1": 3,
+            "c1": 3,
+            "s2": 3,
+            "c2": 1,
+            "s3": 1,
         },
         {
             "psin": 8,
-            "h": 7,
-            "k": 6,
-            "v": 7,
+            "h": 9,
+            "k": 7,
+            "v": 8,
             "c0": 6,
             "s1": 6,
-            "c1": 5,
-            "s2": 5,
-            "c2": 3,
-            "s3": 3,
-            "c3": 2,
-            "s4": 2,
-            "c4": 2,
-            "s5": 2,
-            "c5": 1,
-            "s6": 1,
+            "c1": 4,
+            "s2": 4,
+            "c2": 4,
+            "s3": 4,
         },
     ),
     "efit": (
         {
-            "psin": 4,
+            "psin": 3,
             "h": 5,
             "k": 3,
             "v": 2,
@@ -363,7 +351,7 @@ TABLE05_SELECTED_SIGNATURES: dict[str, tuple[dict[str, int], ...]] = {
             "c1": 2,
             "s2": 2,
             "c2": 2,
-            "s3": 2,
+            "s3": 1,
             "c3": 1,
             "s4": 1,
         },
@@ -379,7 +367,7 @@ TABLE05_SELECTED_SIGNATURES: dict[str, tuple[dict[str, int], ...]] = {
             "c2": 5,
             "s3": 5,
             "c3": 5,
-            "s4": 5,
+            "s4": 4,
             "c4": 5,
             "s5": 5,
             "c5": 2,
@@ -785,7 +773,7 @@ def load_benchmark(backend: str):
         max_evaluations=REFERENCE_SOLVER_MAXFEV,
         initial="cold",
         continuation="cold",
-        norm="none",
+        norm="fast",
     )
     return SimpleNamespace(
         BACKEND=str(backend),
@@ -911,11 +899,7 @@ def recompute_reference_equilibrium(
     case_key: str, lengths: dict[str, int]
 ) -> tuple[object, np.ndarray]:
     geqdsk = read_geqdsk(CASE_REFERENCE_GFILES[case_key])
-    boundary, _ = build_boundary(
-        geqdsk,
-        fit_m=CASE_BOUNDARY_FIT_M[case_key],
-        fit_n=CASE_BOUNDARY_FIT_N[case_key],
-    )
+    boundary, _ = build_boundary(case_key, geqdsk)
     solver_case = build_solver_case(
         boundary,
         geqdsk,
@@ -1009,26 +993,8 @@ def _shape_profile_names() -> tuple[str, ...]:
 SHAPE_PROFILE_NAMES = _shape_profile_names()
 
 
-def build_boundary(geqdsk, *, fit_m: int, fit_n: int, boundary_maxtol: float = BOUNDARY_MAXTOL):
-    if float(boundary_maxtol) == BOUNDARY_MAXTOL:
-        return build_geqdsk_boundary(
-            geqdsk,
-            fit_m=fit_m,
-            fit_n=fit_n,
-            return_fit=True,
-        )
-    components = _load_veqpy_components()
-    boundary = components["KernelBoundary"](
-        B0=float(geqdsk.Bt0),
-        R_boundary=np.asarray(geqdsk.boundary[:, 0], dtype=np.float64),
-        Z_boundary=np.asarray(geqdsk.boundary[:, 1], dtype=np.float64),
-        c_order=int(fit_m),
-        s_order=int(fit_n),
-        fit_maxtol=float(boundary_maxtol),
-    )
-    materialized = components["materialize_kernel_boundary"](boundary)
-    fit = components["materialized_boundary_fit_payload"](materialized)
-    return boundary, fit
+def build_boundary(case_key: str, geqdsk):
+    return build_geqdsk_boundary(case_key, geqdsk, return_fit=True)
 
 
 def build_solver_case(boundary, geqdsk, *, profile_coeffs: dict[str, list[float]]):
@@ -1081,7 +1047,7 @@ def solve_equilibrium(case, *, method: str):
         max_evaluations=REFERENCE_SOLVER_MAXFEV,
         initial="cold",
         continuation="cold",
-        norm="none",
+        norm="fast",
     )
     kernel = modules["Kernel"](
         topology=topology,
@@ -1183,11 +1149,7 @@ def build_reference_case(benchmark, case_key: str) -> ReferenceCase:
     equilibrium = precomputed_reference.equilibrium
     gfile_path = CASE_REFERENCE_GFILES[case_key]
     geqdsk = read_geqdsk(gfile_path)
-    boundary, _ = build_boundary(
-        geqdsk,
-        fit_m=CASE_BOUNDARY_FIT_M[case_key],
-        fit_n=CASE_BOUNDARY_FIT_N[case_key],
-    )
+    boundary, _ = build_boundary(case_key, geqdsk)
     surface_equilibrium = resample_surface_equilibrium(equilibrium)
     exact_shape_x = np.asarray(precomputed_reference.shape_x, dtype=np.float64)
 
@@ -4650,8 +4612,7 @@ def main() -> None:
                 pareto_output_rows(
                     figure_paths=figure_paths,
                     json_paths=[
-                        json_output_path(json_stem, case_key, sweep_mode)
-                        for case_key in CASE_KEYS
+                        json_output_path(json_stem, case_key, sweep_mode) for case_key in CASE_KEYS
                     ],
                     reduced_manifest=reduced_manifest,
                 ),
@@ -4704,12 +4665,21 @@ def main() -> None:
                 case_workers=RUN_CASE_WORKERS,
                 case_worker_inner_threads=RUN_CASE_WORKER_INNER_THREADS,
             )
+            case_frontier = pareto_frontier(
+                all_samples[case_key],
+                min_rel_improvement=RUN_FRONTIER_MIN_REL_IMPROVEMENT,
+            )
+            SCRIPT_CONSOLE.print(
+                f"[pareto] completed {CASE_LABELS[case_key]} sweep: "
+                f"{len(all_samples[case_key])} samples, {len(case_frontier)} frontier points",
+                markup=False,
+            )
             partial_frontiers = {
                 key: pareto_frontier(samples, min_rel_improvement=RUN_FRONTIER_MIN_REL_IMPROVEMENT)
                 for key, samples in all_samples.items()
             }
             if cache_enabled:
-                write_json(
+                saved_paths = write_json(
                     all_samples,
                     partial_frontiers,
                     json_stem,
@@ -4718,6 +4688,13 @@ def main() -> None:
                     RUN_BACKEND,
                     sweep_mode,
                 )
+                case_json_path = json_output_path(json_stem, case_key, sweep_mode)
+                if case_json_path in saved_paths:
+                    SCRIPT_CONSOLE.print(
+                        "[pareto] updated "
+                        f"{CASE_LABELS[case_key]} cache: {script_display_path(case_json_path)}",
+                        markup=False,
+                    )
     finally:
         progress.close()
     frontiers = {

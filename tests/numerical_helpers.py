@@ -21,9 +21,6 @@ def benchmark_args(**overrides: object) -> Namespace:
         "repeat": 1,
         "warmup": 0,
         "no_run": False,
-        "boundary_fit_m": 10,
-        "boundary_fit_n": 10,
-        "boundary_maxtol": 1.0,
     }
     defaults.update(overrides)
     return Namespace(**defaults)
@@ -63,4 +60,3 @@ def skip_if_native_unavailable(row: dict[str, Any]) -> None:
         )
     ):
         pytest.skip(f"native backend unavailable: {text}")
-

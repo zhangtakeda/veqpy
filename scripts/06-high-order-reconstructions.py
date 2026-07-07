@@ -20,12 +20,15 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 from _cases import (
+    CASE_BOUNDARY_C_ORDER,
+    CASE_BOUNDARY_S_ORDER,
     CASE_REFERENCE_EQUILIBRIUM_JSONS,
     REFERENCE_EQUILIBRIUM_MANIFEST_PATH,
 )
 from _common import data_path, figure_path, save_figure_outputs
 from _kernel_cases import (
     active_profiles_from_coeffs,
+    build_geqdsk_boundary,
     build_kernel_topology,
     kernel_config,
 )
@@ -61,10 +64,6 @@ from contourpy import contour_generator
 from matplotlib.ticker import MultipleLocator
 
 import veqpy as veq
-from veqpy.kernels.boundary_materialization import (
-    materialize_kernel_boundary,
-    materialized_boundary_fit_payload,
-)
 from veqpy.kernels.types import kernel_boundary_shape_orders
 from veqpy.model import Geqdsk, Grid
 
@@ -144,18 +143,10 @@ SURFACE_COUNT = 10
 PSIN_ERROR_RHO_LEVELS = tuple(np.linspace(0.1, 0.9, 9, dtype=np.float64))
 SHAPE_RMS_PSIN_LEVELS = tuple(np.linspace(0.0, 1.0, 11, dtype=np.float64))
 SHAPE_RMS_THETA_SAMPLE_COUNT = 16
-BOUNDARY_MAXTOL = 1.0
 SOLVER_METHOD = "hybr"
 SOLVER_MAXFEV = 2000
 SOLVER_WARMUP_RUNS = 1
 SOLVER_TIMING_REPEATS = 5
-
-SOLOVEV_BOUNDARY_FIT_M = 10
-SOLOVEV_BOUNDARY_FIT_N = 10
-CHEASE_BOUNDARY_FIT_M = 10
-CHEASE_BOUNDARY_FIT_N = 10
-EFIT_BOUNDARY_FIT_M = 10
-EFIT_BOUNDARY_FIT_N = 10
 
 DEFAULT_PROFILE_COEFFS = {
     "psin": [0.0] * 10,
@@ -295,8 +286,8 @@ class CaseSpec:
     reference_label: str
     case_key: str
     gfile_path: str
-    boundary_fit_m: int
-    boundary_fit_n: int
+    boundary_c_order: int
+    boundary_s_order: int
     profile_coeffs: dict[str, list[float]]
     solve_nr: int = SOLVE_NR
     solve_nt: int = SOLVE_NT
@@ -385,8 +376,8 @@ CASE_SPECS = (
         reference_label="Solov'ev",
         case_key="solovev",
         gfile_path=SAVE_GFILE_PATH,
-        boundary_fit_m=SOLOVEV_BOUNDARY_FIT_M,
-        boundary_fit_n=SOLOVEV_BOUNDARY_FIT_N,
+        boundary_c_order=CASE_BOUNDARY_C_ORDER["solovev"],
+        boundary_s_order=CASE_BOUNDARY_S_ORDER["solovev"],
         profile_coeffs=DEFAULT_PROFILE_COEFFS,
         solve_nr=SOLVE_NR,
         solve_nt=SOLVE_NT,
@@ -397,8 +388,8 @@ CASE_SPECS = (
         reference_label="CHEASE",
         case_key="chease",
         gfile_path=data_path("CHEASE.geqdsk"),
-        boundary_fit_m=CHEASE_BOUNDARY_FIT_M,
-        boundary_fit_n=CHEASE_BOUNDARY_FIT_N,
+        boundary_c_order=CASE_BOUNDARY_C_ORDER["chease"],
+        boundary_s_order=CASE_BOUNDARY_S_ORDER["chease"],
         profile_coeffs=CHEASE_PROFILE_COEFFS,
     ),
     CaseSpec(
@@ -406,8 +397,8 @@ CASE_SPECS = (
         reference_label="EFIT",
         case_key="efit",
         gfile_path=data_path("EFIT.geqdsk"),
-        boundary_fit_m=EFIT_BOUNDARY_FIT_M,
-        boundary_fit_n=EFIT_BOUNDARY_FIT_N,
+        boundary_c_order=CASE_BOUNDARY_C_ORDER["efit"],
+        boundary_s_order=CASE_BOUNDARY_S_ORDER["efit"],
         profile_coeffs=EFIT_PROFILE_COEFFS,
     ),
 )
@@ -470,8 +461,8 @@ def aggregate_surface_rms_error(profile: tuple[np.ndarray, np.ndarray]) -> float
     return float(np.sqrt(np.mean(values * values)))
 
 
-def format_boundary_fit(case_spec: CaseSpec) -> str:
-    return rf"$c/s=({int(case_spec.boundary_fit_m)},{int(case_spec.boundary_fit_n)})$"
+def format_boundary_order(case_spec: CaseSpec) -> str:
+    return rf"$c/s=({int(case_spec.boundary_c_order)},{int(case_spec.boundary_s_order)})$"
 
 
 def _coeff_length(profile_coeffs: dict[str, list[float]], name: str) -> int:
@@ -1000,18 +991,9 @@ def read_geqdsk(path: str) -> Geqdsk:
 
 
 def build_boundary(
-    geqdsk: Geqdsk, *, fit_m: int, fit_n: int
+    case_key: str, geqdsk: Geqdsk
 ) -> tuple[veq.KernelBoundary, dict[str, float | np.ndarray]]:
-    boundary = veq.KernelBoundary(
-        B0=float(geqdsk.Bt0),
-        R_boundary=np.asarray(geqdsk.boundary[:, 0], dtype=np.float64),
-        Z_boundary=np.asarray(geqdsk.boundary[:, 1], dtype=np.float64),
-        c_order=int(fit_m),
-        s_order=int(fit_n),
-        fit_maxtol=BOUNDARY_MAXTOL,
-    )
-    normalized = materialized_boundary_fit_payload(materialize_kernel_boundary(boundary))
-    return boundary, normalized
+    return build_geqdsk_boundary(case_key, geqdsk, return_fit=True)
 
 
 def build_solver_case(
@@ -1047,7 +1029,7 @@ def build_solver(case: KernelProblemSpec, solve_grid: Grid) -> KernelSolveHandle
         max_evaluations=SOLVER_MAXFEV,
         initial="cold",
         continuation="cold",
-        norm="none",
+        norm="fast",
     )
     kernel = veq.Kernel(
         topology=topology,
@@ -1490,11 +1472,7 @@ def build_case_result(case_spec: CaseSpec) -> CaseResult:
     else:
         geqdsk = read_geqdsk(case_spec.gfile_path)
 
-    boundary, fit = build_boundary(
-        geqdsk,
-        fit_m=case_spec.boundary_fit_m,
-        fit_n=case_spec.boundary_fit_n,
-    )
+    boundary, fit = build_boundary(case_spec.case_key, geqdsk)
     case = build_solver_case(boundary, geqdsk, profile_coeffs=case_spec.profile_coeffs)
     case_setup_ms = (time.perf_counter() - case_setup_started) * 1000.0
     solver, equilibrium, plot_equilibrium, timing, cost_audit = solve_equilibrium(
@@ -2013,8 +1991,7 @@ def main() -> None:
     print_iter_parameter_comparison(case_results)
     output_rows = [("Reference G-EQDSK", SAVE_GFILE_PATH, "Generated Solovev reference")]
     output_rows.extend(
-        ("Reference equilibrium", path, "Figure 06 JSON input")
-        for path in equilibrium_paths
+        ("Reference equilibrium", path, "Figure 06 JSON input") for path in equilibrium_paths
     )
     output_rows.append(
         ("Reference manifest", reference_manifest_path, "Figure 07/08/09 input index")
