@@ -19,8 +19,7 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 import numpy as np
-from config import (
-    AXIS_LABEL_SIZE,
+from _cases import (
     CASE_COLORS,
     CASE_KEYS,
     CASE_LABELS,
@@ -30,32 +29,44 @@ from config import (
     CASE_SOLVER_METHODS,
     CONFIG_LABELS,
     CONFIG_LINE_COLORS,
-    LEGEND_FONT_SIZE,
-    PLOT_TICK_BOTTOM,
-    PLOT_TICK_DIRECTION,
-    PLOT_TICK_LEFT,
-    PLOT_TICK_RIGHT,
-    PLOT_TICK_TOP,
     REDUCED_CONFIG_LABELS,
-    SAVE_DPI,
-    SAVE_TRANSPARENT,
-    SINGLE_COLUMN_WIDTH,
-    TICK_LABEL_SIZE,
-    TITLE_FONT_SIZE,
-    apply_plot_style,
+)
+from _common import ensure_parent_dir, figure_path, save_figure_outputs
+from _kernel_cases import (
     build_pf_case,
     build_pf_reference_case,
-    ensure_parent_dir,
-    figure_path,
     load_equilibrium_json,
     load_pf_benchmark,
     load_reduced_equilibrium_manifest,
     normalize_signature,
     read_geqdsk,
     reduced_equilibrium_json_path,
-    save_figure_outputs,
-    scaled_font_size,
     signature_from_metadata,
+)
+from _plotting import (
+    AXIS_LABEL_SIZE,
+    LEGEND_FONT_SIZE,
+    PLOT_TICK_BOTTOM,
+    PLOT_TICK_DIRECTION,
+    PLOT_TICK_LEFT,
+    PLOT_TICK_RIGHT,
+    PLOT_TICK_TOP,
+    SAVE_DPI,
+    SAVE_TRANSPARENT,
+    SINGLE_COLUMN_WIDTH,
+    TICK_LABEL_SIZE,
+    TITLE_FONT_SIZE,
+    apply_plot_style,
+    scaled_font_size,
+)
+from _reporting import (
+    SCRIPT_CONSOLE,
+    format_script_sci,
+    make_script_table,
+    print_output_table,
+    print_script_config,
+    print_script_table,
+    script_progress,
 )
 from matplotlib import ticker
 from matplotlib.lines import Line2D
@@ -830,17 +841,17 @@ def solve_case_samples(
     case_key: str,
     signatures: list[dict[str, int]],
     args: SimpleNamespace,
+    progress=None,
+    task=None,
 ) -> list[GeometryRedistributionSample]:
     reference = build_pf_reference_case(case_key)
     samples: list[GeometryRedistributionSample] = []
     for config_label, signature in zip(CONFIG_LABELS, signatures, strict=True):
         if config_label not in DISPLAY_CONFIG_LABELS:
             continue
-        print(
-            f"[geometry-redistribution] {CASE_LABELS[case_key]} "
-            f"{config_label} params={sum(signature.values())}",
-            flush=True,
-        )
+        current = f"{CASE_LABELS[case_key]} {config_label}"
+        if progress is not None and task is not None:
+            progress.update(task, current=current, phase="[cyan]solve[/]")
         samples.append(
             solve_geometry_redistribution_sample(
                 benchmark,
@@ -851,6 +862,8 @@ def solve_case_samples(
                 args=args,
             )
         )
+        if progress is not None and task is not None:
+            progress.update(task, advance=1, current=current, phase="[cyan]solve[/]")
     return samples
 
 
@@ -1309,27 +1322,34 @@ def write_text(path: str, text: str) -> None:
 def print_summary(
     samples_by_case: dict[str, list[GeometryRedistributionSample]], args: SimpleNamespace
 ) -> None:
-    print()
-    print(
-        "[geometry-redistribution-summary] "
-        f"method={args.collocation_method}, weight={float(args.collocation_weight):g}, "
-        f"max_nfev={int(args.max_nfev)}, grid={int(args.solve_nr)}x{int(args.solve_nt)}"
-    )
-    print(
-        "[geometry-redistribution-summary] "
-        "case config params shape_rms/a shape_max/a e_gqdsk_ratio force_rms_ratio "
-        "nfev success"
+    table = make_script_table(
+        "geometry redistribution summary",
+        [
+            ("case", "left"),
+            ("config", "left"),
+            ("params", "right"),
+            ("shape rms/a", "right"),
+            ("shape max/a", "right"),
+            ("E_gqdsk ratio", "right"),
+            ("force ratio", "right"),
+            ("nfev", "right"),
+            ("status", "left"),
+        ],
     )
     for case_key, items in samples_by_case.items():
         for item in items:
-            print(
-                "[geometry-redistribution-summary] "
-                f"{case_key} {item.collocation.config_label} "
-                f"{int(item.collocation.parameter_count)} "
-                f"{item.shape_rms_over_a:.6e} {item.shape_max_over_a:.6e} "
-                f"{item.external_shape_error_ratio:.6e} "
-                f"{item.force_rms_ratio:.6e} {int(item.nfev)} {bool(item.success)}"
+            table.add_row(
+                CASE_LABELS[case_key],
+                item.collocation.config_label,
+                str(int(item.collocation.parameter_count)),
+                format_script_sci(item.shape_rms_over_a),
+                format_script_sci(item.shape_max_over_a),
+                format_script_sci(item.external_shape_error_ratio),
+                format_script_sci(item.force_rms_ratio),
+                str(int(item.nfev)),
+                "passed" if item.success else "failed",
             )
+    print_script_table(SCRIPT_CONSOLE, table)
 
 
 def main() -> None:
@@ -1355,54 +1375,88 @@ def main() -> None:
     signatures_by_case = selected_signature_map(selected_cases)
     benchmark = load_pf_benchmark(args.backend)
 
-    samples_by_case = {
-        case_key: solve_case_samples(
-            benchmark,
-            case_key=case_key,
-            signatures=signatures_by_case[case_key],
-            args=args,
+    print_script_config(
+        SCRIPT_CONSOLE,
+        "appendix b: geometry redistribution",
+        (
+            ("backend", args.backend),
+            ("cases", len(selected_cases)),
+            ("configs", ", ".join(DISPLAY_CONFIG_LABELS)),
+            ("grid", f"{args.solve_nr}x{args.solve_nt}"),
+            ("method", args.collocation_method),
         )
-        for case_key in selected_cases
-    }
-
-    fig = build_figure(samples_by_case)
-    saved_paths = save_figure_outputs(
-        fig,
-        png_path=args.save_png,
-        pdf_path=args.save_pdf,
-        dpi=SAVE_DPI,
-        transparent=SAVE_TRANSPARENT,
     )
-    plt.close(fig)
-    compact_saved_paths: list[str] = []
-    if args.save_compact_png:
-        compact_fig = build_compact_overlay_figure(
-            samples_by_case,
-            collocation_weight=float(args.collocation_weight),
+
+    solve_count = sum(
+        1
+        for case_key in selected_cases
+        for config_label, _signature in zip(
+            CONFIG_LABELS, signatures_by_case[case_key], strict=True
         )
-        compact_saved_paths = save_figure_outputs(
-            compact_fig,
-            png_path=args.save_compact_png,
-            pdf_path=None,
+        if config_label in DISPLAY_CONFIG_LABELS
+    )
+    with script_progress(SCRIPT_CONSOLE) as progress:
+        total = solve_count + 2 + (1 if args.save_compact_png else 0)
+        task = progress.add_task("", total=total, current="solve samples", phase="[cyan]solve[/]")
+        samples_by_case: dict[str, list[GeometryRedistributionSample]] = {}
+        for case_key in selected_cases:
+            samples_by_case[case_key] = solve_case_samples(
+                benchmark,
+                case_key=case_key,
+                signatures=signatures_by_case[case_key],
+                args=args,
+                progress=progress,
+                task=task,
+            )
+
+        progress.update(task, current="main figure", phase="[cyan]run[/]")
+        fig = build_figure(samples_by_case)
+        saved_paths = save_figure_outputs(
+            fig,
+            png_path=args.save_png,
+            pdf_path=args.save_pdf,
             dpi=SAVE_DPI,
             transparent=SAVE_TRANSPARENT,
         )
-        plt.close(compact_fig)
+        plt.close(fig)
+        progress.update(task, advance=1, current="compact figure", phase="[cyan]run[/]")
+        compact_saved_paths: list[str] = []
+        if args.save_compact_png:
+            compact_fig = build_compact_overlay_figure(
+                samples_by_case,
+                collocation_weight=float(args.collocation_weight),
+            )
+            compact_saved_paths = save_figure_outputs(
+                compact_fig,
+                png_path=args.save_compact_png,
+                pdf_path=None,
+                dpi=SAVE_DPI,
+                transparent=SAVE_TRANSPARENT,
+            )
+            plt.close(compact_fig)
+            progress.update(task, advance=1, current="table", phase="[cyan]run[/]")
 
-    table_body = build_geometry_redistribution_latex_table(
-        geometry_redistribution_table_rows(samples_by_case)
+        table_body = build_geometry_redistribution_latex_table(
+            geometry_redistribution_table_rows(samples_by_case)
+        )
+        if args.save_table:
+            write_text(args.save_table, table_body)
+        progress.update(task, advance=1, current="table", phase="[green]done[/]")
+
+    if not args.no_print_table:
+        SCRIPT_CONSOLE.print(table_body, markup=False)
+    print_summary(samples_by_case, args)
+    output_rows = [
+        ("Appendix B figure", path, "VAR/collocation force redistribution")
+        for path in saved_paths
+    ]
+    output_rows.extend(
+        ("Appendix B compact", path, "Compact geometry redistribution overlay")
+        for path in compact_saved_paths
     )
     if args.save_table:
-        write_text(args.save_table, table_body)
-    if not args.no_print_table:
-        print(table_body)
-    print_summary(samples_by_case, args)
-    for path in [*saved_paths, *compact_saved_paths]:
-        print(f"[geometry-redistribution] wrote {path}")
-    if args.save_compact_png:
-        print(f"[geometry-redistribution] wrote {args.save_compact_png}")
-    if args.save_table:
-        print(f"[geometry-redistribution] wrote {args.save_table}")
+        output_rows.append(("Appendix B table", args.save_table, "LaTeX table body"))
+    print_output_table(SCRIPT_CONSOLE, output_rows)
 
 
 if __name__ == "__main__":

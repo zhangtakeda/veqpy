@@ -13,16 +13,31 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 import numpy as np
-from config import (
-    AXIS_LABEL_SIZE,
+from _cases import (
     CASE_KEYS,
     CASE_LABELS,
     CASE_LINE_COLORS,
     CASE_REFERENCE_EQUILIBRIUM_JSONS,
     CASE_REFERENCE_GFILES,
     CONFIG_LABELS,
+)
+from _common import data_path, figure_path, save_figure_outputs
+from _kernel_cases import (
+    load_equilibrium_json,
+    load_reduced_equilibrium_manifest,
+    load_reference_equilibrium_manifest,
+    manifest_entry,
+    metadata_float,
+    metadata_int,
+    normalize_signature,
+    read_geqdsk,
+    reduced_equilibrium_json_path,
+    reference_manifest_entry,
+    signature_from_metadata,
+)
+from _plotting import (
+    AXIS_LABEL_SIZE,
     DOUBLE_COLUMN_WIDTH,
-    FIXED_DECIMALS,
     LEGEND_FONT_SIZE,
     PLOT_TICK_BOTTOM,
     PLOT_TICK_DIRECTION,
@@ -31,33 +46,22 @@ from config import (
     PLOT_TICK_TOP,
     SAVE_DPI,
     SAVE_TRANSPARENT,
-    SCIENTIFIC_DECIMALS,
-    SCRIPT_CONSOLE,
     SINGLE_COLUMN_WIDTH,
     TICK_LABEL_SIZE,
     TITLE_FONT_SIZE,
     apply_plot_style,
-    data_path,
-    figure_path,
+    scaled_font_size,
+)
+from _reporting import (
+    FIXED_DECIMALS,
+    SCIENTIFIC_DECIMALS,
+    SCRIPT_CONSOLE,
     format_script_sci,
-    load_equilibrium_json,
-    load_reduced_equilibrium_manifest,
-    load_reference_equilibrium_manifest,
     make_script_table,
-    manifest_entry,
-    metadata_float,
-    metadata_int,
-    normalize_signature,
     print_output_table,
     print_script_config,
     print_script_table,
-    read_geqdsk,
-    reduced_equilibrium_json_path,
-    reference_manifest_entry,
-    save_figure_outputs,
-    scaled_font_size,
     script_progress,
-    signature_from_metadata,
 )
 from matplotlib import colors, ticker
 from matplotlib.lines import Line2D

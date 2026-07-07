@@ -17,16 +17,29 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 import numpy as np
-from config import (
-    AXIS_LABEL_FONT_SIZE,
+from _cases import (
     CASE_KEYS,
     CASE_LABELS,
     CASE_LINE_COLORS,
     CASE_REFERENCE_GFILES,
-    DOUBLE_COLUMN_WIDTH,
-    LEGEND_FONT_SIZE,
     LEVEL_LINESTYLES,
     MU0,
+    REDUCED_CONFIG_LABELS,
+)
+from _common import figure_path, save_figure_outputs
+from _kernel_cases import (
+    load_equilibrium_json,
+    load_reduced_equilibrium_manifest,
+    manifest_entry,
+    metadata_float,
+    metadata_int,
+    read_geqdsk,
+    reduced_equilibrium_json_path,
+)
+from _plotting import (
+    AXIS_LABEL_FONT_SIZE,
+    DOUBLE_COLUMN_WIDTH,
+    LEGEND_FONT_SIZE,
     PLOT_LABEL_RIGHT,
     PLOT_LABEL_TOP,
     PLOT_TICK_BOTTOM,
@@ -34,29 +47,21 @@ from config import (
     PLOT_TICK_LEFT,
     PLOT_TICK_RIGHT,
     PLOT_TICK_TOP,
-    REDUCED_CONFIG_LABELS,
     SAVE_DPI,
     SAVE_TRANSPARENT,
-    SCIENTIFIC_DECIMALS,
-    SCRIPT_CONSOLE,
     TICK_LABEL_FONT_SIZE,
     TITLE_FONT_SIZE,
     apply_plot_style,
-    figure_path,
+    scaled_font_size,
+)
+from _reporting import (
+    SCIENTIFIC_DECIMALS,
+    SCRIPT_CONSOLE,
     format_script_sci,
-    load_equilibrium_json,
-    load_reduced_equilibrium_manifest,
     make_script_table,
-    manifest_entry,
-    metadata_float,
-    metadata_int,
     print_output_table,
     print_script_config,
     print_script_table,
-    read_geqdsk,
-    reduced_equilibrium_json_path,
-    save_figure_outputs,
-    scaled_font_size,
     script_progress,
 )
 from scipy.interpolate import RegularGridInterpolator

@@ -15,8 +15,7 @@ import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import numpy as np
-from config import (
-    AXIS_LABEL_FONT_SIZE,
+from _cases import (
     DEMO_BOUNDARY,
     DEMO_COORDINATE,
     DEMO_GRID,
@@ -25,17 +24,27 @@ from config import (
     DEMO_ROUTE,
     DEMO_SOURCE_SAMPLE_COUNT,
     MU0,
+)
+from _common import figure_path, save_figure_outputs
+from _kernel_cases import (
+    active_profiles_from_coeffs,
+    demo_psin_reference_profiles,
+)
+from _plotting import (
+    AXIS_LABEL_FONT_SIZE,
     SAVE_DPI,
     SAVE_TRANSPARENT,
     SINGLE_COLUMN_WIDTH,
     TICK_LABEL_FONT_SIZE,
     TITLE_FONT_SIZE,
-    active_profiles_from_coeffs,
     apply_plot_style,
-    demo_psin_reference_profiles,
-    figure_path,
-    save_figure_outputs,
     scaled_font_size,
+)
+from _reporting import (
+    SCRIPT_CONSOLE,
+    print_output_table,
+    print_script_config,
+    script_progress,
 )
 
 import veqpy as veq
@@ -267,22 +276,27 @@ def solve_case(reference: ReferenceData, nr: int, nt: int) -> HeatmapRow:
         kernel.close()
 
 
-def run_scan(reference: ReferenceData, nr_list: list[int], nt_list: list[int]) -> list[HeatmapRow]:
+def run_scan(
+    reference: ReferenceData,
+    nr_list: list[int],
+    nt_list: list[int],
+    *,
+    progress=None,
+    task=None,
+) -> list[HeatmapRow]:
     rows: list[HeatmapRow] = []
-    total = len(nr_list) * len(nt_list)
-    index = 0
     for nt in nt_list:
         for nr in nr_list:
-            index += 1
+            if progress is not None and task is not None:
+                progress.update(
+                    task,
+                    current=f"Nr={nr}, Nt={nt}",
+                    phase="[cyan]solve[/]",
+                )
             row = solve_case(reference, nr, nt)
             rows.append(row)
-            print(
-                f"[{index:03d}/{total:03d}] Nr={nr:>2d}, Nt={nt:>2d}: "
-                f"shape={row.shape_error:.3e} | "
-                f"Ip={row.ip_rel_error:.3e} | "
-                f"beta={row.beta_rel_error:.3e} | "
-                f"q95={row.q95_rel_error:.3e}"
-            )
+            if progress is not None and task is not None:
+                progress.update(task, advance=1)
     return rows
 
 
@@ -456,19 +470,42 @@ def normalized_grid_list(values: tuple[int, ...], *, name: str) -> list[int]:
 def main() -> None:
     nr_list = normalized_grid_list(NR_LIST, name="NR_LIST")
     nt_list = normalized_grid_list(NT_LIST, name="NT_LIST")
-    reference = build_reference()
-    rows = run_scan(reference, nr_list, nt_list)
-    fig = build_grid_convergence_figure(rows, nr_list, nt_list)
-    saved_paths = save_figure_outputs(
-        fig,
-        png_path=PNG_PATH,
-        pdf_path=PDF_PATH,
-        dpi=SAVE_DPI,
-        transparent=SAVE_TRANSPARENT,
+    print_script_config(
+        SCRIPT_CONSOLE,
+        "figure 04: resolution dependence",
+        (
+            ("backend", "numba"),
+            ("grid cases", len(nr_list) * len(nt_list)),
+            ("Nr", f"{nr_list[0]}..{nr_list[-1]} ({len(nr_list)})"),
+            ("Nt", f"{nt_list[0]}..{nt_list[-1]} ({len(nt_list)})"),
+        ),
     )
-    plt.close(fig)
-    for path in saved_paths:
-        print(f"saved: {path}")
+    with script_progress(SCRIPT_CONSOLE) as progress:
+        task = progress.add_task(
+            "",
+            total=1 + len(nr_list) * len(nt_list) + 1,
+            current="reference",
+            phase="[cyan]solve[/]",
+        )
+        reference = build_reference()
+        progress.update(task, advance=1, current="scan grid", phase="[cyan]solve[/]")
+        rows = run_scan(reference, nr_list, nt_list, progress=progress, task=task)
+        progress.update(task, current="render figure", phase="[cyan]run[/]")
+        fig = build_grid_convergence_figure(rows, nr_list, nt_list)
+        saved_paths = save_figure_outputs(
+            fig,
+            png_path=PNG_PATH,
+            pdf_path=PDF_PATH,
+            dpi=SAVE_DPI,
+            transparent=SAVE_TRANSPARENT,
+        )
+        plt.close(fig)
+        progress.update(task, advance=1, current="render figure", phase="[green]done[/]")
+
+    print_output_table(
+        SCRIPT_CONSOLE,
+        [("Figure 04", path, "Resolution-dependence heatmaps") for path in saved_paths],
+    )
 
 
 if __name__ == "__main__":

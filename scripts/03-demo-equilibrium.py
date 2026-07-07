@@ -10,16 +10,25 @@ import numpy as np
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
-from config import (
+from _cases import (
     CASE_REFERENCE_PROFILE_LENGTHS,
-    FIGURE_FACE_COLOR,
     MU0,
-    SAVE_DPI,
-    SAVE_TRANSPARENT,
+)
+from _common import figure_path, save_figure_outputs
+from _kernel_cases import (
     active_profiles_from_coeffs,
     demo_psin_reference_profiles,
-    figure_path,
-    save_figure_outputs,
+)
+from _plotting import (
+    FIGURE_FACE_COLOR,
+    SAVE_DPI,
+    SAVE_TRANSPARENT,
+)
+from _reporting import (
+    SCRIPT_CONSOLE,
+    print_output_table,
+    print_script_config,
+    script_progress,
 )
 
 import veqpy as veq
@@ -116,21 +125,37 @@ def build_equilibrium_figure(equilibrium) -> plt.Figure:
 
 
 def main() -> None:
-    equilibrium = solve_reference_equilibrium()
-    fig = build_equilibrium_figure(equilibrium)
-
-    saved_paths = save_figure_outputs(
-        fig,
-        png_path=PNG_PATH,
-        pdf_path=PDF_PATH,
-        dpi=SAVE_DPI,
-        transparent=SAVE_TRANSPARENT,
-        facecolor=FIGURE_FACE_COLOR,
+    print_script_config(
+        SCRIPT_CONSOLE,
+        "figure 03: demo equilibrium",
+        (
+            ("backend", "numba"),
+            ("grid", f"{GRID.Nr}x{GRID.Nt}"),
+            ("snapshot", f"{SNAPSHOT_GRID.Nr}x{SNAPSHOT_GRID.Nt}"),
+            ("source samples", SOURCE_SAMPLE_COUNT),
+        ),
     )
-    plt.close(fig)
+    with script_progress(SCRIPT_CONSOLE) as progress:
+        task = progress.add_task("", total=2, current="solve kernel", phase="[cyan]solve[/]")
+        equilibrium = solve_reference_equilibrium()
+        progress.update(task, advance=1, current="render figure", phase="[cyan]run[/]")
+        fig = build_equilibrium_figure(equilibrium)
 
-    for path in saved_paths:
-        print(f"saved: {path}")
+        saved_paths = save_figure_outputs(
+            fig,
+            png_path=PNG_PATH,
+            pdf_path=PDF_PATH,
+            dpi=SAVE_DPI,
+            transparent=SAVE_TRANSPARENT,
+            facecolor=FIGURE_FACE_COLOR,
+        )
+        plt.close(fig)
+        progress.update(task, advance=1, current="render figure", phase="[green]done[/]")
+
+    print_output_table(
+        SCRIPT_CONSOLE,
+        [("Figure 03", path, "Compact demo equilibrium") for path in saved_paths],
+    )
 
 
 if __name__ == "__main__":

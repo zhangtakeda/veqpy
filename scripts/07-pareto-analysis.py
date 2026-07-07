@@ -13,7 +13,6 @@ import json
 import multiprocessing
 import os
 import random
-import sys
 import time
 from dataclasses import asdict, dataclass
 from functools import lru_cache
@@ -25,8 +24,7 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 import numpy as np
-from config import (
-    AXIS_LABEL_FONT_SIZE,
+from _cases import (
     BOUNDARY_MAXTOL,
     CASE_BOUNDARY_FIT_M,
     CASE_BOUNDARY_FIT_N,
@@ -39,10 +37,29 @@ from config import (
     CASE_REFERENCE_PROFILE_LENGTHS,
     CASE_SOLVER_METHODS,
     DEFAULT_JSON_STEM,
-    DOUBLE_COLUMN_WIDTH,
-    FIXED_DECIMALS,
-    LEGEND_FONT_SIZE,
     MU0,
+    REDUCED_CONFIG_LABELS,
+    REDUCED_EQUILIBRIUM_JSON_TEMPLATE,
+    REDUCED_EQUILIBRIUM_MANIFEST_PATH,
+    REFERENCE_SOLVER_MAXFEV,
+)
+from _common import figure_path, save_figure_outputs
+from _kernel_cases import (
+    active_profiles_from_coeffs,
+    build_geqdsk_boundary,
+    build_kernel_topology,
+    kernel_boundary_from_boundary,
+    kernel_config,
+    read_geqdsk,
+)
+from _kernel_cases import as_float64_array as _as_float64_array
+from _kernel_cases import load_veqpy_components as _load_veqpy_components
+from _kernel_cases import prepare_interp_axis as _prepare_interp_axis
+from _kernel_cases import profile_interp as _profile_interp
+from _plotting import (
+    AXIS_LABEL_FONT_SIZE,
+    DOUBLE_COLUMN_WIDTH,
+    LEGEND_FONT_SIZE,
     PLOT_LABEL_RIGHT,
     PLOT_LABEL_TOP,
     PLOT_TICK_BOTTOM,
@@ -50,37 +67,20 @@ from config import (
     PLOT_TICK_LEFT,
     PLOT_TICK_RIGHT,
     PLOT_TICK_TOP,
-    REDUCED_CONFIG_LABELS,
-    REDUCED_EQUILIBRIUM_JSON_TEMPLATE,
-    REDUCED_EQUILIBRIUM_MANIFEST_PATH,
-    REFERENCE_SOLVER_MAXFEV,
     SAVE_DPI,
     SAVE_TRANSPARENT,
-    SCIENTIFIC_DECIMALS,
     TICK_LABEL_FONT_SIZE,
     TITLE_FONT_SIZE,
-    active_profiles_from_coeffs,
     apply_plot_style,
-    build_geqdsk_boundary,
-    build_kernel_topology,
-    figure_path,
-    kernel_boundary_from_boundary,
-    kernel_config,
-    read_geqdsk,
-    save_figure_outputs,
     scaled_font_size,
 )
-from config import (
-    as_float64_array as _as_float64_array,
-)
-from config import (
-    load_veqpy_components as _load_veqpy_components,
-)
-from config import (
-    prepare_interp_axis as _prepare_interp_axis,
-)
-from config import (
-    profile_interp as _profile_interp,
+from _reporting import (
+    FIXED_DECIMALS,
+    SCIENTIFIC_DECIMALS,
+    SCRIPT_CONSOLE,
+    print_output_table,
+    print_script_config,
+    script_progress,
 )
 from matplotlib.ticker import (
     FixedLocator,
@@ -532,36 +532,29 @@ class InitialSolveTimeoutError(RuntimeError):
         )
 
 
-@dataclass
-class CaseProgressState:
-    label: str
-    total: int = 0
-    completed: int = 0
-    skipped: int = 0
-    active: bool = False
-    finished: bool = False
-    message: str = "pending"
-    started_monotonic: float | None = None
-    elapsed_seconds: float | None = None
-
-
 class ParetoProgressDisplay:
     def __init__(self, case_keys: tuple[str, ...]):
         self.case_keys = tuple(case_keys)
-        self.states = {
-            case_key: CaseProgressState(label=CASE_LABELS[case_key]) for case_key in self.case_keys
-        }
-        self._interactive = bool(getattr(sys.stdout, "isatty", lambda: False)())
-        self._rendered_once = False
-        self._last_render_monotonic = 0.0
-        self._min_render_interval_s = 0.75
+        self._manager = script_progress(SCRIPT_CONSOLE)
+        self._progress = self._manager.__enter__()
+        self._task_by_case: dict[str, int] = {}
+        if self._progress is not None:
+            for case_key in self.case_keys:
+                self._task_by_case[case_key] = self._progress.add_task(
+                    "",
+                    total=1,
+                    current=CASE_LABELS[case_key],
+                    phase="[dim]pending[/]",
+                )
 
     def preparing(self, case_key: str) -> None:
-        state = self.states[case_key]
-        state.active = True
-        state.message = "preparing reference"
-        state.started_monotonic = time.monotonic()
-        state.elapsed_seconds = 0.0
+        if self._progress is None:
+            return
+        self._progress.update(
+            self._task_by_case[case_key],
+            current=CASE_LABELS[case_key],
+            phase="[cyan]prep[/]",
+        )
 
     def start_case(
         self,
@@ -570,22 +563,24 @@ class ParetoProgressDisplay:
         total: int,
         completed: int = 0,
     ) -> None:
-        state = self.states[case_key]
-        state.active = True
-        state.total = int(total)
-        state.completed = int(completed)
-        state.skipped = 0
-        state.finished = False
-        state.message = "running" if state.completed < state.total else "done"
-        state.started_monotonic = time.monotonic()
-        state.elapsed_seconds = 0.0
-        self._render(force=True)
+        if self._progress is None:
+            return
+        self._progress.update(
+            self._task_by_case[case_key],
+            total=max(int(total), 1),
+            completed=int(completed),
+            current=CASE_LABELS[case_key],
+            phase="[cyan]run[/]",
+        )
 
     def set_total(self, case_key: str, *, total: int) -> None:
-        state = self.states[case_key]
-        state.total = int(total)
-        if self._rendered_once:
-            self._render(force=False)
+        if self._progress is None:
+            return
+        self._progress.update(
+            self._task_by_case[case_key],
+            total=max(int(total), 1),
+            current=CASE_LABELS[case_key],
+        )
 
     def update(
         self,
@@ -595,76 +590,26 @@ class ParetoProgressDisplay:
         aggregate_rel_error: float | None,
         skipped: bool = False,
     ) -> None:
-        state = self.states[case_key]
-        state.completed += 1
-        if skipped:
-            state.skipped += 1
-            state.message = "skip >1s"
-        else:
-            state.message = "running"
-        if state.started_monotonic is not None:
-            state.elapsed_seconds = max(0.0, time.monotonic() - float(state.started_monotonic))
-        self._render(force=False)
+        if self._progress is None:
+            return
+        self._progress.update(
+            self._task_by_case[case_key],
+            advance=1,
+            current=CASE_LABELS[case_key],
+            phase="[yellow]skip[/]" if skipped else "[cyan]run[/]",
+        )
 
     def finish_case(self, case_key: str) -> None:
-        state = self.states[case_key]
-        state.active = False
-        state.finished = True
-        state.message = "done"
-        if state.started_monotonic is not None:
-            state.elapsed_seconds = max(0.0, time.monotonic() - float(state.started_monotonic))
-        self._render(force=True)
+        if self._progress is None:
+            return
+        self._progress.update(
+            self._task_by_case[case_key],
+            current=CASE_LABELS[case_key],
+            phase="[green]done[/]",
+        )
 
     def close(self) -> None:
-        if self._rendered_once:
-            sys.stdout.write("\n")
-            sys.stdout.flush()
-
-    def _render(self, *, force: bool) -> None:
-        if not self._interactive and not force:
-            return
-        now = time.monotonic()
-        if (
-            self._interactive
-            and not force
-            and self._rendered_once
-            and (now - self._last_render_monotonic) < self._min_render_interval_s
-        ):
-            return
-        lines = [self._format_line(case_key) for case_key in self.case_keys]
-        if self._interactive and self._rendered_once:
-            sys.stdout.write(f"\x1b[{len(lines)}F")
-        if self._interactive:
-            sys.stdout.write("".join(f"\x1b[2K{line}\n" for line in lines))
-        else:
-            sys.stdout.write("\n".join(lines) + "\n")
-        sys.stdout.flush()
-        self._rendered_once = True
-        self._last_render_monotonic = now
-
-    def _format_line(self, case_key: str) -> str:
-        state = self.states[case_key]
-        total = max(int(state.total), 1)
-        progress = min(max(state.completed / total, 0.0), 1.0) if state.total else 0.0
-        width = 24
-        filled = int(round(progress * width))
-        bar = "#" * filled + "-" * (width - filled)
-        count_text = f"{state.completed:>4d}/{state.total:<4d}" if state.total else "   0/0   "
-        suffix_parts = [state.message]
-        if state.total:
-            suffix_parts.append(f"{progress * 100.0:5.{FIXED_DECIMALS}f}%")
-        if state.skipped:
-            suffix_parts.append(f"skip {state.skipped}")
-        elapsed_seconds = state.elapsed_seconds
-        if state.active and state.started_monotonic is not None:
-            elapsed_seconds = max(
-                float(elapsed_seconds or 0.0),
-                time.monotonic() - float(state.started_monotonic),
-            )
-        if elapsed_seconds is not None:
-            suffix_parts.append(f"{elapsed_seconds:6.{FIXED_DECIMALS}f} s")
-        status = " | ".join(suffix_parts)
-        return f"{state.label:<8} [{bar}] {count_text} {status}"
+        self._manager.__exit__(None, None, None)
 
 
 def sample_signature_key(case_key: str, signature: dict[str, int]) -> str:
@@ -999,9 +944,10 @@ def load_validated_precomputed_reference(case_key: str) -> PrecomputedReference:
             f"tolerance={REFERENCE_VALIDATION_ATOL:.{SCIENTIFIC_DECIMALS}e}."
         )
     if os.environ.get(REFERENCE_CHECK_SUPPRESS_ENV) != "1":
-        print(
+        SCRIPT_CONSOLE.print(
             f"[pareto] Figure 06 reference check {CASE_LABELS[case_key]}: "
-            f"max |delta|={validation_error:.{SCIENTIFIC_DECIMALS}e}"
+            f"max |delta|={validation_error:.{SCIENTIFIC_DECIMALS}e}",
+            markup=False,
         )
     return PrecomputedReference(
         path=path,
@@ -2775,9 +2721,10 @@ def compute_selected_external_shape_errors(
         )
         errors[key] = external_reference_shape_error(reference, equilibrium)
         normalized_error = float(errors[key]) / max(float(reference.reference_a), 1.0e-12)
-        print(
+        SCRIPT_CONSOLE.print(
             f"[pareto] {CASE_LABELS[case_key]} GEQDSK-file shape error E_gqdsk/a: "
-            f"{normalized_error:.{SCIENTIFIC_DECIMALS}e}"
+            f"{normalized_error:.{SCIENTIFIC_DECIMALS}e}",
+            markup=False,
         )
     return errors
 
@@ -2868,9 +2815,10 @@ def write_representative_reduced_equilibria(
                     "source": sample_signature_key(case_key, sample.signature),
                 }
             )
-            print(
+            SCRIPT_CONSOLE.print(
                 f"[pareto] wrote {CASE_LABELS[case_key]} {config_label} "
-                f"reduced equilibrium: {output_path}"
+                f"reduced equilibrium: {output_path}",
+                markup=False,
             )
 
     manifest = {
@@ -2891,7 +2839,10 @@ def write_representative_reduced_equilibria(
         os.makedirs(manifest_dir, exist_ok=True)
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2)
-    print(f"[pareto] wrote reduced-equilibrium manifest: {manifest_path}")
+    SCRIPT_CONSOLE.print(
+        f"[pareto] wrote reduced-equilibrium manifest: {manifest_path}",
+        markup=False,
+    )
     return manifest
 
 
@@ -3078,9 +3029,10 @@ def sample_case(
                         _, record = futures[future]
                         pending_records.pop(int(idx), None)
                         if error_message is not None:
-                            print(
+                            SCRIPT_CONSOLE.print(
                                 f"[pareto] worker skipped {case_key} "
-                                f"{record.sweep_step}: {error_message}"
+                                f"{record.sweep_step}: {error_message}",
+                                markup=False,
                             )
                         if sample is not None:
                             samples_by_index[idx] = sample
@@ -3094,9 +3046,10 @@ def sample_case(
                                 skipped=bool(skipped),
                             )
             except concurrent.futures.process.BrokenProcessPool as exc:
-                print(
+                SCRIPT_CONSOLE.print(
                     f"[pareto] {case_key} process pool failed ({exc}); "
-                    f"falling back to serial for {len(pending_records)} remaining cases"
+                    f"falling back to serial for {len(pending_records)} remaining cases",
+                    markup=False,
                 )
                 for idx, record in sorted(pending_records.items()):
                     solve_record_serial(idx, record)
@@ -3630,13 +3583,14 @@ def print_fastest_config_table_body(
     reference_a_by_case: dict[str, float] | None = None,
     selected_config_rows: list[tuple[str, float, Sample | None]] | None = None,
 ) -> None:
-    print(
+    SCRIPT_CONSOLE.print(
         build_fastest_config_latex_table(
             samples_by_case,
             external_shape_errors,
             reference_a_by_case,
             selected_config_rows=selected_config_rows,
-        )
+        ),
+        markup=False,
     )
 
 
@@ -3895,35 +3849,39 @@ def _print_case_frontier_summary(
     representative: Sample | None,
     normalizer_m: float,
 ) -> None:
-    print(
+    SCRIPT_CONSOLE.print(
         f"[pareto] {CASE_LABELS[case_key]} time frontier: "
-        f"{describe_frontier(time_frontier, x_kind='time_ms', normalizer_m=normalizer_m)}"
+        f"{describe_frontier(time_frontier, x_kind='time_ms', normalizer_m=normalizer_m)}",
+        markup=False,
     )
     if representative is None:
-        print(
+        SCRIPT_CONSOLE.print(
             f"[pareto] {CASE_LABELS[case_key]} representative case "
-            f"(target E_ref/a={REPRESENTATIVE_ERROR_THRESHOLD:.0e}): none"
+            f"(target E_ref/a={REPRESENTATIVE_ERROR_THRESHOLD:.0e}): none",
+            markup=False,
         )
     else:
         representative_error = normalized_shape_error(representative, normalizer_m)
         relation = (
             "<=" if representative_error <= REPRESENTATIVE_ERROR_THRESHOLD else "closest above"
         )
-        print(
+        SCRIPT_CONSOLE.print(
             f"[pareto] {CASE_LABELS[case_key]} representative case "
             f"(target E_ref/a={REPRESENTATIVE_ERROR_THRESHOLD:.0e}, {relation}): "
             f"({format_frontier_x(float(representative.elapsed_ms), kind='time_ms')}, "
             f"{format_frontier_y(representative_error)}), "
             f"parameters={int(representative.parameter_count)}, "
-            f"signature={format_signature(representative.signature)}"
+            f"signature={format_signature(representative.signature)}",
+            markup=False,
         )
-    print(
-        f"[pareto] {CASE_LABELS[case_key]} parameter frontier: ",
-        describe_frontier(
+    SCRIPT_CONSOLE.print(
+        f"[pareto] {CASE_LABELS[case_key]} parameter frontier: "
+        + describe_frontier(
             parameter_frontier,
             x_kind="parameter_count",
             normalizer_m=normalizer_m,
         ),
+        markup=False,
     )
 
 
@@ -4273,7 +4231,7 @@ def render(
     test_nt: int,
     backend: str,
     selected_config_rows: list[tuple[str, float, Sample | None]] | None = None,
-) -> None:
+) -> list[str]:
     apply_plot_style()
     selected_rows_by_case = selected_representative_rows_by_case(
         all_samples,
@@ -4447,7 +4405,7 @@ def render(
                 indent=2,
             )
 
-    save_figure_outputs(
+    saved_paths = save_figure_outputs(
         fig,
         png_path=png_path,
         pdf_path=pdf_path,
@@ -4455,6 +4413,7 @@ def render(
         transparent=SAVE_TRANSPARENT,
     )
     plt.close(fig)
+    return saved_paths
 
 
 def write_json(
@@ -4465,7 +4424,7 @@ def write_json(
     test_nt: int,
     backend: str,
     sweep_mode: str,
-) -> None:
+) -> list[str]:
     def build_payload(
         samples_by_case: dict[str, list[Sample]],
         frontiers_by_case: dict[str, list[Sample]],
@@ -4527,6 +4486,7 @@ def write_json(
             },
         }
 
+    saved_paths: list[str] = []
     for case_key in all_samples:
         case_json_path = json_output_path(json_stem, case_key, sweep_mode)
         case_json_dir = os.path.dirname(case_json_path)
@@ -4538,6 +4498,8 @@ def write_json(
         )
         with open(case_json_path, "w", encoding="utf-8") as f:
             json.dump(case_payload, f, indent=2)
+        saved_paths.append(case_json_path)
+    return saved_paths
 
 
 def _load_sample_list(entries: object) -> list[Sample] | None:
@@ -4598,50 +4560,131 @@ def load_plot_data_bundle(
     return all_samples, all_frontiers
 
 
+def pareto_output_rows(
+    *,
+    figure_paths: list[str],
+    json_paths: list[str],
+    reduced_manifest: dict[str, object] | None,
+) -> list[tuple[str, str, str]]:
+    rows: list[tuple[str, str, str]] = [
+        ("Figure 07", path, "Pareto frontier and reduced surfaces") for path in figure_paths
+    ]
+    rows.extend(("Pareto cache", path, "Per-case sweep samples") for path in json_paths)
+    if reduced_manifest is not None:
+        rows.append(
+            (
+                "Reduced manifest",
+                REDUCED_EQUILIBRIUM_MANIFEST_PATH,
+                "Representative reduced-equilibrium index",
+            )
+        )
+        entries = reduced_manifest.get("entries")
+        if isinstance(entries, list):
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                path = entry.get("path")
+                if not isinstance(path, str):
+                    continue
+                label = f"{entry.get('case_label', 'case')} {entry.get('config_label', '')}".strip()
+                rows.append(("Reduced equilibrium", path, label))
+    return rows
+
+
 def main() -> None:
     json_stem = str(DEFAULT_JSON_STEM)
     sweep_mode = str(RUN_SWEEP_MODE)
     cache_enabled = sweep_mode == "full"
+    print_script_config(
+        SCRIPT_CONSOLE,
+        "figure 07 / table 05: pareto analysis",
+        (
+            ("backend", RUN_BACKEND),
+            ("mode", sweep_mode),
+            ("cases", len(CASE_KEYS)),
+            ("grid", f"{RUN_TEST_NR}x{RUN_TEST_NT}"),
+            ("repeat", RUN_REPEAT_COUNT),
+            ("workers", RUN_CASE_WORKERS),
+        ),
+    )
     if sweep_mode == "full" and not bool(RUN_RECOMPUTE_FULL):
         all_samples, frontiers = load_plot_data_bundle(json_stem, sweep_mode)
         if all_samples is not None and frontiers is not None:
-            print(
+            SCRIPT_CONSOLE.print(
                 "[pareto] loaded plot data from "
-                f"{json_stem}_{sweep_mode}_{{solovev,chease,efit}}.json"
+                f"{json_stem}_{sweep_mode}_{{solovev,chease,efit}}.json",
+                markup=False,
             )
-            reference_a_by_case = compute_reference_a_by_case(backend=RUN_BACKEND)
-            external_shape_errors = compute_selected_external_shape_errors(
-                all_samples,
-                backend=RUN_BACKEND,
-                test_nr=RUN_TEST_NR,
-                test_nt=RUN_TEST_NT,
-                reference_a_by_case=reference_a_by_case,
-            )
+            with script_progress(SCRIPT_CONSOLE) as progress:
+                task = progress.add_task(
+                    "",
+                    total=3,
+                    current="shape errors",
+                    phase="[cyan]run[/]",
+                )
+                reference_a_by_case = compute_reference_a_by_case(backend=RUN_BACKEND)
+                external_shape_errors = compute_selected_external_shape_errors(
+                    all_samples,
+                    backend=RUN_BACKEND,
+                    test_nr=RUN_TEST_NR,
+                    test_nt=RUN_TEST_NT,
+                    reference_a_by_case=reference_a_by_case,
+                )
+                progress.update(task, advance=1, current="render figure", phase="[cyan]run[/]")
+                figure_paths = render(
+                    all_samples,
+                    frontiers,
+                    reference_a_by_case,
+                    PNG_PATH,
+                    PDF_PATH,
+                    RUN_TEST_NR,
+                    RUN_TEST_NT,
+                    RUN_BACKEND,
+                )
+                progress.update(
+                    task,
+                    advance=1,
+                    current="reduced equilibria",
+                    phase="[cyan]run[/]",
+                )
+                reduced_manifest = write_representative_reduced_equilibria_from_cache(
+                    json_stem,
+                    sweep_mode,
+                    backend=RUN_BACKEND,
+                    test_nr=RUN_TEST_NR,
+                    test_nt=RUN_TEST_NT,
+                )
+                progress.update(
+                    task,
+                    advance=1,
+                    current="reduced equilibria",
+                    phase="[green]done[/]",
+                )
             print_fastest_config_table_body(all_samples, external_shape_errors, reference_a_by_case)
-            render(
-                all_samples,
-                frontiers,
-                reference_a_by_case,
-                PNG_PATH,
-                PDF_PATH,
-                RUN_TEST_NR,
-                RUN_TEST_NT,
-                RUN_BACKEND,
-            )
-            write_representative_reduced_equilibria_from_cache(
-                json_stem,
-                sweep_mode,
-                backend=RUN_BACKEND,
-                test_nr=RUN_TEST_NR,
-                test_nt=RUN_TEST_NT,
+            print_output_table(
+                SCRIPT_CONSOLE,
+                pareto_output_rows(
+                    figure_paths=figure_paths,
+                    json_paths=[
+                        json_output_path(json_stem, case_key, sweep_mode)
+                        for case_key in CASE_KEYS
+                    ],
+                    reduced_manifest=reduced_manifest,
+                ),
             )
             return
         expected = ", ".join(
             json_output_path(json_stem, case_key, sweep_mode) for case_key in CASE_KEYS
         )
-        print(f"[pareto] missing or stale full Pareto JSON bundle; recomputing: {expected}")
+        SCRIPT_CONSOLE.print(
+            f"[pareto] missing or stale full Pareto JSON bundle; recomputing: {expected}",
+            markup=False,
+        )
     elif sweep_mode == "partial":
-        print("[pareto] partial mode reruns selected 3x3 configs without Pareto cache I/O")
+        SCRIPT_CONSOLE.print(
+            "[pareto] partial mode reruns selected 3x3 configs without Pareto cache I/O",
+            markup=False,
+        )
 
     benchmark = load_benchmark(RUN_BACKEND)
     progress = ParetoProgressDisplay(CASE_KEYS)
@@ -4715,7 +4758,7 @@ def main() -> None:
         reference_a_by_case,
         selected_config_rows=selected_config_rows,
     )
-    render(
+    figure_paths = render(
         all_samples,
         frontiers,
         reference_a_by_case,
@@ -4726,8 +4769,9 @@ def main() -> None:
         RUN_BACKEND,
         selected_config_rows=selected_config_rows,
     )
+    json_paths: list[str] = []
     if cache_enabled:
-        write_json(
+        json_paths = write_json(
             all_samples,
             frontiers,
             json_stem,
@@ -4736,7 +4780,7 @@ def main() -> None:
             RUN_BACKEND,
             sweep_mode,
         )
-    write_representative_reduced_equilibria(
+    reduced_manifest = write_representative_reduced_equilibria(
         all_samples,
         backend=RUN_BACKEND,
         test_nr=RUN_TEST_NR,
@@ -4744,6 +4788,14 @@ def main() -> None:
         sweep_mode=sweep_mode,
         reference_a_by_case=reference_a_by_case,
         selected_config_rows=selected_config_rows,
+    )
+    print_output_table(
+        SCRIPT_CONSOLE,
+        pareto_output_rows(
+            figure_paths=figure_paths,
+            json_paths=json_paths,
+            reduced_manifest=reduced_manifest,
+        ),
     )
 
 

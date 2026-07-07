@@ -13,7 +13,8 @@ matplotlib.use("Agg")
 from typing import Dict, List
 
 import matplotlib.pyplot as plt
-from config import (
+from _common import figure_path, save_figure_outputs
+from _plotting import (
     AXIS_LABEL_FONT_SIZE,
     DOUBLE_COLUMN_WIDTH,
     LEGEND_FONT_SIZE,
@@ -27,15 +28,15 @@ from config import (
     PLOT_TICK_TOP,
     SAVE_DPI,
     SAVE_TRANSPARENT,
-    SCRIPT_CONSOLE,
     TICK_LABEL_FONT_SIZE,
     TITLE_FONT_SIZE,
     apply_plot_style,
-    figure_path,
+    scaled_font_size,
+)
+from _reporting import (
+    SCRIPT_CONSOLE,
     print_output_table,
     print_script_config,
-    save_figure_outputs,
-    scaled_font_size,
     script_progress,
 )
 from matplotlib.collections import LineCollection

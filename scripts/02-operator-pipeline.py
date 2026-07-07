@@ -11,9 +11,9 @@ from io import BytesIO
 from pathlib import Path
 
 import cairosvg
-from config import (
+from _common import figure_path
+from _reporting import (
     SCRIPT_CONSOLE,
-    figure_path,
     print_output_table,
     print_script_config,
     script_progress,

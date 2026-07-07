@@ -14,9 +14,15 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 import numpy as np
-from config import (
+from _cases import CASE_REFERENCE_PROFILE_LENGTHS
+from _common import figure_path, save_figure_outputs
+from _kernel_cases import (
+    active_profiles_from_coeffs,
+    profile_interp,
+)
+from _kernel_cases import demo_psin_reference_profiles as pf_reference_profiles
+from _plotting import (
     AXIS_LABEL_FONT_SIZE,
-    CASE_REFERENCE_PROFILE_LENGTHS,
     LEGEND_FONT_SIZE,
     PLOT_LABEL_RIGHT,
     PLOT_LABEL_TOP,
@@ -31,22 +37,29 @@ from config import (
     TICK_LABEL_FONT_SIZE,
     TITLE_FONT_SIZE,
     apply_plot_style,
-    figure_path,
-    save_figure_outputs,
     scaled_font_size,
+)
+from _reporting import (
+    SCRIPT_CONSOLE,
+    print_output_table,
+    print_script_config,
+    script_progress,
 )
 from matplotlib.ticker import LogLocator, NullFormatter
 
 from benchmarks._common import (
+    KernelCase,
     RouteBenchmarkSpec,
     benchmark_route_case_diagnostics,
-    route_kernel_case,
+    profile_counts_from_signature,
     solve_numba_case,
-    synthetic_route_reference,
+    synthetic_boundary,
 )
 from benchmarks._common import (
     extract_shape_x as extract_kernel_shape_x,
 )
+from veqpy import KernelConfig, KernelSource, KernelTopology
+from veqpy.model import Grid
 
 MU0 = 4.0e-7 * np.pi
 
@@ -313,12 +326,17 @@ def load_benchmark_module(backend: str):
         BASE_COEFFS=BASE_COEFFS,
         REFERENCE_IP=REFERENCE_IP,
         _UNIFORM_SOURCE_AXIS=_UNIFORM_SOURCE_AXIS,
+        Grid=Grid,
+        KernelCase=KernelCase,
+        KernelConfig=KernelConfig,
+        KernelSource=KernelSource,
+        KernelTopology=KernelTopology,
         RouteBenchmarkSpec=RouteBenchmarkSpec,
         benchmark_route_case_diagnostics=benchmark_route_case_diagnostics,
         extract_shape_x=extract_kernel_shape_x,
-        route_kernel_case=route_kernel_case,
+        profile_counts_from_signature=profile_counts_from_signature,
         solve_numba_case=solve_numba_case,
-        synthetic_route_reference=synthetic_route_reference,
+        synthetic_boundary=synthetic_boundary,
         _build_mode_init_kwargs=_build_mode_init_kwargs,
         _profile_coeffs_for_case=_profile_coeffs_for_case,
     )
@@ -431,27 +449,105 @@ def _style_legend(ax: plt.Axes, handles, labels) -> None:
     )
 
 
+def _constraint_flags(constraint: str) -> tuple[bool, bool]:
+    return constraint in {"Ip", "Ip_beta"}, constraint in {"beta", "Ip_beta"}
+
+
+def _solver_config() -> KernelConfig:
+    return KernelConfig(
+        method="powell",
+        max_residual=1.0e-6,
+        max_evaluations=1000,
+        initial="cold",
+        continuation="cold",
+        norm="fast",
+    )
+
+
+def _topology_for_case(
+    benchmark,
+    *,
+    route: str,
+    nr: int,
+    nt: int,
+    constraint: str,
+    active_profiles: dict[str, int],
+    reference_m_max: int | None = None,
+    reference_k_max: int | None = None,
+) -> KernelTopology:
+    ip_constraint, beta_constraint = _constraint_flags(constraint)
+    return benchmark.KernelTopology(
+        **benchmark.profile_counts_from_signature(
+            active_profiles,
+            route=route,
+            coordinate="rho",
+            nodes="grid",
+        ),
+        Nr=int(nr),
+        Nt=int(nt),
+        route=route,
+        coordinate="rho",
+        nodes="grid",
+        ip_constraint=ip_constraint,
+        beta_constraint=beta_constraint,
+        sample_count=int(nr),
+        L_max=None,
+        M_max=reference_m_max,
+        K_max=reference_k_max,
+    )
+
+
+def _reference_pf_source_on(axis: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    rho_src = np.linspace(0.0, 1.0, REFERENCE_SOURCE_SAMPLE_COUNT, dtype=np.float64)
+    psin_src = rho_src * rho_src
+    ffn_psin_src, pn_psin_src = pf_reference_profiles(psin_src)
+    ffn_r_src = ffn_psin_src * (2.0 * rho_src)
+    pn_r_src = pn_psin_src * (2.0 * rho_src)
+    return (
+        profile_interp(rho_src, pn_r_src / MU0, axis).astype(np.float64),
+        profile_interp(rho_src, ffn_r_src, axis).astype(np.float64),
+    )
+
+
 def build_reference(benchmark) -> ReferenceData:
-    reference_case = benchmark.route_kernel_case(
-        benchmark.RouteBenchmarkSpec("PF", "rho", "uniform", "Ip"),
+    reference_grid = benchmark.Grid(Nr=REFERENCE_NR, Nt=REFERENCE_NT, quadrature_scheme="legendre")
+    active_profiles = active_profiles_from_coeffs(benchmark.BASE_COEFFS)
+    grid_axis = np.asarray(reference_grid.rho, dtype=np.float64)
+    heat_profile, current_profile = _reference_pf_source_on(grid_axis)
+    reference_topology = _topology_for_case(
+        benchmark,
+        route="PF",
         nr=REFERENCE_NR,
         nt=REFERENCE_NT,
-        sample_count=REFERENCE_SOURCE_SAMPLE_COUNT,
-        initial="cold",
-        norm="fast",
+        constraint="Ip",
+        active_profiles=active_profiles,
+        reference_m_max=reference_grid.M_max,
+        reference_k_max=reference_grid.K_max,
+    )
+    reference_case = benchmark.KernelCase(
+        "PF_rho_grid_Ip_reference",
+        reference_topology,
+        benchmark.synthetic_boundary(),
+        benchmark.KernelSource(
+            heat_profile=heat_profile,
+            current_profile=current_profile,
+            Ip=benchmark.REFERENCE_IP,
+            beta=np.nan,
+            case_name="PF_rho_grid_Ip_reference",
+        ),
+        _solver_config(),
     )
     result, kernel = benchmark.solve_numba_case(reference_case)
     try:
         if not result.success:
             raise RuntimeError(f"reference Kernel solve failed with residual {result.raw_norm:.3e}")
         equilibrium = kernel.build_equilibrium()
-        route_reference = benchmark.synthetic_route_reference()
         return ReferenceData(
-            grid=kernel.topology,
+            grid=reference_topology,
             result=result,
             equilibrium=equilibrium,
-            ref_profiles=route_reference.ref_profiles,
-            shape_x=benchmark.extract_shape_x(kernel.topology, result.x),
+            ref_profiles=build_pf_reference_profiles(equilibrium),
+            shape_x=benchmark.extract_shape_x(reference_topology, result.x),
             rho_axis=np.asarray(equilibrium.rho, dtype=np.float64),
             target_beta_t=float(equilibrium.beta_t),
             target_q95=q_at_psin(equilibrium),
@@ -461,15 +557,58 @@ def build_reference(benchmark) -> ReferenceData:
 
 
 def build_case(benchmark, reference: ReferenceData, route: str, nr: int, nt: int):
-    del reference
-    constraint = "Ip"
-    return benchmark.route_kernel_case(
-        benchmark.RouteBenchmarkSpec(route, "rho", "uniform", constraint),
+    test_grid = benchmark.Grid(
+        Nr=nr,
+        Nt=nt,
+        quadrature_scheme="legendre",
+        L_max=reference.grid.L_max,
+        M_max=reference.grid.M_max,
+    )
+    constraint = route_constraint(route)
+    active_profiles = active_profiles_from_coeffs(
+        benchmark._profile_coeffs_for_case(route, "rho", "grid", constraint=constraint)
+    )
+    init_kwargs = benchmark._build_mode_init_kwargs(
+        route,
+        "rho",
+        constraint,
+        reference.ref_profiles,
+    )
+    grid_axis = np.asarray(test_grid.rho, dtype=np.float64)
+    heat_profile = profile_interp(
+        reference.rho_axis,
+        init_kwargs["heat_input"],
+        grid_axis,
+    ).astype(np.float64)
+    current_profile = profile_interp(
+        reference.rho_axis,
+        init_kwargs["current_input"],
+        grid_axis,
+    ).astype(np.float64)
+    topology = _topology_for_case(
+        benchmark,
+        route=route,
         nr=nr,
         nt=nt,
-        sample_count=TEST_SOURCE_SAMPLE_COUNT,
-        initial="cold",
-        norm="fast",
+        constraint=constraint,
+        active_profiles=active_profiles,
+        reference_m_max=reference.grid.M_max,
+        reference_k_max=reference.grid.K_max,
+    )
+    _, beta_constraint = _constraint_flags(constraint)
+    ip_constraint, _ = _constraint_flags(constraint)
+    return benchmark.KernelCase(
+        f"{route}_rho_grid_{constraint}",
+        topology,
+        benchmark.synthetic_boundary(),
+        benchmark.KernelSource(
+            heat_profile=heat_profile,
+            current_profile=current_profile,
+            Ip=benchmark.REFERENCE_IP if ip_constraint else np.nan,
+            beta=float(reference.ref_profiles["beta_constraint"]) if beta_constraint else np.nan,
+            case_name=f"{route}_rho_grid_{constraint}",
+        ),
+        _solver_config(),
     )
 
 
@@ -513,27 +652,38 @@ def solve_case(benchmark, reference: ReferenceData, route: str, nr: int, nt: int
 
 
 def run_regression(
-    benchmark, nr_list: list[int], test_nt: int
+    benchmark,
+    nr_list: list[int],
+    test_nt: int,
+    *,
+    progress=None,
+    task=None,
 ) -> tuple[ReferenceData, list[RegressionRow]]:
+    if progress is not None and task is not None:
+        progress.update(task, current="reference", phase="[cyan]solve[/]")
     reference = build_reference(benchmark)
+    if progress is not None and task is not None:
+        progress.update(task, advance=1, current="routes", phase="[cyan]solve[/]")
     rows: list[RegressionRow] = []
     for route in ROUTES:
         for nr in nr_list:
+            current = f"{route} Nr={nr}"
+            if progress is not None and task is not None:
+                progress.update(task, current=current, phase="[cyan]solve[/]")
             try:
                 row = solve_case(benchmark, reference, route, nr, test_nt)
             except RuntimeError as exc:
-                print(f"[{route}] Nr={nr:>2d}, Nt={test_nt:>2d}: skipped ({exc})")
+                if progress is not None and task is not None:
+                    progress.update(task, advance=1, current=current, phase="[yellow]skip[/]")
+                else:
+                    SCRIPT_CONSOLE.print(
+                        f"[{route}] Nr={nr:>2d}, Nt={test_nt:>2d}: skipped ({exc})",
+                        markup=False,
+                    )
                 continue
             rows.append(row)
-            print(
-                f"[{route}] Nr={nr:>2d}, Nt={test_nt:>2d}: "
-                f"elapsed={row.elapsed_us / 1000.0:.3f} ms | "
-                f"shape={row.shape_error:.3e} | "
-                f"Ip={row.ip_rel_error:.3e} | "
-                f"beta={row.beta_rel_error:.3e} | "
-                f"q95={row.q95_rel_error:.3e} | "
-                f"nfev={row.nfev:>3d}"
-            )
+            if progress is not None and task is not None:
+                progress.update(task, advance=1, current=current, phase="[cyan]solve[/]")
     return reference, rows
 
 
@@ -610,7 +760,10 @@ def build_route_consistency_latex_table(
 def print_route_consistency_latex_table(
     rows: list[RegressionRow], *, table_nr: int, test_nt: int
 ) -> None:
-    print(build_route_consistency_latex_table(rows, table_nr=table_nr, test_nt=test_nt))
+    SCRIPT_CONSOLE.print(
+        build_route_consistency_latex_table(rows, table_nr=table_nr, test_nt=test_nt),
+        markup=False,
+    )
 
 
 def build_route_regression_figure(rows: list[RegressionRow], *, test_nt: int) -> plt.Figure:
@@ -684,22 +837,49 @@ def main() -> None:
     if int(TABLE_NR) not in nr_list:
         nr_list = sorted({*nr_list, int(TABLE_NR)})
 
+    print_script_config(
+        SCRIPT_CONSOLE,
+        "figure 05: route consistency",
+        (
+            ("backend", BACKEND),
+            ("routes", ", ".join(ROUTES)),
+            ("Nr cases", len(nr_list)),
+            ("Nt", TEST_NT),
+        ),
+    )
     benchmark = load_benchmark_module(BACKEND)
-    _, rows = run_regression(benchmark, nr_list, TEST_NT)
+    with script_progress(SCRIPT_CONSOLE) as progress:
+        task = progress.add_task(
+            "",
+            total=1 + len(ROUTES) * len(nr_list) + 1,
+            current="reference",
+            phase="[cyan]solve[/]",
+        )
+        _, rows = run_regression(
+            benchmark,
+            nr_list,
+            TEST_NT,
+            progress=progress,
+            task=task,
+        )
+        progress.update(task, current="render figure", phase="[cyan]run[/]")
+        fig = build_route_regression_figure(rows, test_nt=TEST_NT)
+        saved_paths = save_figure_outputs(
+            fig,
+            png_path=PNG_PATH,
+            pdf_path=PDF_PATH,
+            dpi=SAVE_DPI,
+            transparent=SAVE_TRANSPARENT,
+        )
+        plt.close(fig)
+        progress.update(task, advance=1, current="render figure", phase="[green]done[/]")
+
     print_route_consistency_latex_table(rows, table_nr=int(TABLE_NR), test_nt=TEST_NT)
 
-    fig = build_route_regression_figure(rows, test_nt=TEST_NT)
-    saved_paths = save_figure_outputs(
-        fig,
-        png_path=PNG_PATH,
-        pdf_path=PDF_PATH,
-        dpi=SAVE_DPI,
-        transparent=SAVE_TRANSPARENT,
+    print_output_table(
+        SCRIPT_CONSOLE,
+        [("Figure 05", path, "Route-to-route consistency diagnostics") for path in saved_paths],
     )
-    plt.close(fig)
-
-    for path in saved_paths:
-        print(f"saved: {path}")
 
 
 if __name__ == "__main__":
