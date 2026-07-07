@@ -61,9 +61,16 @@ def config_runtime_args(config: KernelConfig, *, x_size: int) -> tuple[Any, ...]
     )
 
 
-def solve_result_from_native(value: Any) -> SolveResult:
+def solve_result_from_native(
+    value: Any,
+    *,
+    full_elapsed_ms: float | None = None,
+    preprocess_ms: float = 0.0,
+    solver_ms: float | None = None,
+    postprocess_ms: float = 0.0,
+) -> SolveResult:
     (
-        elapsed_ms,
+        native_solver_ms,
         success,
         info,
         nfev,
@@ -79,8 +86,9 @@ def solve_result_from_native(value: Any) -> SolveResult:
         scaled,
         alpha,
     ) = value
+    elapsed_ms = float(native_solver_ms) if full_elapsed_ms is None else float(full_elapsed_ms)
     return SolveResult(
-        elapsed_ms=float(elapsed_ms),
+        elapsed_ms=elapsed_ms,
         success=bool(success),
         info=int(info),
         nfev=int(nfev),
@@ -95,4 +103,7 @@ def solve_result_from_native(value: Any) -> SolveResult:
         raw=np.array(raw, dtype=np.float64, copy=True),
         scaled=np.array(scaled, dtype=np.float64, copy=True),
         alpha=np.array(alpha, dtype=np.float64, copy=True),
+        preprocess_ms=float(preprocess_ms),
+        solver_ms=float(native_solver_ms if solver_ms is None else solver_ms),
+        postprocess_ms=float(postprocess_ms),
     )

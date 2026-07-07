@@ -7,7 +7,7 @@ Role:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from time import perf_counter
 
 import numpy as np
@@ -78,15 +78,21 @@ class NumbaSolver:
         config: KernelConfig,
         *,
         x0: np.ndarray | None,
+        preprocess_ms: float = 0.0,
+        elapsed_started: float | None = None,
     ) -> SolveResult:
+        preprocess_started = perf_counter()
         x_guess = self.runtime.initial_state(
             boundary,
             source,
             initial=config.initial,
             x0=x0,
         )
-        started = perf_counter()
+        preprocess_total_ms = float(preprocess_ms) + (perf_counter() - preprocess_started) * 1000.0
+        solver_started = perf_counter()
         outcome = self._solve_once(x_guess, config)
+        solver_ms = (perf_counter() - solver_started) * 1000.0
+        postprocess_started = perf_counter()
         x_final = self.runtime.coerce_x(outcome.x).copy()
         nfev = int(outcome.nfev)
         njev = int(outcome.njev)
@@ -96,8 +102,7 @@ class NumbaSolver:
         alpha = self.runtime.alpha.copy()
         raw_norm = float(np.linalg.norm(raw))
         success = _residual_within_acceptance(raw_norm, config)
-        elapsed_ms = (perf_counter() - started) * 1000.0
-        return solve_result_from_runtime(
+        result = solve_result_from_runtime(
             x0=x_guess,
             x=x_final,
             raw=raw,
@@ -106,10 +111,20 @@ class NumbaSolver:
             nfev=nfev,
             njev=njev,
             iterations=iterations,
-            elapsed_ms=elapsed_ms,
+            elapsed_ms=solver_ms,
             runtime=self.runtime,
             config=config,
+            preprocess_ms=preprocess_total_ms,
+            solver_ms=solver_ms,
+            postprocess_ms=0.0,
         )
+        postprocess_ms = (perf_counter() - postprocess_started) * 1000.0
+        elapsed_ms = (
+            (perf_counter() - elapsed_started) * 1000.0
+            if elapsed_started is not None
+            else preprocess_total_ms + solver_ms + postprocess_ms
+        )
+        return replace(result, elapsed_ms=float(elapsed_ms), postprocess_ms=float(postprocess_ms))
 
     def _solve_once(self, x_guess: np.ndarray, config: KernelConfig) -> _SolveOutcome:
         return self._try_solve_once(x_guess, config, method=_solver_method(config))

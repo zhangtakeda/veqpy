@@ -581,6 +581,9 @@ class SolveResult:
     raw: np.ndarray
     scaled: np.ndarray
     alpha: np.ndarray
+    preprocess_ms: float = 0.0
+    solver_ms: float = 0.0
+    postprocess_ms: float = 0.0
 
 
 def config_with_overrides(config: KernelConfig, **overrides: Any) -> KernelConfig:

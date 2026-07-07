@@ -8,6 +8,7 @@ Role:
 from __future__ import annotations
 
 from dataclasses import fields, replace
+from time import perf_counter
 from typing import Any
 
 import numpy as np
@@ -104,14 +105,31 @@ class _NumbaKernelImpl:
         case_name: str | None = None,
         **config_overrides: Any,
     ) -> SolveResult:
+        elapsed_started = perf_counter()
         kernel_config = self._runtime_config(config, config_overrides)
         kernel_boundary = self._kernel_boundary(boundary)
         kernel_source = self._kernel_source(source, case_name=case_name)
         self._last_boundary = kernel_boundary
         self._last_source = kernel_source
         x0 = self._warm_start_x(kernel_config)
-        self.result = self._solver.solve(kernel_boundary, kernel_source, kernel_config, x0=x0)
-        self.history.append(self.result)
+        preprocess_ms = (perf_counter() - elapsed_started) * 1000.0
+        result = self._solver.solve(
+            kernel_boundary,
+            kernel_source,
+            kernel_config,
+            x0=x0,
+            preprocess_ms=preprocess_ms,
+            elapsed_started=elapsed_started,
+        )
+        append_started = perf_counter()
+        self.history.append(result)
+        append_ms = (perf_counter() - append_started) * 1000.0
+        self.result = replace(
+            result,
+            elapsed_ms=(perf_counter() - elapsed_started) * 1000.0,
+            postprocess_ms=result.postprocess_ms + append_ms,
+        )
+        self.history[-1] = self.result
         return self.result
 
     def residual(self, x: Any, boundary: KernelBoundary, source: KernelSource) -> np.ndarray:

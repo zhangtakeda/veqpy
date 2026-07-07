@@ -8,7 +8,9 @@ Role:
 from __future__ import annotations
 
 from contextlib import AbstractContextManager
+from dataclasses import replace
 from pathlib import Path
+from time import perf_counter
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -98,10 +100,25 @@ class _CxxKernelImpl:
         case_name: str | None = None,
         **config_overrides: Any,
     ) -> SolveResult:
+        elapsed_started = perf_counter()
         kernel_config = self._runtime_config(config, config_overrides)
         solver = self._set_runtime(boundary, source, kernel_config, case_name=case_name)
-        self.result = solve_result_from_native(solver.solve_direct())
-        self.history.append(self.result)
+        preprocess_ms = (perf_counter() - elapsed_started) * 1000.0
+        native_value = solver.solve_direct()
+        postprocess_started = perf_counter()
+        result = solve_result_from_native(
+            native_value,
+            preprocess_ms=preprocess_ms,
+            solver_ms=float(native_value[0]),
+        )
+        self.history.append(result)
+        postprocess_ms = (perf_counter() - postprocess_started) * 1000.0
+        self.result = replace(
+            result,
+            elapsed_ms=(perf_counter() - elapsed_started) * 1000.0,
+            postprocess_ms=postprocess_ms,
+        )
+        self.history[-1] = self.result
         return self.result
 
     # Raw numerical APIs use the handle default config to install the native

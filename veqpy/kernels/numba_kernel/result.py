@@ -33,6 +33,9 @@ def solve_result_from_runtime(
     elapsed_ms: float,
     runtime: NumbaRuntime,
     config: KernelConfig,
+    preprocess_ms: float = 0.0,
+    solver_ms: float | None = None,
+    postprocess_ms: float = 0.0,
 ) -> SolveResult:
     """Build a ``SolveResult`` from a direct residual runtime."""
 
@@ -56,6 +59,9 @@ def solve_result_from_runtime(
         raw=raw_final,
         scaled=scaled,
         alpha=np.asarray(alpha, dtype=np.float64).copy(),
+        preprocess_ms=float(preprocess_ms),
+        solver_ms=float(elapsed_ms if solver_ms is None else solver_ms),
+        postprocess_ms=float(postprocess_ms),
     )
 
 

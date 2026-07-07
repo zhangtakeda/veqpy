@@ -510,6 +510,9 @@ def test_kernel_dry_run_and_python_owned_result_snapshot(tmp_path: Path) -> None
     raw_x[:] = 99.0
 
     assert result.elapsed_ms == 0.25
+    assert result.preprocess_ms == 0.0
+    assert result.solver_ms == 0.25
+    assert result.postprocess_ms == 0.0
     assert result.success is True
     assert result.x.tolist() == [1.0, 1.0, 1.0]
     assert result.x.flags.owndata
