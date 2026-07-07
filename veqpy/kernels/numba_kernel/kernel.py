@@ -246,7 +246,7 @@ class _NumbaKernelImpl:
     def _kernel_boundary(boundary: KernelBoundary) -> KernelBoundary:
         if not isinstance(boundary, KernelBoundary):
             raise TypeError(f"boundary must be KernelBoundary, got {type(boundary).__name__}")
-        return materialize_kernel_boundary(boundary).boundary
+        return materialize_kernel_boundary(boundary, fit_backend="numba").boundary
 
     @staticmethod
     def _kernel_source(source: KernelSource, *, case_name: str | None) -> KernelSource:

@@ -11,8 +11,10 @@ Notes:
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from time import perf_counter
+from typing import Any
 
 import numpy as np
 
@@ -36,7 +38,15 @@ class MaterializedKernelBoundary:
     fit_s_order: int | None
 
 
-def materialize_kernel_boundary(boundary: KernelBoundary) -> MaterializedKernelBoundary:
+BoundaryFitter = Callable[..., dict[str, float | np.ndarray]]
+
+
+def materialize_kernel_boundary(
+    boundary: KernelBoundary,
+    *,
+    fit_backend: str = "numpy",
+    fitter: BoundaryFitter | None = None,
+) -> MaterializedKernelBoundary:
     """Return a backend-ready coefficient boundary plus optional fit metadata."""
 
     if not isinstance(boundary, KernelBoundary):
@@ -55,9 +65,11 @@ def materialize_kernel_boundary(boundary: KernelBoundary) -> MaterializedKernelB
 
     R_boundary, Z_boundary, c_order, s_order, fit_maxtol = raw
     started = perf_counter()
-    fitted = fit_boundary_params(
+    fitted = _fit_boundary_params(
+        fitter,
         R_boundary,
         Z_boundary,
+        fit_backend=fit_backend,
         c_order=c_order,
         s_order=s_order,
         maxtol=fit_maxtol,
@@ -74,7 +86,7 @@ def materialize_kernel_boundary(boundary: KernelBoundary) -> MaterializedKernelB
     )
     return MaterializedKernelBoundary(
         boundary=materialized_boundary,
-        fit_backend="numpy",
+        fit_backend=str(fit_backend),
         fit_elapsed_ms=float(elapsed_ms),
         fit_rms=float(fitted["rms"]),
         fit_max_curve_error=float(fitted["max_curve_error"]),
@@ -103,3 +115,39 @@ def materialized_boundary_fit_payload(
         "c_offsets": np.asarray(boundary.c_offsets, dtype=np.float64),
         "s_offsets": np.concatenate(([0.0], np.asarray(boundary.s_offsets, dtype=np.float64))),
     }
+
+
+def _fit_boundary_params(
+    fitter: BoundaryFitter | None,
+    R_boundary: Any,
+    Z_boundary: Any,
+    *,
+    fit_backend: str,
+    c_order: int,
+    s_order: int,
+    maxtol: float,
+) -> dict[str, float | np.ndarray]:
+    if fitter is None:
+        fitter = _fitter_for_backend(fit_backend)
+    return fitter(
+        R_boundary,
+        Z_boundary,
+        c_order=c_order,
+        s_order=s_order,
+        maxtol=maxtol,
+    )
+
+
+def _fitter_for_backend(fit_backend: str) -> BoundaryFitter:
+    backend = str(fit_backend).lower()
+    if backend == "numpy":
+        return fit_boundary_params
+    if backend == "numba":
+        from veqpy.kernels.numba_kernel.boundary_fit import fit_boundary_params_numba
+
+        return fit_boundary_params_numba
+    if backend == "cxx":
+        from veqpy.kernels.cxx_kernel.boundary_fit import fit_boundary_params_cxx
+
+        return fit_boundary_params_cxx
+    raise ValueError(f"unsupported boundary fitter backend {fit_backend!r}")
