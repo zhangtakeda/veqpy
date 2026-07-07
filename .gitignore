@@ -77,3 +77,5 @@ veqlib/artifact/
 # /scripts/
 /benchmarks/results/
 /docs_cn/
+/*.png
+/*.json

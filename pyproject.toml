@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "veqpy"
-version = "1.1.0"
+version = "1.2.0"
 description = "VEQPy — Veloce EQuilibrium code"
 readme = "README.md"
 license = "BSD-3-Clause"
@@ -59,11 +59,11 @@ include-package-data = false
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["veqpy*", "veqlib*", "benchmarks*"]
+include = ["veqpy*"]
 namespaces = false
 
 [tool.setuptools.package-data]
-veqlib = [
+"veqpy.kernels.cxx_kernel" = [
     "core/*.cpp",
     "core/*.h",
     "core/*.in",
@@ -82,7 +82,7 @@ testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-p no:cacheprovider"
 markers = [
-    "slow: tests that may compile kernels or run nonlinear solves",
-    "examples: tests that execute user-facing example scripts",
+    "slow: tests that may build kernels or run nonlinear solves",
+    "demo: tests that execute the user-facing root demo",
     "paper: manuscript reproduction artifact checks",
 ]

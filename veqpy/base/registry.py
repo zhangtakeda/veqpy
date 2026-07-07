@@ -1,5 +1,5 @@
 """
-Module: base.registry
+Module: veqpy.base.registry
 
 Role:
 - Provide a small decorator-backed registry for finite method families.

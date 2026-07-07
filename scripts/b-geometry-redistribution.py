@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 import time
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from types import SimpleNamespace
 
 import matplotlib
@@ -19,8 +19,7 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 import numpy as np
-from config import (
-    AXIS_LABEL_SIZE,
+from _cases import (
     CASE_COLORS,
     CASE_KEYS,
     CASE_LABELS,
@@ -30,36 +29,48 @@ from config import (
     CASE_SOLVER_METHODS,
     CONFIG_LABELS,
     CONFIG_LINE_COLORS,
-    LEGEND_FONT_SIZE,
-    PLOT_TICK_BOTTOM,
-    PLOT_TICK_DIRECTION,
-    PLOT_TICK_LEFT,
-    PLOT_TICK_RIGHT,
-    PLOT_TICK_TOP,
     REDUCED_CONFIG_LABELS,
-    REFERENCE_SOLVER_MAXFEV,
-    SAVE_DPI,
-    SAVE_TRANSPARENT,
-    SINGLE_COLUMN_WIDTH,
-    TICK_LABEL_SIZE,
-    TITLE_FONT_SIZE,
-    apply_plot_style,
+)
+from _common import ensure_parent_dir, figure_path, save_figure_outputs
+from _kernel_cases import (
     build_pf_case,
     build_pf_reference_case,
-    ensure_parent_dir,
-    figure_path,
     load_equilibrium_json,
     load_pf_benchmark,
     load_reduced_equilibrium_manifest,
     normalize_signature,
     read_geqdsk,
     reduced_equilibrium_json_path,
-    save_figure_outputs,
-    scaled_font_size,
     signature_from_metadata,
+)
+from _plotting import (
+    AXIS_LABEL_SIZE,
+    LEGEND_FONT_SIZE,
+    PLOT_TICK_BOTTOM,
+    PLOT_TICK_DIRECTION,
+    PLOT_TICK_LEFT,
+    PLOT_TICK_RIGHT,
+    PLOT_TICK_TOP,
+    SAVE_DPI,
+    SAVE_TRANSPARENT,
+    SINGLE_COLUMN_WIDTH,
+    TICK_LABEL_SIZE,
+    TITLE_FONT_SIZE,
+    apply_plot_style,
+    scaled_font_size,
+)
+from _reporting import (
+    SCRIPT_CONSOLE,
+    format_script_sci,
+    make_script_table,
+    print_output_table,
+    print_script_config,
+    print_script_table,
+    script_progress,
 )
 from matplotlib import ticker
 from matplotlib.lines import Line2D
+from scipy.optimize import least_squares
 
 PNG_PATH = figure_path("b-geometry-redistribution.png")
 PDF_PATH = None
@@ -590,25 +601,19 @@ def solve_variational_with_average_timing(
     solver_config,
     initial_solve_timeout_s: float,
 ):
-    solver = benchmark.Solver(
-        operator=benchmark.Operator(grid, case),
+    del grid, method
+    kernel = benchmark.Kernel(
+        topology=case.topology,
+        recipe=benchmark.KernelRecipe(backend=benchmark.BACKEND),
         config=solver_config,
     )
-    solve_kwargs = {
-        "method": str(method),
-        "max_residual": float(getattr(solver_config, "max_residual", 1.0e-6)),
-        "max_evaluations": int(getattr(solver_config, "max_evaluations", REFERENCE_SOLVER_MAXFEV)),
-        "enable_verbose": False,
-        "enable_history": False,
-        "enable_fallback": bool(getattr(solver_config, "enable_fallback", False)),
-    }
 
     probe_started = time.perf_counter()
-    solver.solve(**solve_kwargs)
+    result = kernel.solve(case.boundary, case.source, config=solver_config)
     probe_elapsed_ms = (time.perf_counter() - probe_started) * 1000.0
-    if solver.result is not None:
-        probe_elapsed_ms = max(probe_elapsed_ms, float(solver.result.elapsed) / 1000.0)
+    probe_elapsed_ms = max(probe_elapsed_ms, float(result.elapsed_ms))
     if probe_elapsed_ms > float(initial_solve_timeout_s) * 1000.0:
+        kernel.close()
         raise InitialSolveTimeoutError(
             elapsed_ms=probe_elapsed_ms,
             timeout_s=initial_solve_timeout_s,
@@ -617,30 +622,42 @@ def solve_variational_with_average_timing(
     elapsed_values: list[float] = []
     final_result = None
     for _ in range(max(int(repeat_count), 1)):
-        solver.solve(**solve_kwargs)
-        final_result = solver.result
-        elapsed_values.append(float(final_result.elapsed) / 1000.0)
+        final_result = kernel.solve(case.boundary, case.source, config=solver_config)
+        elapsed_values.append(float(final_result.elapsed_ms))
     if final_result is None:
+        kernel.close()
         raise RuntimeError("No variational solver result returned")
 
-    return final_result, solver.build_equilibrium(), float(np.mean(elapsed_values))
+    return final_result, kernel.build_equilibrium(), float(np.mean(elapsed_values)), kernel
 
 
 def solve_collocation_with_average_timing(
-    benchmark,
-    operator,
+    kernel,
+    case,
     weak_x: np.ndarray,
     weak_elapsed_ms: float,
     args: SimpleNamespace,
     *,
-    variational_method: str,
     solver_config,
 ):
     """Time only the extra mixed-collocation polish and report weak+postprocess time."""
 
-    weak_x_eval = operator.coerce_x(weak_x).copy()
+    del solver_config
+    # Appendix-B is a backend diagnostic: collocation is not part of the public
+    # Kernel API, so the script binds directly to the Numba runtime runner here.
+    runtime = kernel._impl._solver.runtime
+    weak_x_eval = runtime.coerce_x(weak_x).copy()
     collocation_weight = float(args.collocation_weight)
+
+    def collocation_residual(x_eval: np.ndarray) -> np.ndarray:
+        out = np.empty(int(case.topology.Nr) * int(case.topology.Nt), dtype=np.float64)
+        runtime.layout.run_collocation_into(runtime.coerce_x(x_eval), out)
+        if collocation_weight != 1.0:
+            out *= collocation_weight
+        return out
+
     if collocation_weight <= 0.0:
+        residual = collocation_residual(weak_x_eval)
         result = SimpleNamespace(
             x=weak_x_eval.copy(),
             success=True,
@@ -648,72 +665,51 @@ def solve_collocation_with_average_timing(
             function_evaluations=0,
             jacobian_evaluations=0,
             iterations=0,
-            residual_norm_final=float(np.linalg.norm(operator(weak_x_eval))),
+            residual_norm_final=float(np.linalg.norm(residual)),
             elapsed=0.0,
         )
-        return result, operator.build_equilibrium(weak_x_eval), float(weak_elapsed_ms), 0.0
-
-    solver = benchmark.Solver(operator=operator, config=solver_config)
-    solve_config = replace(
-        solver_config,
-        method=str(variational_method),
-        max_residual=float(getattr(solver_config, "max_residual", 1.0e-6)),
-        max_evaluations=int(getattr(solver_config, "max_evaluations", 1000)),
-        enable_collocation=True,
-        collocation_method=str(args.collocation_method),
-        collocation_weight=collocation_weight,
-        collocation_max_residual=float(args.max_residual),
-        collocation_max_evaluations=int(args.max_nfev),
-        enable_fallback=False,
-        fallback_methods=(),
-        enable_history=False,
-        enable_verbose=False,
-    )
-    collocation_config = solver._collocation_stage_config(solve_config)
-    residual_kind = solver._collocation_residual_kind(solve_config)
+        return result, kernel.build_equilibrium(weak_x_eval), float(weak_elapsed_ms), 0.0
 
     def run_one_polish():
-        result_tuple, error = solver._try_solve_attempt(
+        opt = least_squares(
+            collocation_residual,
             weak_x_eval,
-            solve_config=collocation_config,
-            residual_kind=residual_kind,
+            method=str(args.collocation_method),
+            ftol=float(args.max_residual),
+            xtol=float(args.max_residual),
+            gtol=float(args.max_residual),
+            max_nfev=int(args.max_nfev),
         )
-        if result_tuple is None:
-            if error is not None:
-                raise RuntimeError("Mixed-collocation post-process failed") from error
-            raise RuntimeError("Mixed-collocation post-process failed without a result")
-        return result_tuple, error
+        return opt
 
     # Warm-up: triggers any least-squares/Jacobian setup but is not included in
     # the reported extra post-processing time.
     run_one_polish()
 
     elapsed_values: list[float] = []
-    final_tuple = None
-    final_error = None
+    final_opt = None
     for _ in range(max(int(args.collocation_repeat_count), 1)):
         started = time.perf_counter()
-        final_tuple, final_error = run_one_polish()
+        final_opt = run_one_polish()
         elapsed_values.append((time.perf_counter() - started) * 1000.0)
-    if final_tuple is None:
+    if final_opt is None:
         raise RuntimeError("Mixed-collocation post-process did not produce a result")
 
-    x_final, success, message, nfev, njev, iterations, residual_norm = final_tuple
-    if final_error is not None:
-        message = f"{message} [{type(final_error).__name__}: {final_error}]"
+    x_final = runtime.coerce_x(final_opt.x).copy()
+    residual_norm = float(np.linalg.norm(collocation_residual(x_final)))
     postprocess_elapsed_ms = float(np.mean(elapsed_values))
     total_elapsed_ms = float(weak_elapsed_ms) + postprocess_elapsed_ms
     result = SimpleNamespace(
-        x=operator.coerce_x(x_final).copy(),
-        success=bool(success) and final_error is None,
-        message=str(message),
-        function_evaluations=int(nfev),
-        jacobian_evaluations=int(njev),
-        iterations=int(iterations),
+        x=x_final,
+        success=bool(final_opt.success),
+        message=str(final_opt.message),
+        function_evaluations=int(getattr(final_opt, "nfev", 0) or 0),
+        jacobian_evaluations=int(getattr(final_opt, "njev", 0) or 0),
+        iterations=int(getattr(final_opt, "nit", 0) or 0),
         residual_norm_final=float(residual_norm),
         elapsed=postprocess_elapsed_ms * 1000.0,
     )
-    return result, operator.build_equilibrium(result.x), total_elapsed_ms, postprocess_elapsed_ms
+    return result, kernel.build_equilibrium(result.x), total_elapsed_ms, postprocess_elapsed_ms
 
 
 def result_count(result, solver_name: str, optimize_name: str) -> int:
@@ -739,9 +735,9 @@ def solve_geometry_redistribution_sample(
         L_max=int(benchmark.REFERENCE_GRID.L_max),
         M_max=int(benchmark.REFERENCE_GRID.M_max),
     )
-    case = build_pf_case(benchmark, reference, signature)
+    case = build_pf_case(benchmark, reference, signature, grid)
 
-    weak_result, _, weak_elapsed_ms = solve_variational_with_average_timing(
+    weak_result, weak_equilibrium, weak_elapsed_ms, kernel = solve_variational_with_average_timing(
         benchmark,
         case,
         grid,
@@ -751,27 +747,41 @@ def solve_geometry_redistribution_sample(
         initial_solve_timeout_s=float(args.initial_solve_timeout_s),
     )
 
-    operator = benchmark.Operator(grid, case)
-    weak_x = operator.coerce_x(weak_result.x).copy()
-    weak_equilibrium = operator.build_equilibrium(weak_x)
-    weak_packed = np.asarray(operator(weak_x), dtype=np.float64)
-    weak_force_vector = np.asarray(operator.residual_collocation(weak_x), dtype=np.float64)
+    try:
+        # Use the same backend diagnostic runner as the collocation polish above.
+        runtime = kernel._impl._solver.runtime
 
-    collocation_result, collocation_equilibrium, elapsed_ms, _postprocess_elapsed_ms = (
-        solve_collocation_with_average_timing(
-            benchmark,
-            operator,
-            weak_x,
-            weak_elapsed_ms,
-            args,
-            variational_method=CASE_SOLVER_METHODS[case_key],
-            solver_config=benchmark.CONFIG,
+        def collocation_vector(x_eval: np.ndarray) -> np.ndarray:
+            out = np.empty(int(case.topology.Nr) * int(case.topology.Nt), dtype=np.float64)
+            runtime.layout.run_collocation_into(runtime.coerce_x(x_eval), out)
+            return out
+
+        weak_x = runtime.coerce_x(weak_result.x).copy()
+        weak_packed = np.asarray(
+            kernel.residual(weak_x, case.boundary, case.source),
+            dtype=np.float64,
         )
-    )
+        weak_force_vector = np.asarray(collocation_vector(weak_x), dtype=np.float64)
 
-    x_final = operator.coerce_x(collocation_result.x)
-    final_packed = np.asarray(operator(x_final), dtype=np.float64)
-    collocation_force_vector = np.asarray(operator.residual_collocation(x_final), dtype=np.float64)
+        collocation_result, collocation_equilibrium, elapsed_ms, _postprocess_elapsed_ms = (
+            solve_collocation_with_average_timing(
+                kernel,
+                case,
+                weak_x,
+                weak_elapsed_ms,
+                args,
+                solver_config=benchmark.CONFIG,
+            )
+        )
+
+        x_final = runtime.coerce_x(collocation_result.x)
+        final_packed = np.asarray(
+            kernel.residual(x_final, case.boundary, case.source),
+            dtype=np.float64,
+        )
+        collocation_force_vector = np.asarray(collocation_vector(x_final), dtype=np.float64)
+    finally:
+        kernel.close()
 
     weak_sample = make_residual_sample(
         case_key=case_key,
@@ -831,17 +841,17 @@ def solve_case_samples(
     case_key: str,
     signatures: list[dict[str, int]],
     args: SimpleNamespace,
+    progress=None,
+    task=None,
 ) -> list[GeometryRedistributionSample]:
     reference = build_pf_reference_case(case_key)
     samples: list[GeometryRedistributionSample] = []
     for config_label, signature in zip(CONFIG_LABELS, signatures, strict=True):
         if config_label not in DISPLAY_CONFIG_LABELS:
             continue
-        print(
-            f"[geometry-redistribution] {CASE_LABELS[case_key]} "
-            f"{config_label} params={sum(signature.values())}",
-            flush=True,
-        )
+        current = f"{CASE_LABELS[case_key]} {config_label}"
+        if progress is not None and task is not None:
+            progress.update(task, current=current, phase="[cyan]solve[/]")
         samples.append(
             solve_geometry_redistribution_sample(
                 benchmark,
@@ -852,6 +862,8 @@ def solve_case_samples(
                 args=args,
             )
         )
+        if progress is not None and task is not None:
+            progress.update(task, advance=1, current=current, phase="[cyan]solve[/]")
     return samples
 
 
@@ -1310,27 +1322,34 @@ def write_text(path: str, text: str) -> None:
 def print_summary(
     samples_by_case: dict[str, list[GeometryRedistributionSample]], args: SimpleNamespace
 ) -> None:
-    print()
-    print(
-        "[geometry-redistribution-summary] "
-        f"method={args.collocation_method}, weight={float(args.collocation_weight):g}, "
-        f"max_nfev={int(args.max_nfev)}, grid={int(args.solve_nr)}x{int(args.solve_nt)}"
-    )
-    print(
-        "[geometry-redistribution-summary] "
-        "case config params shape_rms/a shape_max/a e_gqdsk_ratio force_rms_ratio "
-        "nfev success"
+    table = make_script_table(
+        "geometry redistribution summary",
+        [
+            ("case", "left"),
+            ("config", "left"),
+            ("params", "right"),
+            ("shape rms/a", "right"),
+            ("shape max/a", "right"),
+            ("E_gqdsk ratio", "right"),
+            ("force ratio", "right"),
+            ("nfev", "right"),
+            ("status", "left"),
+        ],
     )
     for case_key, items in samples_by_case.items():
         for item in items:
-            print(
-                "[geometry-redistribution-summary] "
-                f"{case_key} {item.collocation.config_label} "
-                f"{int(item.collocation.parameter_count)} "
-                f"{item.shape_rms_over_a:.6e} {item.shape_max_over_a:.6e} "
-                f"{item.external_shape_error_ratio:.6e} "
-                f"{item.force_rms_ratio:.6e} {int(item.nfev)} {bool(item.success)}"
+            table.add_row(
+                CASE_LABELS[case_key],
+                item.collocation.config_label,
+                str(int(item.collocation.parameter_count)),
+                format_script_sci(item.shape_rms_over_a),
+                format_script_sci(item.shape_max_over_a),
+                format_script_sci(item.external_shape_error_ratio),
+                format_script_sci(item.force_rms_ratio),
+                str(int(item.nfev)),
+                "passed" if item.success else "failed",
             )
+    print_script_table(SCRIPT_CONSOLE, table)
 
 
 def main() -> None:
@@ -1356,54 +1375,88 @@ def main() -> None:
     signatures_by_case = selected_signature_map(selected_cases)
     benchmark = load_pf_benchmark(args.backend)
 
-    samples_by_case = {
-        case_key: solve_case_samples(
-            benchmark,
-            case_key=case_key,
-            signatures=signatures_by_case[case_key],
-            args=args,
+    print_script_config(
+        SCRIPT_CONSOLE,
+        "appendix b: geometry redistribution",
+        (
+            ("backend", args.backend),
+            ("cases", len(selected_cases)),
+            ("configs", ", ".join(DISPLAY_CONFIG_LABELS)),
+            ("grid", f"{args.solve_nr}x{args.solve_nt}"),
+            ("method", args.collocation_method),
         )
-        for case_key in selected_cases
-    }
-
-    fig = build_figure(samples_by_case)
-    saved_paths = save_figure_outputs(
-        fig,
-        png_path=args.save_png,
-        pdf_path=args.save_pdf,
-        dpi=SAVE_DPI,
-        transparent=SAVE_TRANSPARENT,
     )
-    plt.close(fig)
-    compact_saved_paths: list[str] = []
-    if args.save_compact_png:
-        compact_fig = build_compact_overlay_figure(
-            samples_by_case,
-            collocation_weight=float(args.collocation_weight),
+
+    solve_count = sum(
+        1
+        for case_key in selected_cases
+        for config_label, _signature in zip(
+            CONFIG_LABELS, signatures_by_case[case_key], strict=True
         )
-        compact_saved_paths = save_figure_outputs(
-            compact_fig,
-            png_path=args.save_compact_png,
-            pdf_path=None,
+        if config_label in DISPLAY_CONFIG_LABELS
+    )
+    with script_progress(SCRIPT_CONSOLE) as progress:
+        total = solve_count + 2 + (1 if args.save_compact_png else 0)
+        task = progress.add_task("", total=total, current="solve samples", phase="[cyan]solve[/]")
+        samples_by_case: dict[str, list[GeometryRedistributionSample]] = {}
+        for case_key in selected_cases:
+            samples_by_case[case_key] = solve_case_samples(
+                benchmark,
+                case_key=case_key,
+                signatures=signatures_by_case[case_key],
+                args=args,
+                progress=progress,
+                task=task,
+            )
+
+        progress.update(task, current="main figure", phase="[cyan]run[/]")
+        fig = build_figure(samples_by_case)
+        saved_paths = save_figure_outputs(
+            fig,
+            png_path=args.save_png,
+            pdf_path=args.save_pdf,
             dpi=SAVE_DPI,
             transparent=SAVE_TRANSPARENT,
         )
-        plt.close(compact_fig)
+        plt.close(fig)
+        progress.update(task, advance=1, current="compact figure", phase="[cyan]run[/]")
+        compact_saved_paths: list[str] = []
+        if args.save_compact_png:
+            compact_fig = build_compact_overlay_figure(
+                samples_by_case,
+                collocation_weight=float(args.collocation_weight),
+            )
+            compact_saved_paths = save_figure_outputs(
+                compact_fig,
+                png_path=args.save_compact_png,
+                pdf_path=None,
+                dpi=SAVE_DPI,
+                transparent=SAVE_TRANSPARENT,
+            )
+            plt.close(compact_fig)
+            progress.update(task, advance=1, current="table", phase="[cyan]run[/]")
 
-    table_body = build_geometry_redistribution_latex_table(
-        geometry_redistribution_table_rows(samples_by_case)
+        table_body = build_geometry_redistribution_latex_table(
+            geometry_redistribution_table_rows(samples_by_case)
+        )
+        if args.save_table:
+            write_text(args.save_table, table_body)
+        progress.update(task, advance=1, current="table", phase="[green]done[/]")
+
+    if not args.no_print_table:
+        SCRIPT_CONSOLE.print(table_body, markup=False)
+    print_summary(samples_by_case, args)
+    output_rows = [
+        ("Appendix B figure", path, "VAR/collocation force redistribution")
+        for path in saved_paths
+    ]
+    output_rows.extend(
+        ("Appendix B compact", path, "Compact geometry redistribution overlay")
+        for path in compact_saved_paths
     )
     if args.save_table:
-        write_text(args.save_table, table_body)
-    if not args.no_print_table:
-        print(table_body)
-    print_summary(samples_by_case, args)
-    for path in [*saved_paths, *compact_saved_paths]:
-        print(f"[geometry-redistribution] wrote {path}")
-    if args.save_compact_png:
-        print(f"[geometry-redistribution] wrote {args.save_compact_png}")
-    if args.save_table:
-        print(f"[geometry-redistribution] wrote {args.save_table}")
+        output_rows.append(("Appendix B table", args.save_table, "LaTeX table body"))
+    print_output_table(SCRIPT_CONSOLE, output_rows)
 
 
 if __name__ == "__main__":

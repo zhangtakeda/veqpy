@@ -1,5 +1,5 @@
 """
-Module: model.grid
+Module: veqpy.model.grid
 
 Role:
 - Hold radial-poloidal grid configuration and derived tables.
@@ -9,8 +9,8 @@ Public API:
 - Grid
 
 Notes:
-- `Grid` is an immutable model-layer configuration object.
-- Pure mathematical matrix construction is delegated to `veqpy.math`.
+- `Grid` is a reactive model-layer configuration object.
+- Pure mathematical matrix construction is delegated to `veqpy.numerics`.
 - Does not own source routes, residual assembly, or solver runtime state.
 """
 
@@ -21,15 +21,16 @@ from rich.console import Console
 from rich.tree import Tree
 
 from veqpy.base import Reactive, Serial
-from veqpy.math import (
+from veqpy.numerics import (
+    DEFAULT_CALCULUS,
+    DEFAULT_QUADRATURE,
     RHO_AXIS,
     THETA_AXIS,
     apply_accumulation,
     apply_differentiation,
+    make_calculus,
+    make_quadrature,
 )
-from veqpy.math.calculus import DEFAULT_CALCULUS, make_calculus
-from veqpy.math.fast import colwise_weighted_sum_into, dot, rowwise_sum_into
-from veqpy.math.quadrature import DEFAULT_QUADRATURE, make_quadrature
 
 
 class Grid(Reactive, Serial):
@@ -214,16 +215,12 @@ class Grid(Reactive, Serial):
         if out is None:
             if axis is None:
                 if f.ndim == 1:
-                    return dot(f, self.weights)
+                    return float(np.dot(f, self.weights))
                 if f.ndim != 2:
                     raise ValueError(f"Expected a 1D or 2D array, got shape {f.shape}")
                 # 2D integrals use radial quadrature first and uniform theta
-                # averaging second; this matches the engine's row-major fields.
-                scratch = np.empty(f.shape[1], dtype=f.dtype)
-                colwise_weighted_sum_into(scratch, f, self.weights)
-                total = 0.0
-                for j in range(f.shape[1]):
-                    total += scratch[j]
+                # averaging second; this matches Kernel runtime row-major fields.
+                total = float(np.sum(self.weights @ f))
                 return (2.0 * np.pi / f.shape[1]) * total
 
             if f.ndim != 2:
@@ -237,10 +234,10 @@ class Grid(Reactive, Serial):
 
         if axis == RHO_AXIS:
             # Contract rho and leave theta samples.
-            colwise_weighted_sum_into(out, f, self.weights)
+            np.copyto(out, self.weights @ f)
         elif axis == THETA_AXIS:
             nt = f.shape[1]
-            rowwise_sum_into(out, f)
+            np.sum(f, axis=1, out=out)
             # Theta nodes are uniform over [0, 2*pi), so the quadrature weight is
             # a single constant after rowwise summation.
             out *= 2.0 * np.pi / nt

@@ -4,6 +4,7 @@ The benchmark sweeps radial/poloidal grid sizes, solves the same reference
 case, and reports convergence/timing diagnostics for manuscript Figure 04.
 """
 
+import os
 from dataclasses import dataclass
 
 import matplotlib
@@ -14,33 +15,41 @@ import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import numpy as np
-from config import (
-    AXIS_LABEL_FONT_SIZE,
+from _cases import (
     DEMO_BOUNDARY,
     DEMO_COORDINATE,
     DEMO_GRID,
     DEMO_NODES,
     DEMO_PROFILE_COEFFS,
     DEMO_ROUTE,
-    DEMO_SOLVER_CONFIG,
     DEMO_SOURCE_SAMPLE_COUNT,
     MU0,
+)
+from _common import figure_path, save_figure_outputs
+from _kernel_cases import (
+    active_profiles_from_coeffs,
+    demo_psin_reference_profiles,
+)
+from _plotting import (
+    AXIS_LABEL_FONT_SIZE,
     SAVE_DPI,
     SAVE_TRANSPARENT,
     SINGLE_COLUMN_WIDTH,
     TICK_LABEL_FONT_SIZE,
     TITLE_FONT_SIZE,
-    active_profiles_from_coeffs,
     apply_plot_style,
-    demo_psin_reference_profiles,
-    figure_path,
-    save_figure_outputs,
     scaled_font_size,
 )
+from _reporting import (
+    SCRIPT_CONSOLE,
+    print_output_table,
+    print_script_config,
+    script_progress,
+)
 
-from veqpy.model import Boundary, Grid, Problem
-from veqpy.operator import Operator
-from veqpy.solver import Solver, SolverConfig
+import veqpy as veq
+from benchmarks._common import extract_shape_x as extract_kernel_shape_x
+from veqpy.model import Grid
 
 FIGURE_SIZE = (SINGLE_COLUMN_WIDTH, 4.5)
 FIGURE_NROWS = 2
@@ -77,8 +86,20 @@ Q95_PSIN = 0.95
 
 REFERENCE_NR = 64
 REFERENCE_NT = 64
-NR_LIST = tuple(range(12, 64, 2))
-NT_LIST = tuple(range(12, 64, 2))
+
+
+def _size_list_from_env(name: str, default: tuple[int, ...]) -> tuple[int, ...]:
+    raw = os.environ.get(name)
+    if not raw:
+        return default
+    values = tuple(int(part.strip()) for part in raw.split(",") if part.strip())
+    if not values:
+        raise ValueError(f"{name} must contain at least one integer")
+    return values
+
+
+NR_LIST = _size_list_from_env("VEQPY_FIG04_NR_LIST", tuple(range(12, 64, 2)))
+NT_LIST = _size_list_from_env("VEQPY_FIG04_NT_LIST", tuple(range(12, 64, 2)))
 
 
 @dataclass(frozen=True)
@@ -105,28 +126,52 @@ class HeatmapRow:
 
 
 GRID = Grid(**DEMO_GRID)
-CONFIG = SolverConfig(**DEMO_SOLVER_CONFIG)
 
 
-def build_demo_case() -> Problem:
+def build_demo_kernel_case(
+    nr: int,
+    nt: int,
+) -> tuple[veq.Kernel, veq.KernelBoundary, veq.KernelSource]:
     psin = np.linspace(0.0, 1.0, int(DEMO_SOURCE_SAMPLE_COUNT), dtype=np.float64)
     current_input, heat_input = demo_psin_reference_profiles(psin)
-    return Problem(
+    active = active_profiles_from_coeffs(DEMO_PROFILE_COEFFS)
+    topology = veq.KernelTopology(
+        h_count=active.get("h", 0),
+        v_count=active.get("v", 0),
+        kappa_count=active.get("k", 0),
+        psin_count=active.get("psin", 0),
+        F_count=active.get("F", 0),
+        c_counts=(),
+        s_counts=(active.get("s1", 0),),
+        Nr=int(nr),
+        Nt=int(nt),
         route=DEMO_ROUTE,
         coordinate=DEMO_COORDINATE,
         nodes=DEMO_NODES,
-        active_profiles=active_profiles_from_coeffs(DEMO_PROFILE_COEFFS),
-        boundary=Boundary(
-            **{
-                **DEMO_BOUNDARY,
-                "s_offsets": np.asarray(DEMO_BOUNDARY["s_offsets"], dtype=np.float64),
-            }
-        ),
-        heat_input=np.asarray(heat_input, dtype=np.float64).copy() / MU0,
-        current_input=np.asarray(current_input, dtype=np.float64).copy(),
-        Ip=None,
-        beta=None,
+        ip_constraint=False,
+        beta_constraint=False,
+        sample_count=int(DEMO_SOURCE_SAMPLE_COUNT),
+        M_max=GRID.M_max,
+        K_max=GRID.K_max,
     )
+    boundary = veq.KernelBoundary(
+        **{
+            **DEMO_BOUNDARY,
+            "s_offsets": tuple(np.asarray(DEMO_BOUNDARY["s_offsets"], dtype=np.float64)[1:]),
+        }
+    )
+    source = veq.KernelSource(
+        heat_profile=np.asarray(heat_input, dtype=np.float64).copy() / MU0,
+        current_profile=np.asarray(current_input, dtype=np.float64).copy(),
+        Ip=np.nan,
+        beta=np.nan,
+    )
+    kernel = veq.build(
+        topology=topology,
+        recipe=veq.KernelRecipe(backend="numba"),
+        config=veq.KernelConfig(method="powell", initial="cold", continuation="cold"),
+    )
+    return kernel, boundary, source
 
 
 def extract_shape_x(solver) -> np.ndarray:
@@ -178,81 +223,71 @@ def q_at_psin(equilibrium, psin_query: float = Q95_PSIN) -> float:
 
 
 def build_reference() -> ReferenceData:
-    demo_case = build_demo_case()
-    grid = Grid(
-        Nr=REFERENCE_NR,
-        Nt=REFERENCE_NT,
-        quadrature_scheme="legendre",
-        L_max=GRID.L_max,
-        M_max=GRID.M_max,
-    )
-    solver = Solver(
-        operator=Operator(grid=grid, case=demo_case),
-        config=CONFIG,
-    )
-    solver.solve(enable_verbose=False, enable_history=False)
-    result = solver.result
-    if result is None:
-        raise RuntimeError("solver.result is unavailable after reference solve")
-    equilibrium = solver.build_equilibrium()
-    return ReferenceData(
-        shape_x=extract_shape_x(solver),
-        target_ip=float(equilibrium.Ip),
-        target_beta_t=float(equilibrium.beta_t),
-        target_q95=q_at_psin(equilibrium),
-        l_max=int(grid.L_max),
-        m_max=int(grid.M_max),
-    )
+    kernel, boundary, source = build_demo_kernel_case(REFERENCE_NR, REFERENCE_NT)
+    try:
+        result = kernel.solve(boundary, source)
+        if not result.success:
+            raise RuntimeError(f"reference solve failed with residual {result.raw_norm:.3e}")
+        equilibrium = kernel.build_equilibrium()
+        return ReferenceData(
+            shape_x=extract_kernel_shape_x(kernel.topology, result.x),
+            target_ip=float(equilibrium.Ip),
+            target_beta_t=float(equilibrium.beta_t),
+            target_q95=q_at_psin(equilibrium),
+            l_max=int(kernel.topology.L_max),
+            m_max=int(kernel.topology.M_max),
+        )
+    finally:
+        kernel.close()
 
 
 def solve_case(reference: ReferenceData, nr: int, nt: int) -> HeatmapRow:
-    demo_case = build_demo_case()
-    grid = Grid(
-        Nr=nr,
-        Nt=nt,
-        quadrature_scheme="legendre",
-        L_max=reference.l_max,
-        M_max=reference.m_max,
-    )
-    solver = Solver(
-        operator=Operator(grid=grid, case=demo_case),
-        config=CONFIG,
-    )
-    solver.solve(enable_verbose=False, enable_history=False)
-    result = solver.result
-    if result is None:
-        raise RuntimeError("solver.result is unavailable after solve")
-    equilibrium = solver.build_equilibrium()
-    current_shape_x = extract_shape_x(solver)
-    return HeatmapRow(
-        nr=nr,
-        nt=nt,
-        shape_error=shape_error(reference.shape_x, current_shape_x),
-        ip_rel_error=relative_scalar_error(reference.target_ip, float(equilibrium.Ip)),
-        beta_rel_error=relative_scalar_error(reference.target_beta_t, float(equilibrium.beta_t)),
-        q95_rel_error=relative_scalar_error(reference.target_q95, q_at_psin(equilibrium)),
-        nfev=int(getattr(result, "nfev", result.function_evaluations)),
-        nit=int(getattr(result, "nit", result.iterations)),
-        residual_norm_final=float(result.residual_norm_final),
-    )
+    kernel, boundary, source = build_demo_kernel_case(nr, nt)
+    try:
+        result = kernel.solve(boundary, source)
+        if not result.success:
+            raise RuntimeError(f"solve failed with residual {result.raw_norm:.3e}")
+        equilibrium = kernel.build_equilibrium()
+        current_shape_x = extract_kernel_shape_x(kernel.topology, result.x)
+        return HeatmapRow(
+            nr=nr,
+            nt=nt,
+            shape_error=shape_error(reference.shape_x, current_shape_x),
+            ip_rel_error=relative_scalar_error(reference.target_ip, float(equilibrium.Ip)),
+            beta_rel_error=relative_scalar_error(
+                reference.target_beta_t,
+                float(equilibrium.beta_t),
+            ),
+            q95_rel_error=relative_scalar_error(reference.target_q95, q_at_psin(equilibrium)),
+            nfev=int(result.nfev),
+            nit=int(result.callbacks),
+            residual_norm_final=float(result.raw_norm),
+        )
+    finally:
+        kernel.close()
 
 
-def run_scan(reference: ReferenceData, nr_list: list[int], nt_list: list[int]) -> list[HeatmapRow]:
+def run_scan(
+    reference: ReferenceData,
+    nr_list: list[int],
+    nt_list: list[int],
+    *,
+    progress=None,
+    task=None,
+) -> list[HeatmapRow]:
     rows: list[HeatmapRow] = []
-    total = len(nr_list) * len(nt_list)
-    index = 0
     for nt in nt_list:
         for nr in nr_list:
-            index += 1
+            if progress is not None and task is not None:
+                progress.update(
+                    task,
+                    current=f"Nr={nr}, Nt={nt}",
+                    phase="[cyan]solve[/]",
+                )
             row = solve_case(reference, nr, nt)
             rows.append(row)
-            print(
-                f"[{index:03d}/{total:03d}] Nr={nr:>2d}, Nt={nt:>2d}: "
-                f"shape={row.shape_error:.3e} | "
-                f"Ip={row.ip_rel_error:.3e} | "
-                f"beta={row.beta_rel_error:.3e} | "
-                f"q95={row.q95_rel_error:.3e}"
-            )
+            if progress is not None and task is not None:
+                progress.update(task, advance=1)
     return rows
 
 
@@ -426,19 +461,42 @@ def normalized_grid_list(values: tuple[int, ...], *, name: str) -> list[int]:
 def main() -> None:
     nr_list = normalized_grid_list(NR_LIST, name="NR_LIST")
     nt_list = normalized_grid_list(NT_LIST, name="NT_LIST")
-    reference = build_reference()
-    rows = run_scan(reference, nr_list, nt_list)
-    fig = build_grid_convergence_figure(rows, nr_list, nt_list)
-    saved_paths = save_figure_outputs(
-        fig,
-        png_path=PNG_PATH,
-        pdf_path=PDF_PATH,
-        dpi=SAVE_DPI,
-        transparent=SAVE_TRANSPARENT,
+    print_script_config(
+        SCRIPT_CONSOLE,
+        "figure 04: resolution dependence",
+        (
+            ("backend", "numba"),
+            ("grid cases", len(nr_list) * len(nt_list)),
+            ("Nr", f"{nr_list[0]}..{nr_list[-1]} ({len(nr_list)})"),
+            ("Nt", f"{nt_list[0]}..{nt_list[-1]} ({len(nt_list)})"),
+        ),
     )
-    plt.close(fig)
-    for path in saved_paths:
-        print(f"saved: {path}")
+    with script_progress(SCRIPT_CONSOLE) as progress:
+        task = progress.add_task(
+            "",
+            total=1 + len(nr_list) * len(nt_list) + 1,
+            current="reference",
+            phase="[cyan]solve[/]",
+        )
+        reference = build_reference()
+        progress.update(task, advance=1, current="scan grid", phase="[cyan]solve[/]")
+        rows = run_scan(reference, nr_list, nt_list, progress=progress, task=task)
+        progress.update(task, current="render figure", phase="[cyan]run[/]")
+        fig = build_grid_convergence_figure(rows, nr_list, nt_list)
+        saved_paths = save_figure_outputs(
+            fig,
+            png_path=PNG_PATH,
+            pdf_path=PDF_PATH,
+            dpi=SAVE_DPI,
+            transparent=SAVE_TRANSPARENT,
+        )
+        plt.close(fig)
+        progress.update(task, advance=1, current="render figure", phase="[green]done[/]")
+
+    print_output_table(
+        SCRIPT_CONSOLE,
+        [("Figure 04", path, "Resolution-dependence heatmaps") for path in saved_paths],
+    )
 
 
 if __name__ == "__main__":

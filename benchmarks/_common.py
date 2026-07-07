@@ -1,467 +1,642 @@
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
+import platform
 import statistics
 import sys
-import tempfile
 import time
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass, replace
 from functools import lru_cache
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
 from typing import Any
+
+import numpy as np
 
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("MKL_NUM_THREADS", "1")
 os.environ.setdefault("MPLCONFIGDIR", str(Path("/tmp/veqpy-mpl")))
 
-import numpy as np
-
-from veqlib.facade import KernelResult, pinned_cpu
-from veqpy.engine.numba_source import source_parameterization_for_route_key
-from veqpy.model import Boundary, Geqdsk, Grid, Problem
-from veqpy.operator import (
-    Operator,
+from veqpy import (  # noqa: E402
+    Kernel,
+    KernelBoundary,
+    KernelConfig,
+    KernelRecipe,
+    KernelSource,
+    KernelTopology,
+    SolveResult,
+)
+from veqpy.kernels.boundary_materialization import materialize_kernel_boundary  # noqa: E402
+from veqpy.kernels.numba_kernel.packed_layout import (  # noqa: E402
     build_profile_index,
     build_profile_layout,
     build_profile_names,
     build_shape_profile_names,
 )
-from veqpy.solver import Solver, SolverConfig
+from veqpy.kernels.types import kernel_boundary_shape_orders  # noqa: E402
+from veqpy.model import Geqdsk, Grid  # noqa: E402
 
 THIS_FILE = Path(__file__).resolve()
 REPO_ROOT = THIS_FILE.parents[1]
-VEQLIB_ROOT = REPO_ROOT / "veqlib"
-CORE_DIR = VEQLIB_ROOT / "core"
-SCRIPTS_DIR = REPO_ROOT / "scripts"
-
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+CORE_DIR = REPO_ROOT / "veqpy" / "kernels" / "cxx_kernel" / "core"
+RESULTS_DIR = REPO_ROOT / "benchmarks" / "results"
 
 MU0 = 4.0e-7 * np.pi
-EPS = 1.0e-14
-
-CASE_KEYS = ("solovev", "chease", "efit")
-CASE_LABELS = {
-    "solovev": "D-shape",
-    "chease": "H-mode",
-    "efit": "X-point",
-}
-CONFIG_LABELS = ("Low", "Medium", "High", "Ref")
-
-CASE_REFERENCE_GFILES = {
-    "solovev": str(REPO_ROOT / "data" / "SOLOVEV.geqdsk"),
-    "chease": str(REPO_ROOT / "data" / "CHEASE.geqdsk"),
-    "efit": str(REPO_ROOT / "data" / "EFIT.geqdsk"),
-}
-CASE_REFERENCE_EQUILIBRIUM_JSONS = {
-    "solovev": str(REPO_ROOT / "data" / "solovev-equilibrium.json"),
-    "chease": str(REPO_ROOT / "data" / "chease-equilibrium.json"),
-    "efit": str(REPO_ROOT / "data" / "efit-equilibrium.json"),
-}
-REFERENCE_EQUILIBRIUM_MANIFEST_PATH = str(REPO_ROOT / "data" / "reference_equilibria.json")
-REDUCED_EQUILIBRIUM_JSON_TEMPLATE = str(
-    REPO_ROOT / "data" / "pareto_reduced_{case_key}_{config_label}.json"
-)
-REDUCED_EQUILIBRIUM_MANIFEST_PATH = str(REPO_ROOT / "data" / "pareto_reduced_equilibria.json")
-
-CASE_REFERENCE_PROFILE_LENGTHS = {
-    "solovev": {
-        "psin": 10,
-        "h": 10,
-        "k": 10,
-        "s1": 10,
-        "s2": 5,
-        "s3": 5,
-        "s4": 5,
-        "s5": 5,
-        "s6": 5,
-        "s7": 5,
-        "s8": 5,
-    },
-    "chease": {
-        "psin": 10,
-        "h": 10,
-        "k": 10,
-        "v": 10,
-        "c0": 10,
-        "c1": 5,
-        "c2": 5,
-        "c3": 5,
-        "c4": 5,
-        "c5": 5,
-        "c6": 5,
-        "c7": 5,
-        "s1": 10,
-        "s2": 5,
-        "s3": 5,
-        "s4": 5,
-        "s5": 5,
-        "s6": 5,
-        "s7": 5,
-        "s8": 5,
-    },
-    "efit": {
-        "psin": 10,
-        "h": 10,
-        "k": 10,
-        "v": 10,
-        "c0": 10,
-        "c1": 5,
-        "c2": 5,
-        "c3": 5,
-        "c4": 5,
-        "c5": 5,
-        "c6": 5,
-        "c7": 5,
-        "s1": 10,
-        "s2": 5,
-        "s3": 5,
-        "s4": 5,
-        "s5": 5,
-        "s6": 5,
-        "s7": 5,
-        "s8": 5,
-    },
-}
-
-REFERENCE_LAYOUT_NR = 32
-REFERENCE_LAYOUT_NT = 32
-REFERENCE_SOLVER_MAXFEV = 2000
-SOLVER_INITIAL_POLICY = "auto"
-BOUNDARY_MAXTOL = 1.0
-CASE_BOUNDARY_FIT_M = {
-    "solovev": 10,
-    "chease": 10,
-    "efit": 10,
-}
-CASE_BOUNDARY_FIT_N = {
-    "solovev": 10,
-    "chease": 10,
-    "efit": 10,
-}
 
 ROUTE_BENCHMARK_MODES = ("PF", "PP", "PI", "PJ1", "PJ2", "PQ")
 ROUTE_BENCHMARK_COORDINATES = ("rho", "psin")
-ROUTE_BENCHMARK_MODE_CONSTRAINTS: dict[str, tuple[str, ...]] = {
-    "PF": ("null", "Ip", "beta"),
+ROUTE_BENCHMARK_NODES = ("uniform", "grid")
+ROUTE_BENCHMARK_CONSTRAINTS = {
+    "PF": ("Ip", "beta", "null"),
     "PP": ("Ip_beta", "Ip", "beta", "null"),
     "PI": ("Ip_beta", "Ip", "beta", "null"),
     "PJ1": ("Ip_beta", "Ip", "beta", "null"),
     "PJ2": ("Ip_beta", "Ip", "beta", "null"),
     "PQ": ("Ip_beta", "Ip", "beta", "null"),
 }
-ROUTE_TEST_SOURCE_SAMPLE_COUNT = 51
+DEFAULT_ROUTE_SCOPE = "ip-uniform"
+DEFAULT_ROUTE_SAMPLE_COUNT = 51
+DEFAULT_ROUTE_NR = 32
+DEFAULT_ROUTE_NT = 16
+DEFAULT_ROUTE_L_MAX = 20
+DEFAULT_ROUTE_M_MAX = 20
+DEFAULT_ROUTE_K_MAX = 20
+SYNTHETIC_SOLVER_METHOD = "powell"
+SYNTHETIC_SOLVER_LABEL = "numba-hybr"
+SYNTHETIC_SOLVER_MAX_RESIDUAL = 1.0e-6
+SYNTHETIC_SOLVER_MAX_EVALUATIONS = 1000
+SYNTHETIC_ROUTE_SIGNATURE = {"h": 3, "k": 6, "s1": 3}
+SYNTHETIC_PSIN_ROUTE_SIGNATURE = {**SYNTHETIC_ROUTE_SIGNATURE, "psin": 6}
 ROUTE_SHAPE_MATCH_TOL = 1.0e-2
-ROUTE_DIAGNOSTIC_SIGN_CHANGE_WINDOW = 12
-ROUTE_TEST_GRID = Grid(Nr=32, Nt=16, quadrature_scheme="legendre")
+ROUTE_DIAGNOSTIC_SIGN_CHANGE_WINDOW = 8
+
+CASE_KEYS = ("solovev", "chease", "efit")
+CONFIG_LABELS = ("Low", "Medium", "High", "Ref")
+CASE_REFERENCE_GFILES = {
+    "solovev": REPO_ROOT / "data" / "SOLOVEV.geqdsk",
+    "chease": REPO_ROOT / "data" / "CHEASE.geqdsk",
+    "efit": REPO_ROOT / "data" / "EFIT.geqdsk",
+}
+CASE_LABELS = {
+    "solovev": "D-shape",
+    "chease": "H-mode",
+    "efit": "X-point",
+}
+REFERENCE_LAYOUT_NR = 32
+REFERENCE_LAYOUT_NT = 32
+REFERENCE_SOLVER_MAXFEV = 2000
+GEQDSK_ROUTE_PROFILE_SIGNATURE = {
+    "psin": 10,
+    "h": 10,
+    "k": 10,
+    "v": 10,
+    "c0": 10,
+    "c1": 5,
+    "c2": 5,
+    "c3": 5,
+    "c4": 5,
+    "c5": 5,
+    "c6": 5,
+    "c7": 5,
+    "s1": 10,
+    "s2": 5,
+    "s3": 5,
+    "s4": 5,
+    "s5": 5,
+    "s6": 5,
+    "s7": 5,
+    "s8": 5,
+}
+GEQDSK_CONFIG_SIGNATURES = {
+    ("solovev", "Low"): {"psin": 1, "h": 1, "k": 1, "s1": 1},
+    ("solovev", "Medium"): {"psin": 1, "h": 1, "k": 2, "s1": 1},
+    ("solovev", "High"): {"psin": 3, "h": 2, "k": 2, "s1": 2},
+    (
+        "solovev",
+        "Ref",
+    ): {
+        "psin": 10,
+        "h": 10,
+        "k": 10,
+        "s1": 10,
+        "s2": 5,
+        "s3": 5,
+        "s4": 5,
+        "s5": 5,
+        "s6": 5,
+        "s7": 5,
+        "s8": 5,
+    },
+    (
+        "chease",
+        "Low",
+    ): {
+        "psin": 4,
+        "h": 6,
+        "k": 2,
+        "v": 3,
+        "c0": 3,
+        "s1": 3,
+        "c1": 2,
+        "s2": 2,
+        "c2": 1,
+        "s3": 1,
+    },
+    (
+        "chease",
+        "Medium",
+    ): {
+        "psin": 5,
+        "h": 10,
+        "k": 4,
+        "v": 3,
+        "c0": 3,
+        "s1": 3,
+        "c1": 3,
+        "s2": 3,
+        "c2": 1,
+        "s3": 1,
+    },
+    (
+        "chease",
+        "High",
+    ): {
+        "psin": 8,
+        "h": 9,
+        "k": 7,
+        "v": 8,
+        "c0": 6,
+        "s1": 6,
+        "c1": 4,
+        "s2": 4,
+        "c2": 4,
+        "s3": 4,
+    },
+    (
+        "chease",
+        "Ref",
+    ): {
+        "psin": 10,
+        "h": 10,
+        "k": 10,
+        "v": 10,
+        "c0": 10,
+        "c1": 5,
+        "c2": 5,
+        "c3": 5,
+        "c4": 5,
+        "c5": 5,
+        "c6": 5,
+        "c7": 5,
+        "s1": 10,
+        "s2": 5,
+        "s3": 5,
+        "s4": 5,
+        "s5": 5,
+        "s6": 5,
+        "s7": 5,
+        "s8": 5,
+    },
+    (
+        "efit",
+        "Low",
+    ): {
+        "psin": 3,
+        "h": 5,
+        "k": 3,
+        "v": 2,
+        "c0": 2,
+        "s1": 2,
+        "c1": 1,
+        "s2": 1,
+    },
+    (
+        "efit",
+        "Medium",
+    ): {
+        "psin": 3,
+        "h": 4,
+        "k": 4,
+        "v": 5,
+        "c0": 2,
+        "s1": 2,
+        "c1": 2,
+        "s2": 2,
+        "c2": 2,
+        "s3": 1,
+        "c3": 1,
+        "s4": 1,
+    },
+    (
+        "efit",
+        "High",
+    ): {
+        "psin": 7,
+        "h": 8,
+        "k": 9,
+        "v": 7,
+        "c0": 9,
+        "s1": 9,
+        "c1": 5,
+        "s2": 5,
+        "c2": 5,
+        "s3": 5,
+        "c3": 5,
+        "s4": 4,
+        "c4": 5,
+        "s5": 5,
+        "c5": 2,
+        "s6": 2,
+        "c6": 1,
+        "s7": 1,
+    },
+    ("efit", "Ref"): GEQDSK_ROUTE_PROFILE_SIGNATURE,
+}
 
 
-@dataclass(frozen=True, slots=True)
-class PreparedInterpAxis:
-    unique_axis: np.ndarray
-    order: np.ndarray
-    unique_index: np.ndarray
-
-
-@dataclass(frozen=True, slots=True)
-class PfReferenceCase:
-    case_key: str
-    boundary: object
-    geqdsk: object
-    equilibrium: object
-    ref_profiles: dict[str, np.ndarray | float]
-    psin_interp_axis: PreparedInterpAxis
+def default_kernel_cache_root() -> Path:
+    override = os.environ.get("VEQPY_KERNEL_CACHE")
+    if override:
+        return Path(override).expanduser()
+    return Path.cwd() / ".veqpy-kernel-cache"
 
 
 @dataclass(frozen=True, slots=True)
 class RouteBenchmarkSpec:
     mode: str
     coordinate: str
+    nodes: str
     constraint: str
-    input_kind: str = "uniform"
 
     @property
     def case_name(self) -> str:
-        return f"{self.mode}_{self.coordinate}_{self.input_kind}_{self.constraint}"
+        return f"{self.mode}_{self.coordinate}_{self.nodes}_{self.constraint}"
+
+    @property
+    def input_kind(self) -> str:
+        return self.nodes
 
 
 @dataclass(frozen=True, slots=True)
-class RouteReferenceBundle:
-    result: object
-    equilibrium: object
+class KernelCase:
+    name: str
+    topology: KernelTopology
+    boundary: KernelBoundary
+    source: KernelSource
+    config: KernelConfig
+
+
+@dataclass(frozen=True, slots=True)
+class RouteReference:
     ref_profiles: dict[str, np.ndarray | float]
-    reference_shape_x: np.ndarray
     rho_axis: np.ndarray
     psin_axis: np.ndarray
-    rho_interp_axis: PreparedInterpAxis
-    psin_interp_axis: PreparedInterpAxis
-    boundary: Boundary
-    profile_coeffs: dict[str, np.ndarray]
+    reference_shape_x: np.ndarray
 
 
-@lru_cache(maxsize=1)
-def load_veqpy_components() -> dict[str, object]:
-    from veqpy.model import Boundary, Equilibrium, Grid, Problem
-    from veqpy.model.boundary import _fit_boundary_params
-    from veqpy.operator import Operator
-    from veqpy.solver import Solver, SolverConfig
-
+def runtime_env() -> dict[str, Any]:
     return {
-        "Boundary": Boundary,
-        "Equilibrium": Equilibrium,
-        "Geqdsk": Geqdsk,
-        "Grid": Grid,
-        "Problem": Problem,
-        "fit_boundary_params": _fit_boundary_params,
-        "Operator": Operator,
-        "Solver": Solver,
-        "SolverConfig": SolverConfig,
+        "OPENBLAS_NUM_THREADS": os.environ.get("OPENBLAS_NUM_THREADS"),
+        "OMP_NUM_THREADS": os.environ.get("OMP_NUM_THREADS"),
+        "MKL_NUM_THREADS": os.environ.get("MKL_NUM_THREADS"),
     }
 
 
-def temp_cache(prefix: str) -> Path:
-    return Path(tempfile.mkdtemp(prefix=prefix))
+def runtime_platform_payload() -> dict[str, str]:
+    return {
+        "python": sys.version.split()[0],
+        "python_full": sys.version,
+        "platform": platform.platform(),
+        "executable": sys.executable,
+    }
 
 
-def load_module(name: str, path: Path) -> ModuleType:
-    spec = importlib.util.spec_from_file_location(name, path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"unable to load {path}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+def cpu_affinity() -> list[int] | None:
+    getter = getattr(os, "sched_getaffinity", None)
+    if getter is None:
+        return None
+    return sorted(int(cpu) for cpu in getter(0))
 
 
 def write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
-def cpu_affinity() -> list[int] | None:
-    if hasattr(os, "sched_getaffinity"):
-        return sorted(int(cpu) for cpu in os.sched_getaffinity(0))
-    return None
+def median(values: Sequence[float]) -> float:
+    return float(statistics.median(values)) if values else float("nan")
 
 
-def runtime_env() -> dict[str, str | None]:
-    keys = ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS")
-    return {key: os.environ.get(key) for key in keys}
-
-
-def quantile(values: list[float], q: float) -> float:
-    values_sorted = sorted(values)
-    return float(values_sorted[int((len(values_sorted) - 1) * q)])
-
-
-def float_stats(values: list[float], *, samples: bool = True, prefix: str = "") -> dict[str, Any]:
-    if not values:
+def float_stats(values: Sequence[float]) -> dict[str, Any]:
+    samples = [float(value) for value in values]
+    if not samples:
         return {
-            f"{prefix}median_ms": float("nan"),
-            f"{prefix}mean_ms": float("nan"),
-            f"{prefix}min_ms": float("nan"),
-            f"{prefix}max_ms": float("nan"),
-            f"{prefix}p05_ms": float("nan"),
-            f"{prefix}p95_ms": float("nan"),
+            "samples_ms": [],
             "count": 0,
-            **({"samples_ms": []} if samples else {}),
+            "min_ms": float("nan"),
+            "max_ms": float("nan"),
+            "mean_ms": float("nan"),
+            "median_ms": float("nan"),
+            "p05_ms": float("nan"),
+            "p95_ms": float("nan"),
         }
-    payload: dict[str, Any] = {
-        f"{prefix}median_ms": float(statistics.median(values)),
-        f"{prefix}mean_ms": float(statistics.mean(values)),
-        f"{prefix}min_ms": float(min(values)),
-        f"{prefix}max_ms": float(max(values)),
-        f"{prefix}p05_ms": quantile(values, 0.05),
-        f"{prefix}p95_ms": quantile(values, 0.95),
-        "count": len(values),
+    sorted_values = sorted(samples)
+    return {
+        "samples_ms": samples,
+        "count": len(samples),
+        "min_ms": float(min(samples)),
+        "max_ms": float(max(samples)),
+        "mean_ms": float(statistics.fmean(samples)),
+        "median_ms": float(statistics.median(samples)),
+        "p05_ms": float(np.percentile(sorted_values, 5)),
+        "p95_ms": float(np.percentile(sorted_values, 95)),
     }
-    if samples:
-        payload["samples_ms"] = [float(value) for value in values]
-    return payload
 
 
-def int_stats(values: list[int], *, samples: bool = True) -> dict[str, Any]:
-    if not values:
-        return {
-            "median": 0,
-            "mean": 0.0,
-            "min": 0,
-            "max": 0,
-            **({"samples": []} if samples else {}),
-        }
-    payload: dict[str, Any] = {
-        "median": int(statistics.median(values)),
-        "mean": float(statistics.mean(values)),
-        "min": int(min(values)),
-        "max": int(max(values)),
+def int_stats(values: Sequence[int]) -> dict[str, Any]:
+    samples = [int(value) for value in values]
+    if not samples:
+        return {"samples": [], "count": 0, "min": 0, "max": 0, "mean": 0.0, "median": 0}
+    return {
+        "samples": samples,
+        "count": len(samples),
+        "min": int(min(samples)),
+        "max": int(max(samples)),
+        "mean": float(statistics.fmean(samples)),
+        "median": int(statistics.median(samples)),
     }
-    if samples:
-        payload["samples"] = [int(value) for value in values]
-    return payload
 
 
-def max_abs(lhs: Any, rhs: Any) -> float:
-    lhs_arr = np.asarray(lhs, dtype=np.float64)
-    rhs_arr = np.asarray(rhs, dtype=np.float64)
-    if lhs_arr.shape != rhs_arr.shape:
-        return float("inf")
-    if lhs_arr.size == 0:
-        return 0.0
-    return float(np.max(np.abs(lhs_arr - rhs_arr)))
+def format_float(value: float, *, precision: int = 6) -> str:
+    if not np.isfinite(value):
+        return "nan"
+    return f"{float(value):.{precision}g}"
 
 
-def profile_count(profile_coeffs: dict[str, Any], name: str) -> int:
-    values = profile_coeffs.get(name)
-    return 0 if values is None else int(np.asarray(values, dtype=np.float64).size)
+def constraint_flags(label: str) -> tuple[bool, bool]:
+    normalized = str(label)
+    if normalized == "null":
+        return False, False
+    if normalized == "Ip":
+        return True, False
+    if normalized == "beta":
+        return False, True
+    if normalized == "Ip_beta":
+        return True, True
+    raise ValueError(f"unknown source constraint {label!r}")
 
 
-def family_counts(profile_coeffs: dict[str, Any], prefix: str, first: int) -> tuple[int, ...]:
-    orders = [
-        int(name[1:])
-        for name, values in profile_coeffs.items()
-        if values is not None
-        and len(name) > 1
-        and name[0] == prefix
-        and name[1:].isdigit()
-        and profile_count(profile_coeffs, name) > 0
-    ]
-    if not orders:
-        return ()
-    counts = [
-        profile_count(profile_coeffs, f"{prefix}{order}")
-        for order in range(first, max(orders) + 1)
-    ]
-    while counts and counts[-1] == 0:
-        counts.pop()
-    return tuple(counts)
-
-
-def finite_or_nan(value: Any) -> float:
-    parsed = float(value)
-    return parsed if np.isfinite(parsed) else float("nan")
-
-
-def as_float64_array(values: Any, *, copy: bool = False) -> np.ndarray:
-    arr = np.asarray(values, dtype=np.float64)
-    return arr.copy() if copy else arr
-
-
-def prepare_interp_axis(axis: np.ndarray) -> PreparedInterpAxis:
-    axis_f64 = as_float64_array(axis)
-    order = np.argsort(axis_f64)
-    axis_sorted = axis_f64[order]
-    unique_axis, unique_index = np.unique(axis_sorted, return_index=True)
-    return PreparedInterpAxis(unique_axis=unique_axis, order=order, unique_index=unique_index)
-
-
-def prepare_interp_values(values: np.ndarray, prepared_axis: PreparedInterpAxis) -> np.ndarray:
-    values_f64 = as_float64_array(values)
-    return values_f64[prepared_axis.order][prepared_axis.unique_index]
-
-
-def profile_interp(
-    axis: np.ndarray | PreparedInterpAxis, values: np.ndarray, x_new: np.ndarray
-) -> np.ndarray:
-    from scipy.interpolate import PchipInterpolator
-
-    prepared_axis = axis if isinstance(axis, PreparedInterpAxis) else prepare_interp_axis(axis)
-    unique_axis = prepared_axis.unique_axis
-    unique_values = prepare_interp_values(values, prepared_axis)
-    x_new = as_float64_array(x_new)
-    if unique_axis.size < 2:
-        fill_value = float(unique_values[0] if unique_values.size else 0.0)
-        return np.full_like(x_new, fill_value, dtype=np.float64)
-    if unique_axis.size < 3:
-        return np.interp(x_new, unique_axis, unique_values).astype(np.float64, copy=False)
-    return as_float64_array(PchipInterpolator(unique_axis, unique_values, extrapolate=True)(x_new))
-
-
-def active_profiles_from_coeffs(profile_coeffs: Mapping[str, object]) -> dict[str, int]:
-    active_profiles: dict[str, int] = {}
-    for name, coeff in profile_coeffs.items():
-        if coeff is None:
-            continue
-        if isinstance(coeff, (int, np.integer)):
-            length = int(coeff)
-        else:
-            length = int(np.asarray(coeff, dtype=np.float64).size)
-        if length > 0:
-            active_profiles[str(name)] = length
-    return active_profiles
-
-
-def safe_divisor(values: Sequence[float], *, floor: float = EPS) -> np.ndarray:
-    arr = np.asarray(values, dtype=np.float64)
-    sign = np.where(arr < 0.0, -1.0, 1.0)
-    return np.where(np.abs(arr) > floor, arr, sign * floor)
-
-
-def coefficients_from_coeffs(profile_coeffs: Mapping[str, object]) -> dict[str, np.ndarray]:
-    coefficients: dict[str, np.ndarray] = {}
-    for name, coeff in profile_coeffs.items():
-        if coeff is None:
-            continue
-        if isinstance(coeff, (int, np.integer)):
-            if int(coeff) <= 0:
-                continue
-            values = np.zeros(int(coeff), dtype=np.float64)
-        else:
-            values = np.asarray(coeff, dtype=np.float64)
-            if values.size <= 0:
-                continue
-        coefficients[str(name)] = values
-    return coefficients
-
-
-def profile_order_from_active(active_profiles: Mapping[str, int]) -> int:
-    order = 1
-    for name in active_profiles:
-        if len(name) > 1 and name[0] in {"c", "s"} and name[1:].isdigit():
-            order = max(order, int(name[1:]))
-    return order
-
-
-def extract_shape_x(
-    active_profiles: dict[str, int],
-    x: np.ndarray,
+def iter_route_specs(
+    scope: str = DEFAULT_ROUTE_SCOPE,
     *,
-    m_max: int | None = None,
-) -> np.ndarray:
-    resolved_m_max = max(ROUTE_TEST_GRID.M_max, profile_order_from_active(active_profiles))
-    if m_max is not None:
-        resolved_m_max = max(resolved_m_max, int(m_max))
-    profile_names = build_profile_names(resolved_m_max)
-    shape_profile_names = build_shape_profile_names(resolved_m_max)
-    profile_index = build_profile_index(profile_names)
-    _, coeff_index, _ = build_profile_layout(active_profiles, profile_names=profile_names)
-    shape_values: list[float] = []
-    for degree in range(coeff_index.shape[1]):
-        for name in shape_profile_names:
-            idx = int(coeff_index[profile_index[name], degree])
-            if idx >= 0:
-                shape_values.append(float(x[idx]))
-    return np.asarray(shape_values, dtype=np.float64)
+    default_scope: str = DEFAULT_ROUTE_SCOPE,
+    allow_grid: bool = True,
+) -> tuple[RouteBenchmarkSpec, ...]:
+    if scope not in {default_scope, "uniform", "full"}:
+        raise ValueError(f"scope must be {default_scope}, uniform, or full")
+    node_choices = ("uniform",)
+    if allow_grid and scope == "full":
+        node_choices = ("uniform", "grid")
+    specs: list[RouteBenchmarkSpec] = []
+    for mode in ROUTE_BENCHMARK_MODES:
+        constraints = ROUTE_BENCHMARK_CONSTRAINTS[mode]
+        for coordinate in ROUTE_BENCHMARK_COORDINATES:
+            for nodes in node_choices:
+                for constraint in constraints:
+                    if scope == default_scope and constraint != "Ip":
+                        continue
+                    specs.append(RouteBenchmarkSpec(mode, coordinate, nodes, constraint))
+    return tuple(specs)
+
+
+def _route_spec_predicate(value: str) -> Callable[[RouteBenchmarkSpec], bool]:
+    raw = str(value)
+    parts = raw.split(":")
+    if len(parts) == 1:
+        token = parts[0].lower()
+        return lambda spec: (
+            spec.case_name.lower() == token
+            or route_spec_selector(spec).lower() == token
+            or spec.mode.lower() == token
+        )
+    if len(parts) != 4:
+        raise ValueError("case selectors must be name or route:coordinate:nodes:constraint")
+    route, coordinate, nodes, constraint = parts
+    return lambda spec: (
+        spec.mode == route.upper()
+        and spec.coordinate == coordinate.lower()
+        and spec.nodes == nodes.lower()
+        and spec.constraint == constraint
+    )
+
+
+def filter_route_specs(
+    specs: Iterable[RouteBenchmarkSpec],
+    selectors: Sequence[str] | None,
+) -> tuple[RouteBenchmarkSpec, ...]:
+    specs_tuple = tuple(specs)
+    if not selectors:
+        return specs_tuple
+    predicates = tuple(_route_spec_predicate(selector) for selector in selectors)
+    retained = tuple(
+        spec for spec in specs_tuple if any(predicate(spec) for predicate in predicates)
+    )
+    if not retained:
+        raise ValueError(f"unknown case selector(s): {', '.join(selectors)}")
+    return retained
+
+
+def route_spec_label(spec: RouteBenchmarkSpec) -> str:
+    return spec.case_name
+
+
+def route_spec_selector(spec: RouteBenchmarkSpec) -> str:
+    return f"{spec.mode}:{spec.coordinate}:{spec.nodes}:{spec.constraint}"
+
+
+def profile_counts_for_route(
+    route: str,
+    coordinate: str,
+    nodes: str,
+    *,
+    h_count: int = 3,
+    v_count: int = 0,
+    kappa_count: int = 6,
+    c_counts: tuple[int, ...] = (),
+    s_counts: tuple[int, ...] = (3,),
+    active_count: int = 6,
+) -> dict[str, Any]:
+    psin_count = 0
+    f_count = 0
+    if route == "PJ2":
+        f_count = active_count
+    elif coordinate == "psin" and nodes == "uniform":
+        psin_count = active_count
+    return {
+        "h_count": h_count,
+        "v_count": v_count,
+        "kappa_count": kappa_count,
+        "psin_count": psin_count,
+        "F_count": f_count,
+        "c_counts": c_counts,
+        "s_counts": s_counts,
+    }
+
+
+def profile_counts_from_signature(
+    signature: dict[str, int],
+    *,
+    route: str,
+    coordinate: str,
+    nodes: str,
+    pj2_f_count: int = 6,
+) -> dict[str, Any]:
+    psin_count = int(signature.get("psin", 0))
+    f_count = int(signature.get("F", 0))
+    if route == "PJ2" and f_count <= 0:
+        f_count = int(pj2_f_count)
+    if route == "PJ2":
+        psin_count = 0
+    elif not (coordinate == "psin" and nodes == "uniform"):
+        psin_count = 0
+    c_counts = _family_counts(signature, "c", start=0)
+    s_counts = _family_counts(signature, "s", start=1)
+    return {
+        "h_count": int(signature.get("h", 0)),
+        "v_count": int(signature.get("v", 0)),
+        "kappa_count": int(signature.get("k", 0)),
+        "psin_count": psin_count,
+        "F_count": f_count,
+        "c_counts": c_counts,
+        "s_counts": s_counts,
+    }
+
+
+def _family_counts(signature: dict[str, int], prefix: str, *, start: int) -> tuple[int, ...]:
+    values: list[int] = []
+    order = start
+    while True:
+        key = f"{prefix}{order}"
+        if key not in signature:
+            break
+        values.append(int(signature[key]))
+        order += 1
+    while values and values[-1] == 0:
+        values.pop()
+    return tuple(values)
+
+
+def grid_payload(*, nr: int, nt: int, l_max: int, m_max: int, k_max: int | None) -> dict[str, Any]:
+    return {
+        "Nr": int(nr),
+        "Nt": int(nt),
+        "L_max": int(l_max),
+        "M_max": int(m_max),
+        "K_max": None if k_max is None else int(k_max),
+        "quadrature_scheme": "legendre",
+        "calculus_scheme": "spectral",
+    }
+
+
+def synthetic_boundary() -> KernelBoundary:
+    return KernelBoundary(
+        a=1.05 / 1.85,
+        R0=1.05,
+        Z0=0.0,
+        B0=3.0,
+        ka=2.2,
+        s_offsets=(float(np.arcsin(0.5)),),
+    )
+
+
+def pf_reference_profiles(psin: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    beta0 = 0.75
+    alpha_p = 5.0
+    alpha_f = 3.32
+    exp_ap = np.exp(alpha_p)
+    exp_af = np.exp(alpha_f)
+    den_p = 1.0 + exp_ap * (alpha_p - 1.0)
+    den_f = 1.0 + exp_af * (alpha_f - 1.0)
+    current = (1.0 - beta0) * alpha_f * (np.exp(alpha_f * psin) - exp_af) / den_f
+    heat = beta0 * alpha_p * (np.exp(alpha_p * psin) - exp_ap) / den_p
+    return current.astype(np.float64), heat.astype(np.float64)
+
+
+@lru_cache(maxsize=1)
+def synthetic_route_reference() -> RouteReference:
+    rho_src = np.linspace(0.0, 1.0, DEFAULT_ROUTE_SAMPLE_COUNT, dtype=np.float64)
+    psin_src = rho_src * rho_src
+    ffn_psin_src, pn_psin_src = pf_reference_profiles(psin_src)
+    ffn_r_src = ffn_psin_src * (2.0 * rho_src)
+    pn_r_src = pn_psin_src * (2.0 * rho_src)
+    topology = KernelTopology(
+        **profile_counts_from_signature(
+            SYNTHETIC_ROUTE_SIGNATURE,
+            route="PF",
+            coordinate="rho",
+            nodes="uniform",
+        ),
+        Nr=64,
+        Nt=32,
+        route="PF",
+        coordinate="rho",
+        nodes="uniform",
+        ip_constraint=True,
+        sample_count=DEFAULT_ROUTE_SAMPLE_COUNT,
+        M_max=DEFAULT_ROUTE_M_MAX,
+        K_max=DEFAULT_ROUTE_K_MAX,
+    )
+    source = KernelSource(
+        heat_profile=pn_r_src / MU0,
+        current_profile=ffn_r_src,
+        Ip=3.0e6,
+        beta=np.nan,
+        case_name="synthetic-reference",
+    )
+    config = KernelConfig(
+        method=SYNTHETIC_SOLVER_METHOD,
+        max_residual=SYNTHETIC_SOLVER_MAX_RESIDUAL,
+        max_evaluations=SYNTHETIC_SOLVER_MAX_EVALUATIONS,
+        initial="cold",
+        continuation="cold",
+        norm="fast",
+    )
+    result, kernel = solve_numba_case(
+        KernelCase("synthetic_reference", topology, synthetic_boundary(), source, config)
+    )
+    if not result.success:
+        kernel.close()
+        raise RuntimeError("synthetic route reference solve failed")
+    try:
+        equilibrium = kernel.build_equilibrium()
+        rho_axis = np.asarray(equilibrium.rho, dtype=np.float64)
+        psin_axis = np.asarray(equilibrium.psin, dtype=np.float64)
+        return RouteReference(
+            ref_profiles=build_route_reference_profiles(equilibrium),
+            rho_axis=rho_axis,
+            psin_axis=psin_axis,
+            reference_shape_x=extract_shape_x(topology, result.x),
+        )
+    finally:
+        kernel.close()
 
 
 def build_route_reference_profiles(equilibrium: Any) -> dict[str, np.ndarray | float]:
-    psin_r = as_float64_array(equilibrium.psin_r, copy=True)
+    psin_r = np.asarray(equilibrium.psin_r, dtype=np.float64)
     psin_r_safe = safe_divisor(psin_r)
-    psi_r = as_float64_array(equilibrium.alpha2 * psin_r)
+    psi_r = np.asarray(equilibrium.alpha2 * psin_r, dtype=np.float64)
     psi_r_safe = safe_divisor(psi_r)
 
-    ffn_r = as_float64_array(equilibrium.FFn_r, copy=True)
-    pn_r = as_float64_array(equilibrium.Pn_r, copy=True)
-    ff_r = as_float64_array(equilibrium.FF_r, copy=True)
-    p_r = as_float64_array(equilibrium.P_r, copy=True)
-    itor = as_float64_array(equilibrium.Itor, copy=True)
-    jtor = as_float64_array(equilibrium.jtor, copy=True)
-    jpara = as_float64_array(equilibrium.jpara, copy=True)
-    q = as_float64_array(equilibrium.q, copy=True)
+    ffn_r = np.asarray(equilibrium.FFn_r, dtype=np.float64)
+    pn_r = np.asarray(equilibrium.Pn_r, dtype=np.float64)
+    ff_r = np.asarray(equilibrium.FF_r, dtype=np.float64)
+    p_r = np.asarray(equilibrium.P_r, dtype=np.float64)
+    itor = np.asarray(equilibrium.Itor, dtype=np.float64)
+    jtor = np.asarray(equilibrium.jtor, dtype=np.float64)
+    jpara = np.asarray(equilibrium.jpara, dtype=np.float64)
+    q = np.asarray(equilibrium.q, dtype=np.float64)
     mu0_p_r = MU0 * p_r
     return {
         "psin_r": psin_r,
@@ -489,77 +664,15 @@ def build_route_reference_profiles(equilibrium: Any) -> dict[str, np.ndarray | f
         "mu0_jpara": MU0 * jpara,
         "qn": q * 0.1,
         "q": q,
-        "scaled_Ip": float(MU0 * equilibrium.Ip),
         "Ip_constraint": float(equilibrium.Ip),
         "beta_constraint": float(equilibrium.beta_t),
     }
 
 
-def solve_route_reference(
-    problem: Problem,
-    grid: Grid,
-    config: SolverConfig,
-    coeffs: Mapping[str, object],
-) -> RouteReferenceBundle:
-    solver = Solver(operator=Operator(grid, problem.copy()), config=config)
-    kwargs: dict[str, Any] = {
-        "method": config.method,
-        "max_residual": config.max_residual,
-        "max_evaluations": config.max_evaluations,
-        "initial_policy": config.initial_policy,
-        "enable_verbose": False,
-        "enable_history": False,
-    }
-    if config.initial_policy is None:
-        kwargs["x0"] = solver.operator.pack_coefficients(coefficients_from_coeffs(coeffs))
-    solver.solve(**kwargs)
-    if solver.result is None:
-        raise RuntimeError("reference solve produced no SolverResult")
-    equilibrium = solver.build_equilibrium()
-    rho_axis = as_float64_array(equilibrium.rho)
-    psin_axis = as_float64_array(equilibrium.psin)
-    return RouteReferenceBundle(
-        result=solver.result,
-        equilibrium=equilibrium,
-        ref_profiles=build_route_reference_profiles(equilibrium),
-        reference_shape_x=extract_shape_x(solver.operator.problem.active_profiles, solver.result.x),
-        rho_axis=rho_axis,
-        psin_axis=psin_axis,
-        rho_interp_axis=prepare_interp_axis(rho_axis),
-        psin_interp_axis=prepare_interp_axis(psin_axis),
-        boundary=problem.boundary,
-        profile_coeffs=solver.operator.build_coeffs(solver.result.x, include_none=False),
-    )
-
-
-def constraint_route_domains(constraint: str) -> tuple[str, str]:
-    if constraint == "Ip_beta":
-        return "normalized", "normalized"
-    if constraint == "Ip":
-        return "normalized", "physical"
-    if constraint == "beta":
-        return "physical", "normalized"
-    if constraint == "null":
-        return "physical", "physical"
-    raise ValueError(f"unsupported constraint: {constraint!r}")
-
-
-def pressure_keys_for_coordinate(coordinate: str) -> tuple[str, str]:
-    if coordinate == "rho":
-        return "setup_Pn_r", "P_r"
-    if coordinate == "psin":
-        return "setup_Pn_psin", "P_psi"
-    raise ValueError(f"unsupported coordinate: {coordinate!r}")
-
-
-def pick_ref_profile(
-    ref: dict[str, np.ndarray | float],
-    normalized_key: str,
-    physical_key: str,
-    normalized: bool,
-) -> np.ndarray:
-    key = normalized_key if normalized else physical_key
-    return np.asarray(ref[key], dtype=np.float64)
+def safe_divisor(values: np.ndarray, *, floor: float = 1.0e-12) -> np.ndarray:
+    arr = np.asarray(values, dtype=np.float64)
+    signs = np.where(arr < 0.0, -1.0, 1.0)
+    return np.where(np.abs(arr) < floor, signs * floor, arr)
 
 
 def build_route_mode_inputs(
@@ -604,148 +717,150 @@ def build_route_mode_inputs(
     return heat_input, current_input
 
 
-def uniform_route_source_axis(spec: RouteBenchmarkSpec, sample_count: int) -> np.ndarray:
-    axis = np.linspace(0.0, 1.0, int(sample_count), dtype=np.float64)
-    route_key = (str(spec.mode).upper(), str(spec.coordinate).lower(), str(spec.input_kind).lower())
-    if source_parameterization_for_route_key(route_key) == "sqrt_psin":
-        return axis * axis
-    return axis
+def constraint_route_domains(constraint: str) -> tuple[str, str]:
+    if constraint == "Ip_beta":
+        return "normalized", "normalized"
+    if constraint == "Ip":
+        return "normalized", "physical"
+    if constraint == "beta":
+        return "physical", "normalized"
+    if constraint == "null":
+        return "physical", "physical"
+    raise ValueError(f"unsupported constraint: {constraint!r}")
 
 
-def resample_route_input(
-    values: np.ndarray,
-    source_axis: np.ndarray | PreparedInterpAxis,
+def pressure_keys_for_coordinate(coordinate: str) -> tuple[str, str]:
+    if coordinate == "rho":
+        return "setup_Pn_r", "P_r"
+    if coordinate == "psin":
+        return "setup_Pn_psin", "P_psi"
+    raise ValueError(f"unsupported coordinate: {coordinate!r}")
+
+
+def pick_ref_profile(
+    ref: dict[str, np.ndarray | float],
+    normalized_key: str,
+    physical_key: str,
+    normalized: bool,
+) -> np.ndarray:
+    key = normalized_key if normalized else physical_key
+    return np.asarray(ref[key], dtype=np.float64)
+
+
+def source_profiles_for_route(
     spec: RouteBenchmarkSpec,
     *,
+    nr: int,
+    nt: int,
     sample_count: int,
-) -> np.ndarray:
-    return profile_interp(source_axis, values, uniform_route_source_axis(spec, sample_count))
-
-
-def sample_route_input_on_grid(
-    values: np.ndarray,
-    source_axis: np.ndarray | PreparedInterpAxis,
-    grid_axis: np.ndarray,
-) -> np.ndarray:
-    return profile_interp(source_axis, values, grid_axis)
-
-
-def make_route_problem(
-    spec: RouteBenchmarkSpec,
-    reference: RouteReferenceBundle,
-    coeffs: Mapping[str, object],
-    *,
-    grid: Grid,
-    sample_count: int,
-) -> Problem:
+) -> tuple[np.ndarray, np.ndarray]:
+    reference = synthetic_route_reference()
     heat_profile, current_profile = build_route_mode_inputs(
         spec.mode,
         spec.coordinate,
         spec.constraint,
         reference.ref_profiles,
     )
-    if spec.input_kind == "grid":
+    if spec.nodes == "grid":
+        grid = Grid(Nr=int(nr), Nt=int(nt), quadrature_scheme="legendre")
         if spec.coordinate == "rho":
-            grid_axis = np.asarray(grid.rho, dtype=np.float64)
-            source_axis = reference.rho_interp_axis
+            target_axis = np.asarray(grid.rho, dtype=np.float64)
+            source_axis = reference.rho_axis
         else:
-            grid_axis = profile_interp(
-                reference.rho_interp_axis,
-                reference.psin_axis,
-                np.asarray(grid.rho, dtype=np.float64),
-            )
-            source_axis = reference.psin_interp_axis
-        heat_input = sample_route_input_on_grid(heat_profile, source_axis, grid_axis)
-        current_input = sample_route_input_on_grid(current_profile, source_axis, grid_axis)
-        nodes = "grid"
+            target_axis = profile_interp(reference.rho_axis, reference.psin_axis, grid.rho)
+            source_axis = reference.psin_axis
     else:
-        source_axis = (
-            reference.rho_interp_axis if spec.coordinate == "rho" else reference.psin_interp_axis
-        )
-        heat_input = resample_route_input(
-            heat_profile,
-            source_axis,
-            spec,
-            sample_count=sample_count,
-        )
-        current_input = resample_route_input(
-            current_profile,
-            source_axis,
-            spec,
-            sample_count=sample_count,
-        )
-        nodes = "uniform"
-    ip = (
-        float(reference.ref_profiles["Ip_constraint"])
-        if spec.constraint in {"Ip", "Ip_beta"}
-        else None
-    )
-    beta = (
-        float(reference.ref_profiles["beta_constraint"])
-        if spec.constraint in {"beta", "Ip_beta"}
-        else None
-    )
-    return Problem(
-        route=spec.mode,
-        active_profiles=active_profiles_from_coeffs(coeffs),
-        boundary=reference.boundary,
-        heat_input=heat_input,
-        current_input=current_input,
-        coordinate=spec.coordinate,
-        nodes=nodes,
-        Ip=ip,
-        beta=beta,
+        target_axis = uniform_route_source_axis(spec, sample_count)
+        source_axis = reference.rho_axis if spec.coordinate == "rho" else reference.psin_axis
+    return (
+        profile_interp(source_axis, heat_profile, target_axis).astype(np.float64),
+        profile_interp(source_axis, current_profile, target_axis).astype(np.float64),
     )
 
 
-def solve_route_case(
-    problem: Problem,
-    grid: Grid,
-    config: SolverConfig,
-    coeffs: Mapping[str, object],
-    *,
-    initial_policy: str | None | object = ...,  # ellipsis means use config/default solve behavior
-) -> Solver:
-    solver = Solver(operator=Operator(grid, problem.copy()), config=config)
-    x0 = solver.operator.pack_coefficients(coefficients_from_coeffs(coeffs))
-    kwargs: dict[str, Any] = {
-        "x0": x0,
-        "method": config.method,
-        "max_residual": config.max_residual,
-        "max_evaluations": config.max_evaluations,
-        "enable_verbose": False,
-        "enable_history": False,
-    }
-    if initial_policy is not ...:
-        kwargs["initial_policy"] = initial_policy
-        if initial_policy is not None:
-            kwargs.pop("x0", None)
-    solver.solve(**kwargs)
-    if solver.result is None:
-        raise RuntimeError("route solve produced no SolverResult")
-    return solver
+def uniform_route_source_axis(spec: RouteBenchmarkSpec, sample_count: int) -> np.ndarray:
+    axis = np.linspace(0.0, 1.0, int(sample_count), dtype=np.float64)
+    if spec.mode == "PP" and spec.coordinate == "psin" and spec.nodes == "uniform":
+        return axis * axis
+    return axis
+
+
+def profile_interp(
+    source_axis: np.ndarray,
+    values: np.ndarray,
+    target_axis: np.ndarray,
+) -> np.ndarray:
+    from scipy.interpolate import PchipInterpolator
+
+    source = np.asarray(source_axis, dtype=np.float64)
+    vals = np.asarray(values, dtype=np.float64)
+    target = np.asarray(target_axis, dtype=np.float64)
+    order = np.argsort(source)
+    sorted_axis, unique_index = np.unique(source[order], return_index=True)
+    sorted_values = vals[order][unique_index]
+    if sorted_axis.size < 2:
+        fill_value = float(sorted_values[0] if sorted_values.size else 0.0)
+        return np.full_like(target, fill_value, dtype=np.float64)
+    if sorted_axis.size < 3:
+        return np.interp(target, sorted_axis, sorted_values).astype(np.float64, copy=False)
+    return np.asarray(PchipInterpolator(sorted_axis, sorted_values, extrapolate=True)(target))
+
+
+def active_profiles_from_topology(topology: KernelTopology) -> dict[str, int]:
+    active: dict[str, int] = {}
+    for name, count in (
+        ("h", topology.h_count),
+        ("v", topology.v_count),
+        ("k", topology.kappa_count),
+        ("psin", topology.psin_count),
+        ("F", topology.F_count),
+    ):
+        if count > 0:
+            active[name] = int(count)
+    for order, count in enumerate(topology.c_counts):
+        if count > 0:
+            active[f"c{order}"] = int(count)
+    for order, count in enumerate(topology.s_counts, start=1):
+        if count > 0:
+            active[f"s{order}"] = int(count)
+    return active
+
+
+def extract_shape_x(topology: KernelTopology, x: np.ndarray) -> np.ndarray:
+    active_profiles = active_profiles_from_topology(topology)
+    profile_names = build_profile_names(topology.M_max)
+    shape_profile_names = build_shape_profile_names(topology.M_max)
+    profile_index = build_profile_index(profile_names)
+    _, coeff_index, _ = build_profile_layout(active_profiles, profile_names=profile_names)
+    shape_values: list[float] = []
+    for degree in range(coeff_index.shape[1]):
+        for name in shape_profile_names:
+            idx = int(coeff_index[profile_index[name], degree])
+            if idx >= 0:
+                shape_values.append(float(x[idx]))
+    return np.asarray(shape_values, dtype=np.float64)
 
 
 def shape_error(reference_x: np.ndarray, current_x: np.ndarray) -> float:
     n = min(reference_x.shape[0], current_x.shape[0])
     if n == 0:
         return 0.0
-    return float(np.max(np.abs(current_x[:n] - reference_x[:n])))
+    return float(np.max(np.abs(reference_x[:n] - current_x[:n])))
 
 
 def relative_profile_errors(
     reference_values: np.ndarray,
     current_values: np.ndarray,
 ) -> tuple[float, float]:
-    reference_values = as_float64_array(reference_values)
-    current_values = as_float64_array(current_values)
-    n = min(reference_values.shape[0], current_values.shape[0])
+    ref = np.asarray(reference_values, dtype=np.float64)
+    cur = np.asarray(current_values, dtype=np.float64)
+    n = min(ref.shape[0], cur.shape[0])
     if n == 0:
         return 0.0, 0.0
-    reference_values = reference_values[:n]
-    current_values = current_values[:n]
-    diff = current_values - reference_values
-    scale = max(float(np.max(np.abs(reference_values))), 1.0e-12)
+    ref = ref[:n]
+    cur = cur[:n]
+    diff = cur - ref
+    scale = max(float(np.max(np.abs(ref))), 1.0e-12)
     return float(np.sqrt(np.mean(diff * diff)) / scale), float(np.max(np.abs(diff)) / scale)
 
 
@@ -755,16 +870,15 @@ def window_derivative_sign_changes(
     side: str,
     window: int = ROUTE_DIAGNOSTIC_SIGN_CHANGE_WINDOW,
 ) -> int:
-    values = as_float64_array(values)
-    count = min(int(window), values.shape[0])
+    arr = np.asarray(values, dtype=np.float64)
+    count = min(int(window), arr.shape[0])
     if side == "head":
-        sample = values[:count]
+        sample = arr[:count]
     elif side == "tail":
-        sample = values[-count:]
+        sample = arr[-count:]
     else:
         raise ValueError(f"unsupported side {side!r}")
-    delta = np.diff(sample)
-    signs = np.sign(delta)
+    signs = np.sign(np.diff(sample))
     nonzero = signs[signs != 0.0]
     if nonzero.size < 2:
         return 0
@@ -772,13 +886,11 @@ def window_derivative_sign_changes(
 
 
 def diagnostic_profile_metrics(
-    reference_axis: PreparedInterpAxis,
+    reference_axis: np.ndarray,
     reference_values: np.ndarray,
     current_axis: np.ndarray,
     current_values: np.ndarray,
 ) -> tuple[float, float, int, int]:
-    current_axis = as_float64_array(current_axis)
-    current_values = as_float64_array(current_values)
     reference_on_current = profile_interp(reference_axis, reference_values, current_axis)
     rel_rms, rel_max = relative_profile_errors(reference_on_current, current_values)
     return (
@@ -790,115 +902,444 @@ def diagnostic_profile_metrics(
 
 
 def benchmark_route_case_diagnostics(
-    reference: RouteReferenceBundle,
-    equilibrium: object,
+    reference: RouteReference,
+    equilibrium: Any,
     shape_x: np.ndarray,
 ) -> dict[str, float | int]:
-    psi_r_rel_rms_error, psi_r_rel_max_error, psi_r_head_sign_changes, psi_r_tail_sign_changes = (
+    psi_r_rel_rms_error, psi_r_rel_max_error, psi_r_head_changes, psi_r_tail_changes = (
         diagnostic_profile_metrics(
-            reference.rho_interp_axis,
+            reference.rho_axis,
             np.asarray(reference.ref_profiles["psi_r"], dtype=np.float64),
             equilibrium.rho,
             equilibrium.alpha2 * equilibrium.psin_r,
         )
     )
-    (
-        ff_psi_rel_rms_error,
-        ff_psi_rel_max_error,
-        ff_psi_head_sign_changes,
-        ff_psi_tail_sign_changes,
-    ) = (
+    ff_rel_rms_error, ff_rel_max_error, ff_head_changes, ff_tail_changes = (
         diagnostic_profile_metrics(
-            reference.rho_interp_axis,
+            reference.rho_axis,
             np.asarray(reference.ref_profiles["FF_psi"], dtype=np.float64),
             equilibrium.rho,
             equilibrium.alpha1 * equilibrium.FFn_psin,
         )
     )
-    (
-        mu0_p_psi_rel_rms_error,
-        mu0_p_psi_rel_max_error,
-        mu0_p_psi_head_sign_changes,
-        mu0_p_psi_tail_sign_changes,
-    ) = diagnostic_profile_metrics(
-        reference.rho_interp_axis,
-        np.asarray(reference.ref_profiles["mu0_P_psi"], dtype=np.float64),
-        equilibrium.rho,
-        equilibrium.alpha1 * equilibrium.Pn_psin,
+    mu0_p_rel_rms_error, mu0_p_rel_max_error, mu0_p_head_changes, mu0_p_tail_changes = (
+        diagnostic_profile_metrics(
+            reference.rho_axis,
+            np.asarray(reference.ref_profiles["mu0_P_psi"], dtype=np.float64),
+            equilibrium.rho,
+            equilibrium.alpha1 * equilibrium.Pn_psin,
+        )
     )
     return {
         "shape_error": shape_error(reference.reference_shape_x, shape_x),
+        "shape_match_tol": ROUTE_SHAPE_MATCH_TOL,
         "psi_r_rel_rms_error": psi_r_rel_rms_error,
         "psi_r_rel_max_error": psi_r_rel_max_error,
-        "psi_r_head_sign_changes": psi_r_head_sign_changes,
-        "psi_r_tail_sign_changes": psi_r_tail_sign_changes,
-        "ff_psi_rel_rms_error": ff_psi_rel_rms_error,
-        "ff_psi_rel_max_error": ff_psi_rel_max_error,
-        "ff_psi_head_sign_changes": ff_psi_head_sign_changes,
-        "ff_psi_tail_sign_changes": ff_psi_tail_sign_changes,
-        "mu0_p_psi_rel_rms_error": mu0_p_psi_rel_rms_error,
-        "mu0_p_psi_rel_max_error": mu0_p_psi_rel_max_error,
-        "mu0_p_psi_head_sign_changes": mu0_p_psi_head_sign_changes,
-        "mu0_p_psi_tail_sign_changes": mu0_p_psi_tail_sign_changes,
+        "psi_r_head_sign_changes": psi_r_head_changes,
+        "psi_r_tail_sign_changes": psi_r_tail_changes,
+        "ff_psi_rel_rms_error": ff_rel_rms_error,
+        "ff_psi_rel_max_error": ff_rel_max_error,
+        "ff_psi_head_sign_changes": ff_head_changes,
+        "ff_psi_tail_sign_changes": ff_tail_changes,
+        "mu0_p_psi_rel_rms_error": mu0_p_rel_rms_error,
+        "mu0_p_psi_rel_max_error": mu0_p_rel_max_error,
+        "mu0_p_psi_head_sign_changes": mu0_p_head_changes,
+        "mu0_p_psi_tail_sign_changes": mu0_p_tail_changes,
     }
 
 
-def iter_route_specs(
+def source_profiles_from_geqdsk(
+    geqdsk: Geqdsk,
     *,
-    scope: str,
-    default_scope: str = "ip-uniform",
-    allow_grid: bool = True,
-) -> tuple[RouteBenchmarkSpec, ...]:
-    if scope == default_scope:
-        input_kinds = ("uniform",)
-        constraints_by_mode = {mode: ("Ip",) for mode in ROUTE_BENCHMARK_MODES}
-    elif scope in {"uniform", "full"}:
-        input_kinds = ["uniform"]
-        if scope == "full" and allow_grid:
-            input_kinds.append("grid")
-        constraints_by_mode = ROUTE_BENCHMARK_MODE_CONSTRAINTS
-    else:
-        raise ValueError(f"unknown route benchmark scope {scope!r}")
-    return tuple(
-        RouteBenchmarkSpec(
-            mode=mode,
-            coordinate=coordinate,
-            constraint=constraint,
-            input_kind=input_kind,
-        )
-        for mode in ROUTE_BENCHMARK_MODES
-        for coordinate in ROUTE_BENCHMARK_COORDINATES
-        for input_kind in input_kinds
-        for constraint in constraints_by_mode[mode]
+    route: str,
+    coordinate: str,
+    sample_count: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    axis = np.linspace(0.0, 1.0, int(sample_count), dtype=np.float64)
+    source_axis = axis if coordinate == "psin" else axis * axis
+    geqdsk_axis = np.linspace(0.0, 1.0, max(int(geqdsk.P_psi.size), 2), dtype=np.float64)
+    p_psi = _finite_or_default_profile(geqdsk.P_psi, geqdsk_axis.size, scale=1.0e6)
+    ff_psi = _finite_or_default_profile(geqdsk.FF_psi, geqdsk_axis.size, scale=1.0)
+    heat_profile = np.interp(source_axis, geqdsk_axis, p_psi)
+    current_profile = np.interp(source_axis, geqdsk_axis, ff_psi)
+    if coordinate == "rho":
+        heat_profile = heat_profile * (2.0 * np.maximum(axis, 1.0e-12))
+        current_profile = current_profile * (2.0 * np.maximum(axis, 1.0e-12))
+    if route in {"PI", "PJ1", "PJ2"}:
+        current_profile = current_profile / MU0
+    return heat_profile.astype(np.float64), current_profile.astype(np.float64)
+
+
+def _finite_or_default_profile(values: np.ndarray, size: int, *, scale: float) -> np.ndarray:
+    arr = np.asarray(values, dtype=np.float64)
+    if arr.ndim == 1 and arr.size == size and np.all(np.isfinite(arr)):
+        return arr
+    axis = np.linspace(0.0, 1.0, int(size), dtype=np.float64)
+    return scale * (1.0 - axis)
+
+
+def route_kernel_case(
+    spec: RouteBenchmarkSpec,
+    *,
+    nr: int = DEFAULT_ROUTE_NR,
+    nt: int = DEFAULT_ROUTE_NT,
+    sample_count: int | None = None,
+    method: str = SYNTHETIC_SOLVER_METHOD,
+    max_residual: float = SYNTHETIC_SOLVER_MAX_RESIDUAL,
+    max_evaluations: int | None = SYNTHETIC_SOLVER_MAX_EVALUATIONS,
+    pj2_f_count: int = 6,
+    initial: str = "cold",
+    norm: str = "fast",
+) -> KernelCase:
+    count = int(nr if spec.nodes == "grid" else (sample_count or DEFAULT_ROUTE_SAMPLE_COUNT))
+    ip_constraint, beta_constraint = constraint_flags(spec.constraint)
+    heat_profile, current_profile = source_profiles_for_route(
+        spec,
+        nr=nr,
+        nt=nt,
+        sample_count=count,
+    )
+    signature = (
+        SYNTHETIC_PSIN_ROUTE_SIGNATURE
+        if spec.coordinate == "psin" and spec.nodes == "uniform"
+        else SYNTHETIC_ROUTE_SIGNATURE
+    )
+    topology = KernelTopology(
+        **profile_counts_from_signature(
+            signature,
+            route=spec.mode,
+            coordinate=spec.coordinate,
+            nodes=spec.nodes,
+            pj2_f_count=pj2_f_count,
+        ),
+        Nr=int(nr),
+        Nt=int(nt),
+        route=spec.mode,
+        coordinate=spec.coordinate,
+        nodes=spec.nodes,
+        ip_constraint=ip_constraint,
+        beta_constraint=beta_constraint,
+        sample_count=count,
+        L_max=None,
+        M_max=DEFAULT_ROUTE_M_MAX,
+        K_max=DEFAULT_ROUTE_K_MAX,
+    )
+    source = KernelSource(
+        heat_profile=heat_profile,
+        current_profile=current_profile,
+        Ip=3.0e6 if ip_constraint else np.nan,
+        beta=0.02 if beta_constraint else np.nan,
+        case_name=spec.case_name,
+    )
+    config = KernelConfig(
+        method=method,
+        max_residual=float(max_residual),
+        max_evaluations=max_evaluations,
+        initial=initial,
+        continuation="cold",
+        norm=norm,
+    )
+    return KernelCase(spec.case_name, topology, synthetic_boundary(), source, config)
+
+
+def geqdsk_kernel_case(
+    case_key: str,
+    config_label: str,
+    *,
+    geqdsk_path: Path | None = None,
+    route_spec: RouteBenchmarkSpec | None = None,
+    signature: dict[str, int] | None = None,
+    nr: int = REFERENCE_LAYOUT_NR,
+    nt: int = REFERENCE_LAYOUT_NT,
+    sample_count: int | None = None,
+    method: str = "levenberg-marquardt",
+    max_residual: float = SYNTHETIC_SOLVER_MAX_RESIDUAL,
+    max_evaluations: int | None = 400,
+    initial: str = "cold",
+    norm: str = "none",
+    boundary_fit_m: int = 10,
+    boundary_fit_n: int = 10,
+    boundary_maxtol: float = 1.0,
+) -> KernelCase:
+    geqdsk = Geqdsk(CASE_REFERENCE_GFILES[case_key] if geqdsk_path is None else geqdsk_path)
+    boundary = KernelBoundary(
+        B0=float(geqdsk.Bt0),
+        R_boundary=np.asarray(geqdsk.boundary[:, 0], dtype=np.float64),
+        Z_boundary=np.asarray(geqdsk.boundary[:, 1], dtype=np.float64),
+        c_order=int(boundary_fit_m),
+        s_order=int(boundary_fit_n),
+        fit_maxtol=float(boundary_maxtol),
+    )
+    spec = route_spec or RouteBenchmarkSpec("PF", "psin", "uniform", "Ip")
+    effective_signature = (
+        dict(signature) if signature is not None else geqdsk_signature(case_key, config_label)
+    )
+    count = int(
+        nr
+        if spec.nodes == "grid"
+        else (sample_count or max(int(geqdsk.P_psi.size), int(geqdsk.FF_psi.size), 9))
+    )
+    c_order, s_order = kernel_boundary_shape_orders(boundary)
+    m_max = max(c_order, s_order, 1)
+    ip_constraint, beta_constraint = constraint_flags(spec.constraint)
+    heat_profile, current_profile = source_profiles_from_geqdsk(
+        geqdsk,
+        route=spec.mode,
+        coordinate=spec.coordinate,
+        sample_count=count,
+    )
+    topology = KernelTopology(
+        **profile_counts_from_signature(
+            effective_signature,
+            route=spec.mode,
+            coordinate=spec.coordinate,
+            nodes=spec.nodes,
+            pj2_f_count=5,
+        ),
+        Nr=int(nr),
+        Nt=int(nt),
+        route=spec.mode,
+        coordinate=spec.coordinate,
+        nodes=spec.nodes,
+        ip_constraint=ip_constraint,
+        beta_constraint=beta_constraint,
+        sample_count=count,
+        L_max=None,
+        M_max=m_max,
+        K_max=max(2, m_max),
+    )
+    source = KernelSource(
+        heat_profile=heat_profile,
+        current_profile=current_profile,
+        Ip=abs(float(geqdsk.Ip)) if ip_constraint else np.nan,
+        beta=0.02 if beta_constraint else np.nan,
+        case_name=f"{case_key}-{config_label}-{spec.case_name}",
+    )
+    config = KernelConfig(
+        method=method,
+        max_residual=float(max_residual),
+        max_evaluations=max_evaluations,
+        initial=initial,
+        continuation="cold",
+        norm=norm,
+    )
+    return KernelCase(
+        f"{case_key}_{config_label}_{spec.case_name}",
+        topology,
+        boundary,
+        source,
+        config,
     )
 
 
-def route_spec_label(spec: RouteBenchmarkSpec) -> str:
-    return spec.case_name
+def geqdsk_signature(case_key: str, config_label: str) -> dict[str, int]:
+    signature = GEQDSK_CONFIG_SIGNATURES.get((case_key, config_label))
+    if signature is None:
+        known = ", ".join(f"{case}:{config}" for case, config in GEQDSK_CONFIG_SIGNATURES)
+        raise KeyError(f"missing benchmark signature for {case_key}:{config_label}; known: {known}")
+    return {str(name): int(value) for name, value in signature.items() if int(value) > 0}
 
 
-def route_spec_selector(spec: RouteBenchmarkSpec) -> str:
-    return f"{spec.mode}:{spec.coordinate}:{spec.input_kind}:{spec.constraint}"
+def topology_profile_counts(topology: KernelTopology) -> dict[str, Any]:
+    return {
+        "h": int(topology.h_count),
+        "v": int(topology.v_count),
+        "kappa": int(topology.kappa_count),
+        "psin": int(topology.psin_count),
+        "F": int(topology.F_count),
+        "c": [int(value) for value in topology.c_counts],
+        "s": [int(value) for value in topology.s_counts],
+    }
 
 
-def filter_route_specs(
-    specs: tuple[RouteBenchmarkSpec, ...], selected: set[str] | None
-) -> tuple[RouteBenchmarkSpec, ...]:
-    if selected is None:
-        return specs
-    selected_lower = {item.lower() for item in selected}
-    retained = tuple(
-        spec
-        for spec in specs
-        if route_spec_label(spec).lower() in selected_lower
-        or route_spec_selector(spec).lower() in selected_lower
+def route_topology_payload(
+    topology: KernelTopology,
+    recipe: KernelRecipe,
+    *,
+    status: str = "planned",
+    warnings: Sequence[str] = (),
+) -> dict[str, Any]:
+    return {
+        "status": status,
+        "key": topology.key,
+        "source": {
+            "route": topology.route,
+            "route_key": [topology.route, topology.coordinate, topology.nodes],
+            "coordinate": topology.coordinate,
+            "nodes": topology.nodes,
+            "constraint": topology.constraint_label,
+            "uses_Ip": bool(topology.ip_constraint),
+            "uses_beta": bool(topology.beta_constraint),
+            "sample_count": int(topology.sample_count),
+        },
+        "layout": {"packed": recipe.layout},
+        "recipe": {
+            "backend": recipe.backend,
+            "preset": recipe.build,
+            "layout": {"packed": recipe.layout},
+        },
+        "profile_counts": topology_profile_counts(topology),
+        "grid": {"Nr": int(topology.Nr), "Nt": int(topology.Nt)},
+        "sample_count": int(topology.sample_count),
+        "warnings": [str(item) for item in warnings],
+    }
+
+
+def solve_numba_case(case: KernelCase) -> tuple[SolveResult, Any]:
+    kernel = Kernel(
+        topology=case.topology,
+        recipe=KernelRecipe(backend="numba", layout="degree"),
+        config=case.config,
     )
-    matched = {route_spec_label(spec).lower() for spec in retained}
-    matched.update(route_spec_selector(spec).lower() for spec in retained)
-    missing = selected_lower.difference(matched)
-    if missing:
-        raise ValueError(f"unknown case selector(s): {', '.join(sorted(missing))}")
-    return retained
+    result = kernel.solve(case.boundary, case.source)
+    return result, kernel
+
+
+def solve_native_case(
+    case: KernelCase, *, recipe: KernelRecipe | None = None
+) -> tuple[SolveResult, Any]:
+    kernel = Kernel(
+        topology=case.topology,
+        recipe=recipe or KernelRecipe(backend="cxx", layout="degree"),
+        config=case.config,
+    )
+    result = kernel.solve(case.boundary, case.source)
+    return result, kernel
+
+
+def measure_solver(
+    solve_once: Callable[[], tuple[SolveResult, Any]],
+    *,
+    warmup: int,
+    repeat: int,
+) -> dict[str, Any]:
+    for _ in range(max(0, int(warmup))):
+        result, kernel = solve_once()
+        close = getattr(kernel, "close", None)
+        if close is not None:
+            close()
+        if not isinstance(result, SolveResult):
+            raise RuntimeError("warmup solve did not return SolveResult")
+
+    timings: list[float] = []
+    wall_timings: list[float] = []
+    results: list[SolveResult] = []
+    nfev: list[int] = []
+    njev: list[int] = []
+    iterations: list[int] = []
+    callbacks: list[int] = []
+    jacobian_component_evaluations: list[int] = []
+    jvp_evaluations: list[int] = []
+    last_kernel = None
+    for _ in range(max(1, int(repeat))):
+        started = time.perf_counter_ns()
+        result, kernel = solve_once()
+        wall_timings.append(float(time.perf_counter_ns() - started) / 1.0e6)
+        timings.append(float(result.elapsed_ms))
+        results.append(result)
+        nfev.append(int(result.nfev))
+        njev.append(int(result.njev))
+        iterations.append(int(result.linear_iterations))
+        callbacks.append(int(result.callbacks))
+        jacobian_component_evaluations.append(int(result.jacobian_component_evaluations))
+        jvp_evaluations.append(int(result.jvp_evaluations))
+        if last_kernel is not None:
+            close = getattr(last_kernel, "close", None)
+            if close is not None:
+                close()
+        last_kernel = kernel
+    return {
+        "timings_ms": timings,
+        "wall_timings_ms": wall_timings,
+        "median_ms": median(timings),
+        "result": results[-1],
+        "kernel": last_kernel,
+        "success": all(bool(result.success) for result in results),
+        "nfev": nfev,
+        "njev": njev,
+        "iterations": iterations,
+        "callbacks": callbacks,
+        "jacobian_component_evaluations": jacobian_component_evaluations,
+        "jvp_evaluations": jvp_evaluations,
+        "nfev_median": median([float(value) for value in nfev]),
+    }
+
+
+def result_payload(result: SolveResult) -> dict[str, Any]:
+    return {
+        "success": bool(result.success),
+        "info": int(result.info),
+        "nfev": int(result.nfev),
+        "njev": int(result.njev),
+        "callbacks": int(result.callbacks),
+        "linear_iterations": int(result.linear_iterations),
+        "raw_norm": float(result.raw_norm),
+        "scaled_norm": float(result.scaled_norm),
+        "alpha": [float(value) for value in np.asarray(result.alpha, dtype=np.float64)],
+        "x_size": int(result.x.shape[0]),
+    }
+
+
+def row_payload(name: str, case: KernelCase, measure: dict[str, Any]) -> dict[str, Any]:
+    result = measure["result"]
+    return {
+        "case": name,
+        "topology_key": case.topology.key,
+        "route": case.topology.route,
+        "coordinate": case.topology.coordinate,
+        "nodes": case.topology.nodes,
+        "constraint": case.topology.constraint_label,
+        "x_size": case.topology.x_size,
+        "median_ms": float(measure["median_ms"]),
+        "nfev_median": float(measure["nfev_median"]),
+        **result_payload(result),
+    }
+
+
+def engine_payload(measure: dict[str, Any]) -> dict[str, Any]:
+    result = measure["result"]
+    return {
+        "success_all": bool(measure["success"]),
+        "info": int(result.info),
+        "timing": float_stats(measure["timings_ms"]),
+        "wall_timing": float_stats(measure.get("wall_timings_ms", [])),
+        "inner_timing": float_stats(measure["timings_ms"]),
+        "nfev": int_stats(measure["nfev"]),
+        "njev": int_stats(measure["njev"]),
+        "iterations": int_stats(measure["iterations"]),
+        "callbacks": int_stats(measure["callbacks"]),
+        "jacobian_component_evaluations": int_stats(measure["jacobian_component_evaluations"]),
+        "jvp_evaluations": int_stats(measure["jvp_evaluations"]),
+        "raw_norm": float(result.raw_norm),
+        "scaled_norm": float(result.scaled_norm),
+        "x": result.x.tolist(),
+        "raw": result.raw.tolist(),
+        "alpha": result.alpha.tolist(),
+        "message": "",
+    }
+
+
+def runtime_payload(
+    *,
+    status: str,
+    x_size: int,
+    engine: str,
+    measure: dict[str, Any] | None,
+    failure_reason: str | None = None,
+    diagnostics: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "status": status,
+        "x_size": int(x_size),
+    }
+    if measure is not None:
+        payload["engine"] = engine
+        payload["engines"] = {engine: engine_payload(measure)}
+    if diagnostics is not None:
+        payload["diagnostics"] = diagnostics
+    if failure_reason is not None:
+        payload["failure_reason"] = failure_reason
+    return payload
 
 
 def summarize_runtime_rows(rows: list[dict[str, Any]]) -> dict[str, int]:
@@ -919,14 +1360,6 @@ def summarize_runtime_rows(rows: list[dict[str, Any]]) -> dict[str, int]:
     return summary
 
 
-def runtime_engine_payload(runtime: dict[str, Any], engine_label: str) -> dict[str, Any] | None:
-    engines = runtime.get("engines")
-    if not isinstance(engines, dict):
-        return None
-    payload = engines.get(engine_label)
-    return payload if isinstance(payload, dict) else None
-
-
 def timing_median_ms(engine: dict[str, Any] | None) -> float:
     if engine is None:
         return float("nan")
@@ -936,341 +1369,84 @@ def timing_median_ms(engine: dict[str, Any] | None) -> float:
     return float(timing.get("median_ms", float("nan")))
 
 
-def nfev_median(engine: dict[str, Any] | None) -> str:
-    if engine is None:
-        return "n/a"
-    nfev = engine.get("nfev")
-    if not isinstance(nfev, dict):
-        return "n/a"
-    return str(nfev.get("median", "n/a"))
+def max_abs(lhs: Any, rhs: Any) -> float:
+    lhs_arr = np.asarray(lhs, dtype=np.float64)
+    rhs_arr = np.asarray(rhs, dtype=np.float64)
+    if lhs_arr.shape != rhs_arr.shape:
+        return float("inf")
+    return float(np.max(np.abs(lhs_arr - rhs_arr))) if lhs_arr.size else 0.0
 
 
-def format_optional_float(value: float, *, decimals: int = 6) -> str:
-    return "n/a" if not np.isfinite(value) else f"{value:.{decimals}f}"
-
-
-def format_optional_sci(value: Any) -> str:
-    try:
-        parsed = float(value)
-    except (TypeError, ValueError):
-        return "n/a"
-    return "n/a" if not np.isfinite(parsed) else f"{parsed:.2e}"
-
-
-def runtime_status_cell(status: object) -> str:
-    text = str(status)
-    if text == "passed":
-        return "[green]passed[/]"
-    if text == "failed":
-        return "[red]failed[/]"
-    if text == "not_requested":
-        return "[blue]not requested[/]"
-    return text
-
-
-def runtime_progress_phase(status: object) -> str:
-    text = str(status)
-    if text == "passed":
-        return "[green]passed[/]"
-    if text == "failed":
-        return "[red]failed[/]"
-    if text == "not_requested":
-        return "[blue]skip[/]"
-    return "[dim]done[/]"
-
-
-def grid_payload(grid: Grid) -> dict[str, Any]:
-    return {
-        "Nr": int(grid.Nr),
-        "Nt": int(grid.Nt),
-        "L_max": int(grid.L_max),
-        "M_max": int(grid.M_max),
-        "K_max": None if grid.K_max is None else int(grid.K_max),
-        "quadrature_scheme": str(grid.quadrature_scheme),
-        "calculus_scheme": str(grid.calculus_scheme),
-    }
-
-
-def read_geqdsk(path: str):
-    geqdsk = load_veqpy_components()["Geqdsk"]()
-    geqdsk.read_geqdsk(str(path))
-    return geqdsk
-
-
-def load_equilibrium_json(path: str):
-    if not os.path.exists(path):
-        raise FileNotFoundError(f"Missing equilibrium JSON: {path}")
-    return load_veqpy_components()["Equilibrium"].load(path)
-
-
-def build_pf_reference_profiles(equilibrium: Any) -> dict[str, np.ndarray | float]:
-    psin_r = as_float64_array(equilibrium.psin_r, copy=True)
-    psin_r_safe = np.where(np.abs(psin_r) > 1.0e-14, psin_r, 1.0e-14)
-    pn_psin = as_float64_array(equilibrium.Pn_r, copy=True) / psin_r_safe
-    return {
-        "psin": as_float64_array(equilibrium.psin, copy=True),
-        "FFn_psin": as_float64_array(equilibrium.FFn_r, copy=True) / psin_r_safe,
-        "Pn_psin": pn_psin,
-        "setup_Pn_psin": pn_psin / MU0,
-    }
-
-
-def build_geqdsk_boundary(geqdsk: Any, *, fit_m: int, fit_n: int, return_fit: bool = False):
-    components = load_veqpy_components()
-    fit = components["fit_boundary_params"](
-        geqdsk,
-        M=int(fit_m),
-        N=int(fit_n),
-        maxtol=BOUNDARY_MAXTOL,
-        R0=None,
-        Z0=None,
-        a=None,
-        ka=None,
-    )
-    boundary = components["Boundary"](
-        a=float(fit["a"]),
-        R0=float(fit["R0"]),
-        Z0=float(fit["Z0"]),
-        B0=float(geqdsk.Bt0),
-        ka=float(fit["ka"]),
-        c_offsets=np.asarray(fit["c_offsets"], dtype=np.float64),
-        s_offsets=np.asarray(fit["s_offsets"], dtype=np.float64),
-    )
-    return (boundary, fit) if return_fit else boundary
-
-
-def load_pf_benchmark(backend: str):
-    os.environ["VEQPY_BACKEND"] = str(backend)
-    components = load_veqpy_components()
-    reference_grid = components["Grid"](
-        Nr=REFERENCE_LAYOUT_NR,
-        Nt=REFERENCE_LAYOUT_NT,
-        quadrature_scheme="legendre",
-    )
-    config = components["SolverConfig"](
-        method="hybr",
-        max_evaluations=REFERENCE_SOLVER_MAXFEV,
-        initial_policy=SOLVER_INITIAL_POLICY,
-        enable_verbose=False,
-        enable_fallback=False,
-        enable_history=False,
-    )
-    return SimpleNamespace(
-        Grid=components["Grid"],
-        Operator=components["Operator"],
-        Problem=components["Problem"],
-        Solver=components["Solver"],
-        CONFIG=config,
-        REFERENCE_GRID=reference_grid,
-    )
-
-
-def build_pf_reference_case(case_key: str) -> PfReferenceCase:
-    equilibrium = load_equilibrium_json(CASE_REFERENCE_EQUILIBRIUM_JSONS[case_key])
-    geqdsk = read_geqdsk(CASE_REFERENCE_GFILES[case_key])
-    boundary = build_geqdsk_boundary(
-        geqdsk,
-        fit_m=CASE_BOUNDARY_FIT_M[case_key],
-        fit_n=CASE_BOUNDARY_FIT_N[case_key],
-    )
-    return PfReferenceCase(
-        case_key=case_key,
-        boundary=boundary,
-        geqdsk=geqdsk,
-        equilibrium=equilibrium,
-        ref_profiles=build_pf_reference_profiles(equilibrium),
-        psin_interp_axis=prepare_interp_axis(np.asarray(equilibrium.psin, dtype=np.float64)),
-    )
-
-
-def make_profile_coeffs(
-    signature: dict[str, int],
+def continuation_points(
+    case: KernelCase,
     *,
-    max_lengths: dict[str, int],
-) -> dict[str, list[float] | None]:
-    profile_coeffs: dict[str, list[float] | None] = {name: None for name in max_lengths}
-    for name, length in signature.items():
-        coeff_length = int(length)
-        if coeff_length > 0:
-            profile_coeffs[name] = [0.0] * coeff_length
-    return profile_coeffs
-
-
-def build_pf_case(benchmark: Any, reference: PfReferenceCase, signature: dict[str, int]):
-    return benchmark.Problem(
-        route="PF",
-        coordinate="psin",
-        nodes="uniform",
-        active_profiles=active_profiles_from_coeffs(
-            make_profile_coeffs(
-                signature,
-                max_lengths=CASE_REFERENCE_PROFILE_LENGTHS[reference.case_key],
-            )
-        ),
-        boundary=reference.boundary,
-        heat_input=np.asarray(reference.geqdsk.P_psi, dtype=np.float64),
-        current_input=np.asarray(reference.geqdsk.FF_psi, dtype=np.float64),
-        Ip=float(reference.geqdsk.Ip),
-        beta=None,
+    update: str,
+    span: float,
+    points: int,
+) -> tuple[KernelCase, ...]:
+    offsets = _scan_offsets(points=points, span=span)
+    return tuple(
+        _updated_case(case, update=update, offset=offset, index=index)
+        for index, offset in enumerate(offsets)
     )
 
 
-def reduced_equilibrium_json_path(case_key: str, config_label: str) -> str:
-    return REDUCED_EQUILIBRIUM_JSON_TEMPLATE.format(
-        case_key=str(case_key),
-        config_label=str(config_label).lower(),
-    )
+def _scan_offsets(*, points: int, span: float) -> tuple[float, ...]:
+    if points <= 0:
+        raise ValueError("points must be positive")
+    if points == 1:
+        return (0.0,)
+    lower = -0.5 * float(span)
+    step = float(span) / float(points - 1)
+    return tuple(float(lower + index * step) for index in range(points))
 
 
-def load_reduced_equilibrium_manifest(
-    path: str | None = None,
-) -> dict[tuple[str, str], dict[str, object]]:
-    path = REDUCED_EQUILIBRIUM_MANIFEST_PATH if path is None else str(path)
-    if not os.path.exists(path):
-        raise FileNotFoundError(
-            f"Missing reduced-equilibrium manifest: {path}. "
-            "Run `python scripts/07-pareto-analysis.py` first."
+def _updated_case(case: KernelCase, *, update: str, offset: float, index: int) -> KernelCase:
+    suffix = f"{update}-{index:03d}"
+    boundary = case.boundary
+    source = case.source
+    if update in {"boundary", "mixed"}:
+        boundary = materialize_kernel_boundary(boundary).boundary
+        boundary = replace(
+            boundary,
+            c_offsets=_scale_array(boundary.c_offsets, offset, strength=0.5, keep_first=False),
+            s_offsets=_scale_array(boundary.s_offsets, offset, strength=0.5, keep_first=False),
         )
-    with open(path, encoding="utf-8") as f:
-        payload = json.load(f)
-    entries = payload.get("entries", []) if isinstance(payload, dict) else []
-    manifest: dict[tuple[str, str], dict[str, object]] = {}
-    for entry in entries:
-        if not isinstance(entry, dict):
+    if update in {"ip", "mixed"} and np.isfinite(source.Ip):
+        source = replace(source, Ip=float(source.Ip) * (1.0 + offset))
+    if update in {"source", "mixed"}:
+        source = replace(
+            source,
+            heat_profile=_scale_profile(source.heat_profile, offset, sign=1.0),
+            current_profile=_scale_profile(source.current_profile, offset, sign=-1.0),
+        )
+    source = replace(source, case_name=f"{source.case_name or case.name}-{suffix}")
+    return replace(case, name=f"{case.name}_{suffix}", boundary=boundary, source=source)
+
+
+def _scale_array(
+    values: np.ndarray | tuple[float, ...], offset: float, *, strength: float, keep_first: bool
+) -> np.ndarray:
+    arr = np.array(values, dtype=np.float64, copy=True)
+    for index in range(arr.size):
+        if keep_first and index == 0:
             continue
-        case_key = str(entry.get("case_key", ""))
-        config_label = str(entry.get("config_label", ""))
-        if case_key and config_label:
-            manifest[(case_key, config_label)] = entry
-    return manifest
+        direction = 1.0 if index % 2 == 0 else -1.0
+        arr[index] *= 1.0 + strength * offset * direction / float(index + 1)
+    return arr
 
 
-def load_reference_equilibrium_manifest(
-    path: str | None = None,
-) -> dict[tuple[str, str], dict[str, object]]:
-    path = REFERENCE_EQUILIBRIUM_MANIFEST_PATH if path is None else str(path)
-    if not os.path.exists(path):
-        raise FileNotFoundError(
-            f"Missing reference-equilibrium manifest: {path}. "
-            "Run `python scripts/06-high-order-reconstructions.py` first."
-        )
-    with open(path, encoding="utf-8") as f:
-        payload = json.load(f)
-    entries = payload.get("entries", []) if isinstance(payload, dict) else []
-    manifest: dict[tuple[str, str], dict[str, object]] = {}
-    for entry in entries:
-        if not isinstance(entry, dict):
-            continue
-        case_key = str(entry.get("case_key", ""))
-        config_label = str(entry.get("config_label", ""))
-        if case_key and config_label:
-            manifest[(case_key, config_label)] = entry
-    return manifest
+def _scale_profile(values: np.ndarray, offset: float, *, sign: float) -> np.ndarray:
+    arr = np.asarray(values, dtype=np.float64)
+    if arr.size <= 1:
+        return np.array(arr, dtype=np.float64, copy=True)
+    axis = np.linspace(-1.0, 1.0, arr.size, dtype=np.float64)
+    return np.array(arr * (1.0 + sign * offset * axis), dtype=np.float64, copy=True)
 
 
-def manifest_entry(
-    manifest: dict[tuple[str, str], dict[str, object]],
-    case_key: str,
-    config_label: str,
-) -> dict[str, object]:
-    entry = manifest.get((case_key, config_label))
-    if entry is None:
-        raise FileNotFoundError(
-            f"Missing {CASE_LABELS[case_key]} {config_label} "
-            f"entry in {REDUCED_EQUILIBRIUM_MANIFEST_PATH}. "
-            "Run `python scripts/07-pareto-analysis.py` first."
-        )
-    return entry
+def selected_cases(values: Sequence[str] | None) -> tuple[str, ...]:
+    return tuple(values) if values else CASE_KEYS
 
 
-def reference_manifest_entry(
-    manifest: dict[tuple[str, str], dict[str, object]], case_key: str
-) -> dict[str, object]:
-    entry = manifest.get((case_key, "Ref"))
-    if entry is None:
-        raise FileNotFoundError(
-            f"Missing {CASE_LABELS[case_key]} Ref entry in "
-            f"{REFERENCE_EQUILIBRIUM_MANIFEST_PATH}. "
-            "Run `python scripts/06-high-order-reconstructions.py` first."
-        )
-    return entry
-
-
-def normalize_signature(signature: dict[str, int]) -> dict[str, int]:
-    return {str(name): int(length) for name, length in sorted(signature.items()) if int(length) > 0}
-
-
-def signature_from_metadata(entry: dict[str, object]) -> dict[str, int]:
-    signature = entry.get("signature", {})
-    return normalize_signature(signature) if isinstance(signature, dict) else {}
-
-
-@dataclass(frozen=True, slots=True)
-class NativeTiming:
-    result: KernelResult
-    wall_ms: list[float]
-    inner_ms: list[float]
-    success: list[bool]
-    nfev: list[int]
-    njev: list[int]
-    jacobian_component_evaluations: list[int]
-
-    def compact(self) -> dict[str, Any]:
-        return {
-            "success_all": all(self.success),
-            "info": int(self.result.info),
-            "timing": float_stats(self.wall_ms),
-            "inner_timing": float_stats(self.inner_ms),
-            "nfev": int_stats(self.nfev),
-            "njev": int_stats(self.njev),
-            "jacobian_component_evaluations": int_stats(self.jacobian_component_evaluations),
-            "raw_norm": float(self.result.raw_norm),
-            "scaled_norm": float(self.result.scaled_norm),
-            "x": self.result.x.tolist(),
-            "raw": self.result.raw.tolist(),
-            "alpha": self.result.alpha.tolist(),
-        }
-
-
-def measure_native_solver(
-    solver: Any,
-    configure_runtime: Callable[[], None],
-    *,
-    warmup: int,
-    repeat: int,
-) -> NativeTiming:
-    if repeat <= 0:
-        raise ValueError("repeat must be positive")
-    with pinned_cpu():
-        configure_runtime()
-        for _ in range(warmup):
-            solver.solve_direct()
-
-        wall_ms: list[float] = []
-        inner_ms: list[float] = []
-        success: list[bool] = []
-        nfev: list[int] = []
-        njev: list[int] = []
-        jaccomp: list[int] = []
-        final_result: Any | None = None
-        for _ in range(repeat):
-            start_ns = time.perf_counter_ns()
-            final_result = solver.solve_direct()
-            wall_ms.append(float(time.perf_counter_ns() - start_ns) / 1.0e6)
-            inner_ms.append(float(final_result[0]))
-            success.append(bool(final_result[1]))
-            nfev.append(int(final_result[3]))
-            njev.append(int(final_result[4]))
-            jaccomp.append(int(final_result[6]))
-
-    if final_result is None:
-        raise RuntimeError("native timing loop did not run")
-    return NativeTiming(
-        result=KernelResult.from_solve_direct(final_result),
-        wall_ms=wall_ms,
-        inner_ms=inner_ms,
-        success=success,
-        nfev=nfev,
-        njev=njev,
-        jacobian_component_evaluations=jaccomp,
-    )
+def selected_configs(values: Sequence[str] | None) -> tuple[str, ...]:
+    return tuple(values) if values else CONFIG_LABELS

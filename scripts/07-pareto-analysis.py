@@ -5,13 +5,14 @@ reference GEQDSK case, records timing/error tradeoffs, and writes the JSON
 artifacts consumed by later diagnostic scripts.
 """
 
+from __future__ import annotations
+
 import concurrent.futures
 import itertools
 import json
 import multiprocessing
 import os
 import random
-import sys
 import time
 from dataclasses import asdict, dataclass
 from functools import lru_cache
@@ -23,8 +24,7 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 import numpy as np
-from config import (
-    AXIS_LABEL_FONT_SIZE,
+from _cases import (
     BOUNDARY_MAXTOL,
     CASE_BOUNDARY_FIT_M,
     CASE_BOUNDARY_FIT_N,
@@ -37,10 +37,28 @@ from config import (
     CASE_REFERENCE_PROFILE_LENGTHS,
     CASE_SOLVER_METHODS,
     DEFAULT_JSON_STEM,
-    DOUBLE_COLUMN_WIDTH,
-    FIXED_DECIMALS,
-    LEGEND_FONT_SIZE,
     MU0,
+    REDUCED_CONFIG_LABELS,
+    REDUCED_EQUILIBRIUM_JSON_TEMPLATE,
+    REDUCED_EQUILIBRIUM_MANIFEST_PATH,
+    REFERENCE_SOLVER_MAXFEV,
+)
+from _common import figure_path, save_figure_outputs
+from _kernel_cases import (
+    active_profiles_from_coeffs,
+    build_geqdsk_boundary,
+    build_kernel_topology,
+    kernel_config,
+    read_geqdsk,
+)
+from _kernel_cases import as_float64_array as _as_float64_array
+from _kernel_cases import load_veqpy_components as _load_veqpy_components
+from _kernel_cases import prepare_interp_axis as _prepare_interp_axis
+from _kernel_cases import profile_interp as _profile_interp
+from _plotting import (
+    AXIS_LABEL_FONT_SIZE,
+    DOUBLE_COLUMN_WIDTH,
+    LEGEND_FONT_SIZE,
     PLOT_LABEL_RIGHT,
     PLOT_LABEL_TOP,
     PLOT_TICK_BOTTOM,
@@ -48,36 +66,20 @@ from config import (
     PLOT_TICK_LEFT,
     PLOT_TICK_RIGHT,
     PLOT_TICK_TOP,
-    REDUCED_CONFIG_LABELS,
-    REDUCED_EQUILIBRIUM_JSON_TEMPLATE,
-    REDUCED_EQUILIBRIUM_MANIFEST_PATH,
-    REFERENCE_SOLVER_MAXFEV,
     SAVE_DPI,
     SAVE_TRANSPARENT,
-    SCIENTIFIC_DECIMALS,
-    SOLVER_INITIAL_POLICY,
     TICK_LABEL_FONT_SIZE,
     TITLE_FONT_SIZE,
-    active_profiles_from_coeffs,
     apply_plot_style,
-    build_geqdsk_boundary,
-    coefficients_from_profile_coeffs,
-    figure_path,
-    read_geqdsk,
-    save_figure_outputs,
     scaled_font_size,
 )
-from config import (
-    as_float64_array as _as_float64_array,
-)
-from config import (
-    load_veqpy_components as _load_veqpy_components,
-)
-from config import (
-    prepare_interp_axis as _prepare_interp_axis,
-)
-from config import (
-    profile_interp as _profile_interp,
+from _reporting import (
+    FIXED_DECIMALS,
+    SCIENTIFIC_DECIMALS,
+    SCRIPT_CONSOLE,
+    print_output_table,
+    print_script_config,
+    script_progress,
 )
 from matplotlib.ticker import (
     FixedLocator,
@@ -529,36 +531,29 @@ class InitialSolveTimeoutError(RuntimeError):
         )
 
 
-@dataclass
-class CaseProgressState:
-    label: str
-    total: int = 0
-    completed: int = 0
-    skipped: int = 0
-    active: bool = False
-    finished: bool = False
-    message: str = "pending"
-    started_monotonic: float | None = None
-    elapsed_seconds: float | None = None
-
-
 class ParetoProgressDisplay:
     def __init__(self, case_keys: tuple[str, ...]):
         self.case_keys = tuple(case_keys)
-        self.states = {
-            case_key: CaseProgressState(label=CASE_LABELS[case_key]) for case_key in self.case_keys
-        }
-        self._interactive = bool(getattr(sys.stdout, "isatty", lambda: False)())
-        self._rendered_once = False
-        self._last_render_monotonic = 0.0
-        self._min_render_interval_s = 0.75
+        self._manager = script_progress(SCRIPT_CONSOLE)
+        self._progress = self._manager.__enter__()
+        self._task_by_case: dict[str, int] = {}
+        if self._progress is not None:
+            for case_key in self.case_keys:
+                self._task_by_case[case_key] = self._progress.add_task(
+                    "",
+                    total=1,
+                    current=CASE_LABELS[case_key],
+                    phase="[dim]pending[/]",
+                )
 
     def preparing(self, case_key: str) -> None:
-        state = self.states[case_key]
-        state.active = True
-        state.message = "preparing reference"
-        state.started_monotonic = time.monotonic()
-        state.elapsed_seconds = 0.0
+        if self._progress is None:
+            return
+        self._progress.update(
+            self._task_by_case[case_key],
+            current=CASE_LABELS[case_key],
+            phase="[cyan]prep[/]",
+        )
 
     def start_case(
         self,
@@ -567,22 +562,24 @@ class ParetoProgressDisplay:
         total: int,
         completed: int = 0,
     ) -> None:
-        state = self.states[case_key]
-        state.active = True
-        state.total = int(total)
-        state.completed = int(completed)
-        state.skipped = 0
-        state.finished = False
-        state.message = "running" if state.completed < state.total else "done"
-        state.started_monotonic = time.monotonic()
-        state.elapsed_seconds = 0.0
-        self._render(force=True)
+        if self._progress is None:
+            return
+        self._progress.update(
+            self._task_by_case[case_key],
+            total=max(int(total), 1),
+            completed=int(completed),
+            current=CASE_LABELS[case_key],
+            phase="[cyan]run[/]",
+        )
 
     def set_total(self, case_key: str, *, total: int) -> None:
-        state = self.states[case_key]
-        state.total = int(total)
-        if self._rendered_once:
-            self._render(force=False)
+        if self._progress is None:
+            return
+        self._progress.update(
+            self._task_by_case[case_key],
+            total=max(int(total), 1),
+            current=CASE_LABELS[case_key],
+        )
 
     def update(
         self,
@@ -592,76 +589,26 @@ class ParetoProgressDisplay:
         aggregate_rel_error: float | None,
         skipped: bool = False,
     ) -> None:
-        state = self.states[case_key]
-        state.completed += 1
-        if skipped:
-            state.skipped += 1
-            state.message = "skip >1s"
-        else:
-            state.message = "running"
-        if state.started_monotonic is not None:
-            state.elapsed_seconds = max(0.0, time.monotonic() - float(state.started_monotonic))
-        self._render(force=False)
+        if self._progress is None:
+            return
+        self._progress.update(
+            self._task_by_case[case_key],
+            advance=1,
+            current=CASE_LABELS[case_key],
+            phase="[yellow]skip[/]" if skipped else "[cyan]run[/]",
+        )
 
     def finish_case(self, case_key: str) -> None:
-        state = self.states[case_key]
-        state.active = False
-        state.finished = True
-        state.message = "done"
-        if state.started_monotonic is not None:
-            state.elapsed_seconds = max(0.0, time.monotonic() - float(state.started_monotonic))
-        self._render(force=True)
+        if self._progress is None:
+            return
+        self._progress.update(
+            self._task_by_case[case_key],
+            current=CASE_LABELS[case_key],
+            phase="[green]done[/]",
+        )
 
     def close(self) -> None:
-        if self._rendered_once:
-            sys.stdout.write("\n")
-            sys.stdout.flush()
-
-    def _render(self, *, force: bool) -> None:
-        if not self._interactive and not force:
-            return
-        now = time.monotonic()
-        if (
-            self._interactive
-            and not force
-            and self._rendered_once
-            and (now - self._last_render_monotonic) < self._min_render_interval_s
-        ):
-            return
-        lines = [self._format_line(case_key) for case_key in self.case_keys]
-        if self._interactive and self._rendered_once:
-            sys.stdout.write(f"\x1b[{len(lines)}F")
-        if self._interactive:
-            sys.stdout.write("".join(f"\x1b[2K{line}\n" for line in lines))
-        else:
-            sys.stdout.write("\n".join(lines) + "\n")
-        sys.stdout.flush()
-        self._rendered_once = True
-        self._last_render_monotonic = now
-
-    def _format_line(self, case_key: str) -> str:
-        state = self.states[case_key]
-        total = max(int(state.total), 1)
-        progress = min(max(state.completed / total, 0.0), 1.0) if state.total else 0.0
-        width = 24
-        filled = int(round(progress * width))
-        bar = "#" * filled + "-" * (width - filled)
-        count_text = f"{state.completed:>4d}/{state.total:<4d}" if state.total else "   0/0   "
-        suffix_parts = [state.message]
-        if state.total:
-            suffix_parts.append(f"{progress * 100.0:5.{FIXED_DECIMALS}f}%")
-        if state.skipped:
-            suffix_parts.append(f"skip {state.skipped}")
-        elapsed_seconds = state.elapsed_seconds
-        if state.active and state.started_monotonic is not None:
-            elapsed_seconds = max(
-                float(elapsed_seconds or 0.0),
-                time.monotonic() - float(state.started_monotonic),
-            )
-        if elapsed_seconds is not None:
-            suffix_parts.append(f"{elapsed_seconds:6.{FIXED_DECIMALS}f} s")
-        status = " | ".join(suffix_parts)
-        return f"{state.label:<8} [{bar}] {count_text} {status}"
+        self._manager.__exit__(None, None, None)
 
 
 def sample_signature_key(case_key: str, signature: dict[str, int]) -> str:
@@ -832,19 +779,19 @@ def load_benchmark(backend: str):
     reference_grid = components["Grid"](
         Nr=REFERENCE_LAYOUT_NR, Nt=REFERENCE_LAYOUT_NT, quadrature_scheme="legendre"
     )
-    config = components["SolverConfig"](
-        method="hybr",
+    config = kernel_config(
+        method="powell",
+        max_residual=1.0e-6,
         max_evaluations=REFERENCE_SOLVER_MAXFEV,
-        initial_policy=SOLVER_INITIAL_POLICY,
-        enable_verbose=False,
-        enable_fallback=False,
-        enable_history=False,
+        initial="cold",
+        continuation="cold",
+        norm="none",
     )
     return SimpleNamespace(
+        BACKEND=str(backend),
         Grid=components["Grid"],
-        Operator=components["Operator"],
-        Problem=components["Problem"],
-        Solver=components["Solver"],
+        Kernel=components["Kernel"],
+        KernelRecipe=components["KernelRecipe"],
         BenchmarkCaseSpec=BenchmarkCaseSpec,
         CONFIG=config,
         REFERENCE_GRID=reference_grid,
@@ -996,9 +943,10 @@ def load_validated_precomputed_reference(case_key: str) -> PrecomputedReference:
             f"tolerance={REFERENCE_VALIDATION_ATOL:.{SCIENTIFIC_DECIMALS}e}."
         )
     if os.environ.get(REFERENCE_CHECK_SUPPRESS_ENV) != "1":
-        print(
+        SCRIPT_CONSOLE.print(
             f"[pareto] Figure 06 reference check {CASE_LABELS[case_key]}: "
-            f"max |delta|={validation_error:.{SCIENTIFIC_DECIMALS}e}"
+            f"max |delta|={validation_error:.{SCIENTIFIC_DECIMALS}e}",
+            markup=False,
         )
     return PrecomputedReference(
         path=path,
@@ -1062,47 +1010,32 @@ SHAPE_PROFILE_NAMES = _shape_profile_names()
 
 
 def build_boundary(geqdsk, *, fit_m: int, fit_n: int, boundary_maxtol: float = BOUNDARY_MAXTOL):
-    if float(boundary_maxtol) != BOUNDARY_MAXTOL:
-        components = _load_veqpy_components()
-        fit = components["fit_boundary_params"](
+    if float(boundary_maxtol) == BOUNDARY_MAXTOL:
+        return build_geqdsk_boundary(
             geqdsk,
-            M=int(fit_m),
-            N=int(fit_n),
-            maxtol=float(boundary_maxtol),
-            R0=None,
-            Z0=None,
-            a=None,
-            ka=None,
+            fit_m=fit_m,
+            fit_n=fit_n,
+            return_fit=True,
         )
-        boundary = components["Boundary"](
-            a=float(fit["a"]),
-            R0=float(fit["R0"]),
-            Z0=float(fit["Z0"]),
-            B0=float(geqdsk.Bt0),
-            ka=float(fit["ka"]),
-            c_offsets=np.asarray(fit["c_offsets"], dtype=np.float64),
-            s_offsets=np.asarray(fit["s_offsets"], dtype=np.float64),
-        )
-        return boundary, fit
-    return build_geqdsk_boundary(
-        geqdsk,
-        fit_m=fit_m,
-        fit_n=fit_n,
-        return_fit=True,
+    components = _load_veqpy_components()
+    boundary = components["KernelBoundary"](
+        B0=float(geqdsk.Bt0),
+        R_boundary=np.asarray(geqdsk.boundary[:, 0], dtype=np.float64),
+        Z_boundary=np.asarray(geqdsk.boundary[:, 1], dtype=np.float64),
+        c_order=int(fit_m),
+        s_order=int(fit_n),
+        fit_maxtol=float(boundary_maxtol),
     )
+    materialized = components["materialize_kernel_boundary"](boundary)
+    fit = components["materialized_boundary_fit_payload"](materialized)
+    return boundary, fit
 
 
 def build_solver_case(boundary, geqdsk, *, profile_coeffs: dict[str, list[float]]):
-    modules = _load_veqpy_components()
-    return modules["Problem"](
-        route="PF",
-        coordinate="psin",
-        nodes="uniform",
-        active_profiles=active_profiles_from_coeffs(profile_coeffs),
+    return SimpleNamespace(
         boundary=boundary,
-        heat_input=np.asarray(geqdsk.P_psi, dtype=np.float64),
-        current_input=np.asarray(geqdsk.FF_psi, dtype=np.float64),
-        Ip=float(geqdsk.Ip),
+        geqdsk=geqdsk,
+        profile_coeffs=dict(profile_coeffs),
     )
 
 
@@ -1125,24 +1058,49 @@ def solve_equilibrium(case, *, method: str):
         Nt=REFERENCE_SOLVE_NT,
         quadrature_scheme="legendre",
     )
-    solver = modules["Solver"](
-        operator=modules["Operator"](solve_grid, case),
-        config=modules["SolverConfig"](
-            method=str(method),
-            max_evaluations=REFERENCE_SOLVER_MAXFEV,
-            initial_policy=SOLVER_INITIAL_POLICY,
-            enable_fallback=False,
-            enable_verbose=False,
-            enable_history=False,
+    del method
+    active_profiles = active_profiles_from_coeffs(case.profile_coeffs)
+    c_order, s_order = modules["kernel_boundary_shape_orders"](case.boundary)
+    boundary_m_max = max(c_order, s_order, int(solve_grid.M_max))
+    topology = build_kernel_topology(
+        active_profiles,
+        nr=int(solve_grid.Nr),
+        nt=int(solve_grid.Nt),
+        route="PF",
+        coordinate="psin",
+        nodes="uniform",
+        ip_constraint=True,
+        beta_constraint=False,
+        sample_count=int(np.asarray(case.geqdsk.P_psi).size),
+        m_max=boundary_m_max,
+        k_max=max(2, boundary_m_max),
+    )
+    config = kernel_config(
+        method="powell",
+        max_residual=1.0e-6,
+        max_evaluations=REFERENCE_SOLVER_MAXFEV,
+        initial="cold",
+        continuation="cold",
+        norm="none",
+    )
+    kernel = modules["Kernel"](
+        topology=topology,
+        recipe=modules["KernelRecipe"](backend=RUN_BACKEND),
+        config=config,
+    )
+    result = kernel.solve(
+        case.boundary,
+        modules["KernelSource"](
+            heat_profile=np.asarray(case.geqdsk.P_psi, dtype=np.float64),
+            current_profile=np.asarray(case.geqdsk.FF_psi, dtype=np.float64),
+            Ip=float(case.geqdsk.Ip),
+            beta=np.nan,
+            case_name="figure-07-reference-check",
         ),
     )
-    solver.solve(
-        enable_verbose=False,
-        enable_history=False,
-        initial_policy=SOLVER_INITIAL_POLICY,
-        enable_fallback=False,
-    )
-    equilibrium = solver.build_equilibrium()
+    equilibrium = kernel.build_equilibrium()
+    kernel.close()
+    solver = SimpleNamespace(result=result)
     return solver, equilibrium, resample_surface_equilibrium(equilibrium)
 
 
@@ -1155,6 +1113,8 @@ def result_nfev(result) -> int:
 def result_nit(result) -> int:
     if hasattr(result, "nit"):
         return int(result.nit)
+    if hasattr(result, "callbacks"):
+        return int(result.callbacks)
     return int(getattr(result, "iterations", 0))
 
 
@@ -1344,48 +1304,6 @@ def get_case_length_bounds(case_key: str) -> tuple[dict[str, int], dict[str, int
                 f"for family {family!r}"
             )
     return dict(min_lengths), dict(max_lengths)
-
-
-def merge_active_coeffs(
-    base_profile_coeffs: dict[str, list[float] | None],
-    active_coeffs: dict[str, list[float]],
-) -> dict[str, list[float] | None]:
-    merged = {
-        name: (None if values is None else list(values))
-        for name, values in base_profile_coeffs.items()
-    }
-    for name, values in active_coeffs.items():
-        merged[name] = list(values)
-    return merged
-
-
-def reconstruct_reference_equilibrium(
-    benchmark,
-    *,
-    solver_case,
-    active_coeffs: dict[str, list[float]],
-    nr: int,
-    nt: int,
-    scheme: str,
-):
-    base_profile_coeffs = {
-        name: [0.0] * int(length) for name, length in solver_case.active_profiles.items()
-    }
-    merged_coeffs = merge_active_coeffs(
-        base_profile_coeffs,
-        active_coeffs,
-    )
-    exact_case = solver_case.replace(active_profiles=active_profiles_from_coeffs(merged_coeffs))
-    grid = benchmark.Grid(
-        Nr=int(nr),
-        Nt=int(nt),
-        quadrature_scheme=str(scheme),
-        L_max=int(benchmark.REFERENCE_GRID.L_max),
-        M_max=int(benchmark.REFERENCE_GRID.M_max),
-    )
-    operator = benchmark.Operator(grid, exact_case)
-    x_exact = operator.pack_coefficients(coefficients_from_profile_coeffs(merged_coeffs))
-    return operator.build_equilibrium(x_exact)
 
 
 def baseline_signature(max_lengths: dict[str, int]) -> dict[str, int]:
@@ -2297,19 +2215,37 @@ def make_profile_coeffs(
 
 
 def build_pf_case(benchmark, reference: ReferenceCase, grid, signature: dict[str, int]):
+    components = _load_veqpy_components()
     _, max_lengths = get_case_length_bounds(reference.case_key)
-    return benchmark.Problem(
+    active_profiles = active_profiles_from_coeffs(
+        make_profile_coeffs(signature, max_lengths=max_lengths)
+    )
+    c_order, s_order = components["kernel_boundary_shape_orders"](reference.boundary)
+    boundary_m_max = max(c_order, s_order, int(grid.M_max))
+    topology = build_kernel_topology(
+        active_profiles,
+        nr=int(grid.Nr),
+        nt=int(grid.Nt),
         route="PF",
         coordinate="psin",
         nodes="uniform",
-        active_profiles=active_profiles_from_coeffs(
-            make_profile_coeffs(signature, max_lengths=max_lengths)
-        ),
+        ip_constraint=True,
+        beta_constraint=False,
+        sample_count=int(np.asarray(reference.geqdsk.P_psi).size),
+        m_max=boundary_m_max,
+        k_max=max(2, boundary_m_max),
+    )
+    return SimpleNamespace(
+        topology=topology,
         boundary=reference.boundary,
-        heat_input=np.asarray(reference.geqdsk.P_psi, dtype=np.float64),
-        current_input=np.asarray(reference.geqdsk.FF_psi, dtype=np.float64),
-        Ip=float(reference.geqdsk.Ip),
-        beta=None,
+        source=components["KernelSource"](
+            heat_profile=np.asarray(reference.geqdsk.P_psi, dtype=np.float64),
+            current_profile=np.asarray(reference.geqdsk.FF_psi, dtype=np.float64),
+            Ip=float(reference.geqdsk.Ip),
+            beta=np.nan,
+            case_name=f"figure-07-{reference.case_key}",
+        ),
+        active_profiles=active_profiles,
     )
 
 
@@ -2323,28 +2259,18 @@ def solve_with_timing(
     *,
     initial_solve_timeout_s: float = INITIAL_SOLVE_TIMEOUT_S,
 ):
-    solver = benchmark.Solver(
-        operator=benchmark.Operator(grid, case),
+    kernel = benchmark.Kernel(
+        topology=case.topology,
+        recipe=benchmark.KernelRecipe(backend=benchmark.BACKEND),
         config=solver_config,
     )
-    solve_kwargs = {
-        "method": str(method),
-        "max_residual": float(getattr(solver_config, "max_residual", 1.0e-6)),
-        "max_evaluations": int(getattr(solver_config, "max_evaluations", REFERENCE_SOLVER_MAXFEV)),
-        "enable_verbose": False,
-        "enable_history": False,
-        "initial_policy": SOLVER_INITIAL_POLICY,
-        "enable_fallback": False,
-    }
+    del benchmark, grid, method
     probe_started = time.perf_counter()
-    solver.solve(**solve_kwargs)
+    result = kernel.solve(case.boundary, case.source, config=solver_config)
     probe_elapsed_ms = (time.perf_counter() - probe_started) * 1000.0
-    if solver.result is not None:
-        probe_elapsed_ms = max(
-            probe_elapsed_ms,
-            float(solver.result.elapsed) / 1000.0,
-        )
+    probe_elapsed_ms = max(probe_elapsed_ms, float(result.elapsed_ms))
     if probe_elapsed_ms > float(initial_solve_timeout_s) * 1000.0:
+        kernel.close()
         raise InitialSolveTimeoutError(
             elapsed_ms=probe_elapsed_ms,
             timeout_s=initial_solve_timeout_s,
@@ -2352,12 +2278,13 @@ def solve_with_timing(
     elapsed_values: list[float] = []
     final_result = None
     for _ in range(max(int(repeat_count), 1)):
-        solver.solve(**solve_kwargs)
-        final_result = solver.result
-        elapsed_values.append(float(final_result.elapsed) / 1000.0)
+        final_result = kernel.solve(case.boundary, case.source, config=solver_config)
+        elapsed_values.append(float(final_result.elapsed_ms))
     if final_result is None:
+        kernel.close()
         raise RuntimeError("No solver result returned")
-    final_eq = solver.build_equilibrium()
+    final_eq = kernel.build_equilibrium()
+    kernel.close()
     return final_result, final_eq, float(np.median(elapsed_values))
 
 
@@ -2475,7 +2402,7 @@ def solve_signature_record_worker(
             q_rel_rms_error=float(q_err),
             nfev=result_nfev(result),
             nit=result_nit(result),
-            residual_norm_final=float(result.residual_norm_final),
+            residual_norm_final=float(result.raw_norm),
             strategy_name=str(record.strategy_name),
             strategy_names=list(record.strategy_names),
             signature=dict(signature),
@@ -2731,22 +2658,15 @@ def solve_selected_equilibrium_for_shape_metric(
     )
     case = build_pf_case(benchmark, reference, grid, sample.signature)
     solver_config = get_case_solver_config(benchmark, reference.case_key)
-    solver = benchmark.Solver(
-        operator=benchmark.Operator(grid, case),
-        config=solver_config,
-    )
-    solver.solve(
+    _result, equilibrium, _elapsed_ms = solve_with_timing(
+        benchmark,
+        case,
+        grid,
+        repeat_count=1,
         method=CASE_SOLVER_METHODS[reference.case_key],
-        max_residual=float(getattr(solver_config, "max_residual", 1.0e-6)),
-        max_evaluations=int(getattr(solver_config, "max_evaluations", REFERENCE_SOLVER_MAXFEV)),
-        enable_verbose=False,
-        enable_history=False,
-        initial_policy=SOLVER_INITIAL_POLICY,
-        enable_fallback=False,
+        solver_config=solver_config,
     )
-    if solver.result is None:
-        raise RuntimeError(f"Selected reduced solve failed for {reference.case_key}")
-    return solver.build_equilibrium()
+    return equilibrium
 
 
 def compute_selected_external_shape_errors(
@@ -2785,9 +2705,10 @@ def compute_selected_external_shape_errors(
         )
         errors[key] = external_reference_shape_error(reference, equilibrium)
         normalized_error = float(errors[key]) / max(float(reference.reference_a), 1.0e-12)
-        print(
+        SCRIPT_CONSOLE.print(
             f"[pareto] {CASE_LABELS[case_key]} GEQDSK-file shape error E_gqdsk/a: "
-            f"{normalized_error:.{SCIENTIFIC_DECIMALS}e}"
+            f"{normalized_error:.{SCIENTIFIC_DECIMALS}e}",
+            markup=False,
         )
     return errors
 
@@ -2878,9 +2799,10 @@ def write_representative_reduced_equilibria(
                     "source": sample_signature_key(case_key, sample.signature),
                 }
             )
-            print(
+            SCRIPT_CONSOLE.print(
                 f"[pareto] wrote {CASE_LABELS[case_key]} {config_label} "
-                f"reduced equilibrium: {output_path}"
+                f"reduced equilibrium: {output_path}",
+                markup=False,
             )
 
     manifest = {
@@ -2901,7 +2823,10 @@ def write_representative_reduced_equilibria(
         os.makedirs(manifest_dir, exist_ok=True)
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2)
-    print(f"[pareto] wrote reduced-equilibrium manifest: {manifest_path}")
+    SCRIPT_CONSOLE.print(
+        f"[pareto] wrote reduced-equilibrium manifest: {manifest_path}",
+        markup=False,
+    )
     return manifest
 
 
@@ -3046,7 +2971,7 @@ def sample_case(
                 q_rel_rms_error=float(q_err),
                 nfev=result_nfev(result),
                 nit=result_nit(result),
-                residual_norm_final=float(result.residual_norm_final),
+                residual_norm_final=float(result.raw_norm),
                 strategy_name=str(record.strategy_name),
                 strategy_names=list(record.strategy_names),
                 signature=dict(record.signature),
@@ -3088,9 +3013,10 @@ def sample_case(
                         _, record = futures[future]
                         pending_records.pop(int(idx), None)
                         if error_message is not None:
-                            print(
+                            SCRIPT_CONSOLE.print(
                                 f"[pareto] worker skipped {case_key} "
-                                f"{record.sweep_step}: {error_message}"
+                                f"{record.sweep_step}: {error_message}",
+                                markup=False,
                             )
                         if sample is not None:
                             samples_by_index[idx] = sample
@@ -3104,9 +3030,10 @@ def sample_case(
                                 skipped=bool(skipped),
                             )
             except concurrent.futures.process.BrokenProcessPool as exc:
-                print(
+                SCRIPT_CONSOLE.print(
                     f"[pareto] {case_key} process pool failed ({exc}); "
-                    f"falling back to serial for {len(pending_records)} remaining cases"
+                    f"falling back to serial for {len(pending_records)} remaining cases",
+                    markup=False,
                 )
                 for idx, record in sorted(pending_records.items()):
                     solve_record_serial(idx, record)
@@ -3640,13 +3567,14 @@ def print_fastest_config_table_body(
     reference_a_by_case: dict[str, float] | None = None,
     selected_config_rows: list[tuple[str, float, Sample | None]] | None = None,
 ) -> None:
-    print(
+    SCRIPT_CONSOLE.print(
         build_fastest_config_latex_table(
             samples_by_case,
             external_shape_errors,
             reference_a_by_case,
             selected_config_rows=selected_config_rows,
-        )
+        ),
+        markup=False,
     )
 
 
@@ -3905,35 +3833,39 @@ def _print_case_frontier_summary(
     representative: Sample | None,
     normalizer_m: float,
 ) -> None:
-    print(
+    SCRIPT_CONSOLE.print(
         f"[pareto] {CASE_LABELS[case_key]} time frontier: "
-        f"{describe_frontier(time_frontier, x_kind='time_ms', normalizer_m=normalizer_m)}"
+        f"{describe_frontier(time_frontier, x_kind='time_ms', normalizer_m=normalizer_m)}",
+        markup=False,
     )
     if representative is None:
-        print(
+        SCRIPT_CONSOLE.print(
             f"[pareto] {CASE_LABELS[case_key]} representative case "
-            f"(target E_ref/a={REPRESENTATIVE_ERROR_THRESHOLD:.0e}): none"
+            f"(target E_ref/a={REPRESENTATIVE_ERROR_THRESHOLD:.0e}): none",
+            markup=False,
         )
     else:
         representative_error = normalized_shape_error(representative, normalizer_m)
         relation = (
             "<=" if representative_error <= REPRESENTATIVE_ERROR_THRESHOLD else "closest above"
         )
-        print(
+        SCRIPT_CONSOLE.print(
             f"[pareto] {CASE_LABELS[case_key]} representative case "
             f"(target E_ref/a={REPRESENTATIVE_ERROR_THRESHOLD:.0e}, {relation}): "
             f"({format_frontier_x(float(representative.elapsed_ms), kind='time_ms')}, "
             f"{format_frontier_y(representative_error)}), "
             f"parameters={int(representative.parameter_count)}, "
-            f"signature={format_signature(representative.signature)}"
+            f"signature={format_signature(representative.signature)}",
+            markup=False,
         )
-    print(
-        f"[pareto] {CASE_LABELS[case_key]} parameter frontier: ",
-        describe_frontier(
+    SCRIPT_CONSOLE.print(
+        f"[pareto] {CASE_LABELS[case_key]} parameter frontier: "
+        + describe_frontier(
             parameter_frontier,
             x_kind="parameter_count",
             normalizer_m=normalizer_m,
         ),
+        markup=False,
     )
 
 
@@ -4283,7 +4215,7 @@ def render(
     test_nt: int,
     backend: str,
     selected_config_rows: list[tuple[str, float, Sample | None]] | None = None,
-) -> None:
+) -> list[str]:
     apply_plot_style()
     selected_rows_by_case = selected_representative_rows_by_case(
         all_samples,
@@ -4457,7 +4389,7 @@ def render(
                 indent=2,
             )
 
-    save_figure_outputs(
+    saved_paths = save_figure_outputs(
         fig,
         png_path=png_path,
         pdf_path=pdf_path,
@@ -4465,6 +4397,7 @@ def render(
         transparent=SAVE_TRANSPARENT,
     )
     plt.close(fig)
+    return saved_paths
 
 
 def write_json(
@@ -4475,7 +4408,7 @@ def write_json(
     test_nt: int,
     backend: str,
     sweep_mode: str,
-) -> None:
+) -> list[str]:
     def build_payload(
         samples_by_case: dict[str, list[Sample]],
         frontiers_by_case: dict[str, list[Sample]],
@@ -4537,6 +4470,7 @@ def write_json(
             },
         }
 
+    saved_paths: list[str] = []
     for case_key in all_samples:
         case_json_path = json_output_path(json_stem, case_key, sweep_mode)
         case_json_dir = os.path.dirname(case_json_path)
@@ -4548,6 +4482,8 @@ def write_json(
         )
         with open(case_json_path, "w", encoding="utf-8") as f:
             json.dump(case_payload, f, indent=2)
+        saved_paths.append(case_json_path)
+    return saved_paths
 
 
 def _load_sample_list(entries: object) -> list[Sample] | None:
@@ -4608,50 +4544,131 @@ def load_plot_data_bundle(
     return all_samples, all_frontiers
 
 
+def pareto_output_rows(
+    *,
+    figure_paths: list[str],
+    json_paths: list[str],
+    reduced_manifest: dict[str, object] | None,
+) -> list[tuple[str, str, str]]:
+    rows: list[tuple[str, str, str]] = [
+        ("Figure 07", path, "Pareto frontier and reduced surfaces") for path in figure_paths
+    ]
+    rows.extend(("Pareto cache", path, "Per-case sweep samples") for path in json_paths)
+    if reduced_manifest is not None:
+        rows.append(
+            (
+                "Reduced manifest",
+                REDUCED_EQUILIBRIUM_MANIFEST_PATH,
+                "Representative reduced-equilibrium index",
+            )
+        )
+        entries = reduced_manifest.get("entries")
+        if isinstance(entries, list):
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                path = entry.get("path")
+                if not isinstance(path, str):
+                    continue
+                label = f"{entry.get('case_label', 'case')} {entry.get('config_label', '')}".strip()
+                rows.append(("Reduced equilibrium", path, label))
+    return rows
+
+
 def main() -> None:
     json_stem = str(DEFAULT_JSON_STEM)
     sweep_mode = str(RUN_SWEEP_MODE)
     cache_enabled = sweep_mode == "full"
+    print_script_config(
+        SCRIPT_CONSOLE,
+        "figure 07 / table 05: pareto analysis",
+        (
+            ("backend", RUN_BACKEND),
+            ("mode", sweep_mode),
+            ("cases", len(CASE_KEYS)),
+            ("grid", f"{RUN_TEST_NR}x{RUN_TEST_NT}"),
+            ("repeat", RUN_REPEAT_COUNT),
+            ("workers", RUN_CASE_WORKERS),
+        ),
+    )
     if sweep_mode == "full" and not bool(RUN_RECOMPUTE_FULL):
         all_samples, frontiers = load_plot_data_bundle(json_stem, sweep_mode)
         if all_samples is not None and frontiers is not None:
-            print(
+            SCRIPT_CONSOLE.print(
                 "[pareto] loaded plot data from "
-                f"{json_stem}_{sweep_mode}_{{solovev,chease,efit}}.json"
+                f"{json_stem}_{sweep_mode}_{{solovev,chease,efit}}.json",
+                markup=False,
             )
-            reference_a_by_case = compute_reference_a_by_case(backend=RUN_BACKEND)
-            external_shape_errors = compute_selected_external_shape_errors(
-                all_samples,
-                backend=RUN_BACKEND,
-                test_nr=RUN_TEST_NR,
-                test_nt=RUN_TEST_NT,
-                reference_a_by_case=reference_a_by_case,
-            )
+            with script_progress(SCRIPT_CONSOLE) as progress:
+                task = progress.add_task(
+                    "",
+                    total=3,
+                    current="shape errors",
+                    phase="[cyan]run[/]",
+                )
+                reference_a_by_case = compute_reference_a_by_case(backend=RUN_BACKEND)
+                external_shape_errors = compute_selected_external_shape_errors(
+                    all_samples,
+                    backend=RUN_BACKEND,
+                    test_nr=RUN_TEST_NR,
+                    test_nt=RUN_TEST_NT,
+                    reference_a_by_case=reference_a_by_case,
+                )
+                progress.update(task, advance=1, current="render figure", phase="[cyan]run[/]")
+                figure_paths = render(
+                    all_samples,
+                    frontiers,
+                    reference_a_by_case,
+                    PNG_PATH,
+                    PDF_PATH,
+                    RUN_TEST_NR,
+                    RUN_TEST_NT,
+                    RUN_BACKEND,
+                )
+                progress.update(
+                    task,
+                    advance=1,
+                    current="reduced equilibria",
+                    phase="[cyan]run[/]",
+                )
+                reduced_manifest = write_representative_reduced_equilibria_from_cache(
+                    json_stem,
+                    sweep_mode,
+                    backend=RUN_BACKEND,
+                    test_nr=RUN_TEST_NR,
+                    test_nt=RUN_TEST_NT,
+                )
+                progress.update(
+                    task,
+                    advance=1,
+                    current="reduced equilibria",
+                    phase="[green]done[/]",
+                )
             print_fastest_config_table_body(all_samples, external_shape_errors, reference_a_by_case)
-            render(
-                all_samples,
-                frontiers,
-                reference_a_by_case,
-                PNG_PATH,
-                PDF_PATH,
-                RUN_TEST_NR,
-                RUN_TEST_NT,
-                RUN_BACKEND,
-            )
-            write_representative_reduced_equilibria_from_cache(
-                json_stem,
-                sweep_mode,
-                backend=RUN_BACKEND,
-                test_nr=RUN_TEST_NR,
-                test_nt=RUN_TEST_NT,
+            print_output_table(
+                SCRIPT_CONSOLE,
+                pareto_output_rows(
+                    figure_paths=figure_paths,
+                    json_paths=[
+                        json_output_path(json_stem, case_key, sweep_mode)
+                        for case_key in CASE_KEYS
+                    ],
+                    reduced_manifest=reduced_manifest,
+                ),
             )
             return
         expected = ", ".join(
             json_output_path(json_stem, case_key, sweep_mode) for case_key in CASE_KEYS
         )
-        print(f"[pareto] missing or stale full Pareto JSON bundle; recomputing: {expected}")
+        SCRIPT_CONSOLE.print(
+            f"[pareto] missing or stale full Pareto JSON bundle; recomputing: {expected}",
+            markup=False,
+        )
     elif sweep_mode == "partial":
-        print("[pareto] partial mode reruns selected 3x3 configs without Pareto cache I/O")
+        SCRIPT_CONSOLE.print(
+            "[pareto] partial mode reruns selected 3x3 configs without Pareto cache I/O",
+            markup=False,
+        )
 
     benchmark = load_benchmark(RUN_BACKEND)
     progress = ParetoProgressDisplay(CASE_KEYS)
@@ -4725,7 +4742,7 @@ def main() -> None:
         reference_a_by_case,
         selected_config_rows=selected_config_rows,
     )
-    render(
+    figure_paths = render(
         all_samples,
         frontiers,
         reference_a_by_case,
@@ -4736,8 +4753,9 @@ def main() -> None:
         RUN_BACKEND,
         selected_config_rows=selected_config_rows,
     )
+    json_paths: list[str] = []
     if cache_enabled:
-        write_json(
+        json_paths = write_json(
             all_samples,
             frontiers,
             json_stem,
@@ -4746,7 +4764,7 @@ def main() -> None:
             RUN_BACKEND,
             sweep_mode,
         )
-    write_representative_reduced_equilibria(
+    reduced_manifest = write_representative_reduced_equilibria(
         all_samples,
         backend=RUN_BACKEND,
         test_nr=RUN_TEST_NR,
@@ -4754,6 +4772,14 @@ def main() -> None:
         sweep_mode=sweep_mode,
         reference_a_by_case=reference_a_by_case,
         selected_config_rows=selected_config_rows,
+    )
+    print_output_table(
+        SCRIPT_CONSOLE,
+        pareto_output_rows(
+            figure_paths=figure_paths,
+            json_paths=json_paths,
+            reduced_manifest=reduced_manifest,
+        ),
     )
 
 

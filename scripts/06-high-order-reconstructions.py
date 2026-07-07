@@ -5,6 +5,8 @@ condition for every timing sample.  One warm-up solve is discarded before the
 reported median/mean/std timing statistics are collected.
 """
 
+from __future__ import annotations
+
 import json
 import os
 import time
@@ -17,11 +19,19 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 import numpy as np
-from config import (
-    AXIS_LABEL_FONT_SIZE,
+from _cases import (
     CASE_REFERENCE_EQUILIBRIUM_JSONS,
+    REFERENCE_EQUILIBRIUM_MANIFEST_PATH,
+)
+from _common import data_path, figure_path, save_figure_outputs
+from _kernel_cases import (
+    active_profiles_from_coeffs,
+    build_kernel_topology,
+    kernel_config,
+)
+from _plotting import (
+    AXIS_LABEL_FONT_SIZE,
     DOUBLE_COLUMN_WIDTH,
-    FIXED_DECIMALS,
     LEGEND_FONT_SIZE,
     PLOT_LABEL_RIGHT,
     PLOT_LABEL_TOP,
@@ -30,27 +40,33 @@ from config import (
     PLOT_TICK_LEFT,
     PLOT_TICK_RIGHT,
     PLOT_TICK_TOP,
-    REFERENCE_EQUILIBRIUM_MANIFEST_PATH,
     SAVE_DPI,
     SAVE_TRANSPARENT,
-    SCIENTIFIC_DECIMALS,
-    SOLVER_INITIAL_POLICY,
     TICK_LABEL_FONT_SIZE,
     TITLE_FONT_SIZE,
-    active_profiles_from_coeffs,
     apply_plot_style,
-    data_path,
-    figure_path,
-    save_figure_outputs,
     scaled_font_size,
+)
+from _reporting import (
+    FIXED_DECIMALS,
+    SCIENTIFIC_DECIMALS,
+    SCRIPT_CONSOLE,
+    make_script_table,
+    print_output_table,
+    print_script_config,
+    print_script_table,
+    script_progress,
 )
 from contourpy import contour_generator
 from matplotlib.ticker import MultipleLocator
 
-from veqpy.model import Boundary, Geqdsk, Grid, Problem
-from veqpy.model.boundary import _fit_boundary_params
-from veqpy.operator import Operator
-from veqpy.solver import Solver, SolverConfig
+import veqpy as veq
+from veqpy.kernels.boundary_materialization import (
+    materialize_kernel_boundary,
+    materialized_boundary_fit_payload,
+)
+from veqpy.kernels.types import kernel_boundary_shape_orders
+from veqpy.model import Geqdsk, Grid
 
 MU0 = 4.0e-7 * np.pi
 
@@ -311,6 +327,31 @@ class SolveCostAudit:
     setup_to_solve_ratio: float
     warmup_to_solve_ratio: float
     setup_jit_to_solve_ratio: float
+
+
+@dataclass(frozen=True)
+class KernelProblemSpec:
+    boundary: veq.KernelBoundary
+    geqdsk: Geqdsk
+    profile_coeffs: dict[str, list[float]]
+
+
+@dataclass
+class KernelSolveHandle:
+    kernel: veq.Kernel
+    boundary: veq.KernelBoundary
+    source: veq.KernelSource
+    result: veq.SolveResult | None = None
+
+    def solve(self) -> veq.SolveResult:
+        self.result = self.kernel.solve(self.boundary, self.source)
+        return self.result
+
+    def build_equilibrium(self):
+        return self.kernel.build_equilibrium()
+
+    def close(self) -> None:
+        self.kernel.close()
 
 
 @dataclass(frozen=True)
@@ -960,97 +1001,99 @@ def read_geqdsk(path: str) -> Geqdsk:
 
 def build_boundary(
     geqdsk: Geqdsk, *, fit_m: int, fit_n: int
-) -> tuple[Boundary, dict[str, float | np.ndarray]]:
-    fit = _fit_boundary_params(
-        geqdsk,
-        M=fit_m,
-        N=fit_n,
-        maxtol=BOUNDARY_MAXTOL,
-        R0=None,
-        Z0=None,
-        a=None,
-        ka=None,
-    )
-    normalized = {
-        "rms": float(fit["rms"]),
-        "a": float(fit["a"]),
-        "R0": float(fit["R0"]),
-        "Z0": float(fit["Z0"]),
-        "ka": float(fit["ka"]),
-        "c_offsets": np.asarray(fit["c_offsets"], dtype=np.float64),
-        "s_offsets": np.asarray(fit["s_offsets"], dtype=np.float64),
-    }
-    boundary = Boundary(
-        a=normalized["a"],
-        R0=normalized["R0"],
-        Z0=normalized["Z0"],
+) -> tuple[veq.KernelBoundary, dict[str, float | np.ndarray]]:
+    boundary = veq.KernelBoundary(
         B0=float(geqdsk.Bt0),
-        ka=normalized["ka"],
-        c_offsets=normalized["c_offsets"],
-        s_offsets=normalized["s_offsets"],
+        R_boundary=np.asarray(geqdsk.boundary[:, 0], dtype=np.float64),
+        Z_boundary=np.asarray(geqdsk.boundary[:, 1], dtype=np.float64),
+        c_order=int(fit_m),
+        s_order=int(fit_n),
+        fit_maxtol=BOUNDARY_MAXTOL,
     )
+    normalized = materialized_boundary_fit_payload(materialize_kernel_boundary(boundary))
     return boundary, normalized
 
 
 def build_solver_case(
-    boundary: Boundary, geqdsk: Geqdsk, *, profile_coeffs: dict[str, list[float]]
-) -> Problem:
-    return Problem(
-        route="PF",
-        coordinate="psin",
-        nodes="uniform",
-        active_profiles=active_profiles_from_coeffs(profile_coeffs),
+    boundary: veq.KernelBoundary, geqdsk: Geqdsk, *, profile_coeffs: dict[str, list[float]]
+) -> KernelProblemSpec:
+    return KernelProblemSpec(
         boundary=boundary,
-        heat_input=np.asarray(geqdsk.P_psi, dtype=np.float64),
-        current_input=np.asarray(geqdsk.FF_psi, dtype=np.float64),
-        Ip=float(geqdsk.Ip),
+        geqdsk=geqdsk,
+        profile_coeffs=profile_coeffs,
     )
 
 
-def build_solver(case: Problem, solve_grid: Grid) -> Solver:
-    return Solver(
-        operator=Operator(solve_grid, case.copy()),
-        config=SolverConfig(
-            method=SOLVER_METHOD,
-            max_evaluations=SOLVER_MAXFEV,
-            initial_policy=SOLVER_INITIAL_POLICY,
-            enable_fallback=False,
-            enable_verbose=False,
-            enable_history=False,
+def build_solver(case: KernelProblemSpec, solve_grid: Grid) -> KernelSolveHandle:
+    active_profiles = active_profiles_from_coeffs(case.profile_coeffs)
+    c_order, s_order = kernel_boundary_shape_orders(case.boundary)
+    boundary_m_max = max(c_order, s_order, int(solve_grid.M_max))
+    topology = build_kernel_topology(
+        active_profiles,
+        nr=int(solve_grid.Nr),
+        nt=int(solve_grid.Nt),
+        route="PF",
+        coordinate="psin",
+        nodes="uniform",
+        ip_constraint=True,
+        beta_constraint=False,
+        sample_count=int(np.asarray(case.geqdsk.P_psi).size),
+        m_max=boundary_m_max,
+        k_max=max(2, boundary_m_max),
+    )
+    config = kernel_config(
+        method="powell",
+        max_residual=1.0e-6,
+        max_evaluations=SOLVER_MAXFEV,
+        initial="cold",
+        continuation="cold",
+        norm="none",
+    )
+    kernel = veq.Kernel(
+        topology=topology,
+        recipe=veq.KernelRecipe(backend="numba"),
+        config=config,
+    )
+    return KernelSolveHandle(
+        kernel=kernel,
+        boundary=case.boundary,
+        source=veq.KernelSource(
+            heat_profile=np.asarray(case.geqdsk.P_psi, dtype=np.float64),
+            current_profile=np.asarray(case.geqdsk.FF_psi, dtype=np.float64),
+            Ip=float(case.geqdsk.Ip),
+            beta=np.nan,
+            case_name="figure-06-reference",
         ),
     )
 
 
-def build_solver_with_setup_timing(case: Problem, solve_grid: Grid) -> tuple[Solver, float]:
+def build_solver_with_setup_timing(
+    case: KernelProblemSpec, solve_grid: Grid
+) -> tuple[KernelSolveHandle, float]:
     started = time.perf_counter()
     solver = build_solver(case, solve_grid)
     setup_ms = (time.perf_counter() - started) * 1000.0
     return solver, float(setup_ms)
 
 
-def solve_existing_solver_once(solver: Solver) -> tuple[Solver, float, float]:
+def solve_existing_solver_once(solver: KernelSolveHandle) -> tuple[KernelSolveHandle, float, float]:
     started = time.perf_counter()
-    solver.solve(
-        enable_verbose=False,
-        enable_history=False,
-        initial_policy=SOLVER_INITIAL_POLICY,
-        enable_fallback=False,
-    )
+    result = solver.solve()
     solve_wall_ms = (time.perf_counter() - started) * 1000.0
-    if solver.result is None:
-        raise RuntimeError("solver completed without a SolverResult")
-    return solver, float(solver.result.elapsed) / 1000.0, float(solve_wall_ms)
+    if result is None:
+        raise RuntimeError("Kernel completed without a SolveResult")
+    return solver, float(result.elapsed_ms), float(solve_wall_ms)
 
 
-def solve_once(case: Problem, solve_grid: Grid) -> tuple[Solver, float]:
+def solve_once(case: KernelProblemSpec, solve_grid: Grid) -> tuple[KernelSolveHandle, float]:
     solver = build_solver(case, solve_grid)
     solver, elapsed_ms, _solve_wall_ms = solve_existing_solver_once(solver)
     return solver, elapsed_ms
 
 
 def solve_once_with_cost_audit(
-    case: Problem, solve_grid: Grid
-) -> tuple[Solver, float, SolveCostAudit]:
+    case: KernelProblemSpec, solve_grid: Grid
+) -> tuple[KernelSolveHandle, float, SolveCostAudit]:
     solver, setup_ms = build_solver_with_setup_timing(case, solve_grid)
     solver, elapsed_ms, solve_wall_ms = solve_existing_solver_once(solver)
     warmup_total_ms = setup_ms + solve_wall_ms
@@ -1088,11 +1131,11 @@ def build_timing_stats(samples_ms: list[float], *, warmup_runs: int) -> SolveTim
 
 
 def solve_equilibrium(
-    case: Problem,
+    case: KernelProblemSpec,
     *,
     solve_nr: int = SOLVE_NR,
     solve_nt: int = SOLVE_NT,
-) -> tuple[Solver, object, object, SolveTimingStats, SolveCostAudit]:
+) -> tuple[KernelSolveHandle, object, object, SolveTimingStats, SolveCostAudit]:
     solve_grid = Grid(Nr=int(solve_nr), Nt=int(solve_nt), quadrature_scheme="legendre")
     plot_grid = Grid(
         Nr=max(PLOT_NR, int(solve_nr)),
@@ -1105,13 +1148,17 @@ def solve_equilibrium(
     cost_audit: SolveCostAudit | None = None
     for warmup_index in range(SOLVER_WARMUP_RUNS):
         if warmup_index == 0:
-            _solver, _elapsed_ms, cost_audit = solve_once_with_cost_audit(case, solve_grid)
+            warmup_solver, _elapsed_ms, cost_audit = solve_once_with_cost_audit(case, solve_grid)
+            warmup_solver.close()
         else:
-            solve_once(case, solve_grid)
+            warmup_solver, _elapsed_ms = solve_once(case, solve_grid)
+            warmup_solver.close()
 
     timed_samples_ms: list[float] = []
-    solver: Solver | None = None
+    solver: KernelSolveHandle | None = None
     for _ in range(SOLVER_TIMING_REPEATS):
+        if solver is not None:
+            solver.close()
         solver, elapsed_ms = solve_once(case, solve_grid)
         timed_samples_ms.append(elapsed_ms)
 
@@ -1149,7 +1196,9 @@ def solve_equilibrium(
             setup_jit_to_solve_ratio=float(cost_audit.warmup_total_ms) / denominator,
         )
     equilibrium = solver.build_equilibrium()
-    return solver, equilibrium, equilibrium.resample(grid=plot_grid), timing, cost_audit
+    plot_equilibrium = equilibrium.resample(grid=plot_grid)
+    solver.close()
+    return solver, equilibrium, plot_equilibrium, timing, cost_audit
 
 
 def attach_case_setup_timing(cost_audit: SolveCostAudit, *, case_setup_ms: float) -> SolveCostAudit:
@@ -1490,32 +1539,6 @@ def build_case_result(case_spec: CaseSpec) -> CaseResult:
     )
 
     result = solver.result
-    if result is not None:
-        print(case_spec.title)
-        print(f"boundary fit rms: {float(fit['rms']):.{SCIENTIFIC_DECIMALS}e}")
-        print(f"solver residual: {float(result.residual_norm_final):.{SCIENTIFIC_DECIMALS}e}")
-        print(
-            "solve timing: "
-            f"median={timing.median_ms:.{FIXED_DECIMALS}f} ms, "
-            f"mean={timing.mean_ms:.{FIXED_DECIMALS}f}±"
-            f"{timing.std_ms:.{FIXED_DECIMALS}f} ms, "
-            f"range=[{timing.min_ms:.{FIXED_DECIMALS}f}, "
-            f"{timing.max_ms:.{FIXED_DECIMALS}f}] ms, "
-            f"n={timing.repeat_runs}, warmup={timing.warmup_runs}"
-        )
-        print(
-            "setup/JIT audit: "
-            f"case_setup={cost_audit.case_setup_ms:.{FIXED_DECIMALS}f} ms, "
-            f"operator_setup={cost_audit.setup_ms:.{FIXED_DECIMALS}f} ms, "
-            f"first_solve_wall={cost_audit.first_solve_wall_ms:.{FIXED_DECIMALS}f} ms, "
-            f"setup+first_solve={cost_audit.setup_jit_total_ms:.{FIXED_DECIMALS}f} ms, "
-            f"repeated_solve_median={cost_audit.repeated_solve_median_ms:.{FIXED_DECIMALS}f} ms, "
-            f"ratios operator_setup/solve={cost_audit.setup_to_solve_ratio:.{FIXED_DECIMALS}f}, "
-            f"setup+first_solve/solve={cost_audit.setup_jit_to_solve_ratio:.{FIXED_DECIMALS}f}"
-        )
-        print(f"solved Ip: {float(equilibrium.Ip):.{SCIENTIFIC_DECIMALS}e}")
-        if 1.0 in surface_metrics:
-            print(f"boundary rms distance: {surface_metrics[1.0]['rms']:.{SCIENTIFIC_DECIMALS}e}")
 
     return CaseResult(
         title=case_spec.title,
@@ -1532,8 +1555,8 @@ def build_case_result(case_spec: CaseSpec) -> CaseResult:
         shape_rms_profile=shape_rms_profile,
         parameter_count=profile_parameter_count(case_spec.profile_coeffs),
         boundary_fit_rms=float(fit["rms"]),
-        solver_residual=float("nan") if result is None else float(result.residual_norm_final),
-        nfev=0 if result is None else int(getattr(result, "function_evaluations", 0)),
+        solver_residual=float("nan") if result is None else float(result.raw_norm),
+        nfev=0 if result is None else int(result.nfev),
         solve_elapsed_ms=timing.median_ms,
         solve_timing=timing,
         solve_cost_audit=cost_audit,
@@ -1702,7 +1725,31 @@ def build_case_summary_latex_table(case_results: list[CaseResult]) -> str:
 
 
 def print_case_summary_latex_table(case_results: list[CaseResult]) -> None:
-    print(build_case_summary_latex_table(case_results))
+    SCRIPT_CONSOLE.print(build_case_summary_latex_table(case_results), markup=False)
+
+
+def print_case_runtime_summary(case_results: list[CaseResult]) -> None:
+    table = make_script_table(
+        "case summary",
+        [
+            ("case", "left"),
+            ("params", "right"),
+            ("median ms", "right"),
+            ("nfev", "right"),
+            ("residual", "right"),
+            ("fit rms", "right"),
+        ],
+    )
+    for case_result in case_results:
+        table.add_row(
+            CASE_DISPLAY_NAMES.get(case_result.reference_label, case_result.reference_label),
+            str(int(case_result.parameter_count)),
+            f"{float(case_result.solve_timing.median_ms):.{FIXED_DECIMALS}f}",
+            str(int(case_result.nfev)),
+            f"{float(case_result.solver_residual):.{SCIENTIFIC_DECIMALS}e}",
+            f"{float(case_result.boundary_fit_rms):.{SCIENTIFIC_DECIMALS}e}",
+        )
+    print_script_table(SCRIPT_CONSOLE, table)
 
 
 def interp_q_at_psin(equilibrium, psin_value: float) -> float:
@@ -1729,15 +1776,27 @@ def print_iter_parameter_comparison(case_results: list[CaseResult]) -> None:
         ("Ip [MA]", float(geqdsk.Ip) / 1.0e6, float(equilibrium.Ip) / 1.0e6),
         ("q95", q95_target, q95_veq),
     )
-    print("[ITER D-shape] target vs VEQ parameters")
+    table = make_script_table(
+        "ITER D-shape",
+        [
+            ("parameter", "left"),
+            ("target", "right"),
+            ("VEQ", "right"),
+            ("diff", "right"),
+            ("rel", "right"),
+        ],
+    )
     for name, target, veq_value in rows:
         diff = veq_value - target
         rel = abs(diff) / max(abs(target), 1.0e-12)
-        print(
-            f"  {name}: target={target:.{FIXED_DECIMALS}f}, "
-            f"VEQ={veq_value:.{FIXED_DECIMALS}f}, "
-            f"diff={diff:.{SCIENTIFIC_DECIMALS}e}, rel={rel:.{SCIENTIFIC_DECIMALS}e}"
+        table.add_row(
+            name,
+            f"{target:.{FIXED_DECIMALS}f}",
+            f"{veq_value:.{FIXED_DECIMALS}f}",
+            f"{diff:.{SCIENTIFIC_DECIMALS}e}",
+            f"{rel:.{SCIENTIFIC_DECIMALS}e}",
         )
+    print_script_table(SCRIPT_CONSOLE, table)
 
 
 def build_compare_figure(case_results: list[CaseResult]) -> plt.Figure:
@@ -1907,29 +1966,63 @@ def build_compare_figure(case_results: list[CaseResult]) -> plt.Figure:
 
 def main() -> None:
     os.makedirs("data", exist_ok=True)
-    case_results = [build_case_result(case_spec) for case_spec in CASE_SPECS]
-    equilibrium_paths = [
-        write_reference_equilibrium_json(case_result) for case_result in case_results
-    ]
-    reference_manifest_path = write_reference_equilibrium_manifest(case_results, equilibrium_paths)
+    print_script_config(
+        SCRIPT_CONSOLE,
+        "figure 06 / table 04: high-order reconstructions",
+        (
+            ("cases", len(CASE_SPECS)),
+            ("backend", "numba"),
+            ("warmup", SOLVER_WARMUP_RUNS),
+            ("repeat", SOLVER_TIMING_REPEATS),
+        ),
+    )
+    with script_progress(SCRIPT_CONSOLE) as progress:
+        task = progress.add_task(
+            "",
+            total=len(CASE_SPECS) + 3,
+            current="solve cases",
+            phase="[cyan]solve[/]",
+        )
+        case_results = []
+        for case_spec in CASE_SPECS:
+            progress.update(task, current=case_spec.title, phase="[cyan]solve[/]")
+            case_results.append(build_case_result(case_spec))
+            progress.update(task, advance=1, current=case_spec.title, phase="[cyan]solve[/]")
+        progress.update(task, current="write references", phase="[cyan]run[/]")
+        equilibrium_paths = [
+            write_reference_equilibrium_json(case_result) for case_result in case_results
+        ]
+        reference_manifest_path = write_reference_equilibrium_manifest(
+            case_results, equilibrium_paths
+        )
+        progress.update(task, advance=1, current="render figure", phase="[cyan]run[/]")
+        fig = build_compare_figure(case_results)
+        saved_paths = save_figure_outputs(
+            fig,
+            png_path=PNG_PATH,
+            pdf_path=PDF_PATH,
+            dpi=SAVE_DPI,
+            transparent=SAVE_TRANSPARENT,
+        )
+        plt.close(fig)
+        progress.update(task, advance=1, current="summaries", phase="[cyan]run[/]")
+        progress.update(task, advance=1, current="summaries", phase="[green]done[/]")
+
+    print_case_runtime_summary(case_results)
     print_case_summary_latex_table(case_results)
     print_iter_parameter_comparison(case_results)
-    fig = build_compare_figure(case_results)
-    saved_paths = save_figure_outputs(
-        fig,
-        png_path=PNG_PATH,
-        pdf_path=PDF_PATH,
-        dpi=SAVE_DPI,
-        transparent=SAVE_TRANSPARENT,
+    output_rows = [("Reference G-EQDSK", SAVE_GFILE_PATH, "Generated Solovev reference")]
+    output_rows.extend(
+        ("Reference equilibrium", path, "Figure 06 JSON input")
+        for path in equilibrium_paths
     )
-    plt.close(fig)
-
-    print(f"saved: {SAVE_GFILE_PATH}")
-    for path in equilibrium_paths:
-        print(f"saved: {path}")
-    print(f"saved: {reference_manifest_path}")
-    for path in saved_paths:
-        print(f"saved: {path}")
+    output_rows.append(
+        ("Reference manifest", reference_manifest_path, "Figure 07/08/09 input index")
+    )
+    output_rows.extend(
+        ("Figure 06", path, "High-order reconstruction comparison") for path in saved_paths
+    )
+    print_output_table(SCRIPT_CONSOLE, output_rows)
 
 
 if __name__ == "__main__":

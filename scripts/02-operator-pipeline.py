@@ -11,7 +11,13 @@ from io import BytesIO
 from pathlib import Path
 
 import cairosvg
-from config import figure_path
+from _common import figure_path
+from _reporting import (
+    SCRIPT_CONSOLE,
+    print_output_table,
+    print_script_config,
+    script_progress,
+)
 from PIL import Image
 
 FIGURE_WIDTH_IN = 6.5
@@ -28,9 +34,10 @@ def render_svg_outputs(
     pdf_path: str | Path | None,
     width_in: float,
     dpi: int,
-) -> None:
+) -> list[tuple[str, str | Path, str | None]]:
+    rows: list[tuple[str, str | Path, str | None]] = []
     if png_path is None and pdf_path is None:
-        return
+        return rows
     if not source_svg.is_file():
         raise FileNotFoundError(f"Missing source SVG: {source_svg}")
 
@@ -45,10 +52,12 @@ def render_svg_outputs(
 
         with Image.open(png_path) as image:
             width_px, height_px = image.size
-        print(f"saved: {png_path}")
-        print(
-            f"size: {width_px}x{height_px} px "
-            f"({width_px / dpi:.3f}x{height_px / dpi:.3f} in @ {dpi} dpi)"
+        rows.append(
+            (
+                "Figure 02 PNG",
+                png_path,
+                f"{width_px}x{height_px} px ({width_px / dpi:.3f}x{height_px / dpi:.3f} in)",
+            )
         )
 
     if pdf_path is not None:
@@ -59,17 +68,36 @@ def render_svg_outputs(
             write_to=str(pdf_path),
             output_width=output_width_px,
         )
-        print(f"saved: {pdf_path}")
+        rows.append(("Figure 02 PDF", pdf_path, f"width {width_in:.3f} in"))
+    return rows
 
 
 def main() -> None:
-    render_svg_outputs(
-        SOURCE_SVG_PATH,
-        png_path=PNG_PATH,
-        pdf_path=PDF_PATH,
-        width_in=FIGURE_WIDTH_IN,
-        dpi=SAVE_DPI,
+    print_script_config(
+        SCRIPT_CONSOLE,
+        "figure 02: operator pipeline",
+        (
+            ("source", SOURCE_SVG_PATH),
+            ("width", f"{FIGURE_WIDTH_IN:.3f} in"),
+            ("dpi", SAVE_DPI),
+        ),
     )
+    with script_progress(SCRIPT_CONSOLE) as progress:
+        task = progress.add_task(
+            "",
+            total=1,
+            current="convert SVG",
+            phase="[cyan]run[/]",
+        )
+        rows = render_svg_outputs(
+            SOURCE_SVG_PATH,
+            png_path=PNG_PATH,
+            pdf_path=PDF_PATH,
+            width_in=FIGURE_WIDTH_IN,
+            dpi=SAVE_DPI,
+        )
+        progress.update(task, advance=1, current="convert SVG", phase="[green]done[/]")
+    print_output_table(SCRIPT_CONSOLE, rows)
 
 
 if __name__ == "__main__":
