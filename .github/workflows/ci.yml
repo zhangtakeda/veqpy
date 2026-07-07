@@ -57,10 +57,10 @@ jobs:
           python -m pip install -e ".[dev]"
 
       - name: Compile Python sources
-        run: python -m compileall -q veqpy tests examples veqlib/facade benchmarks scripts
+        run: python -m compileall -q veqpy tests benchmarks scripts demo.py
 
       - name: Lint with Ruff
-        run: ruff check veqpy tests examples veqlib/facade benchmarks scripts
+        run: ruff check veqpy tests benchmarks scripts demo.py
 
       - name: Run tests
         run: pytest
@@ -87,7 +87,7 @@ jobs:
           from pathlib import Path
 
           import veqpy
-          from veqpy.facade import Kernel, KernelBoundary, KernelSource, KernelTopology
+          from veqpy import Kernel, KernelBoundary, KernelSource, KernelTopology
           from veqpy.model import Grid
 
           module_path = Path(veqpy.__file__).resolve()

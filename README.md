@@ -99,41 +99,30 @@ LAPACKE/LAPACK, and OpenBLAS.
 
 All commands below use `.venv` explicitly; activating the environment is optional.
 
-## Example Workflows
+## Demo
 
-Basic demo:
-
-```bash
-.venv/bin/python examples/minimal_equilibrium.py
-```
-
-This script builds a smooth fixed-boundary Kernel case, solves an equilibrium using PF(`psin`)
-source input, writes an `Equilibrium` JSON snapshot, and generates a flux-surface figure.
-By default, outputs go under `./outputs/minimal_equilibrium`; set
-`VEQPY_OUTPUT_DIR` to choose another directory.
-
-GEQDSK demo:
+`demo.py` is the external-user starting point. It builds the smallest smooth
+fixed-boundary PF(`psin`) Kernel case directly with the public `veqpy` API:
+`KernelTopology`, `KernelRecipe`, `KernelConfig`, `KernelBoundary`, and
+`KernelSource`.
 
 ```bash
-.venv/bin/python examples/geqdsk_workflow.py
+.venv/bin/python demo.py
 ```
 
-This script reads a GEQDSK file, fits it as a VEQPy fixed boundary, solves a small
-PF(`psin`) Kernel case with an `Ip` constraint using one-dimensional source profiles
-from the GEQDSK file, and writes a comparison figure. By default, it reads
-`./data/SOLOVEV.geqdsk` and writes outputs under
-`./outputs/geqdsk_workflow`; set `VEQPY_GEQDSK` and `VEQPY_OUTPUT_DIR` to override
-those paths. Manuscript-oriented reproduction scripts are available under
-[`scripts/`][scripts]; they are heavier than the minimal examples and may write
-paper/data artifacts rather than user-demo outputs.
+By default it writes `demo_init.png`, `demo_result.png`, and
+`demo_equilibrium.json` in the current directory. Set `VEQPY_OUTPUT_DIR` to send
+those files elsewhere. Manuscript-oriented reproduction workflows live under
+[`scripts/`][scripts]; they are heavier data/figure generators rather than
+introductory examples.
 
 ## Development Checks
 
 Core local checks mirror the push/PR CI workflow.
 
 ```bash
-.venv/bin/python -m compileall -q veqpy tests examples benchmarks scripts
-.venv/bin/ruff check veqpy tests examples benchmarks scripts
+.venv/bin/python -m compileall -q veqpy tests benchmarks scripts demo.py
+.venv/bin/ruff check veqpy tests benchmarks scripts demo.py
 .venv/bin/python -m pytest
 ```
 
