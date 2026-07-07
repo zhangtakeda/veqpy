@@ -20,6 +20,10 @@ The main source files live in `veqpy/model/`.
 | `Geqdsk`      | GEQDSK data loading, storage, and conversion                                                              |
 | `Equilibrium` | Solved continuous equilibrium snapshot and diagnostic interface                                           |
 
+`Boundary.s_offsets` is indexed directly by Fourier order and therefore includes
+the structural s0 slot. Convert to Kernel runtime input with
+`KernelBoundary(s_offsets=boundary.s_offsets[1:])`.
+
 `Profile` represents a one-dimensional radial profile with scale, power,
 envelope, offset, and optional Chebyshev coefficients. Its persistent state is
 only those root parameters. When a `Grid` is bound, it lazily materializes

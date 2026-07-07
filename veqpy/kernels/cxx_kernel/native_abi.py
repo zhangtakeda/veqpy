@@ -1,4 +1,9 @@
-"""Nanobind ABI lowering helpers for Kernel dataclasses."""
+"""
+Module: veqpy.kernels.cxx_kernel.native_abi
+
+Role:
+- Lower Kernel dataclasses to nanobind runtime arguments and solve results.
+"""
 
 from __future__ import annotations
 
@@ -7,7 +12,12 @@ from typing import Any
 import numpy as np
 
 from veqpy.kernels.abi.source_semantics import MaterializedKernelSource
-from veqpy.kernels.types import KernelBoundary, KernelConfig, SolveResult
+from veqpy.kernels.types import (
+    KernelBoundary,
+    KernelConfig,
+    SolveResult,
+    kernel_boundary_s_offsets_with_s0,
+)
 
 
 def boundary_runtime_args(boundary: KernelBoundary) -> tuple[Any, ...]:
@@ -18,7 +28,7 @@ def boundary_runtime_args(boundary: KernelBoundary) -> tuple[Any, ...]:
         boundary.B0,
         boundary.ka,
         np.ascontiguousarray(boundary.c_offsets, dtype=np.float64),
-        np.ascontiguousarray(boundary.s_offsets, dtype=np.float64),
+        np.ascontiguousarray(kernel_boundary_s_offsets_with_s0(boundary), dtype=np.float64),
     )
 
 

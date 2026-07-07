@@ -1,4 +1,9 @@
-"""Private Cxx Kernel implementation."""
+"""
+Module: veqpy.kernels.cxx_kernel.kernel
+
+Role:
+- Implement the private Cxx backend behind the public ``Kernel`` wrapper.
+"""
 
 from __future__ import annotations
 
@@ -281,14 +286,17 @@ class _CxxKernelImpl:
         source: MaterializedKernelSource,
     ) -> None:
         topology = self.topology
-        max_offsets = topology.M_max + 1
-        for name, values in (
-            ("c_offsets", boundary.c_offsets),
-            ("s_offsets", boundary.s_offsets),
-        ):
-            if values.size > max_offsets:
-                raise ValueError(
-                    "case does not match kernel topology: "
-                    f"{name} length must be at most M_max + 1 ({max_offsets}), "
-                    f"got {values.size}"
-                )
+        max_cosine_offsets = topology.M_max + 1
+        if boundary.c_offsets.size > max_cosine_offsets:
+            raise ValueError(
+                "case does not match kernel topology: "
+                f"c_offsets length must be at most M_max + 1 ({max_cosine_offsets}), "
+                f"got {boundary.c_offsets.size}"
+            )
+        max_sine_offsets = topology.M_max
+        if len(boundary.s_offsets) > max_sine_offsets:
+            raise ValueError(
+                "case does not match kernel topology: "
+                f"s_offsets length must be at most M_max ({max_sine_offsets}), "
+                f"got {len(boundary.s_offsets)}"
+            )

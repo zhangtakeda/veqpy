@@ -1,4 +1,9 @@
-"""Direct runtime assembly for the Numba backend."""
+"""
+Module: veqpy.kernels.numba_kernel.runtime
+
+Role:
+- Assemble direct runtime state for the Numba backend.
+"""
 
 from __future__ import annotations
 
@@ -13,6 +18,7 @@ from veqpy.kernels.types import (
     KernelBoundary,
     KernelSource,
     KernelTopology,
+    kernel_boundary_s_offsets_with_s0,
 )
 from veqpy.model import Grid
 from veqpy.numerics import (
@@ -162,7 +168,7 @@ class KernelRuntimeCase:
 
     @property
     def s_offsets(self) -> np.ndarray:
-        return self.boundary.s_offsets
+        return kernel_boundary_s_offsets_with_s0(self.boundary)
 
     @property
     def heat_input(self) -> np.ndarray:
@@ -641,7 +647,7 @@ def _build_profile_config(
 
 def _boundary_curve_strain(boundary: KernelBoundary) -> float:
     c_offsets = _boundary_offset_array(boundary.c_offsets)
-    s_offsets = _boundary_offset_array(boundary.s_offsets)
+    s_offsets = _boundary_offset_array(kernel_boundary_s_offsets_with_s0(boundary))
     if c_offsets is None or s_offsets is None:
         return float("inf")
     has_c_shape = c_offsets.size > 0 and bool(np.any(c_offsets != 0.0))

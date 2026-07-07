@@ -25,6 +25,7 @@ from veqpy.kernels.abi.options import (
 from veqpy.kernels.abi.source_semantics import materialize_kernel_source
 from veqpy.kernels.cxx_kernel.builder import prepare
 from veqpy.kernels.cxx_kernel.native_abi import solve_result_from_native
+from veqpy.kernels.types import kernel_boundary_s_offsets_with_s0
 
 MU0 = 4.0e-7 * np.pi
 
@@ -57,7 +58,7 @@ def tiny_kernel_boundary() -> KernelBoundary:
         Z0=0.0,
         B0=3.0,
         ka=1.7,
-        s_offsets=np.array([0.0, np.arcsin(0.2)], dtype=np.float64),
+        s_offsets=(float(np.arcsin(0.2)),),
     )
 
 
@@ -156,11 +157,13 @@ def test_kernel_topology_and_runtime_source_is_user_facing_contract() -> None:
     assert_allclose(materialized_source.scaled_current, tiny_kernel_source().current_profile)
     assert materialized_source.scaled_Ip == 3.0e6 * MU0
     assert kernel_boundary.c_offsets.flags.c_contiguous
-    assert kernel_boundary.s_offsets.flags.c_contiguous
+    assert isinstance(kernel_boundary.s_offsets, tuple)
     assert kernel_source.heat_profile.flags.c_contiguous
     assert kernel_source.current_profile.flags.c_contiguous
     assert not kernel_boundary.c_offsets.flags.writeable
-    assert not kernel_boundary.s_offsets.flags.writeable
+    assert_allclose(kernel_boundary.s_offsets, [np.arcsin(0.2)])
+    assert_allclose(kernel_boundary_s_offsets_with_s0(kernel_boundary), [0.0, np.arcsin(0.2)])
+    assert not kernel_boundary_s_offsets_with_s0(kernel_boundary).flags.writeable
     assert not kernel_source.heat_profile.flags.writeable
     assert not kernel_source.current_profile.flags.writeable
 
@@ -213,6 +216,35 @@ def test_kernel_source_materialization_locks_route_scaling(
     assert materialized.scaled_Ip == 3.0e6 * MU0
     assert not materialized.scaled_heat.flags.writeable
     assert not materialized.scaled_current.flags.writeable
+
+
+def test_kernel_source_materialization_does_not_reject_profile_magnitude() -> None:
+    topology = make_kernel_topology(
+        route="PP",
+        coordinate="rho",
+        nodes="uniform",
+        sample_count=3,
+        ip_constraint=False,
+        beta_constraint=True,
+        psin_count=0,
+        F_count=0,
+        h_count=1,
+        kappa_count=0,
+        s_counts=(),
+    )
+    heat_profile = np.array([1.0e12, -2.0e12, 3.0e12], dtype=np.float64)
+    current_profile = np.array([4.0e9, -5.0e9, 6.0e9], dtype=np.float64)
+    source = KernelSource(
+        heat_profile=heat_profile,
+        current_profile=current_profile,
+        beta=0.03,
+    )
+
+    materialized = materialize_kernel_source(topology, source)
+
+    assert_allclose(materialized.scaled_heat, heat_profile * MU0)
+    assert_allclose(materialized.scaled_current, current_profile)
+    assert materialized.beta == 0.03
 
 
 def test_kernel_source_materialization_errors_use_raw_field_names() -> None:
@@ -269,7 +301,7 @@ def test_kernel_runtime_case_must_match_topology_before_native() -> None:
         R0=1.0,
         Z0=0.0,
         B0=3.0,
-        s_offsets=np.zeros(topology.M_max + 2, dtype=np.float64),
+        s_offsets=tuple(np.zeros(topology.M_max + 1, dtype=np.float64)),
     )
     with pytest.raises(ValueError, match="case does not match kernel topology: s_offsets"):
         handle.solve(

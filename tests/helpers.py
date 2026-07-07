@@ -14,7 +14,7 @@ def tiny_boundary() -> Boundary:
         Z0=0.0,
         B0=3.0,
         ka=1.7,
-        s_offsets=np.array([0.0, np.arcsin(0.2)], dtype=np.float64),
+        s_offsets=(float(np.arcsin(0.2)),),
     )
 
 

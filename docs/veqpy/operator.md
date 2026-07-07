@@ -11,6 +11,9 @@ coordinate system, node semantics, and source constraints. `KernelBoundary` and
 `KernelSource` carry per-case physical inputs. `KernelConfig` carries nonlinear
 solve policy. `Kernel.solve(...)` returns a shared `SolveResult`, and
 `Kernel.build_equilibrium()` materializes the current `Equilibrium` snapshot.
+For sine Fourier data, Kernel-level public inputs are s1-started:
+`KernelTopology.s_counts=(n1, n2, ...)` and `KernelBoundary.s_offsets=(s1, s2, ...)`.
+The runtime adds the structural s0=0 slot before backend calls.
 
 The direct Numba implementation is a private Kernel backend. Its internal runtime
 owns packed layout metadata, source materialization, residual workspaces, and

@@ -1,9 +1,13 @@
-"""Typed Kernel values canonicalized before backend ABI lowering.
+"""
+Module: veqpy.kernels.types
 
-The dataclasses in this module own stable Python data only. Construction
-normalizes Python-facing inputs and freezes derived scalar fields; separate
-backend helpers lower these objects to artifact identity payloads and native
-runtime tuples.
+Role:
+- Define typed Kernel dataclasses canonicalized before backend ABI lowering.
+
+Notes:
+- These dataclasses own stable Python data only. Construction normalizes
+  Python-facing inputs and freezes derived scalar fields; backend helpers lower
+  them to artifact identity payloads and runtime tuples.
 """
 
 from __future__ import annotations
@@ -138,7 +142,12 @@ class KernelRecipe:
 
 @dataclass(frozen=True, slots=True)
 class KernelBoundary:
-    """Native Cxx boundary scalars and Fourier offsets."""
+    """Runtime boundary scalars and Fourier offsets.
+
+    ``c_offsets`` is indexed by cosine order and starts at c0. ``s_offsets`` is
+    public input for physical sine modes only and starts at s1; backend runtime
+    lowering adds the structural s0=0 slot.
+    """
 
     a: float
     R0: float
@@ -146,7 +155,8 @@ class KernelBoundary:
     B0: float
     ka: float = 1.0
     c_offsets: np.ndarray | tuple[float, ...] | list[float] | None = None
-    s_offsets: np.ndarray | tuple[float, ...] | list[float] | None = None
+    s_offsets: tuple[float, ...] | list[float] | np.ndarray | None = None
+    _s_offsets_with_s0: np.ndarray = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "a", float(self.a))
@@ -155,11 +165,15 @@ class KernelBoundary:
         object.__setattr__(self, "B0", float(self.B0))
         object.__setattr__(self, "ka", float(self.ka))
         object.__setattr__(self, "c_offsets", _readonly_1d_or_default(self.c_offsets, "c_offsets"))
-        s_offsets = _readonly_1d_or_default(self.s_offsets, "s_offsets")
-        s_copy = np.array(s_offsets, dtype=np.float64, copy=True)
-        s_copy[0] = 0.0
-        s_copy.setflags(write=False)
-        object.__setattr__(self, "s_offsets", s_copy)
+        s_offsets = _float_tuple_or_default(self.s_offsets, "s_offsets", default=())
+        object.__setattr__(self, "s_offsets", s_offsets)
+        object.__setattr__(self, "_s_offsets_with_s0", _s_offsets_runtime_array(s_offsets))
+
+
+def kernel_boundary_s_offsets_with_s0(boundary: KernelBoundary) -> np.ndarray:
+    """Return backend runtime sine offsets indexed directly by Fourier order."""
+
+    return boundary._s_offsets_with_s0
 
 
 @dataclass(frozen=True, slots=True)
@@ -659,6 +673,28 @@ def _readonly_1d_or_default(
         arr = arr.copy()
     arr.setflags(write=False)
     return arr
+
+
+def _float_tuple_or_default(
+    value: np.ndarray | list[float] | tuple[float, ...] | None,
+    name: str,
+    *,
+    default: tuple[float, ...],
+) -> tuple[float, ...]:
+    if value is None:
+        return default
+    arr = np.asarray(value, dtype=np.float64)
+    if arr.ndim != 1:
+        raise ValueError(f"{name} must be 1D, got {arr.shape}")
+    return tuple(float(item) for item in arr)
+
+
+def _s_offsets_runtime_array(s_offsets: tuple[float, ...]) -> np.ndarray:
+    out = np.zeros(len(s_offsets) + 1, dtype=np.float64)
+    if s_offsets:
+        out[1:] = np.asarray(s_offsets, dtype=np.float64)
+    out.setflags(write=False)
+    return out
 
 
 def _readonly_1d(value: np.ndarray | list[float] | tuple[float, ...], name: str) -> np.ndarray:

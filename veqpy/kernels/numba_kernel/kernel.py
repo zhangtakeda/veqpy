@@ -1,4 +1,9 @@
-"""Private Numba Kernel implementation for the Kernel wrapper."""
+"""
+Module: veqpy.kernels.numba_kernel.kernel
+
+Role:
+- Implement the private Numba backend behind the public ``Kernel`` wrapper.
+"""
 
 from __future__ import annotations
 
@@ -268,6 +273,7 @@ def _config_with_overrides(config: KernelConfig, **overrides: Any) -> KernelConf
 
 def _prepare_boundary(topology: KernelTopology) -> KernelBoundary:
     offset_size = max(1, int(topology.M_max) + 1)
+    sine_offset_count = max(0, int(topology.M_max))
     return KernelBoundary(
         a=0.5,
         R0=1.0,
@@ -275,7 +281,7 @@ def _prepare_boundary(topology: KernelTopology) -> KernelBoundary:
         B0=3.0,
         ka=1.0,
         c_offsets=np.zeros(offset_size, dtype=np.float64),
-        s_offsets=np.zeros(offset_size, dtype=np.float64),
+        s_offsets=np.zeros(sine_offset_count, dtype=np.float64),
     )
 
 

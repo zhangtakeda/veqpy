@@ -1,8 +1,12 @@
-"""KernelSource semantic lowering shared by Kernel backends.
+"""
+Module: veqpy.kernels.abi.source_semantics
 
-``KernelSource`` is the public raw case input. Native runtimes still consume the
-same scaled arrays as the existing backend cores, so this module binds Kernel field
-names and topology lengths to the package-level Python-side conversion table.
+Role:
+- Lower public raw ``KernelSource`` inputs into backend-internal source units.
+
+Notes:
+- Source route validation and mu0 scaling are centralized here so Cxx and Numba
+  backends consume the same materialized source arrays.
 """
 
 from __future__ import annotations
@@ -114,9 +118,7 @@ def materialize_source_inputs(
 
 def _scale_pressure_like_input(value: np.ndarray, *, name: str, advice: str) -> np.ndarray:
     array = np.asarray(value, dtype=np.float64)
-    max_abs = float(np.max(np.abs(array))) if array.size else 0.0
-    if not _in_closed_range(max_abs, SETUP_PHYSICAL_ABS_MIN, SETUP_PHYSICAL_ABS_MAX):
-        _reject_setup_magnitude(name=name, max_abs=max_abs, advice=advice)
+    _validate_finite_profile(array, name=name, advice=advice)
     return _readonly_array(array * MU0)
 
 
@@ -128,13 +130,9 @@ def _scale_current_input(
     advice: str,
 ) -> np.ndarray:
     array = np.asarray(value, dtype=np.float64)
-    max_abs = float(np.max(np.abs(array))) if array.size else 0.0
+    _validate_finite_profile(array, name=name, advice=advice)
     if route in CURRENT_PROFILE_ROUTES:
-        if not _in_closed_range(max_abs, SETUP_PHYSICAL_ABS_MIN, SETUP_PHYSICAL_ABS_MAX):
-            _reject_setup_magnitude(name=name, max_abs=max_abs, advice=advice)
         return _readonly_array(array * MU0)
-    if not _in_closed_range(max_abs, SETUP_NORMALIZED_ABS_MIN, SETUP_NORMALIZED_ABS_MAX):
-        _reject_setup_magnitude(name=name, max_abs=max_abs, advice=advice)
     return _readonly_array(array)
 
 
@@ -153,6 +151,14 @@ def _reject_setup_magnitude(*, name: str, max_abs: float, advice: str) -> None:
         f"Rejected setup input magnitude: {magnitude_label}={max_abs:.6g}. "
         f"{advice}"
     )
+    warnings.warn(message, RuntimeWarning, stacklevel=3)
+    raise ValueError(message)
+
+
+def _validate_finite_profile(array: np.ndarray, *, name: str, advice: str) -> None:
+    if np.all(np.isfinite(array)):
+        return
+    message = f"Rejected setup input values: {name} must contain only finite values. {advice}"
     warnings.warn(message, RuntimeWarning, stacklevel=3)
     raise ValueError(message)
 

@@ -178,11 +178,13 @@ The package-level Kernel API is intentionally semantic: users construct
 handle-level default solve policy, and `KernelRecipe` remains the shared backend
 recipe type. `KernelSource` stores raw user-facing `heat_profile`,
 `current_profile`, `Ip`, and `beta` values; the Kernel runtime materializes
-route-dependent `mu0` scaling before calling backend kernels. `KernelRecipe`
-selects `backend="numba"` for the direct Numba runtime or `backend="cxx"` for the
-native backend. Both backends use the same public `Kernel` type and method
-surface, including residuals, solves, finite-difference JVP/Jacobian calls, and
-`build_equilibrium()`.
+route-dependent `mu0` scaling before calling backend kernels. Sine-family Kernel
+inputs are s1-started: `KernelTopology.s_counts=(n1, n2, ...)` and
+`KernelBoundary.s_offsets=(s1, s2, ...)`; backend runtime lowering adds the
+structural s0=0 slot. `KernelRecipe` selects `backend="numba"` for the direct
+Numba runtime or `backend="cxx"` for the native backend. Both backends use the
+same public `Kernel` type and method surface, including residuals, solves,
+finite-difference JVP/Jacobian calls, and `build_equilibrium()`.
 `build(topology=..., recipe=None, config=None)` creates a reusable `Kernel` and
 caches that default policy on the handle; `Kernel.solve(...)` can use it as-is,
 replace it with a one-off `config=...`, or override individual fields such as
@@ -213,7 +215,7 @@ Useful Kernel checks from the repository root:
 ```
 
 Retained benchmark result artifacts live under `benchmarks/results/`. Future
-timing evidence should use the shared KernelTypes directly through
+timing evidence should use the shared Kernel dataclasses directly through
 `veqpy.Kernel`, selecting `backend="numba"` or `backend="cxx"` through
 `KernelRecipe`.
 

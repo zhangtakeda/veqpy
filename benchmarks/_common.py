@@ -402,7 +402,7 @@ def synthetic_boundary() -> KernelBoundary:
         Z0=0.0,
         B0=3.0,
         ka=2.2,
-        s_offsets=np.array([0.0, float(np.arcsin(0.5))], dtype=np.float64),
+        s_offsets=(float(np.arcsin(0.5)),),
     )
 
 
@@ -414,7 +414,7 @@ def kernel_boundary_from_boundary(boundary: Boundary) -> KernelBoundary:
         B0=boundary.B0,
         ka=boundary.ka,
         c_offsets=boundary.c_offsets,
-        s_offsets=boundary.s_offsets,
+        s_offsets=boundary.s_offsets[1:],
     )
 
 
@@ -1306,7 +1306,7 @@ def _updated_case(case: KernelCase, *, update: str, offset: float, index: int) -
         boundary = replace(
             boundary,
             c_offsets=_scale_array(boundary.c_offsets, offset, strength=0.5, keep_first=False),
-            s_offsets=_scale_array(boundary.s_offsets, offset, strength=0.5, keep_first=True),
+            s_offsets=_scale_array(boundary.s_offsets, offset, strength=0.5, keep_first=False),
         )
     if update in {"ip", "mixed"} and np.isfinite(source.Ip):
         source = replace(source, Ip=float(source.Ip) * (1.0 + offset))
@@ -1321,7 +1321,7 @@ def _updated_case(case: KernelCase, *, update: str, offset: float, index: int) -
 
 
 def _scale_array(
-    values: np.ndarray, offset: float, *, strength: float, keep_first: bool
+    values: np.ndarray | tuple[float, ...], offset: float, *, strength: float, keep_first: bool
 ) -> np.ndarray:
     arr = np.array(values, dtype=np.float64, copy=True)
     for index in range(arr.size):
