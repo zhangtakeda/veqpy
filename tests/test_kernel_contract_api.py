@@ -62,6 +62,18 @@ def tiny_kernel_boundary() -> KernelBoundary:
     )
 
 
+def ellipse_boundary_points(
+    *,
+    a: float = 0.5,
+    R0: float = 1.0,
+    Z0: float = 0.1,
+    ka: float = 1.7,
+    count: int = 96,
+) -> tuple[np.ndarray, np.ndarray]:
+    theta = np.linspace(0.0, 2.0 * np.pi, count, endpoint=False, dtype=np.float64)
+    return R0 + a * np.cos(theta), Z0 - a * ka * np.sin(theta)
+
+
 def pf_reference_profiles(psin: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     beta0 = 0.75
     alpha_p = 5.0
@@ -84,6 +96,48 @@ def tiny_kernel_source(*, case_name: str | None = None) -> KernelSource:
         Ip=3.0e6,
         case_name=case_name,
     )
+
+
+def test_kernel_boundary_accepts_parameterized_and_rz_inputs() -> None:
+    explicit = tiny_kernel_boundary()
+    assert explicit.fit_rms is None
+    assert explicit.fit_max_curve_error is None
+    assert explicit.fit_c_order is None
+    assert explicit.fit_s_order is None
+    assert_allclose(kernel_boundary_s_offsets_with_s0(explicit), [0.0, explicit.s_offsets[0]])
+
+    R_boundary, Z_boundary = ellipse_boundary_points()
+    fitted = KernelBoundary(
+        B0=3.0,
+        R_boundary=R_boundary,
+        Z_boundary=Z_boundary,
+        c_order=0,
+        s_order=0,
+        fit_maxtol=1.0e-8,
+    )
+    assert_allclose(fitted.a, 0.5, rtol=0.0, atol=1.0e-8)
+    assert_allclose(fitted.R0, 1.0, rtol=0.0, atol=1.0e-8)
+    assert_allclose(fitted.Z0, 0.1, rtol=0.0, atol=1.0e-8)
+    assert_allclose(fitted.B0, 3.0)
+    assert_allclose(fitted.ka, 1.7, rtol=0.0, atol=1.0e-8)
+    assert_allclose(fitted.c_offsets, [0.0], atol=1.0e-8)
+    assert fitted.s_offsets == ()
+    assert fitted.fit_rms is not None and fitted.fit_rms < 1.0e-8
+    assert fitted.fit_max_curve_error is not None and fitted.fit_max_curve_error < 1.0e-8
+    assert fitted.fit_c_order == 0
+    assert fitted.fit_s_order == 0
+
+    with pytest.raises(ValueError, match="provided together"):
+        KernelBoundary(B0=3.0, R_boundary=R_boundary, Z_boundary=Z_boundary, c_order=0)
+    with pytest.raises(ValueError, match="cannot be mixed"):
+        KernelBoundary(
+            a=0.5,
+            B0=3.0,
+            R_boundary=R_boundary,
+            Z_boundary=Z_boundary,
+            c_order=0,
+            s_order=0,
+        )
 
 
 class RecordingSolver:

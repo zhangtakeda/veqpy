@@ -12,7 +12,7 @@ Notes:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, fields, replace
+from dataclasses import InitVar, dataclass, field, fields, replace
 from typing import Any
 
 import numpy as np
@@ -149,25 +149,114 @@ class KernelBoundary:
     lowering adds the structural s0=0 slot.
     """
 
-    a: float
-    R0: float
-    Z0: float
-    B0: float
-    ka: float = 1.0
+    a: float | None = None
+    R0: float | None = None
+    Z0: float | None = None
+    B0: float | None = None
+    ka: float | None = None
     c_offsets: np.ndarray | tuple[float, ...] | list[float] | None = None
     s_offsets: tuple[float, ...] | list[float] | np.ndarray | None = None
+    R_boundary: InitVar[Any | None] = None
+    Z_boundary: InitVar[Any | None] = None
+    c_order: InitVar[int | None] = None
+    s_order: InitVar[int | None] = None
+    fit_maxtol: InitVar[float] = 1.0e-2
+    fit_rms: float | None = field(init=False)
+    fit_max_curve_error: float | None = field(init=False)
+    fit_c_order: int | None = field(init=False)
+    fit_s_order: int | None = field(init=False)
     _s_offsets_with_s0: np.ndarray = field(init=False, repr=False, compare=False)
 
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "a", float(self.a))
-        object.__setattr__(self, "R0", float(self.R0))
-        object.__setattr__(self, "Z0", float(self.Z0))
+    def __post_init__(
+        self,
+        R_boundary: Any | None,
+        Z_boundary: Any | None,
+        c_order: int | None,
+        s_order: int | None,
+        fit_maxtol: float,
+    ) -> None:
+        if self.B0 is None:
+            raise ValueError("B0 is required")
+        uses_boundary_points = any(
+            value is not None for value in (R_boundary, Z_boundary, c_order, s_order)
+        )
+        if uses_boundary_points:
+            normalized = self._fit_boundary_points(
+                R_boundary=R_boundary,
+                Z_boundary=Z_boundary,
+                c_order=c_order,
+                s_order=s_order,
+                fit_maxtol=fit_maxtol,
+            )
+            c_offsets_input = normalized["c_offsets"]
+            s_offsets_input = np.asarray(normalized["s_offsets"], dtype=np.float64)[1:]
+            object.__setattr__(self, "a", float(normalized["a"]))
+            object.__setattr__(self, "R0", float(normalized["R0"]))
+            object.__setattr__(self, "Z0", float(normalized["Z0"]))
+            object.__setattr__(self, "ka", float(normalized["ka"]))
+            object.__setattr__(self, "fit_rms", float(normalized["rms"]))
+            object.__setattr__(
+                self, "fit_max_curve_error", float(normalized["max_curve_error"])
+            )
+            object.__setattr__(self, "fit_c_order", int(normalized["c_order"]))
+            object.__setattr__(self, "fit_s_order", int(normalized["s_order"]))
+        else:
+            missing = [
+                name
+                for name, value in (("a", self.a), ("R0", self.R0), ("Z0", self.Z0))
+                if value is None
+            ]
+            if missing:
+                joined = ", ".join(missing)
+                raise ValueError(f"{joined} must be provided when RZ boundary points are absent")
+            c_offsets_input = self.c_offsets
+            s_offsets_input = self.s_offsets
+            object.__setattr__(self, "a", float(self.a))
+            object.__setattr__(self, "R0", float(self.R0))
+            object.__setattr__(self, "Z0", float(self.Z0))
+            object.__setattr__(self, "ka", 1.0 if self.ka is None else float(self.ka))
+            object.__setattr__(self, "fit_rms", None)
+            object.__setattr__(self, "fit_max_curve_error", None)
+            object.__setattr__(self, "fit_c_order", None)
+            object.__setattr__(self, "fit_s_order", None)
         object.__setattr__(self, "B0", float(self.B0))
-        object.__setattr__(self, "ka", float(self.ka))
-        object.__setattr__(self, "c_offsets", _readonly_1d_or_default(self.c_offsets, "c_offsets"))
-        s_offsets = _float_tuple_or_default(self.s_offsets, "s_offsets", default=())
+        object.__setattr__(self, "c_offsets", _readonly_1d_or_default(c_offsets_input, "c_offsets"))
+        s_offsets = _float_tuple_or_default(s_offsets_input, "s_offsets", default=())
         object.__setattr__(self, "s_offsets", s_offsets)
         object.__setattr__(self, "_s_offsets_with_s0", _s_offsets_runtime_array(s_offsets))
+
+    def _fit_boundary_points(
+        self,
+        *,
+        R_boundary: Any | None,
+        Z_boundary: Any | None,
+        c_order: int | None,
+        s_order: int | None,
+        fit_maxtol: float,
+    ) -> dict[str, float | np.ndarray]:
+        if R_boundary is None or Z_boundary is None or c_order is None or s_order is None:
+            raise ValueError("R_boundary, Z_boundary, c_order, and s_order must be provided together")
+        mixed = {
+            "a": self.a,
+            "R0": self.R0,
+            "Z0": self.Z0,
+            "ka": self.ka,
+            "c_offsets": self.c_offsets,
+            "s_offsets": self.s_offsets,
+        }
+        mixed_names = [name for name, value in mixed.items() if value is not None]
+        if mixed_names:
+            joined = ", ".join(mixed_names)
+            raise ValueError(f"RZ boundary input cannot be mixed with {joined}")
+        from veqpy.kernels.boundary_fit import fit_boundary_params
+
+        return fit_boundary_params(
+            R_boundary,
+            Z_boundary,
+            c_order=c_order,
+            s_order=s_order,
+            maxtol=fit_maxtol,
+        )
 
 
 def kernel_boundary_s_offsets_with_s0(boundary: KernelBoundary) -> np.ndarray:
