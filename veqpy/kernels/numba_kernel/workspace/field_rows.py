@@ -1,12 +1,12 @@
 """
-Module: workspace.field_rows
+Module: veqpy.kernels.numba_kernel.workspace.field_rows
 
 Role:
 - Define named row indices for workspace-owned field slabs.
 
 Notes:
-- Constants live in a dependency-free module so both workspace accessors and
-  engine kernels can share the same row contract.
+- Constants live in a dependency-free module so workspace accessors and backend
+  kernels share the same row contract.
 - These names describe row layout only; they do not own memory.
 """
 

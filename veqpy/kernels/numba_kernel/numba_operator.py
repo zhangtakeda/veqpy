@@ -1,5 +1,5 @@
 """
-Module: kernels.numba_kernel.numba_operator
+Module: veqpy.kernels.numba_kernel.numba_operator
 
 Role:
 - Provide the fused x -> residual hot runner.

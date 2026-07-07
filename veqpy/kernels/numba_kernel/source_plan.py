@@ -1,9 +1,9 @@
 """
-Module: kernels.numba_kernel.source_plan
+Module: veqpy.kernels.numba_kernel.source_plan
 
 Role:
 - Own source route plans and source input validation.
-- Keep source binding validation at bind-time, before runtime memory refresh and engine calls.
+- Keep source binding validation at bind-time, before runtime memory refresh and backend calls.
 
 Notes:
 - This module owns immutable source plans consumed by the kernel runtime.

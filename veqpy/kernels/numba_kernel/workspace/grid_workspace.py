@@ -1,5 +1,5 @@
 """
-Module: workspace.grid_workspace
+Module: veqpy.kernels.numba_kernel.workspace.grid_workspace
 
 Role:
 - Hold static grid memory snapshots for kernel hot paths.
@@ -36,7 +36,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True)
 class GridWorkspace:
-    """Kernel Grid snapshot: arrays and metadata required by the engine ABI.
+    """Kernel Grid snapshot: arrays and metadata required by the runtime ABI.
 
     K_max is normalized: Grid.K_max=None maps to M_max.
     """

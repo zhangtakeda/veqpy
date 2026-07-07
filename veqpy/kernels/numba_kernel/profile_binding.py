@@ -1,5 +1,5 @@
 """
-Module: layout.profile_binding
+Module: veqpy.kernels.numba_kernel.profile_binding
 
 Role:
 - Bind executable profile-stage callables from preallocated workspace arrays.

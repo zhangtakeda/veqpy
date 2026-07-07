@@ -1,5 +1,7 @@
 #pragma once
 
+// Geometry field assembly for generated Cxx Kernel artifacts.
+
 #include "math.h"
 #include "tensor.h"
 #include <array>

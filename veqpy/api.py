@@ -1,4 +1,12 @@
-"""Function-style Kernel entrypoints."""
+"""
+Module: veqpy.api
+
+Role:
+- Provide function-style ``build`` and ``solve`` entrypoints over ``veqpy.Kernel``.
+
+Notes:
+- This module imports only the public Kernel contract, not concrete backend modules.
+"""
 
 from __future__ import annotations
 

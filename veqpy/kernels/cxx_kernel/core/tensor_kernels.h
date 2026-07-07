@@ -1,5 +1,7 @@
 #pragma once
 
+// Tensor loop kernels for generated Cxx Kernel artifacts.
+
 #include "simd.h"
 #include "tensor.h"
 #include "tensor_layout.h"

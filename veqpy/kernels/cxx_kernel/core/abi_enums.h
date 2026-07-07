@@ -1,9 +1,9 @@
 #pragma once
 
-// Shared VEQlib ABI integer codes.
+// Shared Cxx Kernel ABI integer codes.
 //
-// Keep these values stable: Python facade code, CMake topology defines, and the
-// nanobind/C++ runtime ABI all communicate with these integer codes.
+// Keep these values stable: Python Kernel bindings, CMake topology defines, and
+// the nanobind/C++ runtime ABI all communicate through these integer codes.
 
 namespace veqlib_abi
 {

@@ -1,6 +1,6 @@
 #pragma once
 
-// Runtime case defaults, scaling, normalization, and option-code helpers for VEQlib kernels.
+// Runtime case defaults, scaling, normalization, and option-code helpers for generated Cxx Kernel artifacts.
 
 #include <algorithm>
 #include <array>

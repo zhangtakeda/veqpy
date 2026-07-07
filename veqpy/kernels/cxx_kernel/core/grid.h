@@ -1,5 +1,7 @@
 #pragma once
 
+// Grid tables and radial/poloidal helper views for generated Cxx Kernel artifacts.
+
 #include "linalg.h"
 #include "math.h"
 #include "tensor.h"
@@ -28,7 +30,7 @@ namespace grid::detail
     // GST theta-correction coefficients. The expansion shape follows
     // A. Gil, J. Segura, and N. M. Temme, "Noniterative Computation of
     // Gauss--Jacobi Quadrature", SIAM J. Sci. Comput. 41(1), A668-A693, 2019.
-    // For VEQlib we fit the Chebyshev coefficients of P_1..P_6 offline for
+    // The Chebyshev coefficients of P_1..P_6 are fitted offline for
     // the only Jacobi families we instantiate: Legendre, Lobatto interior,
     // and right-Radau interior. The generator is tools/gst_jacobi_fit_scan.py.
     struct GST6

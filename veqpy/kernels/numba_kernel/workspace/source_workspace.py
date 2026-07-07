@@ -1,5 +1,5 @@
 """
-Module: workspace.source_workspace
+Module: veqpy.kernels.numba_kernel.workspace.source_workspace
 
 Role:
 - Own source-stage runtime memory, caches, and scratch arrays.

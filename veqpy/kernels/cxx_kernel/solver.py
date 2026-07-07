@@ -1,8 +1,12 @@
-"""Low-level Cxx solver wrapper around a thread-owned native workspace.
+"""
+Module: veqpy.kernels.cxx_kernel.solver
 
-Most callers should use ``veqpy.Kernel``. This layer stays close to the
-nanobind surface for benchmark harnesses and lifecycle tests that need explicit
-``set_kernel_runtime`` / ``solve_direct`` control.
+Role:
+- Provide a low-level Cxx solver wrapper around a thread-owned native workspace.
+
+Notes:
+- Most callers should use ``veqpy.Kernel``. This layer stays close to the
+  nanobind surface for benchmark harnesses and lifecycle tests.
 """
 
 from __future__ import annotations

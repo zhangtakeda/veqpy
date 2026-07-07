@@ -1,9 +1,12 @@
-"""Native module registry and thread-owned Cxx solvers.
+"""
+Module: veqpy.kernels.cxx_kernel.registry
 
-The registry caches loaded topology artifacts at process scope, but each
-``NativeSolver`` guard owns mutable C++ workspace and is bound to the Python
-thread that created it. Sharing artifacts is allowed; sharing solver workspace
-across threads is not.
+Role:
+- Cache native Cxx modules and manage thread-owned solver guards.
+
+Notes:
+- Loaded topology artifacts are process-scoped; each ``NativeSolver`` guard owns
+  mutable C++ workspace and is bound to the creating Python thread.
 """
 
 from __future__ import annotations

@@ -1,5 +1,5 @@
 """
-Module: kernels.numba_kernel.numba_residual
+Module: veqpy.kernels.numba_kernel.numba_residual
 
 Role:
 - Update residual surface workspace.

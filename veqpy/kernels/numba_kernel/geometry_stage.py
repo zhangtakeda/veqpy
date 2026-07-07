@@ -1,5 +1,5 @@
 """
-Module: kernels.numba_kernel.geometry_stage
+Module: veqpy.kernels.numba_kernel.geometry_stage
 
 Role:
 - Materialize geometry fields.

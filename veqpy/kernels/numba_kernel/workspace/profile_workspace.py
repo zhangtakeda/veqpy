@@ -1,5 +1,5 @@
 """
-Module: workspace.profile_workspace
+Module: veqpy.kernels.numba_kernel.workspace.profile_workspace
 
 Role:
 - Own profile-stage runtime memory and profile metadata arrays.
@@ -8,7 +8,7 @@ Public API:
 - ProfileWorkspace
 
 Notes:
-- Profile field storage is keyed by stable operator-plan profile ids.
+- Profile field storage is keyed by stable runtime profile ids.
 - This module does not own profile object construction semantics.
 """
 

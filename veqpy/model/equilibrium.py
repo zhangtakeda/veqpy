@@ -1,5 +1,5 @@
 """
-Module: model.equilibrium
+Module: veqpy.model.equilibrium
 
 Role:
 - Hold an equilibrium snapshot on one grid.
@@ -385,7 +385,7 @@ class Equilibrium(Reactive, Serial):
         """Materialized geometry fields owned directly by ``Equilibrium``.
 
         The tuple is internal-only and contains ``(surface_fields, radial_fields)``.
-        ``Z`` is a separate reactive property because the engine geometry stage
+        ``Z`` is a separate reactive property because the Kernel geometry stage
         intentionally does not store the full two-dimensional ``Z`` surface.
         """
 

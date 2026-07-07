@@ -1,4 +1,9 @@
-"""Shared Kernel ABI enum codes."""
+"""
+Module: veqpy.kernels.abi.enums
+
+Role:
+- Define shared integer ABI codes used by Kernel backends.
+"""
 
 from __future__ import annotations
 

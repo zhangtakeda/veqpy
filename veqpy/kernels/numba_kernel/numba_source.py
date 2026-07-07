@@ -1,5 +1,5 @@
 """
-Module: kernels.numba_kernel.numba_source
+Module: veqpy.kernels.numba_kernel.numba_source
 
 Role:
 - Register concrete source routes.
@@ -179,7 +179,7 @@ def _normalize_nodes(value: str) -> str:
 def register_source_route(*route_keys: RouteKey) -> Callable[[Callable], Callable]:
     """Register one implementation for one or more canonical source route tuples.
 
-    Source route registration is intentionally tuple-only at the engine boundary:
+    Source route registration is intentionally tuple-only at the runtime boundary:
     each key must be a three-string tuple such as ``("PJ1", "rho", "uniform")``.
     Friendly route-name aliases belong at the model/source-plan boundary, not
     in this bind-time registry.
@@ -352,7 +352,7 @@ def _regularize_psin_r(psin_r: np.ndarray, rho: np.ndarray, n_fix: int) -> np.nd
     The first two samples outside the affected region (indices ``n_fix`` and
     ``n_fix + 1``) serve as clean anchors.  Extrapolate the smooth even ratio
     ``psin_r / rho`` as a linear function of ``rho^2`` back to all head samples,
-    then enforce the single engine-level positive floor used by psin-space
+    then enforce the single runtime-level positive floor used by psin-space
     divisions.
     """
     _regularize_axis_linear(psin_r, rho, n_fix)

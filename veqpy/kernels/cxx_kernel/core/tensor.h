@@ -1,5 +1,7 @@
 #pragma once
 
+// Fixed-size tensor containers for generated Cxx Kernel artifacts.
+
 #include <algorithm>
 #include <array>
 #include <cassert>

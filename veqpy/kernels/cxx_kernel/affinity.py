@@ -1,8 +1,13 @@
-"""CPU affinity helpers for short Cxx backend calls.
+"""
+Module: veqpy.kernels.cxx_kernel.affinity
 
-Pinning is intentionally a scoped runtime policy, not part of artifact identity.
-Nested calls are tracked per Python thread so benchmark loops can pin once
-around many native solves without fighting lower-level pin scopes.
+Role:
+- Provide scoped CPU affinity helpers for short Cxx backend calls.
+
+Notes:
+- Pinning is a runtime policy, not part of artifact identity. Nested calls are
+  tracked per Python thread so benchmark loops can pin once around many native
+  solves without fighting lower-level pin scopes.
 """
 
 from __future__ import annotations

@@ -1,5 +1,5 @@
 """
-Module: base.serial
+Module: veqpy.base.serial
 
 Role:
 - Provide the shared persistence framework for public root-state objects.
@@ -16,7 +16,7 @@ Design notes:
   subclasses can infer those fields from annotations, while non-dataclass models
   normally provide the schema explicitly.
 - Files store independent root state, not derived caches.  Runtime workspaces,
-  engine temporaries, residual buffers, and other hot-path arrays must stay out
+  backend temporaries, residual buffers, and other hot-path arrays must stay out
   of ``serial_attributes()`` so serialization remains stable across internal
   performance changes.
 - ``load`` creates a new object from a file.  ``read`` mutates an existing object

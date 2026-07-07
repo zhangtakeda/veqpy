@@ -1,5 +1,5 @@
 """
-Module: layout.residual_binding
+Module: veqpy.kernels.numba_kernel.residual_binding
 
 Role:
 - Bind residual and collocation stage callables from refreshed runtime state.

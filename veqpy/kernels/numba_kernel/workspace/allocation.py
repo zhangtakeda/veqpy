@@ -1,5 +1,5 @@
 """
-Module: workspace.allocation
+Module: veqpy.kernels.numba_kernel.workspace.allocation
 
 Role:
 - Allocate kernel stage workspaces.

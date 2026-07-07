@@ -1,4 +1,12 @@
-"""High-level Python handle for topology-specific Kernel backends."""
+"""
+Module: veqpy.kernels.kernel
+
+Role:
+- Provide the backend-neutral public ``Kernel`` handle.
+
+Notes:
+- The wrapper owns lifecycle, validation, and result shape; private backends own execution.
+"""
 
 from __future__ import annotations
 

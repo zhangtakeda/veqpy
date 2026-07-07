@@ -1,5 +1,5 @@
 """
-Module: workspace.geometry_workspace
+Module: veqpy.kernels.numba_kernel.workspace.geometry_workspace
 
 Role:
 - Own geometry-stage runtime memory.

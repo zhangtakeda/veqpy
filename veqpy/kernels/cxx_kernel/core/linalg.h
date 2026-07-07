@@ -1,5 +1,7 @@
 #pragma once
 
+// Small dense linear-algebra helpers for generated Cxx Kernel artifacts.
+
 #include "math.h"
 #include "tensor.h"
 #include <algorithm>

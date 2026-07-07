@@ -1,5 +1,7 @@
 #pragma once
 
+// Nonlinear solver adapters and finite-difference helpers for generated Cxx Kernel artifacts.
+
 #include "linalg.h"
 #include "tensor.h"
 #include <algorithm>

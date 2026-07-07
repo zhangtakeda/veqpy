@@ -1,4 +1,9 @@
-"""Canonical Kernel payloads used for artifact identity and metadata."""
+"""
+Module: veqpy.kernels.abi.identity
+
+Role:
+- Build canonical Kernel payloads used for artifact identity and metadata.
+"""
 
 from __future__ import annotations
 

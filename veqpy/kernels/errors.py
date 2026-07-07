@@ -1,4 +1,9 @@
-"""Public VEQPy Kernel error types."""
+"""
+Module: veqpy.kernels.errors
+
+Role:
+- Define public Kernel error types.
+"""
 
 from __future__ import annotations
 

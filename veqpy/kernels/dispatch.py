@@ -1,4 +1,12 @@
-"""Private Kernel backend dispatch."""
+"""
+Module: veqpy.kernels.dispatch
+
+Role:
+- Select the private backend implementation requested by ``KernelRecipe.backend``.
+
+Notes:
+- Dispatch stays behind ``veqpy.kernels.Kernel`` and is not part of the public API.
+"""
 
 from __future__ import annotations
 

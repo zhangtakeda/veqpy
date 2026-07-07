@@ -1,9 +1,13 @@
-"""Artifact preparation, build, and cache metadata for Kernels.
+"""
+Module: veqpy.kernels.cxx_kernel.builder
 
-Artifact identity is a setup-time contract: topology, artifact recipe, toolchain
-ABI, and source digests define reusable native modules. Runtime
-boundary/input/config values stay on the per-case solve path, keeping repeated
-case solves on one topology independent from CMake artifact lifecycle details.
+Role:
+- Prepare Cxx Kernel artifacts and cache metadata.
+
+Notes:
+- Artifact identity is a setup-time contract: topology, recipe, toolchain ABI,
+  and source digests define reusable native modules. Runtime boundary/source/
+  config values stay on the per-case solve path.
 """
 
 from __future__ import annotations

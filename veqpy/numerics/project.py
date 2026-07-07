@@ -1,5 +1,5 @@
 """
-Module: math.project
+Module: veqpy.numerics.project
 
 Role:
 - Reserve the projection helper namespace.

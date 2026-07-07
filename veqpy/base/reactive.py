@@ -1,5 +1,5 @@
 """
-Module: base.reactive
+Module: veqpy.base.reactive
 
 Role:
 - Provide reactive caching and pull-based dependency freshness checks for model
@@ -22,7 +22,7 @@ Design notes:
   dependency changed.  If a dependency value is itself ``Reactive``, the nested
   object's revision participates in the token so child root writes invalidate
   parent-derived values that depend on that child.
-- ``Reactive`` is intentionally not used for operator hot paths.  Runtime solver
+- ``Reactive`` is intentionally not used for Kernel hot paths.  Runtime solver
   state uses explicit workspaces and in-place arrays; snapshots use this formula
   system because they need interpretable, serializable, on-demand diagnostics.
 """

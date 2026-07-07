@@ -1,5 +1,5 @@
 """
-Module: layout.geometry_binding
+Module: veqpy.kernels.numba_kernel.geometry_binding
 
 Role:
 - Bind geometry stage runners from already-built layout/workspace state.

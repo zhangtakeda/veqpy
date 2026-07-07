@@ -1,5 +1,5 @@
 """
-Module: kernels.numba_kernel.initialize
+Module: veqpy.kernels.numba_kernel.initialize
 
 Role:
 - Build kernel-owned packed initial states.

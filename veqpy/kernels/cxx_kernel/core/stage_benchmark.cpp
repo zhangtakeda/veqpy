@@ -1,3 +1,5 @@
+// Native stage microbenchmark driver for generated Cxx Kernel artifacts.
+
 #include <algorithm>
 #include <array>
 #include <chrono>

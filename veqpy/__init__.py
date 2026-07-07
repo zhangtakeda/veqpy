@@ -1,4 +1,28 @@
-"""VEQPy public package root."""
+"""
+Package: veqpy
+
+Role:
+- Expose the canonical public Kernel surface for VEQPy users.
+- Keep package-root imports focused on build/solve entrypoints and Kernel data types.
+
+Public API:
+- Kernel and KernelRecipe.
+- KernelTopology, KernelBoundary, KernelSource, and KernelConfig.
+- KernelPrepareResult, SolveResult, and TopologyError.
+- build and solve function-style entrypoints.
+
+Dependencies:
+- veqpy.api for function-style entrypoints.
+- veqpy.kernels for Kernel dispatch, public Kernel dataclasses, and errors.
+
+Downstream:
+- Examples, benchmarks, docs, and user code should import the public Kernel
+  contract from this package root when possible.
+
+Design notes:
+- Backend implementation classes remain private to veqpy.kernels.
+- Model objects are exported from veqpy.model rather than this root.
+"""
 
 from __future__ import annotations
 

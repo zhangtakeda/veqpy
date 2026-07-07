@@ -1,5 +1,5 @@
 """
-Module: layout.runtime
+Module: veqpy.kernels.numba_kernel.layout
 
 Role:
 - Define executable runtime layout containers.
@@ -14,7 +14,7 @@ Public API:
 
 Notes:
 - Workspace objects own memory; layouts execute against already-bound arrays.
-- Layout package exports are controlled only by package roots.
+- Concrete layout dataclasses are consumed inside the Numba backend.
 """
 
 from __future__ import annotations

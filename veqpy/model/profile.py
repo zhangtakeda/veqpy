@@ -1,5 +1,5 @@
 """
-Module: model.profile
+Module: veqpy.model.profile
 
 Role:
 - Hold root parameters for one profile.

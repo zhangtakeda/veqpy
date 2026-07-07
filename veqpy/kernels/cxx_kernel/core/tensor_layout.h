@@ -1,5 +1,7 @@
 #pragma once
 
+// Tensor layout aliases and SIMD-aware row helpers for generated Cxx Kernel artifacts.
+
 #include "simd.h"
 #include "tensor.h"
 #include <cstddef>

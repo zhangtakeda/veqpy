@@ -1,5 +1,5 @@
 """
-Module: workspace.residual_workspace
+Module: veqpy.kernels.numba_kernel.workspace.residual_workspace
 
 Role:
 - Own residual/root-stage runtime memory.

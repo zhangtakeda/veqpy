@@ -1,6 +1,6 @@
 #pragma once
 
-// Solver workspace, residual callbacks, AD adapters, and solve dispatch for VEQlib kernels.
+// Solver workspace, residual callbacks, AD adapters, and solve dispatch for generated Cxx Kernel artifacts.
 
 #include <algorithm>
 #include <array>

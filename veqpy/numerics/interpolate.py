@@ -1,9 +1,9 @@
 """
-Module: math.interpolate
+Module: veqpy.numerics.interpolate
 
 Role:
 - Build pure one-dimensional interpolation weights and matrices.
-- Normalize source-interpolation scheme names used by operator setup.
+- Normalize source-interpolation scheme names used by Kernel source setup.
 
 Public API:
 - barycentric_log_weights
@@ -19,8 +19,8 @@ Design notes:
   the target nodes.
 - This module only remaps normalized one-dimensional parameters.  It does not
   define the physical meaning of a source route, choose an ``Ip``/``beta``
-  constraint, or repair profile ownership; those decisions live in operator
-  source planning and source kernels.
+  constraint, or repair profile ownership; those decisions live in Kernel
+  source planning and backend source kernels.
 - Uniform-source helpers support the canonical source-remapping choices:
   ``barycentric`` (default local barycentric stencil), ``not-a-knot`` spline,
   ``linear``, ``quadratic``, and ``cubic``.  Names are normalized only by

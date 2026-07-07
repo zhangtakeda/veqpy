@@ -1,4 +1,9 @@
-"""Low-level solve/residual adapter backed by direct Numba runtime."""
+"""
+Module: veqpy.kernels.numba_kernel.solver
+
+Role:
+- Provide the low-level solve and residual adapter backed by direct Numba runtime.
+"""
 
 from __future__ import annotations
 
@@ -36,7 +41,7 @@ class _SolveOutcome:
 
 
 class NumbaSolver:
-    """Direct KernelTypes-to-Numba runtime solve adapter."""
+    """Direct Kernel dataclass to Numba runtime solve adapter."""
 
     def __init__(self, topology: KernelTopology) -> None:
         self.topology = topology

@@ -1,5 +1,5 @@
 """
-Module: math.calculus
+Module: veqpy.numerics.calculus
 
 Role:
 - Build radial prefix-integration and differentiation matrices.

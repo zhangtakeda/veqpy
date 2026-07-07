@@ -1,5 +1,5 @@
 """
-Module: kernels.numba_kernel.backend_abi
+Module: veqpy.kernels.numba_kernel.backend_abi
 
 Role:
 - Define explicit ABI binding contracts used by the numba fused backend.
@@ -52,7 +52,7 @@ PROFILE_OWNED_PSIN_ROUTE_KEYS: frozenset[RouteKey] = frozenset(
 )
 
 
-# Keep this list derived from the engine registry so route additions fail at
+# Keep this list derived from the source registry so route additions fail at
 # bind time only when their ABI ownership rules have not been modeled here.
 SUPPORTED_FUSED_SOURCE_ROUTE_KEYS: frozenset[RouteKey] = frozenset(SOURCE_ROUTE_KEYS)
 

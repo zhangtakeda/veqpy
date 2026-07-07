@@ -1,8 +1,12 @@
-"""Python mirrors of Cxx ABI option codes.
+"""
+Module: veqpy.kernels.abi.options
 
-Python Kernel inputs use canonical string tokens. Native kernels consume integer
-ABI enum codes derived from those strings. Keep these constants synchronized with
-the native core ABI enum header.
+Role:
+- Map Python Kernel option tokens to shared Cxx ABI option codes.
+
+Notes:
+- Native kernels consume integer ABI enum codes derived from canonical strings.
+  Keep these constants synchronized with the native core ABI enum header.
 """
 
 from __future__ import annotations

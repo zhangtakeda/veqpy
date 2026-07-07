@@ -1,6 +1,6 @@
 #pragma once
 
-// Nanobind-facing NativeSolver implementation for VEQlib production kernels.
+// Nanobind-facing NativeSolver implementation for generated Cxx Kernel artifacts.
 
 #include <algorithm>
 #include <array>
@@ -568,7 +568,7 @@ namespace veqlib_python
 
         nb::dict metadata() const { return topology_metadata_dict(context_->input); }
 
-        // Typed runtime setter used by the Python facade hot path.  The facade
+        // Typed runtime setter used by the Python Kernel hot path.  The Python layer
         // normalizes arrays to 1D float64/C-contiguous views; this C++ boundary
         // remains authoritative for topology-dependent lengths and enum validity.
         void set_kernel_runtime(const std::string& case_name,

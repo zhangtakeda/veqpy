@@ -1,5 +1,5 @@
 """
-Module: math.quadrature
+Module: veqpy.numerics.quadrature
 
 Role:
 - Build pure radial quadrature nodes and weights for the unit interval.

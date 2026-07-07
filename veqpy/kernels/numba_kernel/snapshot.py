@@ -1,4 +1,9 @@
-"""Equilibrium snapshots from direct Numba backend runtime state."""
+"""
+Module: veqpy.kernels.numba_kernel.snapshot
+
+Role:
+- Build ``Equilibrium`` snapshots from Numba backend runtime state.
+"""
 
 from __future__ import annotations
 

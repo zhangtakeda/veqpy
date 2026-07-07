@@ -1,19 +1,25 @@
 """
-Module: model.__init__
+Package: veqpy.model
 
 Role:
-- Export public model-layer types and package-level entrypoints.
+- Define serializable model-layer objects for grids, profiles, boundaries,
+  GEQDSK data, and equilibria.
+- Provide the public model import surface.
 
 Public API:
-- Boundary
-- Grid
-- Profile
-- Geqdsk
-- Equilibrium
+- Grid, Profile, Boundary, Geqdsk, and Equilibrium.
 
-Notes:
-- This module only provides package-level exports.
-- Does not own packed runtime state, solver policy, or backend selection.
+Dependencies:
+- veqpy.base for Serial and Reactive infrastructure.
+- veqpy.numerics for model-side quadrature, calculus, interpolation, and projection helpers.
+
+Downstream:
+- veqpy.kernels consumes model objects when building runtime cases and snapshots.
+- Examples, docs, tests, and user code import model objects from this package root.
+
+Design notes:
+- Model objects describe physical state and diagnostics, not solver execution.
+- Concrete files inside this package may import each other directly.
 """
 
 from __future__ import annotations

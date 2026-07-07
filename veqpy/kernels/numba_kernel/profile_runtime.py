@@ -1,5 +1,5 @@
 """
-Module: kernel.profile_runtime
+Module: veqpy.kernels.numba_kernel.profile_runtime
 
 Role:
 - Consolidate Python rules for kernel case setup and ProfileWorkspace refresh.

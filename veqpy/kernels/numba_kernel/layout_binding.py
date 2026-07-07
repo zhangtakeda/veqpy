@@ -1,5 +1,5 @@
 """
-Module: layout.binding
+Module: veqpy.kernels.numba_kernel.layout_binding
 
 Role:
 - Own Python closure wiring for executable Kernel layouts.

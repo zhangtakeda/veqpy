@@ -2,7 +2,7 @@
 
 NB_MODULE(veqlib_ext, module)
 {
-    module.doc() = "Single-thread nanobind bridge for the production VEQlib kernel solver.";
+    module.doc() = "Single-thread nanobind bridge for the generated Cxx Kernel solver.";
 
     nb::class_<veqlib_python::NativeSolver>(module, "NativeSolver")
         .def(nb::init<int>(),

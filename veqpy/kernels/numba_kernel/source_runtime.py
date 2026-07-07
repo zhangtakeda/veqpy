@@ -1,9 +1,9 @@
 """
-Module: kernels.numba_kernel.source_runtime
+Module: veqpy.kernels.numba_kernel.source_runtime
 
 Role:
 - Refresh source runtime memory from a bound ``SourcePlan`` and current psin state.
-- Own source input materialization cache updates outside engine kernels.
+- Own source input materialization cache updates outside residual kernels.
 
 Notes:
 - This module mutates preallocated source runtime arrays in place.

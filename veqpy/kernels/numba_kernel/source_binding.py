@@ -1,5 +1,5 @@
 """
-Module: layout.source_binding
+Module: veqpy.kernels.numba_kernel.source_binding
 
 Role:
 - Bind source stage runners from already-built layout/workspace state.

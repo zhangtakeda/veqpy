@@ -1,4 +1,9 @@
-"""SolveResult adapters for Numba backend runtimes."""
+"""
+Module: veqpy.kernels.numba_kernel.result
+
+Role:
+- Convert Numba runtime outcomes into public ``SolveResult`` values.
+"""
 
 from __future__ import annotations
 

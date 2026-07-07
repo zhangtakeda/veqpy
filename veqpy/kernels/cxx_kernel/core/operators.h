@@ -1,5 +1,7 @@
 #pragma once
 
+// Fused profile, geometry, source, and residual pipeline for generated Cxx Kernel artifacts.
+
 #include "abi_enums.h"
 #include "geometry.h"
 #include "profiles.h"

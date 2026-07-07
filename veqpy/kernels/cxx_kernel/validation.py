@@ -1,4 +1,9 @@
-"""Validation helpers for Cxx backend execution boundaries."""
+"""
+Module: veqpy.kernels.cxx_kernel.validation
+
+Role:
+- Validate topology features supported by the Cxx backend.
+"""
 
 from __future__ import annotations
 

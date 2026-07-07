@@ -1,5 +1,7 @@
 #pragma once
 
+// Residual surface and root assembly helpers for generated Cxx Kernel artifacts.
+
 #include "geometry.h"
 #include "profiles.h"
 #include "source.h"

@@ -1,5 +1,7 @@
 #pragma once
 
+// Profile metadata and field refresh helpers for generated Cxx Kernel artifacts.
+
 #include "math.h"
 #include "tensor.h"
 #include <array>

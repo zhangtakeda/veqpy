@@ -1,5 +1,5 @@
 """
-Module: model.grid
+Module: veqpy.model.grid
 
 Role:
 - Hold radial-poloidal grid configuration and derived tables.
@@ -9,7 +9,7 @@ Public API:
 - Grid
 
 Notes:
-- `Grid` is an immutable model-layer configuration object.
+- `Grid` is a reactive model-layer configuration object.
 - Pure mathematical matrix construction is delegated to `veqpy.numerics`.
 - Does not own source routes, residual assembly, or solver runtime state.
 """
@@ -219,7 +219,7 @@ class Grid(Reactive, Serial):
                 if f.ndim != 2:
                     raise ValueError(f"Expected a 1D or 2D array, got shape {f.shape}")
                 # 2D integrals use radial quadrature first and uniform theta
-                # averaging second; this matches the engine's row-major fields.
+                # averaging second; this matches Kernel runtime row-major fields.
                 total = float(np.sum(self.weights @ f))
                 return (2.0 * np.pi / f.shape[1]) * total
 

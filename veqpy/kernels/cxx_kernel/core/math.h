@@ -1,5 +1,7 @@
 #pragma once
 
+// Compile-time and runtime math helpers for generated Cxx Kernel artifacts.
+
 #include "tensor.h"
 #include <bit>
 #include <cmath>

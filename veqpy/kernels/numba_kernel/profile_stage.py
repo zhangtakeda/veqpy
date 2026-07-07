@@ -1,5 +1,5 @@
 """
-Module: kernels.numba_kernel.profile_stage
+Module: veqpy.kernels.numba_kernel.profile_stage
 
 Role:
 - Compute profile fields.

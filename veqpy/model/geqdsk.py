@@ -1,5 +1,5 @@
 """
-Module: model.geqdsk
+Module: veqpy.model.geqdsk
 
 Role:
 - Hold passive GEQDSK payload data.

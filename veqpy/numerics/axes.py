@@ -1,8 +1,8 @@
 """
-Module: math.axes
+Module: veqpy.numerics.axes
 
 Role:
-- Define model-neutral array axis constants shared by model and engine code.
+- Define model-neutral array axis constants shared by model and Kernel code.
 """
 
 from __future__ import annotations

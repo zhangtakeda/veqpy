@@ -1,16 +1,24 @@
 """
-Module: workspace.__init__
+Package: veqpy.kernels.numba_kernel.workspace
 
 Role:
-- Expose the workspace package-root contract used outside ``veqpy.kernels.numba_kernel.workspace``.
+- Allocate and expose packed Numba runtime workspaces.
+- Keep grid, profile, geometry, source, and residual memory ownership explicit.
 
 Public API:
-- GridWorkspace and allocate_runtime_state for operator construction
-- Workspace classes consumed by engine/layout/operator
+- GridWorkspace, GeometryWorkspace, ProfileWorkspace, ResidualWorkspace, and SourceWorkspace.
+- allocate_runtime_state.
 
-Notes:
-- Scratch semantics and allocation details stay in their owning modules.
-- Package roots are the only modules that declare ``__all__``.
+Dependencies:
+- veqpy.kernels.numba_kernel field-row ABI and stage helpers.
+
+Downstream:
+- veqpy.kernels.numba_kernel.runtime owns workspace allocation for Kernel cases.
+- Binding and stage modules consume workspace objects by direct module import.
+
+Design notes:
+- Scratch layout details stay in the concrete workspace modules.
+- Workspaces are backend runtime state, not model-layer objects.
 """
 
 from __future__ import annotations

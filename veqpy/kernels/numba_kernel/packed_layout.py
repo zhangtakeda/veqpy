@@ -1,5 +1,5 @@
 """
-Module: kernels.numba_kernel.packed_layout
+Module: veqpy.kernels.numba_kernel.packed_layout
 
 Role:
 - Build packed layout and profile metadata.

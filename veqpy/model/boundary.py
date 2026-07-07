@@ -1,5 +1,5 @@
 """
-Module: model.boundary
+Module: veqpy.model.boundary
 
 Role:
 - Hold boundary parameter aggregates.
@@ -10,7 +10,7 @@ Public API:
 
 Notes:
 - GEQDSK payload parsing and serialization live in ``veqpy.model.geqdsk``.
-- Boundary fitting does not own grid, operator, or solver runtime state.
+- Boundary fitting does not own grid, Kernel, or solver runtime state.
 """
 
 from __future__ import annotations

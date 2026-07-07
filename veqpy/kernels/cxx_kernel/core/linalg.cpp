@@ -1,3 +1,5 @@
+// BLAS/LAPACK-backed dense linear-algebra implementations for generated Cxx Kernel artifacts.
+
 #include "linalg.h"
 #include <cblas.h>
 #include <lapacke.h>

@@ -1,5 +1,7 @@
 #pragma once
 
+// SIMD lane traits and vector utilities for generated Cxx Kernel artifacts.
+
 #include <cstddef>
 #if defined(__AVX2__)
     #include <immintrin.h>
