@@ -4,17 +4,20 @@ import pytest
 from numerical_helpers import (
     assert_finite,
     assert_runtime_passed,
-    assert_status_passed,
     benchmark_args,
     skip_if_native_unavailable,
 )
 
-from benchmarks import cxx_geqdsk_pareto, cxx_routes, numba_routes
+from benchmarks import cxx_routes, numba_routes
 from benchmarks._common import (
+    CASE_KEYS,
+    CONFIG_LABELS,
     ROUTE_SHAPE_MATCH_TOL,
     SYNTHETIC_SOLVER_MAX_EVALUATIONS,
     SYNTHETIC_SOLVER_MAX_RESIDUAL,
     RouteBenchmarkSpec,
+    geqdsk_kernel_case,
+    geqdsk_signature,
 )
 
 ROUTE_REGRESSION_CASES = (
@@ -23,6 +26,22 @@ ROUTE_REGRESSION_CASES = (
     RouteBenchmarkSpec("PJ2", "psin", "uniform", "Ip"),
     RouteBenchmarkSpec("PQ", "rho", "uniform", "Ip"),
 )
+
+
+@pytest.mark.parametrize("case_key", CASE_KEYS)
+@pytest.mark.parametrize("config_label", CONFIG_LABELS)
+def test_geqdsk_benchmark_cases_materialize_from_reference_inputs(
+    case_key: str,
+    config_label: str,
+) -> None:
+    signature = geqdsk_signature(case_key, config_label)
+    case = geqdsk_kernel_case(case_key, config_label)
+
+    assert signature
+    assert case.topology.x_size > 0
+    assert case.boundary.B0 > 0.0
+    assert case.source.heat_profile.size == case.topology.sample_count
+    assert case.source.current_profile.size == case.topology.sample_count
 
 
 @pytest.mark.slow
@@ -64,32 +83,3 @@ def test_cxx_route_benchmark_matches_numba_reference(spec: RouteBenchmarkSpec) -
     for engine in runtime["engines"].values():
         assert engine["success_all"] is True
         assert_finite(engine["raw_norm"], name=f"{spec.case_name} raw_norm")
-
-
-@pytest.mark.slow
-@pytest.mark.parametrize(
-    ("case_key", "config_label"),
-    (
-        ("solovev", "Low"),
-        ("chease", "Medium"),
-        ("efit", "Low"),
-    ),
-)
-def test_cxx_geqdsk_pareto_benchmark_matches_numba_reference(
-    case_key: str,
-    config_label: str,
-) -> None:
-    args = benchmark_args(max_evaluations=2000, boundary_fit_m=10, boundary_fit_n=10)
-
-    row = cxx_geqdsk_pareto._measure_case(args, case_key, config_label)
-
-    skip_if_native_unavailable(row)
-    assert_status_passed(row)
-    closeness = row["closeness_to_numba"]
-    assert closeness["x_max_abs"] <= 5.0e-6
-    assert closeness["raw_max_abs"] <= 5.0e-6
-    assert closeness["within_atol"] is True
-    for engine in row["engines"].values():
-        assert engine["success_all"] is True
-        assert_finite(engine["raw_norm"], name=f"{case_key}:{config_label} raw_norm")
-

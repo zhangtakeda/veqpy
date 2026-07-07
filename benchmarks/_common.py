@@ -84,8 +84,6 @@ CASE_LABELS = {
     "chease": "H-mode",
     "efit": "X-point",
 }
-REFERENCE_EQUILIBRIUM_MANIFEST_PATH = REPO_ROOT / "data" / "reference_equilibria.json"
-REDUCED_EQUILIBRIUM_MANIFEST_PATH = REPO_ROOT / "data" / "pareto_reduced_equilibria.json"
 REFERENCE_LAYOUT_NR = 32
 REFERENCE_LAYOUT_NT = 32
 REFERENCE_SOLVER_MAXFEV = 2000
@@ -110,6 +108,151 @@ GEQDSK_ROUTE_PROFILE_SIGNATURE = {
     "s6": 5,
     "s7": 5,
     "s8": 5,
+}
+GEQDSK_CONFIG_SIGNATURES = {
+    ("solovev", "Low"): {"psin": 1, "h": 1, "k": 1, "s1": 1},
+    ("solovev", "Medium"): {"psin": 1, "h": 1, "k": 2, "s1": 1},
+    ("solovev", "High"): {"psin": 3, "h": 2, "k": 2, "s1": 2},
+    (
+        "solovev",
+        "Ref",
+    ): {
+        "psin": 10,
+        "h": 10,
+        "k": 10,
+        "s1": 10,
+        "s2": 5,
+        "s3": 5,
+        "s4": 5,
+        "s5": 5,
+        "s6": 5,
+        "s7": 5,
+        "s8": 5,
+    },
+    (
+        "chease",
+        "Low",
+    ): {
+        "psin": 4,
+        "h": 6,
+        "k": 2,
+        "v": 3,
+        "c0": 3,
+        "s1": 3,
+        "c1": 2,
+        "s2": 2,
+        "c2": 1,
+        "s3": 1,
+    },
+    (
+        "chease",
+        "Medium",
+    ): {
+        "psin": 5,
+        "h": 10,
+        "k": 4,
+        "v": 3,
+        "c0": 3,
+        "s1": 3,
+        "c1": 3,
+        "s2": 3,
+        "c2": 1,
+        "s3": 1,
+    },
+    (
+        "chease",
+        "High",
+    ): {
+        "psin": 8,
+        "h": 9,
+        "k": 7,
+        "v": 8,
+        "c0": 6,
+        "s1": 6,
+        "c1": 4,
+        "s2": 4,
+        "c2": 4,
+        "s3": 4,
+    },
+    (
+        "chease",
+        "Ref",
+    ): {
+        "psin": 10,
+        "h": 10,
+        "k": 10,
+        "v": 10,
+        "c0": 10,
+        "c1": 5,
+        "c2": 5,
+        "c3": 5,
+        "c4": 5,
+        "c5": 5,
+        "c6": 5,
+        "c7": 5,
+        "s1": 10,
+        "s2": 5,
+        "s3": 5,
+        "s4": 5,
+        "s5": 5,
+        "s6": 5,
+        "s7": 5,
+        "s8": 5,
+    },
+    (
+        "efit",
+        "Low",
+    ): {
+        "psin": 3,
+        "h": 5,
+        "k": 3,
+        "v": 2,
+        "c0": 2,
+        "s1": 2,
+        "c1": 1,
+        "s2": 1,
+    },
+    (
+        "efit",
+        "Medium",
+    ): {
+        "psin": 3,
+        "h": 4,
+        "k": 4,
+        "v": 5,
+        "c0": 2,
+        "s1": 2,
+        "c1": 2,
+        "s2": 2,
+        "c2": 2,
+        "s3": 1,
+        "c3": 1,
+        "s4": 1,
+    },
+    (
+        "efit",
+        "High",
+    ): {
+        "psin": 7,
+        "h": 8,
+        "k": 9,
+        "v": 7,
+        "c0": 9,
+        "s1": 9,
+        "c1": 5,
+        "s2": 5,
+        "c2": 5,
+        "s3": 5,
+        "c3": 5,
+        "s4": 4,
+        "c4": 5,
+        "s5": 5,
+        "c5": 2,
+        "s6": 2,
+        "c6": 1,
+        "s7": 1,
+    },
+    ("efit", "Ref"): GEQDSK_ROUTE_PROFILE_SIGNATURE,
 }
 
 
@@ -989,40 +1132,11 @@ def geqdsk_kernel_case(
     )
 
 
-@lru_cache(maxsize=1)
-def load_reduced_equilibrium_manifest() -> dict[tuple[str, str], dict[str, object]]:
-    return _load_manifest(REDUCED_EQUILIBRIUM_MANIFEST_PATH)
-
-
-@lru_cache(maxsize=1)
-def load_reference_equilibrium_manifest() -> dict[tuple[str, str], dict[str, object]]:
-    return _load_manifest(REFERENCE_EQUILIBRIUM_MANIFEST_PATH)
-
-
-def _load_manifest(path: Path) -> dict[tuple[str, str], dict[str, object]]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    entries = payload.get("entries", []) if isinstance(payload, dict) else []
-    manifest: dict[tuple[str, str], dict[str, object]] = {}
-    for entry in entries:
-        if not isinstance(entry, dict):
-            continue
-        case_key = str(entry.get("case_key", ""))
-        config_label = str(entry.get("config_label", ""))
-        if case_key and config_label:
-            manifest[(case_key, config_label)] = entry
-    return manifest
-
-
 def geqdsk_signature(case_key: str, config_label: str) -> dict[str, int]:
-    if config_label == "Ref":
-        entry = load_reference_equilibrium_manifest().get((case_key, "Ref"))
-    else:
-        entry = load_reduced_equilibrium_manifest().get((case_key, config_label))
-    if entry is None:
-        raise FileNotFoundError(f"missing benchmark manifest entry for {case_key} {config_label}")
-    signature = entry.get("signature", {})
-    if not isinstance(signature, dict):
-        return {}
+    signature = GEQDSK_CONFIG_SIGNATURES.get((case_key, config_label))
+    if signature is None:
+        known = ", ".join(f"{case}:{config}" for case, config in GEQDSK_CONFIG_SIGNATURES)
+        raise KeyError(f"missing benchmark signature for {case_key}:{config_label}; known: {known}")
     return {str(name): int(value) for name, value in signature.items() if int(value) > 0}
 
 
