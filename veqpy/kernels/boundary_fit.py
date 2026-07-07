@@ -6,7 +6,7 @@ Role:
 
 Notes:
 - This module is an internal Kernel helper, not a model-layer object.
-- SciPy is imported only when a fit is actually requested.
+- The baseline fitter is a deterministic phase projection solved by QR.
 """
 
 from __future__ import annotations
@@ -151,49 +151,31 @@ def _fit_boundary_for_orders(
     if initial_a <= 0.0:
         raise ValueError("Boundary width must be positive")
     ka0 = max(float(ka) if ka is not None else float(0.5 * span_z / initial_a), 1.0e-6)
-    bounds = _build_fit_bounds(
-        r_min=r_min,
-        r_max=r_max,
-        z_min=z_min,
-        z_max=z_max,
-        initial_a=initial_a,
-        span_r=span_r,
-        span_z=span_z,
+    fit_variables = c_order + 1 + s_order
+    if R.size < fit_variables:
+        raise ValueError(
+            "R_boundary/Z_boundary do not contain enough points for QR boundary fitting: "
+            f"need at least {fit_variables}, got {R.size}"
+        )
+
+    r_points, z_points = _ordered_boundary_variant(R, Z)
+    start = {
+        "R0": initial_R0,
+        "Z0": initial_Z0,
+        "a": initial_a,
+        "ka": ka0,
+        "c_offsets": np.zeros(c_order + 1, dtype=np.float64),
+        "s_offsets": np.zeros(s_order + 1, dtype=np.float64),
+    }
+    fit = _fit_boundary_variant(
+        r_points,
+        z_points,
+        start=start,
         c_order=c_order,
         s_order=s_order,
     )
-
-    best_fit = None
-    for r_points, z_points in _ordered_boundary_variants(R, Z):
-        start = {
-            "R0": initial_R0,
-            "Z0": initial_Z0,
-            "a": initial_a,
-            "ka": ka0,
-            "c_offsets": np.zeros(c_order + 1, dtype=np.float64),
-            "s_offsets": np.zeros(s_order + 1, dtype=np.float64),
-        }
-        fit = _fit_boundary_variant(
-            r_points,
-            z_points,
-            start=start,
-            bounds=bounds,
-            c_order=c_order,
-            s_order=s_order,
-        )
-        fitted_boundary = _evaluate_boundary_fit(r_points, z_points, fit["params"])
-        rms = float(fit["rms"])
-        max_curve_error = _max_bidirectional_distance(
-            np.column_stack((r_points, z_points)), fitted_boundary
-        )
-        if best_fit is None or rms < best_fit["rms"]:
-            best_fit = {
-                "rms": rms,
-                "params": fit["params"],
-                "max_curve_error": max_curve_error,
-            }
-
-    fitted = best_fit["params"]
+    fitted = fit["params"]
+    fitted_boundary = _evaluate_boundary_fit(r_points, z_points, fitted)
     c_offsets, s_offsets = _normalize_fitted_offsets(fitted["c_offsets"], fitted["s_offsets"])
 
     return {
@@ -203,8 +185,10 @@ def _fit_boundary_for_orders(
         "ka": float(fitted["ka"]),
         "c_offsets": c_offsets,
         "s_offsets": s_offsets,
-        "rms": float(best_fit["rms"]),
-        "max_curve_error": float(best_fit["max_curve_error"]),
+        "rms": float(fit["rms"]),
+        "max_curve_error": _max_bidirectional_distance(
+            np.column_stack((r_points, z_points)), fitted_boundary
+        ),
         "c_order": int(c_order),
         "s_order": int(s_order),
     }
@@ -220,84 +204,17 @@ def _validate_orders(c_order: int, s_order: int) -> None:
         )
 
 
-def _ordered_boundary_variants(
-    R: np.ndarray, Z: np.ndarray
-) -> tuple[tuple[np.ndarray, np.ndarray], ...]:
+def _ordered_boundary_variant(R: np.ndarray, Z: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     start = int(np.argmin(Z))
     r_ordered = np.roll(R, -start)
     z_ordered = np.roll(Z, -start)
-    return (
-        (r_ordered, z_ordered),
-        (
-            np.concatenate(([r_ordered[0]], r_ordered[:0:-1])),
-            np.concatenate(([z_ordered[0]], z_ordered[:0:-1])),
-        ),
-    )
-
-
-def _build_fit_bounds(
-    *,
-    r_min: float,
-    r_max: float,
-    z_min: float,
-    z_max: float,
-    initial_a: float,
-    span_r: float,
-    span_z: float,
-    c_order: int,
-    s_order: int,
-) -> tuple[np.ndarray, np.ndarray]:
-    lower_bounds = [
-        r_min - 0.25 * span_r,
-        z_min - 0.25 * span_z,
-        max(1.0e-6, 0.25 * initial_a),
-        1.0e-6,
-    ]
-    upper_bounds = [
-        r_max + 0.25 * span_r,
-        z_max + 0.25 * span_z,
-        max(4.0 * initial_a, span_z, 1.0),
-        10.0,
-    ]
-    lower_bounds.extend([-10.0] * (c_order + 1))
-    upper_bounds.extend([10.0] * (c_order + 1))
-    lower_bounds.extend([-10.0] * s_order)
-    upper_bounds.extend([10.0] * s_order)
-    return np.asarray(lower_bounds, dtype=np.float64), np.asarray(upper_bounds, dtype=np.float64)
-
-
-def _pack_boundary_fit_params(params: dict[str, float | np.ndarray], *, s_order: int) -> np.ndarray:
-    vector = [
-        float(params["R0"]),
-        float(params["Z0"]),
-        float(params["a"]),
-        float(params["ka"]),
-    ]
-    vector.extend(np.asarray(params["c_offsets"], dtype=np.float64).tolist())
-    if s_order > 0:
-        vector.extend(np.asarray(params["s_offsets"], dtype=np.float64)[1:].tolist())
-    return np.asarray(vector, dtype=np.float64)
-
-
-def _unpack_boundary_fit_params(
-    vector: np.ndarray, *, c_order: int, s_order: int
-) -> dict[str, float | np.ndarray]:
-    idx = 0
-    params = {
-        "R0": float(vector[idx]),
-        "Z0": float(vector[idx + 1]),
-        "a": float(vector[idx + 2]),
-        "ka": float(vector[idx + 3]),
-    }
-    idx += 4
-    c_offsets = np.asarray(vector[idx : idx + c_order + 1], dtype=np.float64).copy()
-    idx += c_order + 1
-    s_offsets = np.zeros(s_order + 1, dtype=np.float64)
-    if s_order > 0:
-        s_offsets[1:] = np.asarray(vector[idx : idx + s_order], dtype=np.float64)
-    params["c_offsets"] = c_offsets
-    params["s_offsets"] = s_offsets
-    return params
+    direction_probe_count = min(5, r_ordered.size - 1)
+    if direction_probe_count > 0:
+        mean_dr = float(np.mean(r_ordered[1 : direction_probe_count + 1] - r_ordered[0]))
+        if mean_dr > 0.0:
+            r_ordered = np.concatenate(([r_ordered[0]], r_ordered[:0:-1]))
+            z_ordered = np.concatenate(([z_ordered[0]], z_ordered[:0:-1]))
+    return r_ordered, z_ordered
 
 
 def _evaluate_boundary_fit(
@@ -317,51 +234,131 @@ def _evaluate_boundary_fit(
     )
 
 
-def _boundary_fit_residual(
-    vector: np.ndarray,
-    *,
-    r_points: np.ndarray,
-    z_points: np.ndarray,
-    c_order: int,
-    s_order: int,
-) -> np.ndarray:
-    params = _unpack_boundary_fit_params(vector, c_order=c_order, s_order=s_order)
-    fitted_boundary = _evaluate_boundary_fit(r_points, z_points, params)
-    r_res = r_points - fitted_boundary[:, 0]
-    z_res = z_points - fitted_boundary[:, 1]
-    return np.concatenate((r_res, z_res))
-
-
 def _fit_boundary_variant(
     r_points: np.ndarray,
     z_points: np.ndarray,
     *,
     start: dict[str, float | np.ndarray],
-    bounds: tuple[np.ndarray, np.ndarray],
     c_order: int,
     s_order: int,
 ) -> dict[str, float | dict[str, float | np.ndarray]]:
-    from scipy.optimize import least_squares
-
     start = dict(start)
-    start["a"] = max(float(start["a"]), float(bounds[0][2]))
-    start["ka"] = max(float(start["ka"]), float(bounds[0][3]))
-    fit = least_squares(
-        _boundary_fit_residual,
-        x0=np.clip(_pack_boundary_fit_params(start, s_order=s_order), bounds[0], bounds[1]),
-        bounds=bounds,
-        method="trf",
-        kwargs={
-            "r_points": r_points,
-            "z_points": z_points,
-            "c_order": c_order,
-            "s_order": s_order,
-        },
+    theta = _infer_theta(
+        z_points,
+        float(start["Z0"]),
+        float(start["a"]),
+        float(start["ka"]),
+    )
+    theta_bar_target = _infer_theta_bar_target(
+        r_points,
+        theta,
+        R0=float(start["R0"]),
+        a=float(start["a"]),
+    )
+    coefficients = _solve_phase_projection_qr(
+        theta,
+        theta_bar_target - theta,
+        c_order=c_order,
+        s_order=s_order,
+    )
+    c_offsets, s_offsets = _coefficients_to_offsets(
+        coefficients,
+        c_order=c_order,
+        s_order=s_order,
+    )
+    params = {
+        "R0": float(start["R0"]),
+        "Z0": float(start["Z0"]),
+        "a": float(start["a"]),
+        "ka": float(start["ka"]),
+        "c_offsets": c_offsets,
+        "s_offsets": s_offsets,
+    }
+    fitted_boundary = _build_boundary(
+        R0=float(params["R0"]),
+        Z0=float(params["Z0"]),
+        a=float(params["a"]),
+        ka=float(params["ka"]),
+        c_offsets=c_offsets,
+        s_offsets=s_offsets,
+        theta=theta,
     )
     return {
-        "rms": float(np.sqrt(np.mean(fit.fun**2))),
-        "params": _unpack_boundary_fit_params(fit.x, c_order=c_order, s_order=s_order),
+        "rms": float(np.sqrt(np.mean((r_points - fitted_boundary[:, 0]) ** 2))),
+        "params": params,
     }
+
+
+def _infer_theta_bar_target(
+    r_points: np.ndarray,
+    theta: np.ndarray,
+    *,
+    R0: float,
+    a: float,
+) -> np.ndarray:
+    if a <= 0.0:
+        raise ValueError("Boundary width must be positive")
+    cosine_target = (np.asarray(r_points, dtype=np.float64) - float(R0)) / float(a)
+    excess = np.maximum(np.abs(cosine_target) - 1.0, 0.0)
+    max_excess = float(np.max(excess)) if excess.size else 0.0
+    if max_excess > 1.0e-8:
+        raise ValueError(
+            "R_boundary values are inconsistent with R0/a for phase QR fitting: "
+            f"max normalized excess is {max_excess:.6e}"
+        )
+
+    principal = np.arccos(np.clip(cosine_target, -1.0, 1.0))
+    positive = principal + 2.0 * np.pi * np.round((theta - principal) / (2.0 * np.pi))
+    negative = -principal + 2.0 * np.pi * np.round((theta + principal) / (2.0 * np.pi))
+    target = np.where(np.abs(positive - theta) <= np.abs(negative - theta), positive, negative)
+    target = np.unwrap(target)
+    target += 2.0 * np.pi * np.round(float(np.mean(theta - target)) / (2.0 * np.pi))
+    return target
+
+
+def _solve_phase_projection_qr(
+    theta: np.ndarray,
+    delta: np.ndarray,
+    *,
+    c_order: int,
+    s_order: int,
+) -> np.ndarray:
+    matrix = _phase_design_matrix(theta, c_order=c_order, s_order=s_order)
+    q, r = np.linalg.qr(matrix, mode="reduced")
+    diagonal = np.abs(np.diag(r))
+    scale = float(np.max(diagonal)) if diagonal.size else 0.0
+    tolerance = np.finfo(np.float64).eps * max(matrix.shape) * max(scale, 1.0)
+    rank = int(np.count_nonzero(diagonal > tolerance))
+    expected_rank = c_order + 1 + s_order
+    if rank < expected_rank:
+        raise ValueError(
+            "R_boundary/Z_boundary do not provide full-rank phase QR fitting data: "
+            f"rank {rank}, need {expected_rank}"
+        )
+    return np.linalg.solve(r, q.T @ np.asarray(delta, dtype=np.float64))
+
+
+def _phase_design_matrix(theta: np.ndarray, *, c_order: int, s_order: int) -> np.ndarray:
+    columns = [np.ones_like(theta, dtype=np.float64)]
+    columns.extend(np.cos(order * theta) for order in range(1, c_order + 1))
+    columns.extend(np.sin(order * theta) for order in range(1, s_order + 1))
+    return np.column_stack(columns)
+
+
+def _coefficients_to_offsets(
+    coefficients: np.ndarray,
+    *,
+    c_order: int,
+    s_order: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    c_offsets = np.asarray(coefficients[: c_order + 1], dtype=np.float64).copy()
+    s_offsets = np.zeros(s_order + 1, dtype=np.float64)
+    if s_order > 0:
+        s_offsets[1:] = np.asarray(
+            coefficients[c_order + 1 : c_order + 1 + s_order],
+            dtype=np.float64,
+        )
+    return _normalize_fitted_offsets(c_offsets, s_offsets)
 
 
 def _normalize_fitted_offsets(
