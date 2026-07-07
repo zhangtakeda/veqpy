@@ -9,7 +9,7 @@ Public API:
 - Geqdsk
 
 Notes:
-- Boundary fitting is owned by ``veqpy.model.boundary``.
+- Boundary fitting is owned by ``veqpy.KernelBoundary`` when constructing Kernel cases.
 - ``Geqdsk`` stores GEQDSK data and serialization behavior only.
 """
 

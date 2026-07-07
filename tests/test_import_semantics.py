@@ -31,7 +31,7 @@ KERNEL_EXPORTS = {
     "config_with_overrides",
 }
 
-MODEL_EXPORTS = {"Boundary", "Equilibrium", "Geqdsk", "Grid", "Profile"}
+MODEL_EXPORTS = {"Equilibrium", "Geqdsk", "Grid", "Profile"}
 
 NUMERICS_EXPORTS = {
     "DEFAULT_CALCULUS",

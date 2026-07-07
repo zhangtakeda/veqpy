@@ -212,7 +212,7 @@ timing evidence should use the shared Kernel dataclasses directly through
 User-facing architecture notes:
 
 - [`model.md`][model-doc]: responsibilities, snapshot boundaries, and diagnostic
-  interfaces for `Grid`, `Profile`, `Boundary`, `Geqdsk`, and `Equilibrium`.
+  interfaces for `Grid`, `Profile`, `Geqdsk`, and `Equilibrium`.
 - [`architecture.md`][architecture-doc]: package layers, dependency direction,
   and public construction entry points.
 - [`kernel.md`][kernel-doc]: Kernel runtime boundary, solve lifecycle, result

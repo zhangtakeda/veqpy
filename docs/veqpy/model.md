@@ -16,13 +16,12 @@ The main source files live in `veqpy/model/`.
 | ------------- | --------------------------------------------------------------------------------------------------------- |
 | `Grid`        | Radial/angular discretization, quadrature weights, differentiation/integration matrices, and basis tables |
 | `Profile`     | Parameterized representation of a one-dimensional radial profile                                          |
-| `Boundary`    | Fixed-boundary geometry parameters, including fitting from a GEQDSK boundary                              |
 | `Geqdsk`      | GEQDSK data loading, storage, and conversion                                                              |
 | `Equilibrium` | Solved continuous equilibrium snapshot and diagnostic interface                                           |
 
-`Boundary.s_offsets` is indexed directly by Fourier order and therefore includes
-the structural s0 slot. Convert to Kernel runtime input with
-`KernelBoundary(s_offsets=boundary.s_offsets[1:])`.
+GEQDSK LCFS points remain passive data in `Geqdsk.boundary`. Runtime boundary
+parameters and boundary-point fitting belong to `KernelBoundary`, not to a
+separate model object.
 
 `Profile` represents a one-dimensional radial profile with scale, power,
 envelope, offset, and optional Chebyshev coefficients. Its persistent state is
@@ -53,6 +52,6 @@ have stable meaning for plotting, comparison, and GEQDSK export. Finer local
 derivative combinations, residual projection matrices, and backend workspaces
 remain in the Kernel runtime layer and do not become public snapshot API.
 
-## Boundary
+## Model Boundary
 
 The model layer follows the principle "minimal independent state plus interpretable derived quantities." It gives users an equilibrium object that can be read, plotted, compared, and serialized. It does not solve the Grad--Shafranov equation again and does not perform high-frequency residual refreshes. New diagnostics should usually be added as `Equilibrium` properties derived from existing root state, rather than by exposing solver or engine internals directly.

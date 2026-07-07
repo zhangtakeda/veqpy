@@ -14,6 +14,11 @@ solve policy. `Kernel.solve(...)` returns a shared `SolveResult`, and
 For sine Fourier data, Kernel-level public inputs are s1-started:
 `KernelTopology.s_counts=(n1, n2, ...)` and `KernelBoundary.s_offsets=(s1, s2, ...)`.
 The runtime adds the structural s0=0 slot before backend calls.
+`KernelBoundary` accepts either explicit parameterized geometry
+(`a`, `R0`, `Z0`, `B0`, `ka`, `c_offsets`, `s_offsets`) or raw LCFS point arrays
+(`R_boundary`, `Z_boundary`) plus `c_order`/`s_order`; the latter form performs
+the least-squares Fourier projection during construction and records fit
+diagnostics on `fit_*` fields.
 
 The direct Numba implementation is a private Kernel backend. Its internal runtime
 owns packed layout metadata, source materialization, residual workspaces, and

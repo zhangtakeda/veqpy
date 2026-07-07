@@ -2,12 +2,12 @@
 Package: veqpy.model
 
 Role:
-- Define serializable model-layer objects for grids, profiles, boundaries,
-  GEQDSK data, and equilibria.
+- Define serializable model-layer objects for grids, profiles, GEQDSK data,
+  and equilibria.
 - Provide the public model import surface.
 
 Public API:
-- Grid, Profile, Boundary, Geqdsk, and Equilibrium.
+- Grid, Profile, Geqdsk, and Equilibrium.
 
 Dependencies:
 - veqpy.base for Serial and Reactive infrastructure.
@@ -24,7 +24,6 @@ Design notes:
 
 from __future__ import annotations
 
-from .boundary import Boundary
 from .equilibrium import Equilibrium
 from .geqdsk import Geqdsk
 from .grid import Grid
@@ -34,6 +33,5 @@ __all__ = [
     "Equilibrium",
     "Grid",
     "Geqdsk",
-    "Boundary",
     "Profile",
 ]

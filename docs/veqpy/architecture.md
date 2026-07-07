@@ -6,7 +6,7 @@ VEQPy is a single public package with four user-visible layers:
 | --- | --- |
 | `veqpy.base` | Reactive derived-state utilities, serialization, and registry helpers |
 | `veqpy.numerics` | General interpolation, differentiation, quadrature, and projection helpers |
-| `veqpy.model` | Serializable model objects: `Grid`, `Profile`, `Boundary`, `Geqdsk`, and `Equilibrium` |
+| `veqpy.model` | Serializable model objects: `Grid`, `Profile`, `Geqdsk`, and `Equilibrium` |
 | `veqpy.kernels` | Public Kernel contract, backend dispatch, and private Numba/Cxx runtime implementations |
 
 The dependency direction is intentionally one-way: model code may use `base` and

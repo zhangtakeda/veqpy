@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from numpy.testing import assert_allclose
 
-from veqpy.model import Boundary, Geqdsk, Grid, Profile
+from veqpy.model import Geqdsk, Grid, Profile
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 
@@ -29,7 +29,7 @@ def test_grid_user_arrays_and_integration() -> None:
         grid.integrate(np.ones((2, 2, 2)))
 
 
-def test_boundary_and_profile_normalize_user_inputs() -> None:
+def test_profile_normalizes_user_inputs() -> None:
     coeff = np.array([1.0, 2.0], dtype=np.float64)
     profile = Profile(scale=2, power=3.0, envelope_power=1.0, coeff=coeff)
     coeff[:] = -1.0
@@ -40,10 +40,6 @@ def test_boundary_and_profile_normalize_user_inputs() -> None:
     assert not profile.coeff.flags.writeable
     with pytest.raises(ValueError, match="coeff must be 1D"):
         Profile(coeff=np.ones((1, 1)))
-
-    boundary = Boundary(a=1, R0=2, Z0=0, B0=3, c_offsets=[0.1], s_offsets=[9.0, 0.3])
-    assert boundary.a == 1.0
-    assert_allclose(boundary.s_offsets, [0.0, 0.3])
 
 
 def test_profile_fields_are_reactive_when_grid_is_bound() -> None:
@@ -63,22 +59,7 @@ def test_profile_fields_are_reactive_when_grid_is_bound() -> None:
     assert_allclose(profile.value, 8.0 * grid.rho**2)
 
 
-def test_boundary_and_geqdsk_roundtrip(tmp_path: Path) -> None:
-    boundary = Boundary(
-        a=0.5,
-        R0=1.2,
-        Z0=-0.1,
-        B0=2.5,
-        ka=1.6,
-        c_offsets=np.array([0.1, 0.2], dtype=np.float64),
-        s_offsets=np.array([0.0, -0.2], dtype=np.float64),
-    )
-    boundary_path = tmp_path / "boundary.json"
-    boundary.write(boundary_path)
-    loaded_boundary = Boundary.load(boundary_path)
-    assert loaded_boundary.a == boundary.a
-    assert_allclose(loaded_boundary.c_offsets, boundary.c_offsets)
-
+def test_geqdsk_roundtrip(tmp_path: Path) -> None:
     source = Geqdsk(DATA_DIR / "SOLOVEV.geqdsk")
     source.check()
     geqdsk_path = tmp_path / "SOLOVEV.geqdsk"

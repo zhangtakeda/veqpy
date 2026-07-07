@@ -17,7 +17,6 @@ def test_package_version_matches_pyproject() -> None:
 
 def test_core_public_imports_are_available() -> None:
     assert model.Grid
-    assert model.Boundary
     assert model.Profile
     assert model.Geqdsk
     assert model.Equilibrium
