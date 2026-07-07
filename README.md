@@ -189,8 +189,8 @@ Runtime boundary/source arrays, physical constraints, solver tolerances, and `x0
 belong to the per-case solve call.
 
 The Cxx backend pins short native calls to one CPU by default to reduce scheduler
-noise. Set `VEQLIB_PIN_CPU=0` to disable scoped pinning, or
-`VEQLIB_PIN_CPU_ID=<cpu>` to request a specific allowed CPU. For high-volume
+noise. Set `VEQPY_CXX_PIN_CPU=0` to disable scoped pinning, or
+`VEQPY_CXX_PIN_CPU_ID=<cpu>` to request a specific allowed CPU. For high-volume
 loops, prefer one outer pinning scope via the Kernel handle rather than relying
 on per-call affinity changes.
 

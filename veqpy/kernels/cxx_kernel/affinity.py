@@ -118,7 +118,7 @@ def _resolve_target(resolved: bool | int, allowed: set[int]) -> set[int] | None:
 
 
 def _default_policy_from_env() -> bool | int:
-    token = os.environ.get("VEQLIB_PIN_CPU", "auto").strip().lower()
+    token = os.environ.get("VEQPY_CXX_PIN_CPU", "auto").strip().lower()
     if token in _DISABLE_TOKENS:
         return False
     if token in _ENABLE_TOKENS or token == "":
@@ -128,16 +128,16 @@ def _default_policy_from_env() -> bool | int:
             return int(token)
         except ValueError as exc:
             raise ValueError(
-                "VEQLIB_PIN_CPU must be auto/on/1, off/0, or an integer CPU id; "
-                "use VEQLIB_PIN_CPU_ID to select CPU 0 unambiguously"
+                "VEQPY_CXX_PIN_CPU must be auto/on/1, off/0, or an integer CPU id; "
+                "use VEQPY_CXX_PIN_CPU_ID to select CPU 0 unambiguously"
             ) from exc
 
     if not enabled:
         return False
-    requested = os.environ.get("VEQLIB_PIN_CPU_ID")
+    requested = os.environ.get("VEQPY_CXX_PIN_CPU_ID")
     if requested is None or requested.strip() == "":
         return True
     try:
         return int(requested)
     except ValueError as exc:
-        raise ValueError("VEQLIB_PIN_CPU_ID must be an integer CPU id") from exc
+        raise ValueError("VEQPY_CXX_PIN_CPU_ID must be an integer CPU id") from exc

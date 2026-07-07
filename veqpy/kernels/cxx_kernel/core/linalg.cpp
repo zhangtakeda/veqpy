@@ -9,7 +9,7 @@ static_assert(sizeof(lapack_int) == sizeof(int),
 
 [[maybe_unused]] const bool blas_runtime_configured = []
 {
-#if defined(VEQLIB_FORCE_OPENBLAS_SINGLE_THREAD)
+#if defined(VEQPY_CXX_FORCE_OPENBLAS_SINGLE_THREAD)
     openblas_set_num_threads(1);
 #endif
     return true;

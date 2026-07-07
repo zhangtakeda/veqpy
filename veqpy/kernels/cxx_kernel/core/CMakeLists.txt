@@ -1,32 +1,32 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(veqlib LANGUAGES CXX)
+project(cxx_kernel LANGUAGES CXX)
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
 
 option(ENABLE_ENZYME "Load the Enzyme clang plugin and probe autodiff" ON)
-option(VEQLIB_ENABLE_STRICT_CONVERSIONS "Reject implicit narrowing and signedness conversions with clang warnings" ON)
-option(VEQLIB_ENABLE_NATIVE_OPTIMIZATIONS "Enable native CPU and loop optimization flags" ON)
-option(VEQLIB_ENABLE_THIN_LTO "Enable clang ThinLTO and lld for optimized builds" ON)
-option(VEQLIB_ANALYSIS_BUILD "Build with source-correlated optimization diagnostics" OFF)
-option(VEQLIB_FORCE_OPENBLAS_SINGLE_THREAD "Force OpenBLAS to one runtime thread inside veqlib targets" ON)
-option(VEQLIB_ENABLE_PYTHON_BINDINGS "Build the nanobind Python extension for VEQlib" ON)
-set(VEQLIB_FP_MODE "RELAXED" CACHE STRING "Floating-point mode: STRICT, FMA, or RELAXED")
-set_property(CACHE VEQLIB_FP_MODE PROPERTY STRINGS STRICT FMA RELAXED)
-set(VEQLIB_ENZYME_PLUGIN "" CACHE FILEPATH "Path to ClangEnzyme shared library")
-set(VEQLIB_ENZYME_INCLUDE_DIR "$ENV{HOME}/opt/Enzyme/enzyme/include" CACHE PATH "Path to Enzyme C++ headers")
-set(VEQLIB_GCEM_ROOT "$ENV{HOME}/opt/gcem-install" CACHE PATH "GCEM install prefix")
-set(VEQLIB_NB_DOMAIN "veqlib_default" CACHE STRING "nanobind type registry domain for this extension")
+option(VEQPY_CXX_ENABLE_STRICT_CONVERSIONS "Reject implicit narrowing and signedness conversions with clang warnings" ON)
+option(VEQPY_CXX_ENABLE_NATIVE_OPTIMIZATIONS "Enable native CPU and loop optimization flags" ON)
+option(VEQPY_CXX_ENABLE_THIN_LTO "Enable clang ThinLTO and lld for optimized builds" ON)
+option(VEQPY_CXX_ANALYSIS_BUILD "Build with source-correlated optimization diagnostics" OFF)
+option(VEQPY_CXX_FORCE_OPENBLAS_SINGLE_THREAD "Force OpenBLAS to one runtime thread inside Cxx backend targets" ON)
+option(VEQPY_CXX_ENABLE_PYTHON_BINDINGS "Build the nanobind Python extension for the Cxx backend" ON)
+set(VEQPY_CXX_FP_MODE "RELAXED" CACHE STRING "Floating-point mode: STRICT, FMA, or RELAXED")
+set_property(CACHE VEQPY_CXX_FP_MODE PROPERTY STRINGS STRICT FMA RELAXED)
+set(VEQPY_CXX_ENZYME_PLUGIN "" CACHE FILEPATH "Path to ClangEnzyme shared library")
+set(VEQPY_CXX_ENZYME_INCLUDE_DIR "$ENV{HOME}/opt/Enzyme/enzyme/include" CACHE PATH "Path to Enzyme C++ headers")
+set(VEQPY_CXX_GCEM_ROOT "$ENV{HOME}/opt/gcem-install" CACHE PATH "GCEM install prefix")
+set(VEQPY_CXX_NB_DOMAIN "veqpy_cxx_default" CACHE STRING "nanobind type registry domain for this extension")
 set(
-    VEQLIB_PREBUILT_NANOBIND_STATIC
+    VEQPY_CXX_PREBUILT_NANOBIND_STATIC
     ""
     CACHE FILEPATH
     "Optional prebuilt libnanobind-static.a reused across topology-specific kernel builds"
 )
-set(VEQLIB_CONSTEXPR_STEP_LIMIT "67108864")
-set(VEQLIB_CONSTEXPR_STEPS "${VEQLIB_CONSTEXPR_STEP_LIMIT}" CACHE STRING "Clang constexpr evaluation step budget")
+set(VEQPY_CXX_CONSTEXPR_STEP_LIMIT "67108864")
+set(VEQPY_CXX_CONSTEXPR_STEPS "${VEQPY_CXX_CONSTEXPR_STEP_LIMIT}" CACHE STRING "Clang constexpr evaluation step budget")
 set(VEQ_NR "8" CACHE STRING "Default topology radial grid node count")
 set(VEQ_NT "16" CACHE STRING "Default topology poloidal grid node count")
 set(VEQ_SOURCE_SAMPLE_COUNT "51" CACHE STRING "Default topology source sample count")
@@ -73,34 +73,34 @@ set(
     "Enzyme dense Jacobian batch width; 0 lets the generated kernel choose from x_size"
 )
 
-string(TOUPPER "${VEQLIB_FP_MODE}" VEQLIB_FP_MODE_NORMALIZED)
-if(NOT VEQLIB_FP_MODE_NORMALIZED MATCHES "^(STRICT|FMA|RELAXED)$")
-    message(FATAL_ERROR "VEQLIB_FP_MODE must be STRICT, FMA, or RELAXED; got '${VEQLIB_FP_MODE}'")
+string(TOUPPER "${VEQPY_CXX_FP_MODE}" VEQPY_CXX_FP_MODE_NORMALIZED)
+if(NOT VEQPY_CXX_FP_MODE_NORMALIZED MATCHES "^(STRICT|FMA|RELAXED)$")
+    message(FATAL_ERROR "VEQPY_CXX_FP_MODE must be STRICT, FMA, or RELAXED; got '${VEQPY_CXX_FP_MODE}'")
 endif()
-set(VEQLIB_FP_MODE "${VEQLIB_FP_MODE_NORMALIZED}" CACHE STRING "Floating-point mode: STRICT, FMA, or RELAXED" FORCE)
+set(VEQPY_CXX_FP_MODE "${VEQPY_CXX_FP_MODE_NORMALIZED}" CACHE STRING "Floating-point mode: STRICT, FMA, or RELAXED" FORCE)
 
-if(VEQLIB_CONSTEXPR_STEPS GREATER VEQLIB_CONSTEXPR_STEP_LIMIT)
-    message(FATAL_ERROR "VEQLIB_CONSTEXPR_STEPS must not exceed ${VEQLIB_CONSTEXPR_STEP_LIMIT}")
+if(VEQPY_CXX_CONSTEXPR_STEPS GREATER VEQPY_CXX_CONSTEXPR_STEP_LIMIT)
+    message(FATAL_ERROR "VEQPY_CXX_CONSTEXPR_STEPS must not exceed ${VEQPY_CXX_CONSTEXPR_STEP_LIMIT}")
 endif()
-if(NOT VEQLIB_NB_DOMAIN MATCHES "^[A-Za-z_][A-Za-z0-9_]*$")
-    message(FATAL_ERROR "VEQLIB_NB_DOMAIN must be a valid C/C++ identifier, got '${VEQLIB_NB_DOMAIN}'")
+if(NOT VEQPY_CXX_NB_DOMAIN MATCHES "^[A-Za-z_][A-Za-z0-9_]*$")
+    message(FATAL_ERROR "VEQPY_CXX_NB_DOMAIN must be a valid C/C++ identifier, got '${VEQPY_CXX_NB_DOMAIN}'")
 endif()
 
-function(veqlib_require_nonnegative_int_var source_var)
+function(cxx_require_nonnegative_int_var source_var)
     if(NOT "${${source_var}}" MATCHES "^[0-9]+$")
         message(FATAL_ERROR "${source_var} must be a non-negative integer, got '${${source_var}}'")
     endif()
 endfunction()
 
-function(veqlib_require_int_at_least source_var minimum)
-    veqlib_require_nonnegative_int_var("${source_var}")
+function(cxx_require_int_at_least source_var minimum)
+    cxx_require_nonnegative_int_var("${source_var}")
     if("${${source_var}}" LESS "${minimum}")
         message(FATAL_ERROR "${source_var} must be at least ${minimum}, got '${${source_var}}'")
     endif()
 endfunction()
 
-function(veqlib_require_int_one_of source_var)
-    veqlib_require_nonnegative_int_var("${source_var}")
+function(cxx_require_int_one_of source_var)
+    cxx_require_nonnegative_int_var("${source_var}")
     set(found_value FALSE)
     foreach(value IN ITEMS ${ARGN})
         if("${${source_var}}" STREQUAL "${value}")
@@ -113,7 +113,7 @@ function(veqlib_require_int_one_of source_var)
     endif()
 endfunction()
 
-function(veqlib_prepare_nonnegative_int_list
+function(cxx_prepare_nonnegative_int_list
     source_var
     out_values
     out_size
@@ -163,28 +163,28 @@ function(veqlib_prepare_nonnegative_int_list
     set("${out_highest_order}" "${highest_order}" PARENT_SCOPE)
 endfunction()
 
-veqlib_require_int_at_least(VEQ_NR 4)
-veqlib_require_int_at_least(VEQ_NT 4)
-veqlib_require_int_at_least(VEQ_SOURCE_SAMPLE_COUNT 1)
-veqlib_require_int_one_of(VEQ_SOURCE_ROUTE_CODE 1 2 3 4 5 6)
-veqlib_require_int_one_of(VEQ_SOURCE_COORDINATE_CODE 1 2)
-veqlib_require_int_one_of(VEQ_SOURCE_CONSTRAINT_CODE 0 1 2 3)
-veqlib_require_int_one_of(VEQ_SOURCE_NODES_CODE 1 2)
-veqlib_require_int_one_of(VEQ_SOURCE_ACTIVE_FAMILY_CODE 0 1 2)
-veqlib_require_int_one_of(VEQ_SOURCE_PARAMETERIZATION_CODE 0 1)
-veqlib_require_nonnegative_int_var(VEQ_H_PROFILE_COUNT)
-veqlib_require_nonnegative_int_var(VEQ_V_PROFILE_COUNT)
-veqlib_require_nonnegative_int_var(VEQ_KAPPA_PROFILE_COUNT)
-veqlib_require_nonnegative_int_var(VEQ_PSIN_PROFILE_COUNT)
-veqlib_require_nonnegative_int_var(VEQ_F_PROFILE_COUNT)
-veqlib_require_int_at_least(VEQ_PROFILE_KMAX_LIMIT 2)
-veqlib_require_int_one_of(VEQ_LAYOUT_PROFILE_FIRST 0 1)
-veqlib_require_nonnegative_int_var(VEQ_ENZYME_JACOBIAN_BATCH_WIDTH)
+cxx_require_int_at_least(VEQ_NR 4)
+cxx_require_int_at_least(VEQ_NT 4)
+cxx_require_int_at_least(VEQ_SOURCE_SAMPLE_COUNT 1)
+cxx_require_int_one_of(VEQ_SOURCE_ROUTE_CODE 1 2 3 4 5 6)
+cxx_require_int_one_of(VEQ_SOURCE_COORDINATE_CODE 1 2)
+cxx_require_int_one_of(VEQ_SOURCE_CONSTRAINT_CODE 0 1 2 3)
+cxx_require_int_one_of(VEQ_SOURCE_NODES_CODE 1 2)
+cxx_require_int_one_of(VEQ_SOURCE_ACTIVE_FAMILY_CODE 0 1 2)
+cxx_require_int_one_of(VEQ_SOURCE_PARAMETERIZATION_CODE 0 1)
+cxx_require_nonnegative_int_var(VEQ_H_PROFILE_COUNT)
+cxx_require_nonnegative_int_var(VEQ_V_PROFILE_COUNT)
+cxx_require_nonnegative_int_var(VEQ_KAPPA_PROFILE_COUNT)
+cxx_require_nonnegative_int_var(VEQ_PSIN_PROFILE_COUNT)
+cxx_require_nonnegative_int_var(VEQ_F_PROFILE_COUNT)
+cxx_require_int_at_least(VEQ_PROFILE_KMAX_LIMIT 2)
+cxx_require_int_one_of(VEQ_LAYOUT_PROFILE_FIRST 0 1)
+cxx_require_nonnegative_int_var(VEQ_ENZYME_JACOBIAN_BATCH_WIDTH)
 if(NOT VEQ_BOUNDARY_M_MAX STREQUAL "AUTO")
-    veqlib_require_int_at_least(VEQ_BOUNDARY_M_MAX 1)
+    cxx_require_int_at_least(VEQ_BOUNDARY_M_MAX 1)
 endif()
 
-veqlib_prepare_nonnegative_int_list(
+cxx_prepare_nonnegative_int_list(
     VEQ_COS_PROFILE_COUNTS
     VEQ_COS_PROFILE_COUNTS_VALUES
     VEQ_COS_PROFILE_COUNTS_SIZE
@@ -192,7 +192,7 @@ veqlib_prepare_nonnegative_int_list(
     VEQ_C_MAX
     0
 )
-veqlib_prepare_nonnegative_int_list(
+cxx_prepare_nonnegative_int_list(
     VEQ_SIN_PROFILE_COUNTS
     VEQ_SIN_PROFILE_COUNTS_VALUES
     VEQ_SIN_PROFILE_COUNTS_SIZE
@@ -267,23 +267,23 @@ if(VEQ_K_MAX LESS 2)
     message(FATAL_ERROR "Derived K_max must be at least 2")
 endif()
 
-set(VEQLIB_GENERATED_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
-file(MAKE_DIRECTORY "${VEQLIB_GENERATED_INCLUDE_DIR}")
+set(VEQPY_CXX_GENERATED_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
+file(MAKE_DIRECTORY "${VEQPY_CXX_GENERATED_INCLUDE_DIR}")
 configure_file(
     "${PROJECT_SOURCE_DIR}/config.h.in"
-    "${VEQLIB_GENERATED_INCLUDE_DIR}/config.h"
+    "${VEQPY_CXX_GENERATED_INCLUDE_DIR}/config.h"
     @ONLY
 )
 
-function(veqlib_require_clang)
+function(cxx_require_clang)
     if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-        message(FATAL_ERROR "veqlib requires clang++; configure with -DCMAKE_CXX_COMPILER=clang++")
+        message(FATAL_ERROR "Cxx backend requires clang++; configure with -DCMAKE_CXX_COMPILER=clang++")
     endif()
 endfunction()
 
-function(veqlib_link_dependencies target)
-    if(VEQLIB_GCEM_ROOT)
-        list(PREPEND CMAKE_PREFIX_PATH "${VEQLIB_GCEM_ROOT}")
+function(cxx_link_dependencies target)
+    if(VEQPY_CXX_GCEM_ROOT)
+        list(PREPEND CMAKE_PREFIX_PATH "${VEQPY_CXX_GCEM_ROOT}")
     endif()
     find_package(gcem CONFIG REQUIRED)
     target_link_libraries("${target}" PRIVATE gcem)
@@ -306,14 +306,14 @@ function(veqlib_link_dependencies target)
             "${BLAS_LIBRARY}"
     )
 
-    if(VEQLIB_FORCE_OPENBLAS_SINGLE_THREAD)
-        target_compile_definitions("${target}" PRIVATE VEQLIB_FORCE_OPENBLAS_SINGLE_THREAD=1)
+    if(VEQPY_CXX_FORCE_OPENBLAS_SINGLE_THREAD)
+        target_compile_definitions("${target}" PRIVATE VEQPY_CXX_FORCE_OPENBLAS_SINGLE_THREAD=1)
     endif()
 endfunction()
 
-function(veqlib_find_enzyme out_var)
-    if(VEQLIB_ENZYME_PLUGIN AND EXISTS "${VEQLIB_ENZYME_PLUGIN}")
-        set("${out_var}" "${VEQLIB_ENZYME_PLUGIN}" PARENT_SCOPE)
+function(cxx_find_enzyme out_var)
+    if(VEQPY_CXX_ENZYME_PLUGIN AND EXISTS "${VEQPY_CXX_ENZYME_PLUGIN}")
+        set("${out_var}" "${VEQPY_CXX_ENZYME_PLUGIN}" PARENT_SCOPE)
         return()
     endif()
 
@@ -346,31 +346,31 @@ function(veqlib_find_enzyme out_var)
     set("${out_var}" "${found_enzyme_plugin}" PARENT_SCOPE)
 endfunction()
 
-function(veqlib_enable_enzyme target)
+function(cxx_enable_enzyme target)
     if(NOT ENABLE_ENZYME)
         return()
     endif()
 
-    veqlib_find_enzyme(enzyme_plugin)
+    cxx_find_enzyme(enzyme_plugin)
     if(NOT enzyme_plugin)
-        message(FATAL_ERROR "ClangEnzyme plugin not found; set VEQLIB_ENZYME_PLUGIN=/path/to/ClangEnzyme-18.so")
+        message(FATAL_ERROR "ClangEnzyme plugin not found; set VEQPY_CXX_ENZYME_PLUGIN=/path/to/ClangEnzyme-18.so")
     endif()
 
     get_filename_component(enzyme_plugin_name "${enzyme_plugin}" NAME)
     if(NOT enzyme_plugin_name MATCHES "^ClangEnzyme")
-        message(FATAL_ERROR "veqlib's direct clang++ workflow requires ClangEnzyme, got ${enzyme_plugin}")
+        message(FATAL_ERROR "Cxx backend direct clang++ workflow requires ClangEnzyme, got ${enzyme_plugin}")
     endif()
 
     message(STATUS "Using Enzyme plugin: ${enzyme_plugin}")
     target_compile_options("${target}" PRIVATE "-fplugin=${enzyme_plugin}")
     target_compile_definitions("${target}" PRIVATE ENABLE_ENZYME=1)
-    if(VEQLIB_ENZYME_INCLUDE_DIR AND EXISTS "${VEQLIB_ENZYME_INCLUDE_DIR}")
-        target_include_directories("${target}" PRIVATE "${VEQLIB_ENZYME_INCLUDE_DIR}")
+    if(VEQPY_CXX_ENZYME_INCLUDE_DIR AND EXISTS "${VEQPY_CXX_ENZYME_INCLUDE_DIR}")
+        target_include_directories("${target}" PRIVATE "${VEQPY_CXX_ENZYME_INCLUDE_DIR}")
     endif()
 endfunction()
 
-function(veqlib_enable_strict_conversions target)
-    if(NOT VEQLIB_ENABLE_STRICT_CONVERSIONS)
+function(cxx_enable_strict_conversions target)
+    if(NOT VEQPY_CXX_ENABLE_STRICT_CONVERSIONS)
         return()
     endif()
 
@@ -398,16 +398,16 @@ function(veqlib_enable_strict_conversions target)
     )
 endfunction()
 
-function(veqlib_link_json_dependency target)
+function(cxx_link_json_dependency target)
     find_package(nlohmann_json CONFIG REQUIRED)
     target_link_libraries("${target}" PRIVATE nlohmann_json::nlohmann_json)
 endfunction()
 
-function(veqlib_enable_constexpr_budget target)
-    target_compile_options("${target}" PRIVATE "-fconstexpr-steps=${VEQLIB_CONSTEXPR_STEPS}")
+function(cxx_enable_constexpr_budget target)
+    target_compile_options("${target}" PRIVATE "-fconstexpr-steps=${VEQPY_CXX_CONSTEXPR_STEPS}")
 endfunction()
 
-function(veqlib_enable_kernel_optimizations target)
+function(cxx_enable_kernel_optimizations target)
     set(release_like "$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>")
 
     target_compile_options(
@@ -415,9 +415,9 @@ function(veqlib_enable_kernel_optimizations target)
         PRIVATE
             $<${release_like}:-O3>
     )
-    target_compile_definitions("${target}" PRIVATE "VEQLIB_FP_MODE_${VEQLIB_FP_MODE}=1")
+    target_compile_definitions("${target}" PRIVATE "VEQPY_CXX_FP_MODE_${VEQPY_CXX_FP_MODE}=1")
 
-    if(VEQLIB_ENABLE_NATIVE_OPTIMIZATIONS)
+    if(VEQPY_CXX_ENABLE_NATIVE_OPTIMIZATIONS)
         target_compile_options(
             "${target}"
             PRIVATE
@@ -440,21 +440,21 @@ function(veqlib_enable_kernel_optimizations target)
         )
     endif()
 
-    if(VEQLIB_FP_MODE STREQUAL "STRICT")
+    if(VEQPY_CXX_FP_MODE STREQUAL "STRICT")
         target_compile_options(
             "${target}"
             PRIVATE
                 $<${release_like}:-fno-fast-math>
                 $<${release_like}:-ffp-contract=off>
         )
-    elseif(VEQLIB_FP_MODE STREQUAL "FMA")
+    elseif(VEQPY_CXX_FP_MODE STREQUAL "FMA")
         target_compile_options(
             "${target}"
             PRIVATE
                 $<${release_like}:-fno-fast-math>
                 $<${release_like}:-ffp-contract=fast>
         )
-    elseif(VEQLIB_FP_MODE STREQUAL "RELAXED")
+    elseif(VEQPY_CXX_FP_MODE STREQUAL "RELAXED")
         target_compile_options(
             "${target}"
             PRIVATE
@@ -470,7 +470,7 @@ function(veqlib_enable_kernel_optimizations target)
         )
     endif()
 
-    if(VEQLIB_ENABLE_THIN_LTO AND NOT VEQLIB_ANALYSIS_BUILD)
+    if(VEQPY_CXX_ENABLE_THIN_LTO AND NOT VEQPY_CXX_ANALYSIS_BUILD)
         target_compile_options(
             "${target}"
             PRIVATE
@@ -484,7 +484,7 @@ function(veqlib_enable_kernel_optimizations target)
         )
     endif()
 
-    if(VEQLIB_ANALYSIS_BUILD)
+    if(VEQPY_CXX_ANALYSIS_BUILD)
         target_compile_options(
             "${target}"
             PRIVATE
@@ -503,15 +503,15 @@ function(veqlib_enable_kernel_optimizations target)
     endif()
 endfunction()
 
-veqlib_require_clang()
+cxx_require_clang()
 
-set(VEQLIB_COMMON_SOURCES nonlinear.cpp linalg.cpp)
+set(VEQPY_CXX_COMMON_SOURCES nonlinear.cpp linalg.cpp)
 
-function(veqlib_configure_target target)
+function(cxx_configure_target target)
     target_include_directories(
         "${target}"
         PRIVATE
-            "${VEQLIB_GENERATED_INCLUDE_DIR}"
+            "${VEQPY_CXX_GENERATED_INCLUDE_DIR}"
             "${PROJECT_SOURCE_DIR}"
     )
     set_target_properties(
@@ -521,71 +521,71 @@ function(veqlib_configure_target target)
             CXX_STANDARD_REQUIRED ON
             CXX_EXTENSIONS OFF
     )
-    veqlib_enable_enzyme("${target}")
-    veqlib_enable_strict_conversions("${target}")
-    veqlib_enable_constexpr_budget("${target}")
-    veqlib_enable_kernel_optimizations("${target}")
-    veqlib_link_dependencies("${target}")
+    cxx_enable_enzyme("${target}")
+    cxx_enable_strict_conversions("${target}")
+    cxx_enable_constexpr_budget("${target}")
+    cxx_enable_kernel_optimizations("${target}")
+    cxx_link_dependencies("${target}")
 endfunction()
 
 find_package(Git QUIET)
-set(VEQLIB_GIT_SHA "unknown")
-set(VEQLIB_GIT_DIRTY 0)
+set(VEQPY_CXX_GIT_SHA "unknown")
+set(VEQPY_CXX_GIT_DIRTY 0)
 if(Git_FOUND)
     execute_process(
         COMMAND "${GIT_EXECUTABLE}" rev-parse --short=12 HEAD
         WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
-        OUTPUT_VARIABLE VEQLIB_GIT_SHA
+        OUTPUT_VARIABLE VEQPY_CXX_GIT_SHA
         ERROR_QUIET
         OUTPUT_STRIP_TRAILING_WHITESPACE
     )
     execute_process(
         COMMAND "${GIT_EXECUTABLE}" status --short
         WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
-        OUTPUT_VARIABLE VEQLIB_GIT_STATUS
+        OUTPUT_VARIABLE VEQPY_CXX_GIT_STATUS
         ERROR_QUIET
         OUTPUT_STRIP_TRAILING_WHITESPACE
     )
-    if(NOT VEQLIB_GIT_STATUS STREQUAL "")
-        set(VEQLIB_GIT_DIRTY 1)
+    if(NOT VEQPY_CXX_GIT_STATUS STREQUAL "")
+        set(VEQPY_CXX_GIT_DIRTY 1)
     endif()
 endif()
-set(VEQLIB_STAGE_NATIVE_OPTIMIZATIONS 0)
-if(VEQLIB_ENABLE_NATIVE_OPTIMIZATIONS)
-    set(VEQLIB_STAGE_NATIVE_OPTIMIZATIONS 1)
+set(VEQPY_CXX_STAGE_NATIVE_OPTIMIZATIONS 0)
+if(VEQPY_CXX_ENABLE_NATIVE_OPTIMIZATIONS)
+    set(VEQPY_CXX_STAGE_NATIVE_OPTIMIZATIONS 1)
 endif()
-set(VEQLIB_STAGE_THIN_LTO 0)
-if(VEQLIB_ENABLE_THIN_LTO)
-    set(VEQLIB_STAGE_THIN_LTO 1)
+set(VEQPY_CXX_STAGE_THIN_LTO 0)
+if(VEQPY_CXX_ENABLE_THIN_LTO)
+    set(VEQPY_CXX_STAGE_THIN_LTO 1)
 endif()
-set(VEQLIB_STAGE_ANALYSIS_BUILD 0)
-if(VEQLIB_ANALYSIS_BUILD)
-    set(VEQLIB_STAGE_ANALYSIS_BUILD 1)
+set(VEQPY_CXX_STAGE_ANALYSIS_BUILD 0)
+if(VEQPY_CXX_ANALYSIS_BUILD)
+    set(VEQPY_CXX_STAGE_ANALYSIS_BUILD 1)
 endif()
-set(VEQLIB_STAGE_ENZYME 0)
+set(VEQPY_CXX_STAGE_ENZYME 0)
 if(ENABLE_ENZYME)
-    set(VEQLIB_STAGE_ENZYME 1)
+    set(VEQPY_CXX_STAGE_ENZYME 1)
 endif()
 
-add_executable(veqlib_stage_benchmark stage_benchmark.cpp ${VEQLIB_COMMON_SOURCES})
-veqlib_configure_target(veqlib_stage_benchmark)
-veqlib_link_json_dependency(veqlib_stage_benchmark)
+add_executable(cxx_stage_benchmark stage_benchmark.cpp ${VEQPY_CXX_COMMON_SOURCES})
+cxx_configure_target(cxx_stage_benchmark)
+cxx_link_json_dependency(cxx_stage_benchmark)
 target_compile_definitions(
-    veqlib_stage_benchmark
+    cxx_stage_benchmark
     PRIVATE
-        VEQLIB_STAGE_GIT_SHA="${VEQLIB_GIT_SHA}"
-        VEQLIB_STAGE_GIT_DIRTY=${VEQLIB_GIT_DIRTY}
-        VEQLIB_STAGE_CXX_COMPILER_ID="${CMAKE_CXX_COMPILER_ID}"
-        VEQLIB_STAGE_CXX_COMPILER_VERSION="${CMAKE_CXX_COMPILER_VERSION}"
-        VEQLIB_STAGE_BUILD_TYPE="${CMAKE_BUILD_TYPE}"
-        VEQLIB_STAGE_FP_MODE="${VEQLIB_FP_MODE}"
-        VEQLIB_STAGE_NATIVE_OPTIMIZATIONS=${VEQLIB_STAGE_NATIVE_OPTIMIZATIONS}
-        VEQLIB_STAGE_THIN_LTO=${VEQLIB_STAGE_THIN_LTO}
-        VEQLIB_STAGE_ANALYSIS_BUILD=${VEQLIB_STAGE_ANALYSIS_BUILD}
-        VEQLIB_STAGE_ENZYME=${VEQLIB_STAGE_ENZYME}
+        VEQPY_CXX_STAGE_GIT_SHA="${VEQPY_CXX_GIT_SHA}"
+        VEQPY_CXX_STAGE_GIT_DIRTY=${VEQPY_CXX_GIT_DIRTY}
+        VEQPY_CXX_STAGE_CXX_COMPILER_ID="${CMAKE_CXX_COMPILER_ID}"
+        VEQPY_CXX_STAGE_CXX_COMPILER_VERSION="${CMAKE_CXX_COMPILER_VERSION}"
+        VEQPY_CXX_STAGE_BUILD_TYPE="${CMAKE_BUILD_TYPE}"
+        VEQPY_CXX_STAGE_FP_MODE="${VEQPY_CXX_FP_MODE}"
+        VEQPY_CXX_STAGE_NATIVE_OPTIMIZATIONS=${VEQPY_CXX_STAGE_NATIVE_OPTIMIZATIONS}
+        VEQPY_CXX_STAGE_THIN_LTO=${VEQPY_CXX_STAGE_THIN_LTO}
+        VEQPY_CXX_STAGE_ANALYSIS_BUILD=${VEQPY_CXX_STAGE_ANALYSIS_BUILD}
+        VEQPY_CXX_STAGE_ENZYME=${VEQPY_CXX_STAGE_ENZYME}
 )
 
-if(VEQLIB_ENABLE_PYTHON_BINDINGS)
+if(VEQPY_CXX_ENABLE_PYTHON_BINDINGS)
     if(NOT Python_EXECUTABLE AND EXISTS "${PROJECT_SOURCE_DIR}/../../.venv/bin/python")
         set(Python_EXECUTABLE "${PROJECT_SOURCE_DIR}/../../.venv/bin/python" CACHE FILEPATH "Python interpreter")
     endif()
@@ -594,78 +594,78 @@ if(VEQLIB_ENABLE_PYTHON_BINDINGS)
     if(NOT nanobind_DIR)
         execute_process(
             COMMAND "${Python_EXECUTABLE}" -m nanobind --cmake_dir
-            RESULT_VARIABLE VEQLIB_NANOBIND_CMAKE_RESULT
-            OUTPUT_VARIABLE VEQLIB_NANOBIND_CMAKE_DIR
-            ERROR_VARIABLE VEQLIB_NANOBIND_CMAKE_ERROR
+            RESULT_VARIABLE VEQPY_CXX_NANOBIND_CMAKE_RESULT
+            OUTPUT_VARIABLE VEQPY_CXX_NANOBIND_CMAKE_DIR
+            ERROR_VARIABLE VEQPY_CXX_NANOBIND_CMAKE_ERROR
             OUTPUT_STRIP_TRAILING_WHITESPACE
             ERROR_STRIP_TRAILING_WHITESPACE
         )
-        if(NOT VEQLIB_NANOBIND_CMAKE_RESULT EQUAL 0)
+        if(NOT VEQPY_CXX_NANOBIND_CMAKE_RESULT EQUAL 0)
             message(
                 FATAL_ERROR
-                "nanobind is required when VEQLIB_ENABLE_PYTHON_BINDINGS=ON. "
+                "nanobind is required when VEQPY_CXX_ENABLE_PYTHON_BINDINGS=ON. "
                 "Python '${Python_EXECUTABLE}' failed to report --cmake_dir: "
-                "${VEQLIB_NANOBIND_CMAKE_ERROR}"
+                "${VEQPY_CXX_NANOBIND_CMAKE_ERROR}"
             )
         endif()
-        set(nanobind_DIR "${VEQLIB_NANOBIND_CMAKE_DIR}" CACHE PATH "nanobind CMake package directory")
+        set(nanobind_DIR "${VEQPY_CXX_NANOBIND_CMAKE_DIR}" CACHE PATH "nanobind CMake package directory")
     endif()
     find_package(nanobind CONFIG REQUIRED)
 
-    if(VEQLIB_PREBUILT_NANOBIND_STATIC)
-        if(NOT EXISTS "${VEQLIB_PREBUILT_NANOBIND_STATIC}")
+    if(VEQPY_CXX_PREBUILT_NANOBIND_STATIC)
+        if(NOT EXISTS "${VEQPY_CXX_PREBUILT_NANOBIND_STATIC}")
             message(
                 FATAL_ERROR
-                "VEQLIB_PREBUILT_NANOBIND_STATIC does not exist: ${VEQLIB_PREBUILT_NANOBIND_STATIC}"
+                "VEQPY_CXX_PREBUILT_NANOBIND_STATIC does not exist: ${VEQPY_CXX_PREBUILT_NANOBIND_STATIC}"
             )
         endif()
         execute_process(
             COMMAND "${Python_EXECUTABLE}" -m nanobind --include_dir
-            RESULT_VARIABLE VEQLIB_NANOBIND_INCLUDE_RESULT
-            OUTPUT_VARIABLE VEQLIB_NANOBIND_INCLUDE_DIR
-            ERROR_VARIABLE VEQLIB_NANOBIND_INCLUDE_ERROR
+            RESULT_VARIABLE VEQPY_CXX_NANOBIND_INCLUDE_RESULT
+            OUTPUT_VARIABLE VEQPY_CXX_NANOBIND_INCLUDE_DIR
+            ERROR_VARIABLE VEQPY_CXX_NANOBIND_INCLUDE_ERROR
             OUTPUT_STRIP_TRAILING_WHITESPACE
             ERROR_STRIP_TRAILING_WHITESPACE
         )
-        if(NOT VEQLIB_NANOBIND_INCLUDE_RESULT EQUAL 0)
+        if(NOT VEQPY_CXX_NANOBIND_INCLUDE_RESULT EQUAL 0)
             message(
                 FATAL_ERROR
                 "Python '${Python_EXECUTABLE}' failed to report nanobind --include_dir: "
-                "${VEQLIB_NANOBIND_INCLUDE_ERROR}"
+                "${VEQPY_CXX_NANOBIND_INCLUDE_ERROR}"
             )
         endif()
-        get_filename_component(VEQLIB_NANOBIND_ROOT "${VEQLIB_NANOBIND_INCLUDE_DIR}" DIRECTORY)
+        get_filename_component(VEQPY_CXX_NANOBIND_ROOT "${VEQPY_CXX_NANOBIND_INCLUDE_DIR}" DIRECTORY)
 
-        add_library(veqlib_ext MODULE bindings.cpp ${VEQLIB_COMMON_SOURCES})
-        nanobind_compile_options(veqlib_ext)
-        nanobind_link_options(veqlib_ext)
-        set_target_properties(veqlib_ext PROPERTIES LINKER_LANGUAGE CXX)
-        nanobind_extension(veqlib_ext)
-        nanobind_disable_stack_protector(veqlib_ext)
-        nanobind_opt_size(veqlib_ext)
-        nanobind_strip(veqlib_ext)
-        nanobind_set_visibility(veqlib_ext)
+        add_library(cxx_ext MODULE bindings.cpp ${VEQPY_CXX_COMMON_SOURCES})
+        nanobind_compile_options(cxx_ext)
+        nanobind_link_options(cxx_ext)
+        set_target_properties(cxx_ext PROPERTIES LINKER_LANGUAGE CXX)
+        nanobind_extension(cxx_ext)
+        nanobind_disable_stack_protector(cxx_ext)
+        nanobind_opt_size(cxx_ext)
+        nanobind_strip(cxx_ext)
+        nanobind_set_visibility(cxx_ext)
         target_include_directories(
-            veqlib_ext
+            cxx_ext
             SYSTEM
             PRIVATE
                 "${Python_INCLUDE_DIRS}"
-                "${VEQLIB_NANOBIND_INCLUDE_DIR}"
-                "${VEQLIB_NANOBIND_ROOT}/ext/robin_map/include"
+                "${VEQPY_CXX_NANOBIND_INCLUDE_DIR}"
+                "${VEQPY_CXX_NANOBIND_ROOT}/ext/robin_map/include"
         )
-        target_link_libraries(veqlib_ext PRIVATE "${VEQLIB_PREBUILT_NANOBIND_STATIC}" Python::Module)
+        target_link_libraries(cxx_ext PRIVATE "${VEQPY_CXX_PREBUILT_NANOBIND_STATIC}" Python::Module)
     else()
-        nanobind_add_module(veqlib_ext NB_SUPPRESS_WARNINGS bindings.cpp ${VEQLIB_COMMON_SOURCES})
+        nanobind_add_module(cxx_ext NB_SUPPRESS_WARNINGS bindings.cpp ${VEQPY_CXX_COMMON_SOURCES})
     endif()
-    veqlib_configure_target(veqlib_ext)
-    target_compile_definitions(veqlib_ext PRIVATE "NB_DOMAIN=${VEQLIB_NB_DOMAIN}")
+    cxx_configure_target(cxx_ext)
+    target_compile_definitions(cxx_ext PRIVATE "NB_DOMAIN=${VEQPY_CXX_NB_DOMAIN}")
 endif()
 
 enable_testing()
 add_test(
-    NAME veqlib_stage_benchmark_smoke
+    NAME cxx_stage_benchmark_smoke
     COMMAND
-        veqlib_stage_benchmark
+        cxx_stage_benchmark
         --stage
         all
         --repeat

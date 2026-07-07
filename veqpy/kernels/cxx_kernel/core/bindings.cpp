@@ -1,15 +1,15 @@
 #include "python_kernel_solver.h"
 
-NB_MODULE(veqlib_ext, module)
+NB_MODULE(cxx_ext, module)
 {
     module.doc() = "Single-thread nanobind bridge for the generated Cxx Kernel solver.";
 
-    nb::class_<veqlib_python::NativeSolver>(module, "NativeSolver")
+    nb::class_<cxx_python::NativeSolver>(module, "NativeSolver")
         .def(nb::init<int>(),
-             nb::arg("solver_code") = static_cast<int>(veqlib_kernel_api::SolverMethodPowell))
-        .def("metadata", &veqlib_python::NativeSolver::metadata)
+             nb::arg("solver_code") = static_cast<int>(cxx_kernel_api::SolverMethodPowell))
+        .def("metadata", &cxx_python::NativeSolver::metadata)
         .def("set_kernel_runtime",
-             &veqlib_python::NativeSolver::set_kernel_runtime,
+             &cxx_python::NativeSolver::set_kernel_runtime,
              nb::arg("case_name"),
              nb::arg("a"),
              nb::arg("R0"),
@@ -37,28 +37,28 @@ NB_MODULE(veqlib_ext, module)
              nb::arg("residual_normalization_probe_step"),
              nb::arg("residual_normalization_sensitivity_lambda"),
              "Set the full runtime case and solve policy without JSON serialization.")
-        .def("warmup", &veqlib_python::NativeSolver::warmup, nb::arg("count"))
+        .def("warmup", &cxx_python::NativeSolver::warmup, nb::arg("count"))
         .def("solve_direct",
-             &veqlib_python::NativeSolver::solve_direct,
+             &cxx_python::NativeSolver::solve_direct,
              "Run one solve and return scalars plus read-only NumPy views without JSON serialization.")
         .def("adopt_last_solution_as_initial",
-             &veqlib_python::NativeSolver::adopt_last_solution_as_initial,
+             &cxx_python::NativeSolver::adopt_last_solution_as_initial,
              "Use the last accepted solve result as the current initial state.")
         .def("residual_var_into",
-             &veqlib_python::NativeSolver::residual_var_into,
+             &cxx_python::NativeSolver::residual_var_into,
              nb::arg("out"),
              nb::arg("x"),
              "Evaluate the raw variational residual into a caller-owned packed output array.")
         .def("jvp_into",
-             &veqlib_python::NativeSolver::jvp_into,
+             &cxx_python::NativeSolver::jvp_into,
              nb::arg("out"),
              nb::arg("x"),
              nb::arg("v"),
              "Evaluate a raw-residual Jacobian-vector product into a caller-owned packed output array.")
         .def("jacobian_into",
-             &veqlib_python::NativeSolver::jacobian_into,
+             &cxx_python::NativeSolver::jacobian_into,
              nb::arg("out"),
              nb::arg("x"),
              "Evaluate the dense raw-residual Jacobian into a caller-owned row-major matrix.")
-        .def_prop_ro("last_elapsed_ms", &veqlib_python::NativeSolver::last_elapsed_ms);
+        .def_prop_ro("last_elapsed_ms", &cxx_python::NativeSolver::last_elapsed_ms);
 }

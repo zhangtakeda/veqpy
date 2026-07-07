@@ -36,11 +36,11 @@ from veqpy.kernels.types import KernelTopology as Topology
 
 from .validation import validate_supported_for_cxx_backend
 
-GENERATOR_VERSION = "veqlib.kernel.builder.v1"
-ARTIFACT_SCHEMA = "veqlib.kernel_artifact.v1"
-SOURCE_DIGEST_SCHEMA = "veqlib.source_digest.v1"
-PYTHON_SOURCE_DIGEST_SCHEMA = "veqlib.kernel_python_source_digest.v1"
-NANOBIND_STATIC_SCHEMA = "veqlib.nanobind_static_artifact.v1"
+GENERATOR_VERSION = "veqpy.cxx.kernel.builder.v2"
+ARTIFACT_SCHEMA = "veqpy.cxx.kernel_artifact.v2"
+SOURCE_DIGEST_SCHEMA = "veqpy.cxx.source_digest.v2"
+PYTHON_SOURCE_DIGEST_SCHEMA = "veqpy.cxx.kernel_python_source_digest.v2"
+NANOBIND_STATIC_SCHEMA = "veqpy.cxx.nanobind_static_artifact.v2"
 DEFAULT_CXX_COMPILER = "clang++-18"
 
 
@@ -168,7 +168,7 @@ def prepare(
             "--build",
             str(paths["cmake_build_dir"]),
             "--target",
-            "veqlib_ext",
+            "cxx_ext",
             "--parallel",
             str(_default_build_parallel_jobs()),
         ]
@@ -316,7 +316,7 @@ def _artifact_paths(root_dir: Path) -> dict[str, Path]:
         "topology_path": root_dir / "topology.json",
         "build_path": root_dir / "build.json",
         "kernel_py_path": root_dir / "kernel.py",
-        "shared_library_path": root_dir / "veqlib.so",
+        "shared_library_path": root_dir / "cxx_kernel.so",
         "configure_log_path": root_dir / "configure.log",
         "build_log_path": root_dir / "build.log",
     }
@@ -420,7 +420,7 @@ def _metadata_payload(
     nanobind_static: dict[str, Any],
     dry_run: bool,
 ) -> dict[str, Any]:
-    module_name = f"veqpy._kernel_cache.k_{artifact_id}.veqlib_ext"
+    module_name = f"veqpy._kernel_cache.k_{artifact_id}.cxx_ext"
     return {
         "schema": ARTIFACT_SCHEMA,
         "generator": GENERATOR_VERSION,
@@ -428,7 +428,7 @@ def _metadata_payload(
             "artifact_id": artifact_id,
             "status": "planned" if dry_run else "building",
             "module_name": module_name,
-            "shared_library": "veqlib.so",
+            "shared_library": "cxx_kernel.so",
             "shared_library_sha256": None,
             "built_at": None,
             "last_reused_at": None,
@@ -461,7 +461,7 @@ from pathlib import Path
 
 ARTIFACT_ID = {metadata["artifact"]["artifact_id"]!r}
 MODULE_NAME = {module_name!r}
-SHARED_LIBRARY = Path(__file__).with_name("veqlib.so")
+SHARED_LIBRARY = Path(__file__).with_name("cxx_kernel.so")
 
 
 def load():
@@ -497,13 +497,13 @@ def _cmake_configure_args(
         f"-DPython_EXECUTABLE={sys.executable}",
         "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
         f"-DENABLE_ENZYME={_cmake_bool(recipe.enable_enzyme)}",
-        "-DVEQLIB_ENABLE_PYTHON_BINDINGS=ON",
-        f"-DVEQLIB_ENABLE_NATIVE_OPTIMIZATIONS={_cmake_bool(recipe.enable_native_optimizations)}",
-        f"-DVEQLIB_FP_MODE={recipe.fp_mode}",
-        f"-DVEQLIB_NB_DOMAIN=veqlib_kernel_{artifact_id}",
-        f"-DVEQLIB_PREBUILT_NANOBIND_STATIC={prebuilt_nanobind_static or ''}",
-        f"-DVEQLIB_ENABLE_THIN_LTO={_cmake_bool(recipe.enable_thin_lto)}",
-        f"-DVEQLIB_ANALYSIS_BUILD={_cmake_bool(recipe.analysis)}",
+        "-DVEQPY_CXX_ENABLE_PYTHON_BINDINGS=ON",
+        f"-DVEQPY_CXX_ENABLE_NATIVE_OPTIMIZATIONS={_cmake_bool(recipe.enable_native_optimizations)}",
+        f"-DVEQPY_CXX_FP_MODE={recipe.fp_mode}",
+        f"-DVEQPY_CXX_NB_DOMAIN=veqpy_cxx_kernel_{artifact_id}",
+        f"-DVEQPY_CXX_PREBUILT_NANOBIND_STATIC={prebuilt_nanobind_static or ''}",
+        f"-DVEQPY_CXX_ENABLE_THIN_LTO={_cmake_bool(recipe.enable_thin_lto)}",
+        f"-DVEQPY_CXX_ANALYSIS_BUILD={_cmake_bool(recipe.analysis)}",
         f"-DVEQ_NR={topology.Nr}",
         f"-DVEQ_NT={topology.Nt}",
         f"-DVEQ_SOURCE_SAMPLE_COUNT={topology.sample_count}",
@@ -602,7 +602,7 @@ def _get_or_build_nanobind_static(
 
 def _nanobind_static_identity(*, cxx: str, cmake_build_type: str) -> dict[str, Any]:
     return {
-        "schema": "veqlib.nanobind_static_identity.v1",
+        "schema": "veqpy.cxx.nanobind_static_identity.v2",
         "build_type": cmake_build_type,
         "python": {
             "version": platform.python_version(),
@@ -645,7 +645,7 @@ def _nanobind_static_is_reusable(
 
 def _nanobind_static_cmake_project() -> str:
     return """cmake_minimum_required(VERSION 3.24)
-project(veqlib_nanobind_static LANGUAGES CXX)
+project(cxx_nanobind_static LANGUAGES CXX)
 
 find_package(Python 3.12 COMPONENTS Interpreter Development.Module REQUIRED)
 execute_process(
@@ -675,17 +675,19 @@ def _native_build_contract(topology: Topology, recipe: Recipe, *, cxx: str) -> d
 
     kmax_limit = max(2, topology.K_max or 2)
     return {
-        "schema": "veqlib.native_build_contract.v1",
+        "schema": "veqpy.cxx.native_build_contract.v2",
         "backend": recipe.backend,
         "cmake_build_type": recipe.cmake_build_type,
         "cxx": cxx,
         "defines": {
             "ENABLE_ENZYME": _cmake_bool(recipe.enable_enzyme),
-            "VEQLIB_ENABLE_PYTHON_BINDINGS": "ON",
-            "VEQLIB_ENABLE_NATIVE_OPTIMIZATIONS": _cmake_bool(recipe.enable_native_optimizations),
-            "VEQLIB_FP_MODE": recipe.fp_mode,
-            "VEQLIB_ENABLE_THIN_LTO": _cmake_bool(recipe.enable_thin_lto),
-            "VEQLIB_ANALYSIS_BUILD": _cmake_bool(recipe.analysis),
+            "VEQPY_CXX_ENABLE_PYTHON_BINDINGS": "ON",
+            "VEQPY_CXX_ENABLE_NATIVE_OPTIMIZATIONS": _cmake_bool(
+                recipe.enable_native_optimizations
+            ),
+            "VEQPY_CXX_FP_MODE": recipe.fp_mode,
+            "VEQPY_CXX_ENABLE_THIN_LTO": _cmake_bool(recipe.enable_thin_lto),
+            "VEQPY_CXX_ANALYSIS_BUILD": _cmake_bool(recipe.analysis),
             "VEQ_NR": topology.Nr,
             "VEQ_NT": topology.Nt,
             "VEQ_SOURCE_SAMPLE_COUNT": topology.sample_count,
@@ -718,7 +720,7 @@ def _build_identity(
     cxx: str,
 ) -> dict[str, Any]:
     return {
-        "schema": "veqlib.kernel_build_identity.v1",
+        "schema": "veqpy.cxx.kernel_build_identity.v2",
         "python": {
             "version": platform.python_version(),
             "implementation": platform.python_implementation(),
@@ -808,9 +810,9 @@ def _default_build_parallel_jobs() -> int:
 
 
 def _copy_extension(build_dir: Path, destination: Path) -> None:
-    candidates = sorted(build_dir.glob("veqlib_ext*.so"))
+    candidates = sorted(build_dir.glob("cxx_ext*.so"))
     if not candidates:
-        raise PrepareError(f"CMake build did not produce veqlib_ext*.so in {build_dir}")
+        raise PrepareError(f"CMake build did not produce cxx_ext*.so in {build_dir}")
     shutil.copy2(candidates[0], destination)
 
 

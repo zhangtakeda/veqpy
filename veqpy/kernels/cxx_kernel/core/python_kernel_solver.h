@@ -26,58 +26,58 @@
 
 namespace nb = nanobind;
 
-namespace veqlib_python
+namespace cxx_python
 {
     using std::size_t;
 
     using config::Topology;
-    using veqlib_kernel_api::CompiledGrid;
-    using veqlib_kernel_api::CompiledShape;
-    using veqlib_kernel_api::CompiledSource;
-    using veqlib_kernel_api::RuntimeCase;
-    using veqlib_kernel_api::InitialPolicyColdGeometric;
-    using veqlib_kernel_api::InitialPolicyCold;
-    using veqlib_kernel_api::ContinuePolicyColdZeros;
-    using veqlib_kernel_api::ContinuePolicyColdGeometric;
-    using veqlib_kernel_api::ContinuePolicyCold;
-    using veqlib_kernel_api::ContinuePolicyWarmFixed;
-    using veqlib_kernel_api::ContinuePolicyWarmPredict;
-    using veqlib_kernel_api::ContinuePolicyWarmChord;
-    using veqlib_kernel_api::PackedVector;
-    using veqlib_kernel_api::SolveState;
-    using veqlib_kernel_api::SolveResult;
-    using veqlib_kernel_api::SolverKind;
-    using veqlib_kernel_api::build_residual_scale_for_context;
-    using veqlib_kernel_api::build_x_block_scale_vector;
-    using veqlib_kernel_api::build_inline_case;
-    using veqlib_kernel_api::apply_cold_policy;
-    using veqlib_kernel_api::apply_initial_policy;
-    using veqlib_kernel_api::boundary_curve_strain;
-    using veqlib_kernel_api::norm2;
-    using veqlib_kernel_api::residual_scale_extra_evaluations;
-    using veqlib_kernel_api::profile_params_for_case;
-    using veqlib_kernel_api::run_solver_once;
-    using veqlib_kernel_api::solver_entrypoint;
-    using veqlib_kernel_api::solver_info_succeeded;
-    using veqlib_kernel_api::solver_jacobian;
-    using veqlib_kernel_api::solver_kind_from_runtime_method_code;
-    using veqlib_kernel_api::solver_method_code;
-    using veqlib_kernel_api::solver_method;
-    using veqlib_kernel_api::initial_policy_name;
-    using veqlib_kernel_api::continue_policy_is_cold;
-    using veqlib_kernel_api::continue_policy_name;
-    using veqlib_kernel_api::continue_policy_uses_chord;
-    using veqlib_kernel_api::continue_policy_uses_predictor;
-    using veqlib_kernel_api::continue_policy_uses_warm_state;
-    using veqlib_kernel_api::residual_normalization_name;
-    using veqlib_kernel_api::resolved_continue_policy;
-    using veqlib_kernel_api::validate_initial_policy_code;
-    using veqlib_kernel_api::validate_continue_policy_code;
-    using veqlib_kernel_api::validate_residual_normalization_code;
-    using veqlib_kernel_api::kernel_c_counts;
-    using veqlib_kernel_api::kernel_s_counts;
+    using cxx_kernel_api::CompiledGrid;
+    using cxx_kernel_api::CompiledShape;
+    using cxx_kernel_api::CompiledSource;
+    using cxx_kernel_api::RuntimeCase;
+    using cxx_kernel_api::InitialPolicyColdGeometric;
+    using cxx_kernel_api::InitialPolicyCold;
+    using cxx_kernel_api::ContinuePolicyColdZeros;
+    using cxx_kernel_api::ContinuePolicyColdGeometric;
+    using cxx_kernel_api::ContinuePolicyCold;
+    using cxx_kernel_api::ContinuePolicyWarmFixed;
+    using cxx_kernel_api::ContinuePolicyWarmPredict;
+    using cxx_kernel_api::ContinuePolicyWarmChord;
+    using cxx_kernel_api::PackedVector;
+    using cxx_kernel_api::SolveState;
+    using cxx_kernel_api::SolveResult;
+    using cxx_kernel_api::SolverKind;
+    using cxx_kernel_api::build_residual_scale_for_context;
+    using cxx_kernel_api::build_x_block_scale_vector;
+    using cxx_kernel_api::build_inline_case;
+    using cxx_kernel_api::apply_cold_policy;
+    using cxx_kernel_api::apply_initial_policy;
+    using cxx_kernel_api::boundary_curve_strain;
+    using cxx_kernel_api::norm2;
+    using cxx_kernel_api::residual_scale_extra_evaluations;
+    using cxx_kernel_api::profile_params_for_case;
+    using cxx_kernel_api::run_solver_once;
+    using cxx_kernel_api::solver_entrypoint;
+    using cxx_kernel_api::solver_info_succeeded;
+    using cxx_kernel_api::solver_jacobian;
+    using cxx_kernel_api::solver_kind_from_runtime_method_code;
+    using cxx_kernel_api::solver_method_code;
+    using cxx_kernel_api::solver_method;
+    using cxx_kernel_api::initial_policy_name;
+    using cxx_kernel_api::continue_policy_is_cold;
+    using cxx_kernel_api::continue_policy_name;
+    using cxx_kernel_api::continue_policy_uses_chord;
+    using cxx_kernel_api::continue_policy_uses_predictor;
+    using cxx_kernel_api::continue_policy_uses_warm_state;
+    using cxx_kernel_api::residual_normalization_name;
+    using cxx_kernel_api::resolved_continue_policy;
+    using cxx_kernel_api::validate_initial_policy_code;
+    using cxx_kernel_api::validate_continue_policy_code;
+    using cxx_kernel_api::validate_residual_normalization_code;
+    using cxx_kernel_api::kernel_c_counts;
+    using cxx_kernel_api::kernel_s_counts;
 #ifdef ENABLE_ENZYME
-    using veqlib_kernel_api::enzyme_dense_jacobian_batch_width;
+    using cxx_kernel_api::enzyme_dense_jacobian_batch_width;
 #endif
 
     using tensor::uninitialized;
@@ -542,8 +542,8 @@ namespace veqlib_python
         solver["residual_normalization"]      = residual_normalization_name(input.residual_normalization_code);
 
         nb::dict out;
-        out["schema"]        = "veqlib.kernel.metadata.v1";
-        out["backend"]       = "veqlib.nanobind";
+        out["schema"]        = "veqpy.cxx.kernel.metadata.v2";
+        out["backend"]       = "veqpy.cxx.nanobind";
         out["route"]         = source_route_label();
         out["x_size"]        = CompiledShape::x_size;
         out["active_count"]  = CompiledShape::active_count;
@@ -561,7 +561,7 @@ namespace veqlib_python
     class NativeSolver
     {
     public:
-        explicit NativeSolver(int solver_code = static_cast<int>(veqlib_kernel_api::SolverMethodPowell))
+        explicit NativeSolver(int solver_code = static_cast<int>(cxx_kernel_api::SolverMethodPowell))
             : solver_(solver_kind_from_runtime_method_code(solver_code)), context_(make_context(solver_))
         {
         }
@@ -1126,4 +1126,4 @@ namespace veqlib_python
         double                        last_elapsed_ms_ = 0.0;
     };
 
-} // namespace veqlib_python
+} // namespace cxx_python

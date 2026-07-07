@@ -13,7 +13,7 @@
 #include "kernel_topology.h"
 #include "math.h"
 
-namespace veqlib_kernel_api
+namespace cxx_kernel_api
 {
     namespace
     {
@@ -728,4 +728,4 @@ namespace veqlib_kernel_api
 
     } // namespace
 
-} // namespace veqlib_kernel_api
+} // namespace cxx_kernel_api

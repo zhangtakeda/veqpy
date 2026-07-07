@@ -22,7 +22,7 @@ extern int enzyme_width;
 #include "nonlinear.h"
 #include "tensor.h"
 
-namespace veqlib_kernel_api
+namespace cxx_kernel_api
 {
     namespace
     {
@@ -640,4 +640,4 @@ namespace veqlib_kernel_api
 
     } // namespace
 
-} // namespace veqlib_kernel_api
+} // namespace cxx_kernel_api

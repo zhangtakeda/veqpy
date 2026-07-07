@@ -18,7 +18,7 @@
 
 namespace nb = nanobind;
 
-namespace veqlib_boundary_fit
+namespace cxx_boundary_fit
 {
     using std::size_t;
 
@@ -439,16 +439,16 @@ namespace veqlib_boundary_fit
     }
 }
 
-namespace veqlib_python
+namespace cxx_python
 {
     inline nb::dict fit_boundary_qr(nb::ndarray<nb::numpy, const double, nb::ndim<1>, nb::c_contig> R_boundary,
                                     nb::ndarray<nb::numpy, const double, nb::ndim<1>, nb::c_contig> Z_boundary,
                                     int c_order,
                                     int s_order)
     {
-        auto R      = veqlib_boundary_fit::vector_from_array(R_boundary, "R_boundary");
-        auto Z      = veqlib_boundary_fit::vector_from_array(Z_boundary, "Z_boundary");
-        auto result = veqlib_boundary_fit::fit_boundary_qr_impl(
+        auto R      = cxx_boundary_fit::vector_from_array(R_boundary, "R_boundary");
+        auto Z      = cxx_boundary_fit::vector_from_array(Z_boundary, "Z_boundary");
+        auto result = cxx_boundary_fit::fit_boundary_qr_impl(
             std::move(R),
             std::move(Z),
             c_order,
@@ -459,8 +459,8 @@ namespace veqlib_python
         payload["Z0"]              = result.Z0;
         payload["a"]               = result.a;
         payload["ka"]              = result.ka;
-        payload["c_offsets"]       = veqlib_boundary_fit::list_from_vector(result.c_offsets);
-        payload["s_offsets"]       = veqlib_boundary_fit::list_from_vector(result.s_offsets);
+        payload["c_offsets"]       = cxx_boundary_fit::list_from_vector(result.c_offsets);
+        payload["s_offsets"]       = cxx_boundary_fit::list_from_vector(result.s_offsets);
         payload["rms"]             = result.rms;
         payload["max_curve_error"] = result.max_curve_error;
         payload["c_order"]         = c_order;

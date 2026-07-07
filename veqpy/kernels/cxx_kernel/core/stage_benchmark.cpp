@@ -25,35 +25,35 @@
 #include "math.h"
 #include "tensor.h"
 
-#ifndef VEQLIB_STAGE_GIT_SHA
-#define VEQLIB_STAGE_GIT_SHA "unknown"
+#ifndef VEQPY_CXX_STAGE_GIT_SHA
+#define VEQPY_CXX_STAGE_GIT_SHA "unknown"
 #endif
-#ifndef VEQLIB_STAGE_GIT_DIRTY
-#define VEQLIB_STAGE_GIT_DIRTY 0
+#ifndef VEQPY_CXX_STAGE_GIT_DIRTY
+#define VEQPY_CXX_STAGE_GIT_DIRTY 0
 #endif
-#ifndef VEQLIB_STAGE_CXX_COMPILER_ID
-#define VEQLIB_STAGE_CXX_COMPILER_ID "unknown"
+#ifndef VEQPY_CXX_STAGE_CXX_COMPILER_ID
+#define VEQPY_CXX_STAGE_CXX_COMPILER_ID "unknown"
 #endif
-#ifndef VEQLIB_STAGE_CXX_COMPILER_VERSION
-#define VEQLIB_STAGE_CXX_COMPILER_VERSION "unknown"
+#ifndef VEQPY_CXX_STAGE_CXX_COMPILER_VERSION
+#define VEQPY_CXX_STAGE_CXX_COMPILER_VERSION "unknown"
 #endif
-#ifndef VEQLIB_STAGE_BUILD_TYPE
-#define VEQLIB_STAGE_BUILD_TYPE "unknown"
+#ifndef VEQPY_CXX_STAGE_BUILD_TYPE
+#define VEQPY_CXX_STAGE_BUILD_TYPE "unknown"
 #endif
-#ifndef VEQLIB_STAGE_FP_MODE
-#define VEQLIB_STAGE_FP_MODE "unknown"
+#ifndef VEQPY_CXX_STAGE_FP_MODE
+#define VEQPY_CXX_STAGE_FP_MODE "unknown"
 #endif
-#ifndef VEQLIB_STAGE_NATIVE_OPTIMIZATIONS
-#define VEQLIB_STAGE_NATIVE_OPTIMIZATIONS 0
+#ifndef VEQPY_CXX_STAGE_NATIVE_OPTIMIZATIONS
+#define VEQPY_CXX_STAGE_NATIVE_OPTIMIZATIONS 0
 #endif
-#ifndef VEQLIB_STAGE_THIN_LTO
-#define VEQLIB_STAGE_THIN_LTO 0
+#ifndef VEQPY_CXX_STAGE_THIN_LTO
+#define VEQPY_CXX_STAGE_THIN_LTO 0
 #endif
-#ifndef VEQLIB_STAGE_ANALYSIS_BUILD
-#define VEQLIB_STAGE_ANALYSIS_BUILD 0
+#ifndef VEQPY_CXX_STAGE_ANALYSIS_BUILD
+#define VEQPY_CXX_STAGE_ANALYSIS_BUILD 0
 #endif
-#ifndef VEQLIB_STAGE_ENZYME
-#define VEQLIB_STAGE_ENZYME 0
+#ifndef VEQPY_CXX_STAGE_ENZYME
+#define VEQPY_CXX_STAGE_ENZYME 0
 #endif
 
 namespace
@@ -61,14 +61,14 @@ namespace
     using Clock = std::chrono::steady_clock;
     using std::size_t;
 
-    using veqlib_kernel_api::RuntimeCase;
-    using veqlib_kernel_api::CompiledOperator;
-    using veqlib_kernel_api::CompiledShape;
-    using veqlib_kernel_api::PackedVector;
-    using veqlib_kernel_api::SolverKind;
-    using veqlib_kernel_api::build_inline_case;
-    using veqlib_kernel_api::setup_for_case;
-    using veqlib_kernel_api::runtime_scalars_for_case;
+    using cxx_kernel_api::RuntimeCase;
+    using cxx_kernel_api::CompiledOperator;
+    using cxx_kernel_api::CompiledShape;
+    using cxx_kernel_api::PackedVector;
+    using cxx_kernel_api::SolverKind;
+    using cxx_kernel_api::build_inline_case;
+    using cxx_kernel_api::setup_for_case;
+    using cxx_kernel_api::runtime_scalars_for_case;
     using tensor::uninitialized;
 
     enum class Stage
@@ -115,7 +115,7 @@ namespace
     {
         throw std::runtime_error(
             message +
-            "\nusage: veqlib_stage_benchmark [--stage all|<stage-name>] "
+            "\nusage: cxx_stage_benchmark [--stage all|<stage-name>] "
             "[--repeat N] [--warmup N] [--inner N] [--ring-size N] [--output PATH]");
     }
 
@@ -145,7 +145,7 @@ namespace
             if (arg == "--help" || arg == "-h")
             {
                 std::cout
-                    << "usage: veqlib_stage_benchmark [--stage all|<stage-name>] "
+                    << "usage: cxx_stage_benchmark [--stage all|<stage-name>] "
                        "[--repeat N] [--warmup N] [--inner N] [--ring-size N] [--output PATH]\n";
                 std::exit(0);
             }
@@ -893,37 +893,37 @@ namespace
     nlohmann::json topology_json()
     {
         nlohmann::json out;
-        out["Nr"]                  = veqlib_kernel_api::CompiledGrid::radial_nodes;
-        out["Nt"]                  = veqlib_kernel_api::CompiledGrid::theta_rows;
+        out["Nr"]                  = cxx_kernel_api::CompiledGrid::radial_nodes;
+        out["Nt"]                  = cxx_kernel_api::CompiledGrid::theta_rows;
         out["x_size"]              = CompiledShape::x_size;
         out["active_count"]        = CompiledShape::active_count;
         out["L_max"]               = CompiledShape::L_max;
         out["M_max"]               = CompiledShape::M_max;
         out["K_max"]               = CompiledShape::K_max;
-        out["source_sample_count"] = veqlib_kernel_api::CompiledSource::sample_count;
+        out["source_sample_count"] = cxx_kernel_api::CompiledSource::sample_count;
         return out;
     }
 
     nlohmann::json build_metadata_json()
     {
         nlohmann::json out;
-        out["git_sha"]              = VEQLIB_STAGE_GIT_SHA;
-        out["git_dirty"]            = VEQLIB_STAGE_GIT_DIRTY != 0;
-        out["compiler_id"]          = VEQLIB_STAGE_CXX_COMPILER_ID;
-        out["compiler_version"]     = VEQLIB_STAGE_CXX_COMPILER_VERSION;
-        out["build_type"]           = VEQLIB_STAGE_BUILD_TYPE;
-        out["fp_mode"]              = VEQLIB_STAGE_FP_MODE;
-        out["native_optimizations"] = VEQLIB_STAGE_NATIVE_OPTIMIZATIONS != 0;
-        out["thin_lto"]             = VEQLIB_STAGE_THIN_LTO != 0;
-        out["analysis_build"]       = VEQLIB_STAGE_ANALYSIS_BUILD != 0;
-        out["enzyme"]               = VEQLIB_STAGE_ENZYME != 0;
+        out["git_sha"]              = VEQPY_CXX_STAGE_GIT_SHA;
+        out["git_dirty"]            = VEQPY_CXX_STAGE_GIT_DIRTY != 0;
+        out["compiler_id"]          = VEQPY_CXX_STAGE_CXX_COMPILER_ID;
+        out["compiler_version"]     = VEQPY_CXX_STAGE_CXX_COMPILER_VERSION;
+        out["build_type"]           = VEQPY_CXX_STAGE_BUILD_TYPE;
+        out["fp_mode"]              = VEQPY_CXX_STAGE_FP_MODE;
+        out["native_optimizations"] = VEQPY_CXX_STAGE_NATIVE_OPTIMIZATIONS != 0;
+        out["thin_lto"]             = VEQPY_CXX_STAGE_THIN_LTO != 0;
+        out["analysis_build"]       = VEQPY_CXX_STAGE_ANALYSIS_BUILD != 0;
+        out["enzyme"]               = VEQPY_CXX_STAGE_ENZYME != 0;
         return out;
     }
 
     nlohmann::json run_benchmark(const Options& options)
     {
         nlohmann::json root;
-        root["schema"]         = "veqlib.stage_benchmark.v1";
+        root["schema"]         = "veqpy.cxx.stage_benchmark.v2";
         root["unit"]           = "ns_per_call";
         root["build"]          = "current-source";
         root["build_metadata"] = build_metadata_json();
@@ -975,7 +975,7 @@ int main(int argc, char** argv)
     }
     catch (const std::exception& error)
     {
-        std::cerr << "veqlib_stage_benchmark: " << error.what() << '\n';
+        std::cerr << "cxx_stage_benchmark: " << error.what() << '\n';
         return 1;
     }
 }

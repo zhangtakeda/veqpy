@@ -275,9 +275,9 @@ def _boundary_fit_cmake_project() -> str:
     return """cmake_minimum_required(VERSION 3.24)
 project(veqpy_boundary_fit_native LANGUAGES CXX)
 
-set(VEQLIB_GCEM_ROOT "$ENV{HOME}/opt/gcem-install" CACHE PATH "GCEM install prefix")
-if(VEQLIB_GCEM_ROOT)
-    list(PREPEND CMAKE_PREFIX_PATH "${VEQLIB_GCEM_ROOT}")
+set(VEQPY_CXX_GCEM_ROOT "$ENV{HOME}/opt/gcem-install" CACHE PATH "GCEM install prefix")
+if(VEQPY_CXX_GCEM_ROOT)
+    list(PREPEND CMAKE_PREFIX_PATH "${VEQPY_CXX_GCEM_ROOT}")
 endif()
 
 find_package(Python 3.12 COMPONENTS Interpreter Development.Module REQUIRED)
