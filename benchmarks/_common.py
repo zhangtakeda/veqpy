@@ -34,7 +34,7 @@ from veqpy.kernels.numba_kernel.packed_layout import (  # noqa: E402
     build_profile_names,
     build_shape_profile_names,
 )
-from veqpy.model import Boundary, Geqdsk, Grid  # noqa: E402
+from veqpy.model import Geqdsk, Grid  # noqa: E402
 
 THIS_FILE = Path(__file__).resolve()
 REPO_ROOT = THIS_FILE.parents[1]
@@ -403,18 +403,6 @@ def synthetic_boundary() -> KernelBoundary:
         B0=3.0,
         ka=2.2,
         s_offsets=(float(np.arcsin(0.5)),),
-    )
-
-
-def kernel_boundary_from_boundary(boundary: Boundary) -> KernelBoundary:
-    return KernelBoundary(
-        a=boundary.a,
-        R0=boundary.R0,
-        Z0=boundary.Z0,
-        B0=boundary.B0,
-        ka=boundary.ka,
-        c_offsets=boundary.c_offsets,
-        s_offsets=boundary.s_offsets[1:],
     )
 
 
@@ -929,11 +917,13 @@ def geqdsk_kernel_case(
     boundary_maxtol: float = 1.0,
 ) -> KernelCase:
     geqdsk = Geqdsk(CASE_REFERENCE_GFILES[case_key] if geqdsk_path is None else geqdsk_path)
-    fitted = Boundary.from_geqdsk(
-        geqdsk,
-        M=int(boundary_fit_m),
-        N=int(boundary_fit_n),
-        maxtol=float(boundary_maxtol),
+    boundary = KernelBoundary(
+        B0=float(geqdsk.Bt0),
+        R_boundary=np.asarray(geqdsk.boundary[:, 0], dtype=np.float64),
+        Z_boundary=np.asarray(geqdsk.boundary[:, 1], dtype=np.float64),
+        c_order=int(boundary_fit_m),
+        s_order=int(boundary_fit_n),
+        fit_maxtol=float(boundary_maxtol),
     )
     spec = route_spec or RouteBenchmarkSpec("PF", "psin", "uniform", "Ip")
     effective_signature = (
@@ -945,8 +935,8 @@ def geqdsk_kernel_case(
         else (sample_count or max(int(geqdsk.P_psi.size), int(geqdsk.FF_psi.size), 9))
     )
     m_max = max(
-        int(np.asarray(fitted.c_offsets, dtype=np.float64).size) - 1,
-        int(np.asarray(fitted.s_offsets, dtype=np.float64).size) - 1,
+        int(np.asarray(boundary.c_offsets, dtype=np.float64).size) - 1,
+        int(np.asarray(boundary.s_offsets, dtype=np.float64).size),
         1,
     )
     ip_constraint, beta_constraint = constraint_flags(spec.constraint)
@@ -994,7 +984,7 @@ def geqdsk_kernel_case(
     return KernelCase(
         f"{case_key}_{config_label}_{spec.case_name}",
         topology,
-        kernel_boundary_from_boundary(fitted),
+        boundary,
         source,
         config,
     )

@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import numpy as np
 
-from veqpy.model import Boundary
+from veqpy import KernelBoundary
 
 MU0 = 4.0e-7 * np.pi
 
 
-def tiny_boundary() -> Boundary:
-    return Boundary(
+def tiny_boundary() -> KernelBoundary:
+    return KernelBoundary(
         a=0.5,
         R0=1.0,
         Z0=0.0,

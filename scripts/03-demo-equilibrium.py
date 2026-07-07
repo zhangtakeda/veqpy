@@ -32,7 +32,7 @@ from _reporting import (
 )
 
 import veqpy as veq
-from veqpy.model import Boundary, Grid
+from veqpy.model import Grid
 
 PNG_PATH = figure_path("03-demo-equilibrium.png")
 PDF_PATH = None
@@ -51,13 +51,13 @@ SNAPSHOT_GRID = Grid(
     L_max=GRID.L_max,
     M_max=GRID.M_max,
 )
-BOUNDARY = Boundary(
+BOUNDARY = veq.KernelBoundary(
     a=1.05 / 1.85,
     R0=1.05,
     Z0=0.0,
     B0=3.0,
     ka=2.2,
-    s_offsets=np.array([0.0, float(np.arcsin(0.5))]),
+    s_offsets=(float(np.arcsin(0.5)),),
 )
 COEFFS = CASE_REFERENCE_PROFILE_LENGTHS["demo(psin)"]
 
@@ -90,21 +90,12 @@ def build_kernel() -> tuple[veq.Kernel, veq.KernelBoundary, veq.KernelSource]:
         recipe=veq.KernelRecipe(backend="numba"),
         config=veq.KernelConfig(method="powell", initial="cold", continuation="cold"),
     )
-    boundary = veq.KernelBoundary(
-        a=BOUNDARY.a,
-        R0=BOUNDARY.R0,
-        Z0=BOUNDARY.Z0,
-        B0=BOUNDARY.B0,
-        ka=BOUNDARY.ka,
-        c_offsets=BOUNDARY.c_offsets,
-        s_offsets=BOUNDARY.s_offsets[1:],
-    )
     source = veq.KernelSource(
         heat_profile=heat_input / MU0,
         current_profile=current_input,
         Ip=3.0e6,
     )
-    return kernel, boundary, source
+    return kernel, BOUNDARY, source
 
 
 def solve_reference_equilibrium() -> object:

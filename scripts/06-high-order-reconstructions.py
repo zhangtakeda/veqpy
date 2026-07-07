@@ -27,7 +27,6 @@ from _common import data_path, figure_path, save_figure_outputs
 from _kernel_cases import (
     active_profiles_from_coeffs,
     build_kernel_topology,
-    kernel_boundary_from_boundary,
     kernel_config,
 )
 from _plotting import (
@@ -62,8 +61,7 @@ from contourpy import contour_generator
 from matplotlib.ticker import MultipleLocator
 
 import veqpy as veq
-from veqpy.model import Boundary, Geqdsk, Grid
-from veqpy.model.boundary import _fit_boundary_params
+from veqpy.model import Geqdsk, Grid
 
 MU0 = 4.0e-7 * np.pi
 
@@ -328,7 +326,7 @@ class SolveCostAudit:
 
 @dataclass(frozen=True)
 class KernelProblemSpec:
-    boundary: Boundary
+    boundary: veq.KernelBoundary
     geqdsk: Geqdsk
     profile_coeffs: dict[str, list[float]]
 
@@ -998,40 +996,30 @@ def read_geqdsk(path: str) -> Geqdsk:
 
 def build_boundary(
     geqdsk: Geqdsk, *, fit_m: int, fit_n: int
-) -> tuple[Boundary, dict[str, float | np.ndarray]]:
-    fit = _fit_boundary_params(
-        geqdsk,
-        M=fit_m,
-        N=fit_n,
-        maxtol=BOUNDARY_MAXTOL,
-        R0=None,
-        Z0=None,
-        a=None,
-        ka=None,
+) -> tuple[veq.KernelBoundary, dict[str, float | np.ndarray]]:
+    boundary = veq.KernelBoundary(
+        B0=float(geqdsk.Bt0),
+        R_boundary=np.asarray(geqdsk.boundary[:, 0], dtype=np.float64),
+        Z_boundary=np.asarray(geqdsk.boundary[:, 1], dtype=np.float64),
+        c_order=int(fit_m),
+        s_order=int(fit_n),
+        fit_maxtol=BOUNDARY_MAXTOL,
     )
     normalized = {
-        "rms": float(fit["rms"]),
-        "a": float(fit["a"]),
-        "R0": float(fit["R0"]),
-        "Z0": float(fit["Z0"]),
-        "ka": float(fit["ka"]),
-        "c_offsets": np.asarray(fit["c_offsets"], dtype=np.float64),
-        "s_offsets": np.asarray(fit["s_offsets"], dtype=np.float64),
+        "rms": float(boundary.fit_rms),
+        "max_curve_error": float(boundary.fit_max_curve_error),
+        "a": float(boundary.a),
+        "R0": float(boundary.R0),
+        "Z0": float(boundary.Z0),
+        "ka": float(boundary.ka),
+        "c_offsets": np.asarray(boundary.c_offsets, dtype=np.float64),
+        "s_offsets": np.concatenate(([0.0], np.asarray(boundary.s_offsets, dtype=np.float64))),
     }
-    boundary = Boundary(
-        a=normalized["a"],
-        R0=normalized["R0"],
-        Z0=normalized["Z0"],
-        B0=float(geqdsk.Bt0),
-        ka=normalized["ka"],
-        c_offsets=normalized["c_offsets"],
-        s_offsets=normalized["s_offsets"],
-    )
     return boundary, normalized
 
 
 def build_solver_case(
-    boundary: Boundary, geqdsk: Geqdsk, *, profile_coeffs: dict[str, list[float]]
+    boundary: veq.KernelBoundary, geqdsk: Geqdsk, *, profile_coeffs: dict[str, list[float]]
 ) -> KernelProblemSpec:
     return KernelProblemSpec(
         boundary=boundary,
@@ -1044,7 +1032,7 @@ def build_solver(case: KernelProblemSpec, solve_grid: Grid) -> KernelSolveHandle
     active_profiles = active_profiles_from_coeffs(case.profile_coeffs)
     boundary_m_max = max(
         int(np.asarray(case.boundary.c_offsets, dtype=np.float64).size) - 1,
-        int(np.asarray(case.boundary.s_offsets, dtype=np.float64).size) - 1,
+        int(np.asarray(case.boundary.s_offsets, dtype=np.float64).size),
         int(solve_grid.M_max),
     )
     topology = build_kernel_topology(
@@ -1075,7 +1063,7 @@ def build_solver(case: KernelProblemSpec, solve_grid: Grid) -> KernelSolveHandle
     )
     return KernelSolveHandle(
         kernel=kernel,
-        boundary=kernel_boundary_from_boundary(case.boundary),
+        boundary=case.boundary,
         source=veq.KernelSource(
             heat_profile=np.asarray(case.geqdsk.P_psi, dtype=np.float64),
             current_profile=np.asarray(case.geqdsk.FF_psi, dtype=np.float64),

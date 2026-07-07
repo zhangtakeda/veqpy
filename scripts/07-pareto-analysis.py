@@ -48,7 +48,6 @@ from _kernel_cases import (
     active_profiles_from_coeffs,
     build_geqdsk_boundary,
     build_kernel_topology,
-    kernel_boundary_from_boundary,
     kernel_config,
     read_geqdsk,
 )
@@ -1011,34 +1010,33 @@ SHAPE_PROFILE_NAMES = _shape_profile_names()
 
 
 def build_boundary(geqdsk, *, fit_m: int, fit_n: int, boundary_maxtol: float = BOUNDARY_MAXTOL):
-    if float(boundary_maxtol) != BOUNDARY_MAXTOL:
-        components = _load_veqpy_components()
-        fit = components["fit_boundary_params"](
+    if float(boundary_maxtol) == BOUNDARY_MAXTOL:
+        return build_geqdsk_boundary(
             geqdsk,
-            M=int(fit_m),
-            N=int(fit_n),
-            maxtol=float(boundary_maxtol),
-            R0=None,
-            Z0=None,
-            a=None,
-            ka=None,
+            fit_m=fit_m,
+            fit_n=fit_n,
+            return_fit=True,
         )
-        boundary = components["Boundary"](
-            a=float(fit["a"]),
-            R0=float(fit["R0"]),
-            Z0=float(fit["Z0"]),
-            B0=float(geqdsk.Bt0),
-            ka=float(fit["ka"]),
-            c_offsets=np.asarray(fit["c_offsets"], dtype=np.float64),
-            s_offsets=np.asarray(fit["s_offsets"], dtype=np.float64),
-        )
-        return boundary, fit
-    return build_geqdsk_boundary(
-        geqdsk,
-        fit_m=fit_m,
-        fit_n=fit_n,
-        return_fit=True,
+    components = _load_veqpy_components()
+    boundary = components["KernelBoundary"](
+        B0=float(geqdsk.Bt0),
+        R_boundary=np.asarray(geqdsk.boundary[:, 0], dtype=np.float64),
+        Z_boundary=np.asarray(geqdsk.boundary[:, 1], dtype=np.float64),
+        c_order=int(fit_m),
+        s_order=int(fit_n),
+        fit_maxtol=float(boundary_maxtol),
     )
+    fit = {
+        "rms": float(boundary.fit_rms),
+        "max_curve_error": float(boundary.fit_max_curve_error),
+        "a": float(boundary.a),
+        "R0": float(boundary.R0),
+        "Z0": float(boundary.Z0),
+        "ka": float(boundary.ka),
+        "c_offsets": np.asarray(boundary.c_offsets, dtype=np.float64),
+        "s_offsets": components["kernel_boundary_s_offsets_with_s0"](boundary),
+    }
+    return boundary, fit
 
 
 def build_solver_case(boundary, geqdsk, *, profile_coeffs: dict[str, list[float]]):
@@ -1072,7 +1070,7 @@ def solve_equilibrium(case, *, method: str):
     active_profiles = active_profiles_from_coeffs(case.profile_coeffs)
     boundary_m_max = max(
         int(np.asarray(case.boundary.c_offsets, dtype=np.float64).size) - 1,
-        int(np.asarray(case.boundary.s_offsets, dtype=np.float64).size) - 1,
+        int(np.asarray(case.boundary.s_offsets, dtype=np.float64).size),
         int(solve_grid.M_max),
     )
     topology = build_kernel_topology(
@@ -1102,7 +1100,7 @@ def solve_equilibrium(case, *, method: str):
         config=config,
     )
     result = kernel.solve(
-        kernel_boundary_from_boundary(case.boundary),
+        case.boundary,
         modules["KernelSource"](
             heat_profile=np.asarray(case.geqdsk.P_psi, dtype=np.float64),
             current_profile=np.asarray(case.geqdsk.FF_psi, dtype=np.float64),
@@ -2235,7 +2233,7 @@ def build_pf_case(benchmark, reference: ReferenceCase, grid, signature: dict[str
     )
     boundary_m_max = max(
         int(np.asarray(reference.boundary.c_offsets, dtype=np.float64).size) - 1,
-        int(np.asarray(reference.boundary.s_offsets, dtype=np.float64).size) - 1,
+        int(np.asarray(reference.boundary.s_offsets, dtype=np.float64).size),
         int(grid.M_max),
     )
     topology = build_kernel_topology(
@@ -2253,7 +2251,7 @@ def build_pf_case(benchmark, reference: ReferenceCase, grid, signature: dict[str
     )
     return SimpleNamespace(
         topology=topology,
-        boundary=kernel_boundary_from_boundary(reference.boundary),
+        boundary=reference.boundary,
         source=components["KernelSource"](
             heat_profile=np.asarray(reference.geqdsk.P_psi, dtype=np.float64),
             current_profile=np.asarray(reference.geqdsk.FF_psi, dtype=np.float64),

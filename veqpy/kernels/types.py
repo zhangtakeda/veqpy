@@ -235,7 +235,9 @@ class KernelBoundary:
         fit_maxtol: float,
     ) -> dict[str, float | np.ndarray]:
         if R_boundary is None or Z_boundary is None or c_order is None or s_order is None:
-            raise ValueError("R_boundary, Z_boundary, c_order, and s_order must be provided together")
+            raise ValueError(
+                "R_boundary, Z_boundary, c_order, and s_order must be provided together"
+            )
         mixed = {
             "a": self.a,
             "R0": self.R0,

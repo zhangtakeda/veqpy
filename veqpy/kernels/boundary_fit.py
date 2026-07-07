@@ -77,7 +77,9 @@ def _coerce_boundary_points(R_boundary: Any, Z_boundary: Any) -> tuple[np.ndarra
     if Z.ndim != 1:
         raise ValueError(f"Z_boundary must be 1D, got {Z.shape}")
     if R.shape != Z.shape:
-        raise ValueError(f"R_boundary and Z_boundary must have the same shape, got {R.shape} and {Z.shape}")
+        raise ValueError(
+            f"R_boundary and Z_boundary must have the same shape, got {R.shape} and {Z.shape}"
+        )
     if R.size < 4:
         raise ValueError("R_boundary and Z_boundary must contain at least four points")
     if not np.all(np.isfinite(R)) or not np.all(np.isfinite(Z)):

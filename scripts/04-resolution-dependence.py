@@ -49,7 +49,7 @@ from _reporting import (
 
 import veqpy as veq
 from benchmarks._common import extract_shape_x as extract_kernel_shape_x
-from veqpy.model import Boundary, Grid
+from veqpy.model import Grid
 
 FIGURE_SIZE = (SINGLE_COLUMN_WIDTH, 4.5)
 FIGURE_NROWS = 2
@@ -154,20 +154,11 @@ def build_demo_kernel_case(
         M_max=GRID.M_max,
         K_max=GRID.K_max,
     )
-    boundary_model = Boundary(
+    boundary = veq.KernelBoundary(
         **{
             **DEMO_BOUNDARY,
-            "s_offsets": np.asarray(DEMO_BOUNDARY["s_offsets"], dtype=np.float64),
+            "s_offsets": tuple(np.asarray(DEMO_BOUNDARY["s_offsets"], dtype=np.float64)[1:]),
         }
-    )
-    boundary = veq.KernelBoundary(
-        a=boundary_model.a,
-        R0=boundary_model.R0,
-        Z0=boundary_model.Z0,
-        B0=boundary_model.B0,
-        ka=boundary_model.ka,
-        c_offsets=boundary_model.c_offsets,
-        s_offsets=boundary_model.s_offsets[1:],
     )
     source = veq.KernelSource(
         heat_profile=np.asarray(heat_input, dtype=np.float64).copy() / MU0,

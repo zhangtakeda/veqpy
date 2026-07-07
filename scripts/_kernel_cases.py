@@ -88,15 +88,13 @@ def load_veqpy_components() -> dict[str, object]:
         build_profile_names,
         build_shape_profile_names,
     )
-    from veqpy.model import Boundary, Equilibrium, Geqdsk, Grid
-    from veqpy.model.boundary import _fit_boundary_params
+    from veqpy.kernels.types import kernel_boundary_s_offsets_with_s0
+    from veqpy.model import Equilibrium, Geqdsk, Grid
 
     return {
-        "Boundary": Boundary,
         "Equilibrium": Equilibrium,
         "Geqdsk": Geqdsk,
         "Grid": Grid,
-        "fit_boundary_params": _fit_boundary_params,
         "Kernel": Kernel,
         "KernelBoundary": KernelBoundary,
         "KernelConfig": KernelConfig,
@@ -107,6 +105,7 @@ def load_veqpy_components() -> dict[str, object]:
         "build_profile_layout": build_profile_layout,
         "build_profile_names": build_profile_names,
         "build_shape_profile_names": build_shape_profile_names,
+        "kernel_boundary_s_offsets_with_s0": kernel_boundary_s_offsets_with_s0,
     }
 
 
@@ -245,19 +244,6 @@ def profile_counts_from_signature(
     }
 
 
-def kernel_boundary_from_boundary(boundary) -> object:
-    components = load_veqpy_components()
-    return components["KernelBoundary"](
-        a=boundary.a,
-        R0=boundary.R0,
-        Z0=boundary.Z0,
-        B0=boundary.B0,
-        ka=boundary.ka,
-        c_offsets=boundary.c_offsets,
-        s_offsets=np.asarray(boundary.s_offsets, dtype=np.float64)[1:],
-    )
-
-
 def build_kernel_topology(
     signature: Mapping[str, int],
     *,
@@ -331,25 +317,24 @@ def solve_script_kernel_case(
 
 def build_geqdsk_boundary(geqdsk, *, fit_m: int, fit_n: int, return_fit: bool = False):
     components = load_veqpy_components()
-    fit = components["fit_boundary_params"](
-        geqdsk,
-        M=int(fit_m),
-        N=int(fit_n),
-        maxtol=BOUNDARY_MAXTOL,
-        R0=None,
-        Z0=None,
-        a=None,
-        ka=None,
-    )
-    boundary = components["Boundary"](
-        a=float(fit["a"]),
-        R0=float(fit["R0"]),
-        Z0=float(fit["Z0"]),
+    boundary = components["KernelBoundary"](
         B0=float(geqdsk.Bt0),
-        ka=float(fit["ka"]),
-        c_offsets=np.asarray(fit["c_offsets"], dtype=np.float64),
-        s_offsets=np.asarray(fit["s_offsets"], dtype=np.float64),
+        R_boundary=np.asarray(geqdsk.boundary[:, 0], dtype=np.float64),
+        Z_boundary=np.asarray(geqdsk.boundary[:, 1], dtype=np.float64),
+        c_order=int(fit_m),
+        s_order=int(fit_n),
+        fit_maxtol=BOUNDARY_MAXTOL,
     )
+    fit = {
+        "rms": float(boundary.fit_rms),
+        "max_curve_error": float(boundary.fit_max_curve_error),
+        "a": float(boundary.a),
+        "R0": float(boundary.R0),
+        "Z0": float(boundary.Z0),
+        "ka": float(boundary.ka),
+        "c_offsets": np.asarray(boundary.c_offsets, dtype=np.float64),
+        "s_offsets": components["kernel_boundary_s_offsets_with_s0"](boundary),
+    }
     return (boundary, fit) if return_fit else boundary
 
 
@@ -422,7 +407,7 @@ def build_pf_case(benchmark, reference: PfReferenceCase, signature: dict[str, in
     )
     boundary_m_max = max(
         int(np.asarray(reference.boundary.c_offsets).size) - 1,
-        int(np.asarray(reference.boundary.s_offsets).size) - 1,
+        int(np.asarray(reference.boundary.s_offsets).size),
         int(grid.M_max),
         1,
     )
@@ -441,7 +426,7 @@ def build_pf_case(benchmark, reference: PfReferenceCase, signature: dict[str, in
     return ScriptKernelCase(
         name=f"{reference.case_key}-PF-psin-uniform-Ip",
         topology=topology,
-        boundary=kernel_boundary_from_boundary(reference.boundary),
+        boundary=reference.boundary,
         source=components["KernelSource"](
             heat_profile=np.asarray(reference.geqdsk.P_psi, dtype=np.float64),
             current_profile=np.asarray(reference.geqdsk.FF_psi, dtype=np.float64),
