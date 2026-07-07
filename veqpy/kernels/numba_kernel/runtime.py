@@ -12,7 +12,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from veqpy.kernels.abi.source_semantics import materialize_kernel_source
-from veqpy.kernels.numba_kernel.workspace import allocate_runtime_state
+from veqpy.kernels.numba_kernel.workspace.allocation import allocate_runtime_state
 from veqpy.kernels.numba_kernel.workspace.grid_workspace import GridWorkspace
 from veqpy.kernels.types import (
     KernelBoundary,

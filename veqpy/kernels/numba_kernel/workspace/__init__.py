@@ -6,8 +6,7 @@ Role:
 - Keep grid, profile, geometry, source, and residual memory ownership explicit.
 
 Public API:
-- GridWorkspace, GeometryWorkspace, ProfileWorkspace, ResidualWorkspace, and SourceWorkspace.
-- allocate_runtime_state.
+- Concrete workspace objects are imported from their concrete modules.
 
 Dependencies:
 - veqpy.kernels.numba_kernel field-row ABI and stage helpers.
@@ -23,19 +22,4 @@ Design notes:
 
 from __future__ import annotations
 
-from veqpy.kernels.numba_kernel.workspace.grid_workspace import GridWorkspace
-
-from .allocation import allocate_runtime_state
-from .geometry_workspace import GeometryWorkspace
-from .profile_workspace import ProfileWorkspace
-from .residual_workspace import ResidualWorkspace
-from .source_workspace import SourceWorkspace
-
-__all__ = [
-    "GeometryWorkspace",
-    "GridWorkspace",
-    "ProfileWorkspace",
-    "ResidualWorkspace",
-    "SourceWorkspace",
-    "allocate_runtime_state",
-]
+__all__: list[str] = []
