@@ -1,8 +1,16 @@
+#include "boundary_fit.h"
 #include "python_kernel_solver.h"
 
 NB_MODULE(veqlib_ext, module)
 {
     module.doc() = "Single-thread nanobind bridge for the generated Cxx Kernel solver.";
+    module.def("fit_boundary_qr",
+               &veqlib_python::fit_boundary_qr,
+               nb::arg("R_boundary"),
+               nb::arg("Z_boundary"),
+               nb::arg("c_order"),
+               nb::arg("s_order"),
+               "Fit R/Z boundary points to Kernel boundary coefficients with native phase QR.");
 
     nb::class_<veqlib_python::NativeSolver>(module, "NativeSolver")
         .def(nb::init<int>(),

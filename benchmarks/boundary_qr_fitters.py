@@ -40,6 +40,7 @@ from benchmarks._reporting import (  # noqa: E402
     console as reporting_console,
 )
 from veqpy.kernels.boundary_fit import fit_boundary_params  # noqa: E402
+from veqpy.kernels.cxx_kernel.boundary_fit import fit_boundary_params_cxx  # noqa: E402
 from veqpy.kernels.numba_kernel.boundary_fit import fit_boundary_params_numba  # noqa: E402
 from veqpy.model import Geqdsk  # noqa: E402
 
@@ -47,7 +48,7 @@ DEFAULT_OUTPUT = REPO_ROOT / "benchmarks" / "results" / "boundary_qr_fitters.jso
 DEFAULT_C_ORDER = 10
 DEFAULT_S_ORDER = 10
 DEFAULT_MAXTOL = 1.0
-SUPPORTED_BACKENDS = ("numpy", "numba")
+SUPPORTED_BACKENDS = ("numpy", "numba", "cxx")
 
 
 def _load_boundary_points(case_key: str) -> tuple[np.ndarray, np.ndarray]:
@@ -92,6 +93,23 @@ def _fit_numba(
     )
 
 
+def _fit_cxx(
+    R_boundary: np.ndarray,
+    Z_boundary: np.ndarray,
+    *,
+    c_order: int,
+    s_order: int,
+    maxtol: float,
+) -> dict[str, Any]:
+    return fit_boundary_params_cxx(
+        R_boundary,
+        Z_boundary,
+        c_order=c_order,
+        s_order=s_order,
+        maxtol=maxtol,
+    )
+
+
 def _fit_once(
     backend: str,
     R_boundary: np.ndarray,
@@ -111,6 +129,14 @@ def _fit_once(
         )
     if backend == "numba":
         return _fit_numba(
+            R_boundary,
+            Z_boundary,
+            c_order=c_order,
+            s_order=s_order,
+            maxtol=maxtol,
+        )
+    if backend == "cxx":
+        return _fit_cxx(
             R_boundary,
             Z_boundary,
             c_order=c_order,
