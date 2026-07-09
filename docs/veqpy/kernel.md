@@ -103,3 +103,42 @@ cache so old packed solutions cannot warm-start a different active layout.
 different active topologies and `x_size` values. `Kernel.variant()` is not
 thread-safe and must not run concurrently with solve, residual, derivative,
 prepare, or equilibrium snapshot calls.
+
+## Pareto Topology Reduction
+
+`Kernel.pareto(...)` is a Numba-only exploration interface for intentionally
+over-large active-count topologies. It solves the current high-parameter
+topology as a reference, generates smaller count-only topology candidates,
+solves each candidate through the existing Numba variant runtime, and returns a
+`ParetoResult` containing the reference, evaluated samples, frontier, and
+threshold selections. The method restores the caller-visible Kernel topology,
+result, history, and last runtime case before returning.
+
+```python
+pareto = kernel.pareto(
+    boundary,
+    source,
+    config=KernelConfig(method="powell"),
+    max_shape_error=[1.0e-3, 5.0e-4],
+    pareto_by="complexity",   # "counts", "time", or "complexity"
+    strategy="adaptive",      # "tail", "energy", "adaptive", or "balanced"
+    metric="rms",             # "rms" or "max"
+    max_candidates=500,
+)
+```
+
+Shape error is measured directly on the Kernel solve grid using only the
+major-radius surface `R`, without constructing candidate `Equilibrium`
+snapshots. `metric="rms"` computes `sqrt(mean((R_candidate - R_ref)**2))`;
+`metric="max"` computes `max(abs(R_candidate - R_ref))`. Both values are in
+meters and are not normalized. `max_shape_error=1.0e-3` therefore means a
+one-millimeter major-radius error threshold.
+
+Each `ParetoSample` reports three cost columns whose names match `pareto_by`:
+`counts` is `topology.x_size`, `time` is `SolveResult.elapsed_ms`, and
+`complexity` is the fixed score
+`nfev*Nx + jvp_evaluations*Nx**2 + jacobian_component_evaluations*Nx**2 + linear_iterations*Nx**2`,
+where `Nx=counts`. `samples` contains evaluated reduced candidates only;
+`reference` stores the high-parameter reference; `frontier` includes the
+reference as the exact endpoint. For each threshold, `selected[threshold]` is
+the lowest-cost frontier sample with `shape_error <= threshold`.

@@ -18,11 +18,15 @@ table reports effective function evaluations rather than solve-time medians.
 `numba_variant_sweep.py` is also separate from the solve-time tables: it reports
 a single-pass `Kernel.variant()` switch cost against fresh Numba `Kernel`
 construction for the same active GEQDSK topology.
+`numba_pareto.py` is a lightweight smoke entry point for the Numba-only
+`Kernel.pareto()` topology-reduction interface; it records counts, time,
+complexity, and R-only shape-error frontier samples.
 
 ## Scripts
 
 - `numba_routes.py`: Numba backend synthetic route matrix through `veqpy.Kernel`.
 - `numba_variant_sweep.py`: Numba `Kernel.variant()` construction-cost comparison.
+- `numba_pareto.py`: Numba `Kernel.pareto()` topology-reduction smoke benchmark.
 - `cxx_routes.py`: Cxx backend route matrix compared with the Numba backend.
 - `cxx_geqdsk_pareto.py`: GEQDSK Cxx backend matrix compared with the Numba backend.
 - `cxx_continuation.py`: Cxx backend continuation-policy benchmark.
@@ -34,6 +38,7 @@ construction for the same active GEQDSK topology.
 ```bash
 .venv/bin/python benchmarks/numba_routes.py --quiet-progress
 .venv/bin/python benchmarks/numba_variant_sweep.py --quiet-progress
+.venv/bin/python benchmarks/numba_pareto.py --no-write
 .venv/bin/python benchmarks/cxx_routes.py --quiet-progress
 .venv/bin/python benchmarks/cxx_geqdsk_pareto.py --quiet-progress
 .venv/bin/python benchmarks/cxx_continuation.py --quiet-progress
