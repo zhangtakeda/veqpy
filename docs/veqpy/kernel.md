@@ -136,7 +136,7 @@ one-millimeter major-radius error threshold.
 
 Each `ParetoSample` reports three cost columns whose names match `pareto_by`:
 `counts` is `topology.x_size`, `time` is `SolveResult.elapsed_ms`, and
-`complexity` is the fixed score
+`complexity` is the fixed integer score
 `nfev*Nx + jvp_evaluations*Nx**2 + jacobian_component_evaluations*Nx**2 + linear_iterations*Nx**2`,
 where `Nx=counts`. `samples` contains evaluated reduced candidates only;
 `reference` stores the high-parameter reference; `frontier` includes the

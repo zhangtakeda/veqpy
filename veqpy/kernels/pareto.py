@@ -66,7 +66,7 @@ class ParetoSample:
     signature: KernelParetoSignature
     counts: int
     time: float
-    complexity: float
+    complexity: int
     shape_error: float
     result: SolveResult
 
@@ -123,10 +123,10 @@ def normalize_shape_error_thresholds(
     )
 
 
-def pareto_sample_complexity(result: SolveResult, topology: KernelTopology) -> float:
+def pareto_sample_complexity(result: SolveResult, topology: KernelTopology) -> int:
     nx = int(topology.x_size)
     nx2 = nx * nx
-    return float(
+    return (
         int(result.nfev) * nx
         + int(result.jvp_evaluations) * nx2
         + int(result.jacobian_component_evaluations) * nx2

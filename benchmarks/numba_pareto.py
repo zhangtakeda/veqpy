@@ -1,28 +1,56 @@
 #!/usr/bin/env python3
-"""Smoke benchmark for Numba Kernel.pareto() topology reduction."""
+"""Numba Kernel.pareto() smoke run on a tiny synthetic topology."""
 
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+from rich.table import Table
+from rich.text import Text
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from benchmarks._common import REPO_ROOT, cpu_affinity, runtime_env, write_json
+from benchmarks._reporting import (
+    REPORT_TABLE_BOX,
+    format_optional_float,
+    format_optional_sci,
+    print_config_tree,
+    print_outputs_tree,
+    status_cell,
+)
+from benchmarks._reporting import (
+    console as reporting_console,
+)
 from veqpy import Kernel, KernelBoundary, KernelConfig, KernelRecipe, KernelSource, KernelTopology
 from veqpy.kernels.pareto import ParetoResult, ParetoSample
 
-DEFAULT_OUTPUT = Path(__file__).resolve().parent / "results" / "numba_pareto.json"
+DEFAULT_OUTPUT = REPO_ROOT / "benchmarks" / "results" / "numba_pareto.json"
 MU0 = 4.0e-7 * np.pi
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
+    console = reporting_console()
+    if not args.quiet_progress:
+        print_config_tree(
+            console,
+            (
+                "purpose: [green]Kernel.pareto smoke/provenance check[/]",
+                "backend: [green]numba[/]",
+                "case: [green]tiny synthetic PF/psin/uniform[/]",
+                f"strategy: [green]{args.strategy}[/]",
+                f"metric: [green]{args.metric}[/]",
+                f"pareto_by: [green]{args.pareto_by}[/]",
+                f"max candidates: [green]{args.max_candidates}[/]",
+            ),
+        )
+        console.print()
     kernel = Kernel(
         topology=_topology(),
         recipe=KernelRecipe(backend="numba", layout="degree"),
@@ -43,11 +71,12 @@ def main(argv: list[str] | None = None) -> int:
         kernel.close()
 
     payload = _payload(result, args)
-    _print_summary(payload)
     if not args.no_write:
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-        print(f"wrote {args.output}")
+        write_json(args.output, payload)
+        if not args.quiet_progress:
+            print_outputs_tree(console, {"json": args.output}, repo_root=REPO_ROOT)
+            console.print()
+    _print_summary(console, payload)
     return 0
 
 
@@ -70,6 +99,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--no-write", action="store_true")
+    parser.add_argument("--quiet-progress", action="store_true", help=argparse.SUPPRESS)
     return parser.parse_args(argv)
 
 
@@ -128,6 +158,12 @@ def _config() -> KernelConfig:
 def _payload(result: ParetoResult, args: argparse.Namespace) -> dict[str, Any]:
     return {
         "schema": "veqpy.numba.pareto_smoke.v1",
+        "cpu_affinity": cpu_affinity(),
+        "env": runtime_env(),
+        "run_note": (
+            "Tiny synthetic smoke run for Kernel.pareto() contract and JSON shape. "
+            "This is not a GEQDSK performance matrix or a stable timing benchmark."
+        ),
         "args": {
             "strategy": args.strategy,
             "metric": args.metric,
@@ -150,7 +186,7 @@ def _sample_payload(sample: ParetoSample) -> dict[str, Any]:
         "signature": sample.signature.to_variant_kwargs(),
         "counts": int(sample.counts),
         "time": float(sample.time),
-        "complexity": float(sample.complexity),
+        "complexity": int(sample.complexity),
         "shape_error": float(sample.shape_error),
         "success": bool(sample.result.success),
         "nfev": int(sample.result.nfev),
@@ -158,21 +194,36 @@ def _sample_payload(sample: ParetoSample) -> dict[str, Any]:
     }
 
 
-def _print_summary(payload: dict[str, Any]) -> None:
+def _print_summary(console, payload: dict[str, Any]) -> None:
     args = payload["args"]
-    print(
-        "Numba Pareto smoke: "
-        f"strategy={args['strategy']} metric={args['metric']} pareto_by={args['pareto_by']}"
-    )
-    print("counts time_ms complexity shape_error success")
-    for sample in payload["frontier"]:
-        print(
-            f"{sample['counts']:>6} "
-            f"{sample['time']:>7.3f} "
-            f"{sample['complexity']:>10.1f} "
-            f"{sample['shape_error']:>11.3e} "
-            f"{sample['success']}"
+    console.print(
+        Text(
+            "Numba Pareto smoke: "
+            f"strategy={args['strategy']} metric={args['metric']} pareto_by={args['pareto_by']}",
+            style="bold cyan",
         )
+    )
+    table = Table(box=REPORT_TABLE_BOX, show_lines=False, expand=False, padding=(0, 1))
+    table.add_column("role", no_wrap=True)
+    table.add_column("status", no_wrap=True)
+    table.add_column("counts", justify="right")
+    table.add_column(Text("time (ms)"), justify="right")
+    table.add_column("complexity", justify="right")
+    table.add_column(Text("R error (m)"), justify="right")
+    table.add_column("nfev", justify="right")
+
+    reference = payload["reference"]
+    for sample in payload["frontier"]:
+        table.add_row(
+            "ref" if sample["signature"] == reference["signature"] else "candidate",
+            status_cell("passed" if sample["success"] else "failed"),
+            str(sample["counts"]),
+            format_optional_float(sample["time"], precision=3),
+            str(sample["complexity"]),
+            format_optional_sci(sample["shape_error"]),
+            str(sample["nfev"]),
+        )
+    console.print(table)
 
 
 if __name__ == "__main__":

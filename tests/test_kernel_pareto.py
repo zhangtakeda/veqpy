@@ -102,7 +102,7 @@ def make_sample(
     topology: KernelTopology,
     counts: int,
     time: float,
-    complexity: float,
+    complexity: int,
     shape_error: float,
     success: bool = True,
 ) -> ParetoSample:
@@ -155,7 +155,9 @@ def test_pareto_sample_complexity_uses_fixed_formula() -> None:
 
     nx = topology.x_size
     expected = 3 * nx + (2 + 1 + 4) * nx * nx
-    assert pareto_sample_complexity(result, topology) == float(expected)
+    complexity = pareto_sample_complexity(result, topology)
+    assert isinstance(complexity, int)
+    assert complexity == expected
 
 
 def test_pareto_shape_error_measures_r_surface_in_meters() -> None:
@@ -282,7 +284,7 @@ def test_adaptive_refinement_generates_unseen_local_neighbors() -> None:
         topology=topology_from_pareto_signature(topology, signature),
         counts=5,
         time=1.0,
-        complexity=5.0,
+        complexity=5,
         shape_error=0.1,
     )
 
@@ -444,15 +446,15 @@ def test_kernel_pareto_is_numba_only_for_now() -> None:
 def test_pareto_frontier_filters_failed_and_dominated_samples() -> None:
     topology = make_topology()
     samples = (
-        make_sample(topology=topology, counts=5, time=5.0, complexity=50.0, shape_error=0.30),
-        make_sample(topology=topology, counts=6, time=4.0, complexity=40.0, shape_error=0.20),
-        make_sample(topology=topology, counts=7, time=3.0, complexity=30.0, shape_error=0.25),
-        make_sample(topology=topology, counts=8, time=2.0, complexity=20.0, shape_error=0.10),
+        make_sample(topology=topology, counts=5, time=5.0, complexity=50, shape_error=0.30),
+        make_sample(topology=topology, counts=6, time=4.0, complexity=40, shape_error=0.20),
+        make_sample(topology=topology, counts=7, time=3.0, complexity=30, shape_error=0.25),
+        make_sample(topology=topology, counts=8, time=2.0, complexity=20, shape_error=0.10),
         make_sample(
             topology=topology,
             counts=9,
             time=1.0,
-            complexity=10.0,
+            complexity=10,
             shape_error=0.05,
             success=False,
         ),
@@ -460,7 +462,7 @@ def test_pareto_frontier_filters_failed_and_dominated_samples() -> None:
             topology=topology,
             counts=10,
             time=0.5,
-            complexity=5.0,
+            complexity=5,
             shape_error=float("nan"),
         ),
     )
@@ -472,15 +474,15 @@ def test_pareto_frontier_filters_failed_and_dominated_samples() -> None:
     assert [sample.time for sample in by_time] == [2.0]
 
     by_complexity = pareto_frontier(samples, pareto_by="complexity")
-    assert [sample.complexity for sample in by_complexity] == [20.0]
+    assert [sample.complexity for sample in by_complexity] == [20]
 
 
 def test_select_pareto_thresholds_chooses_lowest_cost_under_error() -> None:
     topology = make_topology()
     frontier = (
-        make_sample(topology=topology, counts=5, time=5.0, complexity=50.0, shape_error=0.30),
-        make_sample(topology=topology, counts=6, time=4.0, complexity=40.0, shape_error=0.20),
-        make_sample(topology=topology, counts=8, time=2.0, complexity=20.0, shape_error=0.10),
+        make_sample(topology=topology, counts=5, time=5.0, complexity=50, shape_error=0.30),
+        make_sample(topology=topology, counts=6, time=4.0, complexity=40, shape_error=0.20),
+        make_sample(topology=topology, counts=8, time=2.0, complexity=20, shape_error=0.10),
     )
 
     selected = select_pareto_thresholds(frontier, [0.25, 0.15, 0.05], pareto_by="counts")
