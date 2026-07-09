@@ -399,7 +399,7 @@ class KernelTopology:
         if calculus != "spectral":
             raise TopologyError("only spectral calculus is supported")
         sample_count = _canonical_sample_count(nodes, nr, self.sample_count)
-        l_max = _canonical_exact_or_inferred(
+        l_max = _canonical_capacity_or_inferred(
             self.L_max,
             _infer_l_max((*profile_counts.values(), *c_counts, *s_counts)),
             "L_max",
@@ -755,6 +755,15 @@ def _canonical_exact_or_inferred(value: int | None, inferred: int, name: str) ->
         raise TopologyError(
             f"{name} is inferred as {inferred}; explicit value {explicit} is invalid"
         )
+    return explicit
+
+
+def _canonical_capacity_or_inferred(value: int | None, inferred: int, name: str) -> int:
+    if value is None:
+        return inferred
+    explicit = _positive_int(value, name)
+    if explicit < inferred:
+        raise TopologyError(f"{name} must be >= {inferred}, got {explicit}")
     return explicit
 
 
