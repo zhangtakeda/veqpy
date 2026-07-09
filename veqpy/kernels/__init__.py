@@ -8,7 +8,8 @@ Role:
 Public API:
 - Kernel.
 - KernelRecipe, KernelTopology, KernelBoundary, KernelSource, and KernelConfig.
-- KernelPrepareResult, SolveResult, TopologyError, and config_with_overrides.
+- KernelPrepareResult, SolveResult, ParetoResult, ParetoSample, TopologyError,
+  and config_with_overrides.
 
 Dependencies:
 - veqpy.kernels.abi for shared route, option, identity, and source-lowering rules.

@@ -9,7 +9,7 @@ Public API:
 - Kernel and KernelRecipe.
 - KernelTopology, KernelBoundary, KernelSource, and KernelConfig.
 - KernelPrepareResult, SolveResult, and TopologyError.
-- build and solve function-style entrypoints.
+- build, fit, pareto, and solve function-style entrypoints.
 
 Dependencies:
 - veqpy.api for function-style entrypoints.
@@ -30,7 +30,7 @@ import tomllib
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
-from veqpy.api import build, solve
+from veqpy.api import build, fit, pareto, solve
 from veqpy.kernels import (
     Kernel,
     KernelBoundary,
@@ -60,6 +60,8 @@ __all__ = [
     "SolveResult",
     "TopologyError",
     "build",
+    "fit",
+    "pareto",
     "solve",
 ]
 

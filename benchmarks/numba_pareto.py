@@ -41,11 +41,12 @@ from benchmarks._reporting import (
 from benchmarks._reporting import (
     console as reporting_console,
 )
-from veqpy import Kernel, KernelRecipe, KernelTopology
-from veqpy.kernels.pareto import ParetoResult, ParetoSample
+from veqpy import Kernel, KernelRecipe, KernelTopology, ParetoResult, ParetoSample
 
 DEFAULT_OUTPUT = REPO_ROOT / "benchmarks" / "results" / "numba_pareto.json"
 DEFAULT_THRESHOLD_SCALES = (1.0e-2, 5.0e-3, 1.0e-3)
+DEFAULT_MAX_CANDIDATES = 10000
+DEFAULT_MAX_EVALUATIONS = 2000
 
 
 def _run_case(
@@ -63,7 +64,7 @@ def _run_case(
         max_evaluations=args.max_evaluations,
     )
     thresholds = _thresholds_for_boundary(kernel_case.boundary.a, threshold_scales)
-    row = _planned_row(case_key, kernel_case.topology, thresholds)
+    row = _planned_row(case_key, kernel_case.topology, kernel_case.boundary, thresholds)
     kernel = None
     started = time.perf_counter_ns()
     try:
@@ -101,6 +102,7 @@ def _run_case(
 def _planned_row(
     case_key: str,
     topology: KernelTopology,
+    boundary,
     thresholds: tuple[dict[str, float], ...],
 ) -> dict[str, Any]:
     return {
@@ -108,6 +110,7 @@ def _planned_row(
         "config": "Ref",
         "route": "PF_psin_uniform_Ip",
         "capacity": _topology_payload(topology),
+        "boundary": _boundary_payload(boundary),
         "thresholds": list(thresholds),
         "runtime": {"status": "not_requested"},
     }
@@ -126,6 +129,26 @@ def _topology_payload(topology: KernelTopology) -> dict[str, Any]:
             "K_max": int(topology.K_max),
         },
         "sample_count": int(topology.sample_count),
+    }
+
+
+def _boundary_payload(boundary) -> dict[str, Any]:
+    return {
+        "source": "benchmarks._common.GEQDSK_BOUNDARY_PARAMETERS",
+        "fit_backend": "numpy",
+        "fit_method": boundary.fit_method,
+        "fit_rms": None if boundary.fit_rms is None else float(boundary.fit_rms),
+        "fit_max_curve_error": (
+            None
+            if boundary.fit_max_curve_error is None
+            else float(boundary.fit_max_curve_error)
+        ),
+        "fit_c_order": boundary.fit_c_order,
+        "fit_s_order": boundary.fit_s_order,
+        "fit_note": (
+            "Frozen GEQDSK LCFS least-square fit; no boundary fitting is performed "
+            "inside this Pareto benchmark run."
+        ),
     }
 
 
@@ -272,8 +295,8 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     parser.add_argument("--metric", choices=("rms", "max"), default="rms")
     parser.add_argument("--pareto-by", choices=("counts", "time", "complexity"), default="counts")
-    parser.add_argument("--max-candidates", type=int, default=32)
-    parser.add_argument("--max-evaluations", type=int, default=400)
+    parser.add_argument("--max-candidates", type=int, default=DEFAULT_MAX_CANDIDATES)
+    parser.add_argument("--max-evaluations", type=int, default=DEFAULT_MAX_EVALUATIONS)
     parser.add_argument("--nr", type=int, default=REFERENCE_LAYOUT_NR)
     parser.add_argument("--nt", type=int, default=REFERENCE_LAYOUT_NT)
     parser.add_argument(
@@ -344,7 +367,9 @@ def main(argv: list[str] | None = None) -> int:
         "run_note": (
             "GEQDSK Ref-capacity Pareto screening benchmark. max_candidates is the "
             "candidate solve budget per case and excludes the reference solve. "
-            "threshold_scale values are multiplied by each boundary minor radius a."
+            "threshold_scale values are multiplied by each boundary minor radius a. "
+            "GEQDSK boundaries are pre-fitted frozen parameterized KernelBoundary "
+            "inputs from benchmarks._common; this benchmark does not refit LCFS points."
         ),
         "args": {
             "cases": list(case_keys),

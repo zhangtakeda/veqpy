@@ -35,7 +35,10 @@ from veqpy.kernels.numba_kernel.packed_layout import (  # noqa: E402
     build_profile_names,
     build_shape_profile_names,
 )
-from veqpy.kernels.types import kernel_boundary_shape_orders  # noqa: E402
+from veqpy.kernels.types import (  # noqa: E402
+    _kernel_boundary_with_fit_metadata,
+    kernel_boundary_shape_orders,
+)
 from veqpy.model import Geqdsk, Grid  # noqa: E402
 
 THIS_FILE = Path(__file__).resolve()
@@ -254,6 +257,11 @@ GEQDSK_CONFIG_SIGNATURES = {
     },
     ("efit", "Ref"): GEQDSK_ROUTE_PROFILE_SIGNATURE,
 }
+# Frozen GEQDSK LCFS boundary fits used by manuscript-style benchmarks.
+# These values match numpy least-square fits of the stored GEQDSK boundary
+# points with c_order=10, s_order=10, and maxtol=1.0.  Keeping them here avoids
+# re-fitting scatter boundaries during each benchmark run and makes case
+# materialization deterministic across Pareto and physics checks.
 GEQDSK_BOUNDARY_PARAMETERS = {
     "solovev": {
         "a": 1.999991815361528,
@@ -1238,7 +1246,7 @@ def geqdsk_boundary(case_key: str, geqdsk: Geqdsk) -> KernelBoundary:
     params = GEQDSK_BOUNDARY_PARAMETERS[str(case_key)]
     c_offsets = np.asarray(params["c_offsets"], dtype=np.float64)
     s_offsets = np.asarray(params["s_offsets"], dtype=np.float64)
-    return KernelBoundary(
+    boundary = KernelBoundary(
         a=float(params["a"]),
         R0=float(params["R0"]),
         Z0=float(params["Z0"]),
@@ -1246,6 +1254,14 @@ def geqdsk_boundary(case_key: str, geqdsk: Geqdsk) -> KernelBoundary:
         ka=float(params["ka"]),
         c_offsets=c_offsets,
         s_offsets=s_offsets[1:],
+    )
+    return _kernel_boundary_with_fit_metadata(
+        boundary,
+        fit_rms=float(params["fit_rms"]),
+        fit_max_curve_error=float(params["fit_max_curve_error"]),
+        fit_c_order=10,
+        fit_s_order=10,
+        fit_method="least-square",
     )
 
 

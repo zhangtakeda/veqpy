@@ -8,13 +8,18 @@ ROOT_EXPORTS = {
     "Kernel",
     "KernelBoundary",
     "KernelConfig",
+    "KernelParetoSignature",
     "KernelPrepareResult",
     "KernelRecipe",
     "KernelSource",
     "KernelTopology",
+    "ParetoResult",
+    "ParetoSample",
     "SolveResult",
     "TopologyError",
     "build",
+    "fit",
+    "pareto",
     "solve",
 }
 
@@ -22,10 +27,13 @@ KERNEL_EXPORTS = {
     "Kernel",
     "KernelBoundary",
     "KernelConfig",
+    "KernelParetoSignature",
     "KernelPrepareResult",
     "KernelRecipe",
     "KernelSource",
     "KernelTopology",
+    "ParetoResult",
+    "ParetoSample",
     "SolveResult",
     "TopologyError",
     "config_with_overrides",
@@ -71,8 +79,10 @@ def test_package_roots_export_current_public_contracts() -> None:
 def test_api_module_exposes_function_entrypoints() -> None:
     api = importlib.import_module("veqpy.api")
 
-    assert api.__all__ == ["build", "solve"]
+    assert api.__all__ == ["build", "fit", "pareto", "solve"]
     assert api.build is veqpy.build
+    assert api.fit is veqpy.fit
+    assert api.pareto is veqpy.pareto
     assert api.solve is veqpy.solve
 
 

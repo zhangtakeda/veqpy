@@ -2,7 +2,7 @@
 Module: veqpy.api
 
 Role:
-- Provide function-style ``build`` and ``solve`` entrypoints over ``veqpy.Kernel``.
+- Provide function-style entrypoints over ``veqpy.Kernel`` and ``KernelBoundary``.
 
 Notes:
 - This module imports only the public Kernel contract, not concrete backend modules.
@@ -10,6 +10,7 @@ Notes:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -20,10 +21,11 @@ from veqpy.kernels import (
     KernelRecipe,
     KernelSource,
     KernelTopology,
+    ParetoResult,
     SolveResult,
 )
 
-__all__ = ["build", "solve"]
+__all__ = ["build", "fit", "pareto", "solve"]
 
 
 def build(
@@ -82,5 +84,75 @@ def solve(
     try:
         kernel.prepare(force=force, dry_run=False)
         return kernel.solve(boundary, source, case_name=case_name, **config_overrides)
+    finally:
+        kernel.close()
+
+
+def fit(
+    boundary: KernelBoundary,
+    *,
+    backend: str = "numba",
+    method: str | None = None,
+    c_order: int | None = None,
+    s_order: int | None = None,
+    maxtol: float | None = None,
+) -> KernelBoundary:
+    """Return a parameterized boundary by explicitly fitting stored R/Z points."""
+
+    return boundary.fit(
+        backend=backend,
+        method=method,
+        c_order=c_order,
+        s_order=s_order,
+        maxtol=maxtol,
+    )
+
+
+def pareto(
+    boundary: KernelBoundary,
+    source: KernelSource,
+    *,
+    topology: KernelTopology,
+    config: KernelConfig | None = None,
+    recipe: KernelRecipe | None = None,
+    registry: object | None = None,
+    cache_root: Path | None = None,
+    source_dir: Path | None = None,
+    pin_cpu: bool | int | None = None,
+    force: bool = False,
+    case_name: str | None = None,
+    max_shape_error: float | Sequence[float] | None = None,
+    pareto_by: str = "counts",
+    strategy: str = "tail",
+    metric: str = "rms",
+    max_candidates: int = 500,
+    **config_overrides: Any,
+) -> ParetoResult:
+    """Prepare a short-lived kernel, run one Pareto search, and close it."""
+
+    kernel_recipe = KernelRecipe(backend="numba", layout="degree") if recipe is None else recipe
+    kernel = Kernel(
+        topology=topology,
+        recipe=kernel_recipe,
+        config=config,
+        registry=registry,
+        cache_root=cache_root,
+        source_dir=source_dir,
+        pin_cpu=pin_cpu,
+    )
+    try:
+        kernel.prepare(force=force, dry_run=False)
+        return kernel.pareto(
+            boundary,
+            source,
+            config=config,
+            case_name=case_name,
+            max_shape_error=max_shape_error,
+            pareto_by=pareto_by,
+            strategy=strategy,
+            metric=metric,
+            max_candidates=max_candidates,
+            **config_overrides,
+        )
     finally:
         kernel.close()

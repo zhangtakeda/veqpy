@@ -15,7 +15,7 @@ from veqpy import (
     KernelSource,
     KernelTopology,
 )
-from veqpy.api import build
+from veqpy.api import build, fit
 from veqpy.kernels.abi.identity import recipe_identity_payload, topology_identity_payload
 from veqpy.kernels.abi.options import (
     RESIDUAL_NORMALIZATION_BALANCED,
@@ -191,6 +191,25 @@ def test_kernel_boundary_fit_returns_parameterized_boundary() -> None:
     assert fitted.fit_method == "qr"
 
 
+def test_function_api_fit_forwards_boundary_fit() -> None:
+    R_boundary, Z_boundary = ellipse_boundary_points()
+    raw = KernelBoundary(
+        B0=3.0,
+        R_boundary=R_boundary,
+        Z_boundary=Z_boundary,
+        c_order=0,
+        s_order=0,
+        fit_maxtol=1.0e-8,
+        method="qr",
+    )
+
+    fitted = fit(raw, backend="numpy")
+
+    assert not kernel_boundary_has_raw_points(fitted)
+    assert fitted.fit_method == "qr"
+    assert fitted.fit_rms is not None and fitted.fit_rms < 1.0e-8
+
+
 def test_kernel_boundary_fit_is_idempotent_for_parameterized_boundary() -> None:
     explicit = tiny_kernel_boundary()
 
@@ -288,6 +307,8 @@ def test_veqpy_root_exports_kernel_surface() -> None:
         "SolveResult",
         "TopologyError",
         "build",
+        "fit",
+        "pareto",
         "solve",
     ]
 

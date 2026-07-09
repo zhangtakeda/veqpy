@@ -5,6 +5,7 @@ import pytest
 from numpy.testing import assert_allclose
 
 from veqpy import Kernel, KernelBoundary, KernelConfig, KernelRecipe, KernelSource
+from veqpy.api import pareto as pareto_api
 from veqpy.kernels.numba_kernel.pareto_runtime import sample_r_surface
 from veqpy.kernels.pareto import (
     KernelParetoSignature,
@@ -434,6 +435,23 @@ def test_kernel_pareto_adaptive_refines_after_seed_frontier() -> None:
     assert len(result.samples) <= max_candidates
     assert len({sample.signature for sample in result.samples}) == len(result.samples)
     assert result.frontier
+
+
+def test_function_api_pareto_defaults_to_numba_backend() -> None:
+    result = pareto_api(
+        tiny_boundary(),
+        tiny_source(),
+        topology=make_topology(h_count=3, v_count=2, kappa_count=1, psin_count=2),
+        config=pareto_smoke_config(),
+        max_shape_error=1.0e6,
+        strategy="balanced",
+        max_candidates=0,
+    )
+
+    assert result.reference.result.success
+    assert result.samples == ()
+    assert result.frontier == (result.reference,)
+    assert result.selected[1.0e6] is result.reference
 
 
 def test_kernel_pareto_is_numba_only_for_now() -> None:

@@ -28,3 +28,5 @@ def test_core_public_imports_are_available() -> None:
     assert veqpy.KernelParetoSignature
     assert veqpy.ParetoResult
     assert veqpy.ParetoSample
+    assert veqpy.fit
+    assert veqpy.pareto
