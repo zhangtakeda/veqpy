@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Benchmark boundary scatter-to-coefficient QR fitters."""
+"""Benchmark boundary scatter-to-coefficient fitters."""
 
 from __future__ import annotations
 
@@ -30,6 +30,7 @@ from benchmarks._reporting import (  # noqa: E402
     REPORT_TABLE_BOX,
     format_optional_float,
     format_optional_sci,
+    format_optional_speedup,
     print_config_tree,
     print_outputs_tree,
     progress_context,
@@ -44,11 +45,14 @@ from veqpy.kernels.cxx_kernel.boundary_fit import fit_boundary_params_cxx  # noq
 from veqpy.kernels.numba_kernel.boundary_fit import fit_boundary_params_numba  # noqa: E402
 from veqpy.model import Geqdsk  # noqa: E402
 
-DEFAULT_OUTPUT = REPO_ROOT / "benchmarks" / "results" / "boundary_qr_fitters.json"
+DEFAULT_OUTPUT = REPO_ROOT / "benchmarks" / "results" / "boundary_fitters.json"
 DEFAULT_C_ORDER = 10
 DEFAULT_S_ORDER = 10
 DEFAULT_MAXTOL = 1.0
+SUPPORTED_METHODS = ("qr", "gnqr", "least-square")
+DEFAULT_METHODS = SUPPORTED_METHODS
 SUPPORTED_BACKENDS = ("numpy", "numba", "cxx")
+DEFAULT_BACKENDS = ("numba", "cxx")
 
 
 def _load_boundary_points(case_key: str) -> tuple[np.ndarray, np.ndarray]:
@@ -66,6 +70,7 @@ def _fit_numpy(
     c_order: int,
     s_order: int,
     maxtol: float,
+    method: str,
 ) -> dict[str, Any]:
     return fit_boundary_params(
         R_boundary,
@@ -73,6 +78,7 @@ def _fit_numpy(
         c_order=c_order,
         s_order=s_order,
         maxtol=maxtol,
+        method=method,
     )
 
 
@@ -83,6 +89,7 @@ def _fit_numba(
     c_order: int,
     s_order: int,
     maxtol: float,
+    method: str,
 ) -> dict[str, Any]:
     return fit_boundary_params_numba(
         R_boundary,
@@ -90,6 +97,7 @@ def _fit_numba(
         c_order=c_order,
         s_order=s_order,
         maxtol=maxtol,
+        method=method,
     )
 
 
@@ -100,6 +108,7 @@ def _fit_cxx(
     c_order: int,
     s_order: int,
     maxtol: float,
+    method: str,
 ) -> dict[str, Any]:
     return fit_boundary_params_cxx(
         R_boundary,
@@ -107,6 +116,7 @@ def _fit_cxx(
         c_order=c_order,
         s_order=s_order,
         maxtol=maxtol,
+        method=method,
     )
 
 
@@ -115,6 +125,7 @@ def _fit_once(
     R_boundary: np.ndarray,
     Z_boundary: np.ndarray,
     *,
+    method: str,
     c_order: int,
     s_order: int,
     maxtol: float,
@@ -126,6 +137,7 @@ def _fit_once(
             c_order=c_order,
             s_order=s_order,
             maxtol=maxtol,
+            method=method,
         )
     if backend == "numba":
         return _fit_numba(
@@ -134,6 +146,7 @@ def _fit_once(
             c_order=c_order,
             s_order=s_order,
             maxtol=maxtol,
+            method=method,
         )
     if backend == "cxx":
         return _fit_cxx(
@@ -142,6 +155,7 @@ def _fit_once(
             c_order=c_order,
             s_order=s_order,
             maxtol=maxtol,
+            method=method,
         )
     raise ValueError(f"unsupported boundary fitter backend {backend!r}")
 
@@ -151,6 +165,7 @@ def _measure_fit(
     R_boundary: np.ndarray,
     Z_boundary: np.ndarray,
     *,
+    method: str,
     c_order: int,
     s_order: int,
     maxtol: float,
@@ -162,6 +177,7 @@ def _measure_fit(
             backend,
             R_boundary,
             Z_boundary,
+            method=method,
             c_order=c_order,
             s_order=s_order,
             maxtol=maxtol,
@@ -175,6 +191,7 @@ def _measure_fit(
             backend,
             R_boundary,
             Z_boundary,
+            method=method,
             c_order=c_order,
             s_order=s_order,
             maxtol=maxtol,
@@ -194,6 +211,7 @@ def _fit_payload(result: dict[str, Any]) -> dict[str, Any]:
         "ka": float(result["ka"]),
         "c_order": int(result["c_order"]),
         "s_order": int(result["s_order"]),
+        "method": str(result.get("method", "n/a")),
         "rms": float(result["rms"]),
         "max_curve_error": float(result["max_curve_error"]),
         "c_offsets": np.asarray(result["c_offsets"], dtype=np.float64).tolist(),
@@ -223,18 +241,24 @@ def _accuracy_payload(fit: dict[str, Any], reference: dict[str, Any]) -> dict[st
     else:
         coeff_linf = float(np.max(np.abs(coeff - ref_coeff)))
     return {
-        "coeff_linf_vs_numpy": coeff_linf,
-        "rms_delta_vs_numpy": float(abs(float(fit["rms"]) - float(reference["rms"]))),
-        "curve_delta_vs_numpy": float(
+        "coeff_linf_vs_reference": coeff_linf,
+        "rms_delta_vs_reference": float(abs(float(fit["rms"]) - float(reference["rms"]))),
+        "curve_delta_vs_reference": float(
             abs(float(fit["max_curve_error"]) - float(reference["max_curve_error"]))
         ),
     }
 
 
-def _measure_case(args: argparse.Namespace, case_key: str, backend: str) -> dict[str, Any]:
+def _measure_case(
+    args: argparse.Namespace,
+    case_key: str,
+    method: str,
+    backend: str,
+) -> dict[str, Any]:
     R_boundary, Z_boundary = _load_boundary_points(case_key)
     row = {
         "case": case_key,
+        "method": method,
         "backend": backend,
         "points": int(R_boundary.size),
         "order": {"c_order": int(args.c_order), "s_order": int(args.s_order)},
@@ -251,12 +275,14 @@ def _measure_case(args: argparse.Namespace, case_key: str, backend: str) -> dict
                 c_order=args.c_order,
                 s_order=args.s_order,
                 maxtol=args.maxtol,
+                method=method,
             )
         )
         measurement = _measure_fit(
             backend,
             R_boundary,
             Z_boundary,
+            method=method,
             c_order=args.c_order,
             s_order=args.s_order,
             maxtol=args.maxtol,
@@ -267,6 +293,7 @@ def _measure_case(args: argparse.Namespace, case_key: str, backend: str) -> dict
         row.update(
             {
                 "status": "passed",
+                "reference_backend": "numpy",
                 "timing": measurement["timing"],
                 "fit": measurement["fit"],
                 "accuracy": accuracy,
@@ -303,29 +330,61 @@ def _print_summary(console, summary: dict[str, int]) -> None:
 def _print_timing_table(console, rows: list[dict[str, Any]]) -> None:
     table = Table(box=REPORT_TABLE_BOX, show_lines=False, expand=False, padding=(0, 1))
     table.add_column("case", no_wrap=True)
-    table.add_column("backend", no_wrap=True)
+    table.add_column("method", no_wrap=True)
     table.add_column("status", no_wrap=True)
-    table.add_column("points", justify="right")
     table.add_column("order", justify="right")
-    table.add_column(Text("median (ms)"), justify="right")
-    table.add_column("fit rms", justify="right")
-    table.add_column("curve", justify="right")
+    table.add_column(Text("Cxx (ms)"), justify="right")
+    table.add_column(Text("Numba (ms)"), justify="right")
+    table.add_column("speedup", justify="right")
     table.add_column("coeff diff", justify="right")
+    table.add_column("rms diff", justify="right")
+    table.add_column("curve diff", justify="right")
+    grouped: dict[tuple[str, str], dict[str, dict[str, Any]]] = {}
     for row in rows:
-        timing = row.get("timing", {})
-        fit = row.get("fit", {})
-        accuracy = row.get("accuracy", {})
-        order = row.get("order", {})
+        key = (str(row.get("case", "n/a")), str(row.get("method", "n/a")))
+        grouped.setdefault(key, {})[str(row.get("backend", "n/a"))] = row
+
+    for (case_key, method), group in grouped.items():
+        cxx = group.get("cxx")
+        numba = group.get("numba")
+        first = next(iter(group.values()))
+        order = first.get("order", {})
+        cxx_ms = (cxx or {}).get("timing", {}).get("median_ms")
+        numba_ms = (numba or {}).get("timing", {}).get("median_ms")
+        status_values = {row.get("status") for row in group.values()}
+        if "failed" in status_values:
+            status = "failed"
+        elif "planned" in status_values:
+            status = "planned"
+        elif {"cxx", "numba"}.issubset(group) and status_values == {"passed"}:
+            status = "passed"
+        else:
+            status = "partial"
+        if cxx is not None and numba is not None and cxx.get("fit") and numba.get("fit"):
+            cxx_fit = cxx["fit"]
+            numba_fit = numba["fit"]
+            cxx_coeff = _coefficient_vector(cxx_fit)
+            numba_coeff = _coefficient_vector(numba_fit)
+            coeff_diff = float(np.max(np.abs(cxx_coeff - numba_coeff)))
+            rms_diff = abs(float(cxx_fit["rms"]) - float(numba_fit["rms"]))
+            curve_diff = abs(
+                float(cxx_fit["max_curve_error"]) - float(numba_fit["max_curve_error"])
+            )
+        else:
+            coeff_diff = None
+            rms_diff = None
+            curve_diff = None
         table.add_row(
-            str(row.get("case", "n/a")),
-            str(row.get("backend", "n/a")),
-            status_cell(row.get("status")),
-            str(row.get("points", "n/a")),
+            case_key,
+            method,
+            status_cell(status),
             f"{order.get('c_order', 'n/a')}/{order.get('s_order', 'n/a')}",
-            format_optional_float(timing.get("median_ms")),
-            format_optional_sci(fit.get("rms")),
-            format_optional_sci(fit.get("max_curve_error")),
-            format_optional_sci(accuracy.get("coeff_linf_vs_numpy")),
+            format_optional_float(cxx_ms),
+            format_optional_float(numba_ms),
+            format_optional_speedup(numba_ms, cxx_ms),
+            format_optional_sci(coeff_diff),
+            format_optional_sci(rms_diff),
+            format_optional_sci(curve_diff),
         )
     console.print(table)
 
@@ -333,6 +392,7 @@ def _print_timing_table(console, rows: list[dict[str, Any]]) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--case", action="append", choices=CASE_KEYS)
+    parser.add_argument("--method", action="append", choices=SUPPORTED_METHODS)
     parser.add_argument("--backend", action="append", choices=SUPPORTED_BACKENDS)
     parser.add_argument("--c-order", type=int, default=DEFAULT_C_ORDER)
     parser.add_argument("--s-order", type=int, default=DEFAULT_S_ORDER)
@@ -351,7 +411,8 @@ def main(argv: list[str] | None = None) -> int:
         raise ValueError("--c-order and --s-order must be non-negative")
 
     case_keys = tuple(args.case or CASE_KEYS)
-    backends = tuple(args.backend or SUPPORTED_BACKENDS)
+    methods = tuple(args.method or DEFAULT_METHODS)
+    backends = tuple(args.backend or DEFAULT_BACKENDS)
     console = reporting_console()
 
     if not args.quiet_progress:
@@ -359,6 +420,7 @@ def main(argv: list[str] | None = None) -> int:
             console,
             (
                 f"cases: [green]{len(case_keys)}[/]",
+                f"methods: [green]{','.join(methods)}[/]",
                 f"backends: [green]{','.join(backends)}[/]",
                 f"order: [green]{args.c_order}/{args.s_order}[/]",
                 f"maxtol: [green]{args.maxtol:g}[/]",
@@ -370,7 +432,12 @@ def main(argv: list[str] | None = None) -> int:
         console.print()
         console.print(Text("[progress]", style="bold cyan"))
 
-    jobs = [(case_key, backend) for case_key in case_keys for backend in backends]
+    jobs = [
+        (case_key, method, backend)
+        for case_key in case_keys
+        for method in methods
+        for backend in backends
+    ]
     rows: list[dict[str, Any]] = []
     with progress_context(console, quiet=args.quiet_progress) as progress:
         task_id = None
@@ -381,11 +448,11 @@ def main(argv: list[str] | None = None) -> int:
                 current="-",
                 phase="[cyan]run[/]",
             )
-        for case_key, backend in jobs:
-            label = f"{case_key}:{backend}"
+        for case_key, method, backend in jobs:
+            label = f"{case_key}:{method}:{backend}"
             if progress is not None and task_id is not None:
                 progress.update(task_id, current=label, phase="[cyan]run[/]")
-            row = _measure_case(args, case_key, backend)
+            row = _measure_case(args, case_key, method, backend)
             rows.append(row)
             if progress is not None and task_id is not None:
                 progress.update(task_id, phase=progress_phase(row["status"]))
@@ -393,9 +460,11 @@ def main(argv: list[str] | None = None) -> int:
 
     summary = _summarize(rows)
     payload = {
-        "schema": "veqpy.boundary.qr_fitters.v1",
+        "schema": "veqpy.boundary.fitters.v2",
         "case_count": len(case_keys),
+        "method_count": len(methods),
         "backend_count": len(backends),
+        "methods": list(methods),
         "backends": list(backends),
         "repeat": int(args.repeat),
         "warmup": int(args.warmup),

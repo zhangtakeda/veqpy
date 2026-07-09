@@ -34,6 +34,8 @@ Benchmark entry points use backend names directly:
 - `benchmarks/cxx_routes.py`: Cxx route matrix compared with Numba.
 - `benchmarks/cxx_geqdsk_pareto.py`: Cxx GEQDSK matrix compared with Numba.
 - `benchmarks/cxx_continuation.py`: Cxx continuation-policy nfev benchmark.
+- `benchmarks/cxx_boundary_fitters.py`: raw-boundary `qr`/`gnqr`/`least-square`
+  fitter timing and diff matrix across Numba and Cxx.
 
 The native backend needs a C++20 toolchain plus CMake, nanobind, GCEM,
 nlohmann-json, CMINPACK, LAPACKE/LAPACK, and OpenBLAS. Normal Numba usage does
