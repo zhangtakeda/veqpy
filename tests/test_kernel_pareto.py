@@ -9,7 +9,9 @@ from veqpy.kernels.numba_kernel.pareto_runtime import sample_r_surface
 from veqpy.kernels.pareto import (
     KernelParetoSignature,
     ParetoSample,
+    adaptive_seed_candidate_count,
     coefficient_blocks_from_packed_state,
+    generate_adaptive_refinement_signatures,
     generate_pareto_signatures,
     normalize_pareto_by,
     normalize_pareto_max_candidates,
@@ -265,6 +267,40 @@ def test_adaptive_strategy_starts_from_combined_seed_candidates() -> None:
     assert len(set(adaptive)) == len(adaptive)
 
 
+def test_adaptive_refinement_generates_unseen_local_neighbors() -> None:
+    topology = make_topology(h_count=4, v_count=3, kappa_count=0, psin_count=2)
+    signature = KernelParetoSignature(
+        h_count=2,
+        v_count=2,
+        kappa_count=0,
+        psin_count=1,
+        F_count=0,
+        c_counts=(),
+        s_counts=(),
+    )
+    sample = make_sample(
+        topology=topology_from_pareto_signature(topology, signature),
+        counts=5,
+        time=1.0,
+        complexity=5.0,
+        shape_error=0.1,
+    )
+
+    neighbors = generate_adaptive_refinement_signatures(
+        topology,
+        frontier=(sample,),
+        seen_signatures={KernelParetoSignature.from_topology(topology), signature},
+        max_candidates=10,
+    )
+
+    assert neighbors
+    assert signature not in neighbors
+    assert len(neighbors) == len(set(neighbors))
+    assert all(neighbor.psin_count >= 1 for neighbor in neighbors)
+    assert any(neighbor.h_count == 1 for neighbor in neighbors)
+    assert any(neighbor.h_count == 3 for neighbor in neighbors)
+
+
 def test_numba_pareto_r_sampler_matches_equilibrium_without_history_mutation() -> None:
     topology = make_topology()
     kernel = Kernel(topology=topology, recipe=KernelRecipe(backend="numba"))
@@ -354,17 +390,48 @@ def test_kernel_pareto_cost_axes_and_metrics_are_accepted(pareto_by: str, metric
     assert 1.0e6 in result.selected
 
 
-def test_kernel_pareto_rejects_adaptive_until_refinement_phase() -> None:
-    kernel = Kernel(topology=make_topology(), recipe=KernelRecipe(backend="numba"))
+def test_kernel_pareto_adaptive_uses_seed_budget_for_small_searches() -> None:
+    kernel = Kernel(
+        topology=make_topology(h_count=3, v_count=2, kappa_count=1, psin_count=2),
+        recipe=KernelRecipe(backend="numba"),
+    )
 
-    with pytest.raises(NotImplementedError, match="adaptive"):
-        kernel.pareto(
-            tiny_boundary(),
-            tiny_source(),
-            config=pareto_smoke_config(),
-            strategy="adaptive",
-            max_candidates=1,
-        )
+    result = kernel.pareto(
+        tiny_boundary(),
+        tiny_source(),
+        config=pareto_smoke_config(),
+        strategy="adaptive",
+        max_candidates=1,
+        max_shape_error=1.0e6,
+    )
+
+    assert adaptive_seed_candidate_count(1) == 1
+    assert len(result.samples) == 1
+    assert len({sample.signature for sample in result.samples}) == len(result.samples)
+    assert 1.0e6 in result.selected
+
+
+def test_kernel_pareto_adaptive_refines_after_seed_frontier() -> None:
+    max_candidates = 5
+    kernel = Kernel(
+        topology=make_topology(h_count=4, v_count=3, kappa_count=2, psin_count=3),
+        recipe=KernelRecipe(backend="numba"),
+    )
+
+    result = kernel.pareto(
+        tiny_boundary(),
+        tiny_source(),
+        config=pareto_smoke_config(),
+        strategy="adaptive",
+        max_candidates=max_candidates,
+        max_shape_error=1.0e6,
+    )
+
+    assert adaptive_seed_candidate_count(max_candidates) == 3
+    assert len(result.samples) > 3
+    assert len(result.samples) <= max_candidates
+    assert len({sample.signature for sample in result.samples}) == len(result.samples)
+    assert result.frontier
 
 
 def test_kernel_pareto_is_numba_only_for_now() -> None:

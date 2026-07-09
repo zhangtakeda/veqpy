@@ -204,6 +204,53 @@ def generate_pareto_signatures(
     return _unique_candidate_signatures(capacity_topology, candidates)[:candidate_limit]
 
 
+def adaptive_seed_candidate_count(max_candidates: int) -> int:
+    candidate_limit = normalize_pareto_max_candidates(max_candidates)
+    if candidate_limit == 0:
+        return 0
+    return max(1, int(np.ceil(0.6 * candidate_limit)))
+
+
+def generate_adaptive_refinement_signatures(
+    capacity_topology: KernelTopology,
+    *,
+    frontier: Sequence[ParetoSample],
+    seen_signatures: set[KernelParetoSignature],
+    max_candidates: int,
+) -> tuple[KernelParetoSignature, ...]:
+    candidate_limit = normalize_pareto_max_candidates(max_candidates)
+    if candidate_limit == 0:
+        return ()
+    names = _active_count_names(capacity_topology)
+    reference_counts = _count_map_from_signature(
+        KernelParetoSignature.from_topology(capacity_topology)
+    )
+    minimums = _minimum_counts_by_name(capacity_topology)
+    candidates: list[KernelParetoSignature] = []
+    seen = set(seen_signatures)
+
+    for sample in frontier:
+        counts = _count_map_from_signature(sample.signature)
+        for name in names:
+            current = counts.get(name, 0)
+            original = reference_counts.get(name, 0)
+            for delta in (-1, 1):
+                trial_count = min(original, max(minimums.get(name, 0), current + delta))
+                if trial_count == current:
+                    continue
+                trial = dict(counts)
+                trial[name] = trial_count
+                _ensure_one_active_count(trial, reference_counts, minimums)
+                signature = _signature_from_count_map(capacity_topology, trial)
+                if signature in seen:
+                    continue
+                seen.add(signature)
+                candidates.append(signature)
+                if len(candidates) >= candidate_limit:
+                    return tuple(candidates)
+    return tuple(candidates)
+
+
 def pareto_shape_error(reference_R: np.ndarray, candidate_R: np.ndarray, *, metric: str) -> float:
     metric_name = normalize_pareto_metric(metric)
     reference = np.asarray(reference_R, dtype=np.float64)

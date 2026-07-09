@@ -20,7 +20,9 @@ from veqpy.kernels.pareto import (
     KernelParetoSignature,
     ParetoResult,
     ParetoSample,
+    adaptive_seed_candidate_count,
     coefficient_blocks_from_packed_state,
+    generate_adaptive_refinement_signatures,
     generate_pareto_signatures,
     normalize_pareto_by,
     normalize_pareto_max_candidates,
@@ -200,8 +202,6 @@ class _NumbaKernelImpl:
     ) -> ParetoResult:
         pareto_by_name = normalize_pareto_by(pareto_by)
         strategy_name = normalize_pareto_strategy(strategy)
-        if strategy_name == "adaptive":
-            raise NotImplementedError("strategy='adaptive' will be enabled in the next phase")
         metric_name = normalize_pareto_metric(metric)
         candidate_limit = normalize_pareto_max_candidates(max_candidates)
         thresholds = normalize_shape_error_thresholds(max_shape_error)
@@ -244,38 +244,66 @@ class _NumbaKernelImpl:
                 profile_L=self._solver.runtime.plan.profile_L,
                 coeff_index=self._solver.runtime.plan.coeff_index,
             )
-            signatures = generate_pareto_signatures(
-                saved_topology,
-                strategy=strategy_name,
-                coefficients_by_profile=coefficient_blocks,
-                max_candidates=candidate_limit,
-            )
-
             samples: list[ParetoSample] = []
-            for signature in signatures:
-                candidate_topology = topology_from_pareto_signature(saved_topology, signature)
-                self._activate_pareto_topology(candidate_topology)
-                result = self._solve_pareto_case(
-                    kernel_boundary,
-                    kernel_source,
-                    kernel_config,
+            if strategy_name == "adaptive":
+                seed_limit = adaptive_seed_candidate_count(candidate_limit)
+                seed_signatures = generate_pareto_signatures(
+                    saved_topology,
+                    strategy=strategy_name,
+                    coefficients_by_profile=coefficient_blocks,
+                    max_candidates=seed_limit,
                 )
-                candidate_R = sample_r_surface(
-                    self._solver.runtime,
-                    result.x,
-                    kernel_boundary,
-                    kernel_source,
+                samples.extend(
+                    self._solve_pareto_signatures(
+                        seed_signatures,
+                        capacity_topology=saved_topology,
+                        boundary=kernel_boundary,
+                        source=kernel_source,
+                        config=kernel_config,
+                        reference_R=reference_R,
+                        metric=metric_name,
+                    )
                 )
-                samples.append(
-                    self._pareto_sample_from_result(
-                        candidate_topology,
-                        signature,
-                        result,
-                        shape_error=pareto_shape_error(
-                            reference_R,
-                            candidate_R,
+                remaining = candidate_limit - len(samples)
+                if remaining > 0:
+                    preliminary_frontier = pareto_frontier(
+                        (reference_sample, *samples),
+                        pareto_by=pareto_by_name,
+                    )
+                    seen = {reference_signature, *(sample.signature for sample in samples)}
+                    refinement_signatures = generate_adaptive_refinement_signatures(
+                        saved_topology,
+                        frontier=preliminary_frontier,
+                        seen_signatures=seen,
+                        max_candidates=remaining,
+                    )
+                    samples.extend(
+                        self._solve_pareto_signatures(
+                            refinement_signatures,
+                            capacity_topology=saved_topology,
+                            boundary=kernel_boundary,
+                            source=kernel_source,
+                            config=kernel_config,
+                            reference_R=reference_R,
                             metric=metric_name,
-                        ),
+                        )
+                    )
+            else:
+                signatures = generate_pareto_signatures(
+                    saved_topology,
+                    strategy=strategy_name,
+                    coefficients_by_profile=coefficient_blocks,
+                    max_candidates=candidate_limit,
+                )
+                samples.extend(
+                    self._solve_pareto_signatures(
+                        signatures,
+                        capacity_topology=saved_topology,
+                        boundary=kernel_boundary,
+                        source=kernel_source,
+                        config=kernel_config,
+                        reference_R=reference_R,
+                        metric=metric_name,
                     )
                 )
 
@@ -303,6 +331,46 @@ class _NumbaKernelImpl:
             self._last_boundary = saved_last_boundary
             self._last_source = saved_last_source
             self._prepare_result = saved_prepare_result
+
+    def _solve_pareto_signatures(
+        self,
+        signatures: Sequence[KernelParetoSignature],
+        *,
+        capacity_topology: KernelTopology,
+        boundary: KernelBoundary,
+        source: KernelSource,
+        config: KernelConfig,
+        reference_R: np.ndarray,
+        metric: str,
+    ) -> list[ParetoSample]:
+        samples: list[ParetoSample] = []
+        for signature in signatures:
+            candidate_topology = topology_from_pareto_signature(capacity_topology, signature)
+            self._activate_pareto_topology(candidate_topology)
+            result = self._solve_pareto_case(
+                boundary,
+                source,
+                config,
+            )
+            candidate_R = sample_r_surface(
+                self._solver.runtime,
+                result.x,
+                boundary,
+                source,
+            )
+            samples.append(
+                self._pareto_sample_from_result(
+                    candidate_topology,
+                    signature,
+                    result,
+                    shape_error=pareto_shape_error(
+                        reference_R,
+                        candidate_R,
+                        metric=metric,
+                    ),
+                )
+            )
+        return samples
 
     def residual(self, x: Any, boundary: KernelBoundary, source: KernelSource) -> np.ndarray:
         out = np.empty(self.x_size, dtype=np.float64)
