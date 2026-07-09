@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from numpy.testing import assert_allclose
 
+from veqpy import Kernel, KernelBoundary, KernelRecipe, KernelSource
+from veqpy.kernels.numba_kernel.pareto_runtime import sample_r_surface
 from veqpy.kernels.pareto import (
     KernelParetoSignature,
     ParetoSample,
@@ -13,6 +16,7 @@ from veqpy.kernels.pareto import (
     normalize_shape_error_thresholds,
     pareto_frontier,
     pareto_sample_complexity,
+    pareto_shape_error,
     select_pareto_thresholds,
 )
 from veqpy.kernels.types import KernelTopology, SolveResult
@@ -65,6 +69,26 @@ def make_result(
         raw=x.copy(),
         scaled=x.copy(),
         alpha=np.zeros(2, dtype=np.float64),
+    )
+
+
+def tiny_boundary() -> KernelBoundary:
+    return KernelBoundary(
+        a=0.5,
+        R0=1.0,
+        Z0=0.0,
+        B0=3.0,
+        ka=1.7,
+        s_offsets=(float(np.arcsin(0.2)),),
+    )
+
+
+def tiny_source() -> KernelSource:
+    psin = np.linspace(0.0, 1.0, 8, dtype=np.float64)
+    return KernelSource(
+        heat_profile=1.0e6 + 0.2e6 * psin,
+        current_profile=1.0 + 0.1 * psin,
+        Ip=3.0e6,
     )
 
 
@@ -127,6 +151,42 @@ def test_pareto_sample_complexity_uses_fixed_formula() -> None:
     nx = topology.x_size
     expected = 3 * nx + (2 + 1 + 4) * nx * nx
     assert pareto_sample_complexity(result, topology) == float(expected)
+
+
+def test_pareto_shape_error_measures_r_surface_in_meters() -> None:
+    reference = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float64)
+    candidate = np.array([[2.0, 1.0], [5.0, 2.0]], dtype=np.float64)
+
+    assert pareto_shape_error(reference, candidate, metric="rms") == pytest.approx(np.sqrt(2.5))
+    assert pareto_shape_error(reference, candidate, metric="max") == 2.0
+
+    with pytest.raises(ValueError, match="shape mismatch"):
+        pareto_shape_error(reference, candidate[:, :1], metric="rms")
+
+
+def test_numba_pareto_r_sampler_matches_equilibrium_without_history_mutation() -> None:
+    topology = make_topology()
+    kernel = Kernel(topology=topology, recipe=KernelRecipe(backend="numba"))
+    boundary = tiny_boundary()
+    source = tiny_source()
+    x = np.zeros(kernel.x_size, dtype=np.float64)
+
+    kernel.residual(x, boundary, source)
+    assert kernel.result is None
+    assert kernel.history == []
+
+    impl = kernel._impl
+    r_surface = sample_r_surface(
+        impl._solver.runtime,
+        x,
+        impl._kernel_boundary(boundary),
+        impl._kernel_source(source, case_name=None),
+    )
+    equilibrium = kernel.build_equilibrium(x)
+
+    assert_allclose(r_surface, equilibrium.R)
+    assert kernel.result is None
+    assert kernel.history == []
 
 
 def test_pareto_frontier_filters_failed_and_dominated_samples() -> None:

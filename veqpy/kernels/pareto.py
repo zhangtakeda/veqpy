@@ -133,6 +133,22 @@ def pareto_sample_complexity(result: SolveResult, topology: KernelTopology) -> f
     )
 
 
+def pareto_shape_error(reference_R: np.ndarray, candidate_R: np.ndarray, *, metric: str) -> float:
+    metric_name = normalize_pareto_metric(metric)
+    reference = np.asarray(reference_R, dtype=np.float64)
+    candidate = np.asarray(candidate_R, dtype=np.float64)
+    if reference.shape != candidate.shape:
+        raise ValueError(
+            f"R surface shape mismatch: reference {reference.shape}, candidate {candidate.shape}"
+        )
+    if reference.size == 0:
+        raise ValueError("R surfaces must be non-empty")
+    diff = candidate - reference
+    if metric_name == "rms":
+        return float(np.sqrt(np.mean(diff * diff)))
+    return float(np.max(np.abs(diff)))
+
+
 def pareto_frontier(
     samples: Sequence[ParetoSample],
     *,
