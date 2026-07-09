@@ -47,6 +47,12 @@ class NumbaSolver:
         self.topology = topology
         self.runtime = NumbaRuntime(topology)
 
+    def variant(self, topology: KernelTopology) -> bool:
+        if self.runtime.variant(topology):
+            self.topology = topology
+            return True
+        return False
+
     def residual_into(
         self,
         out: np.ndarray,

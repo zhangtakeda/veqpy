@@ -20,6 +20,7 @@ from veqpy.kernels.types import (
     KernelTopology,
     kernel_boundary_s_offsets_with_s0,
 )
+from veqpy.kernels.variant import topology_counts_contained_by_capacity
 from veqpy.model import Grid
 from veqpy.numerics import (
     SOURCE_INTERP_DEFAULT,
@@ -189,6 +190,8 @@ class NumbaRuntime:
         fix_rho: float = 0.05,
         source_interpolation_kind: str = SOURCE_INTERP_DEFAULT,
     ) -> None:
+        self.capacity_topology = topology
+        self.active_topology = topology
         self.topology = topology
         self.fix_rho = float(fix_rho)
         self.source_interpolation_kind = source_interpolation_kind
@@ -222,6 +225,26 @@ class NumbaRuntime:
     @property
     def alpha(self) -> np.ndarray:
         return self.source_workspace.alpha_state
+
+    def contains(self, topology: KernelTopology) -> bool:
+        return topology_counts_contained_by_capacity(topology, self.capacity_topology)
+
+    def variant(self, topology: KernelTopology) -> bool:
+        if not self.contains(topology):
+            return False
+        self.active_topology = topology
+        self.topology = topology
+        self.plan = _build_kernel_runtime_plan(
+            topology,
+            source_interpolation_kind=self.source_interpolation_kind,
+            grid_workspace=self.plan.grid_workspace,
+        )
+        self.profile_workspace.configure_active_metadata(self.plan.active_profile_ids)
+        self.layout = KernelLayout.empty(self.plan.x_size)
+        self.c_effective_order = 0
+        self.s_effective_order = 0
+        self._case = None
+        return True
 
     def zero_state(self) -> np.ndarray:
         return np.zeros(self.plan.x_size, dtype=np.float64)
@@ -464,18 +487,20 @@ def _build_kernel_runtime_plan(
     topology: KernelTopology,
     *,
     source_interpolation_kind: str,
+    grid_workspace: GridWorkspace | None = None,
 ) -> KernelRuntimePlan:
-    grid_workspace = GridWorkspace.from_grid(
-        Grid(
-            Nr=topology.Nr,
-            Nt=topology.Nt,
-            L_max=topology.L_max,
-            M_max=topology.M_max,
-            K_max=topology.K_max,
-            quadrature_scheme=topology.quadrature,
-            calculus_scheme=topology.calculus,
+    if grid_workspace is None:
+        grid_workspace = GridWorkspace.from_grid(
+            Grid(
+                Nr=topology.Nr,
+                Nt=topology.Nt,
+                L_max=topology.L_max,
+                M_max=topology.M_max,
+                K_max=topology.K_max,
+                quadrature_scheme=topology.quadrature,
+                calculus_scheme=topology.calculus,
+            )
         )
-    )
     prefix_profile_names = get_prefix_profile_names()
     shape_profile_names = build_shape_profile_names(grid_workspace.M_max)
     profile_names = build_profile_names(grid_workspace.M_max)
