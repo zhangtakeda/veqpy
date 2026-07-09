@@ -6,8 +6,11 @@ The public runtime entrypoint is the Kernel API:
 from veqpy import Kernel, KernelBoundary, KernelConfig, KernelRecipe, KernelSource, KernelTopology
 ```
 
-`KernelTopology` fixes the packed coefficient topology, grid size, source route,
-coordinate system, node semantics, and source constraints. `KernelBoundary` and
+`KernelTopology` fixes the active packed coefficient counts, grid size, source
+route, coordinate system, node semantics, source constraints, and capacity
+limits. Active count fields determine the public packed vector size. `L_max`,
+`M_max`, and `K_max` are setup/capacity limits: explicit values may exceed the
+minimal active-count requirement, but may not be smaller. `KernelBoundary` and
 `KernelSource` carry per-case physical inputs. `KernelConfig` carries nonlinear
 solve policy. `Kernel.solve(...)` returns a shared `SolveResult`, and
 `Kernel.build_equilibrium()` materializes the current `Equilibrium` snapshot.
@@ -55,3 +58,36 @@ finite-difference numerical queries over the same residual runtime.
 Warm continuation is handle-local: after a solve, the next `Kernel.solve(...)`
 can reuse the previous solution when the continuation policy is warm. Use
 `kernel.clear()` to drop the stored result and history.
+
+## Topology Variants
+
+`Kernel.variant(...)` is for multi-topology count sweeps on Numba-backed
+handles: within fixed setup and capacity limits, it switches the active
+topology counts without rebuilding fixed grid, capacity workspace, and compiled
+runtime state. It is an in-place state switch that returns the same `Kernel`
+object and constructs a fresh immutable `KernelTopology`; previously saved
+topology objects are not mutated.
+
+Only active count fields may be changed:
+
+```python
+kernel.variant(
+    h_count=6,
+    c_counts=(2, 1),
+)
+```
+
+Omitted arguments and explicit `None` inherit the current active count.
+`variant()` does not change fixed setup or capacity fields such as
+`Nr/Nt/route/coordinate/nodes/sample_count/ip_constraint/beta_constraint`,
+`quadrature`, `calculus`, `L_max`, `M_max`, or `K_max`. New counts must fit the
+current capacity limits: radial counts require `count <= L_max + 1`, cosine
+orders require `order <= M_max`, and sine orders use the public s1-started
+indexing.
+
+Successful variants clear the current result, last runtime case, and prepare
+cache so old packed solutions cannot warm-start a different active layout.
+`history` is retained as a per-handle solve log and can contain entries from
+different active topologies and `x_size` values. `Kernel.variant()` is not
+thread-safe and must not run concurrently with solve, residual, derivative,
+prepare, or equilibrium snapshot calls.
