@@ -10,12 +10,14 @@ Notes:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from veqpy.kernels.pareto import ParetoResult
 from veqpy.kernels.types import (
     KernelBoundary,
     KernelConfig,
@@ -119,6 +121,33 @@ class Kernel:
             source,
             config=config,
             case_name=case_name,
+            **config_overrides,
+        )
+
+    def pareto(
+        self,
+        boundary: KernelBoundary,
+        source: KernelSource,
+        *,
+        config: KernelConfig | None = None,
+        case_name: str | None = None,
+        max_shape_error: float | Sequence[float] | None = None,
+        pareto_by: str = "counts",
+        strategy: str = "tail",
+        metric: str = "rms",
+        max_candidates: int = 500,
+        **config_overrides: Any,
+    ) -> ParetoResult:
+        return self._impl.pareto(
+            boundary,
+            source,
+            config=config,
+            case_name=case_name,
+            max_shape_error=max_shape_error,
+            pareto_by=pareto_by,
+            strategy=strategy,
+            metric=metric,
+            max_candidates=max_candidates,
             **config_overrides,
         )
 

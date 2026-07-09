@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from numpy.testing import assert_allclose
 
-from veqpy import Kernel, KernelBoundary, KernelRecipe, KernelSource
+from veqpy import Kernel, KernelBoundary, KernelConfig, KernelRecipe, KernelSource
 from veqpy.kernels.numba_kernel.pareto_runtime import sample_r_surface
 from veqpy.kernels.pareto import (
     KernelParetoSignature,
@@ -288,6 +288,90 @@ def test_numba_pareto_r_sampler_matches_equilibrium_without_history_mutation() -
     assert_allclose(r_surface, equilibrium.R)
     assert kernel.result is None
     assert kernel.history == []
+
+
+def pareto_smoke_config() -> KernelConfig:
+    return KernelConfig(
+        method="powell",
+        initial="cold-zeros",
+        norm="none",
+        max_residual=1.0e12,
+        max_evaluations=1,
+    )
+
+
+def test_kernel_pareto_balanced_runs_and_restores_public_state() -> None:
+    topology = make_topology(h_count=4, v_count=3, kappa_count=2, psin_count=3)
+    kernel = Kernel(topology=topology, recipe=KernelRecipe(backend="numba"))
+    boundary = tiny_boundary()
+    source = tiny_source()
+    config = pareto_smoke_config()
+    existing = kernel.solve(boundary, source, config=config)
+    history_before = list(kernel.history)
+
+    result = kernel.pareto(
+        boundary,
+        source,
+        config=config,
+        max_shape_error=[1.0e6],
+        pareto_by="counts",
+        strategy="balanced",
+        metric="rms",
+        max_candidates=3,
+    )
+
+    assert result.reference.shape_error == 0.0
+    assert len(result.samples) <= 3
+    assert result.frontier
+    assert result.selected[1.0e6].result.success
+    assert result.pareto_by == "counts"
+    assert result.metric == "rms"
+    assert result.strategy == "balanced"
+    assert kernel.topology == topology
+    assert kernel.result is existing
+    assert kernel.history == history_before
+
+
+@pytest.mark.parametrize("pareto_by", ["counts", "time", "complexity"])
+@pytest.mark.parametrize("metric", ["rms", "max"])
+def test_kernel_pareto_cost_axes_and_metrics_are_accepted(pareto_by: str, metric: str) -> None:
+    topology = make_topology(h_count=3, v_count=2, kappa_count=1, psin_count=2)
+    kernel = Kernel(topology=topology, recipe=KernelRecipe(backend="numba"))
+    result = kernel.pareto(
+        tiny_boundary(),
+        tiny_source(),
+        config=pareto_smoke_config(),
+        max_shape_error=1.0e6,
+        pareto_by=pareto_by,
+        strategy="balanced",
+        metric=metric,
+        max_candidates=1,
+    )
+
+    assert result.pareto_by == pareto_by
+    assert result.metric == metric
+    assert len(result.samples) <= 1
+    assert 1.0e6 in result.selected
+
+
+def test_kernel_pareto_rejects_adaptive_until_refinement_phase() -> None:
+    kernel = Kernel(topology=make_topology(), recipe=KernelRecipe(backend="numba"))
+
+    with pytest.raises(NotImplementedError, match="adaptive"):
+        kernel.pareto(
+            tiny_boundary(),
+            tiny_source(),
+            config=pareto_smoke_config(),
+            strategy="adaptive",
+            max_candidates=1,
+        )
+
+
+def test_kernel_pareto_is_numba_only_for_now() -> None:
+    kernel = Kernel(topology=make_topology(), recipe=KernelRecipe(backend="cxx"))
+
+    with pytest.raises(NotImplementedError, match="Numba backend"):
+        kernel.pareto(tiny_boundary(), tiny_source(), config=pareto_smoke_config())
 
 
 def test_pareto_frontier_filters_failed_and_dominated_samples() -> None:

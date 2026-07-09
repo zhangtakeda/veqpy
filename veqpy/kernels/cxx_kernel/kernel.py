@@ -7,11 +7,12 @@ Role:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from contextlib import AbstractContextManager
 from dataclasses import replace
 from pathlib import Path
 from time import perf_counter
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NoReturn
 
 import numpy as np
 
@@ -137,6 +138,34 @@ class _CxxKernelImpl:
         )
         self.history[-1] = self.result
         return self.result
+
+    def pareto(
+        self,
+        boundary: KernelBoundary,
+        source: KernelSource,
+        *,
+        config: KernelConfig | None = None,
+        case_name: str | None = None,
+        max_shape_error: float | Sequence[float] | None = None,
+        pareto_by: str = "counts",
+        strategy: str = "tail",
+        metric: str = "rms",
+        max_candidates: int = 500,
+        **config_overrides: Any,
+    ) -> NoReturn:
+        del (
+            boundary,
+            source,
+            config,
+            case_name,
+            max_shape_error,
+            pareto_by,
+            strategy,
+            metric,
+            max_candidates,
+            config_overrides,
+        )
+        raise NotImplementedError("Kernel.pareto is currently supported only by the Numba backend")
 
     # Raw numerical APIs use the handle default config to install the native
     # current-case context required before residual/JVP/Jacobian kernels run.

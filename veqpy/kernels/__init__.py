@@ -27,6 +27,7 @@ from __future__ import annotations
 
 from .errors import TopologyError
 from .kernel import Kernel
+from .pareto import KernelParetoSignature, ParetoResult, ParetoSample
 from .types import (
     KernelBoundary,
     KernelConfig,
@@ -46,6 +47,9 @@ __all__ = [
     "KernelRecipe",
     "KernelSource",
     "KernelTopology",
+    "KernelParetoSignature",
+    "ParetoResult",
+    "ParetoSample",
     "SolveResult",
     "TopologyError",
     "config_with_overrides",
