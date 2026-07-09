@@ -1,191 +1,190 @@
 #!/usr/bin/env python3
-"""Numba Kernel.pareto() smoke run on a tiny synthetic topology."""
+"""Numba Kernel.pareto() screening benchmark on GEQDSK Ref topologies."""
 
 from __future__ import annotations
 
 import argparse
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 from rich.table import Table
 from rich.text import Text
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from benchmarks._common import REPO_ROOT, cpu_affinity, runtime_env, write_json
+from benchmarks._common import (
+    CASE_KEYS,
+    REFERENCE_LAYOUT_NR,
+    REFERENCE_LAYOUT_NT,
+    REPO_ROOT,
+    RouteBenchmarkSpec,
+    cpu_affinity,
+    geqdsk_kernel_case,
+    runtime_env,
+    selected_cases,
+    topology_profile_counts,
+    write_json,
+)
 from benchmarks._reporting import (
     REPORT_TABLE_BOX,
     format_optional_float,
     format_optional_sci,
     print_config_tree,
     print_outputs_tree,
+    progress_context,
+    progress_phase,
     status_cell,
 )
 from benchmarks._reporting import (
     console as reporting_console,
 )
-from veqpy import Kernel, KernelBoundary, KernelConfig, KernelRecipe, KernelSource, KernelTopology
+from veqpy import Kernel, KernelRecipe, KernelTopology
 from veqpy.kernels.pareto import ParetoResult, ParetoSample
 
 DEFAULT_OUTPUT = REPO_ROOT / "benchmarks" / "results" / "numba_pareto.json"
-MU0 = 4.0e-7 * np.pi
+DEFAULT_THRESHOLD_SCALES = (1.0e-2, 5.0e-3, 1.0e-3)
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = _parse_args(argv)
-    console = reporting_console()
-    if not args.quiet_progress:
-        print_config_tree(
-            console,
-            (
-                "purpose: [green]Kernel.pareto smoke/provenance check[/]",
-                "backend: [green]numba[/]",
-                "case: [green]tiny synthetic PF/psin/uniform[/]",
-                f"strategy: [green]{args.strategy}[/]",
-                f"metric: [green]{args.metric}[/]",
-                f"pareto_by: [green]{args.pareto_by}[/]",
-                f"max candidates: [green]{args.max_candidates}[/]",
-            ),
-        )
-        console.print()
-    kernel = Kernel(
-        topology=_topology(),
-        recipe=KernelRecipe(backend="numba", layout="degree"),
-        config=_config(),
+def _run_case(
+    args: argparse.Namespace,
+    case_key: str,
+    threshold_scales: tuple[float, ...],
+) -> dict[str, Any]:
+    route_spec = RouteBenchmarkSpec("PF", "psin", "uniform", "Ip")
+    kernel_case = geqdsk_kernel_case(
+        case_key,
+        "Ref",
+        route_spec=route_spec,
+        nr=args.nr,
+        nt=args.nt,
+        max_evaluations=args.max_evaluations,
     )
+    thresholds = _thresholds_for_boundary(kernel_case.boundary.a, threshold_scales)
+    row = _planned_row(case_key, kernel_case.topology, thresholds)
+    kernel = None
+    started = time.perf_counter_ns()
     try:
+        kernel = Kernel(
+            topology=kernel_case.topology,
+            recipe=KernelRecipe(backend="numba", layout="degree"),
+            config=kernel_case.config,
+        )
         result = kernel.pareto(
-            _boundary(),
-            _source(),
-            config=_config(),
-            max_shape_error=tuple(args.max_shape_error),
+            kernel_case.boundary,
+            kernel_case.source,
+            config=kernel_case.config,
+            max_shape_error=tuple(threshold["meters"] for threshold in thresholds),
             pareto_by=args.pareto_by,
             strategy=args.strategy,
             metric=args.metric,
             max_candidates=args.max_candidates,
         )
+        elapsed_ms = float(time.perf_counter_ns() - started) / 1.0e6
+        row["runtime"] = _runtime_payload(result, thresholds, elapsed_ms)
+    except Exception as exc:
+        elapsed_ms = float(time.perf_counter_ns() - started) / 1.0e6
+        row["runtime"] = {
+            "status": "failed",
+            "failure_reason": "exception",
+            "error": f"{type(exc).__name__}: {exc}",
+            "elapsed_ms": elapsed_ms,
+        }
     finally:
-        kernel.close()
-
-    payload = _payload(result, args)
-    if not args.no_write:
-        write_json(args.output, payload)
-        if not args.quiet_progress:
-            print_outputs_tree(console, {"json": args.output}, repo_root=REPO_ROOT)
-            console.print()
-    _print_summary(console, payload)
-    return 0
+        if kernel is not None:
+            kernel.close()
+    return row
 
 
-def _parse_args(argv: list[str] | None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--strategy",
-        choices=("tail", "energy", "adaptive", "balanced"),
-        default="adaptive",
-    )
-    parser.add_argument("--metric", choices=("rms", "max"), default="rms")
-    parser.add_argument("--pareto-by", choices=("counts", "time", "complexity"), default="counts")
-    parser.add_argument("--max-candidates", type=int, default=8)
-    parser.add_argument(
-        "--max-shape-error",
-        action="append",
-        type=float,
-        default=[1.0e-3, 5.0e-4],
-        help="Major-radius error threshold in meters; may be repeated.",
-    )
-    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
-    parser.add_argument("--no-write", action="store_true")
-    parser.add_argument("--quiet-progress", action="store_true", help=argparse.SUPPRESS)
-    return parser.parse_args(argv)
-
-
-def _topology() -> KernelTopology:
-    return KernelTopology(
-        h_count=4,
-        v_count=3,
-        kappa_count=2,
-        psin_count=3,
-        F_count=0,
-        c_counts=(2, 1),
-        s_counts=(2,),
-        Nr=8,
-        Nt=8,
-        route="PF",
-        coordinate="psin",
-        nodes="uniform",
-        ip_constraint=True,
-        sample_count=8,
-    )
-
-
-def _boundary() -> KernelBoundary:
-    return KernelBoundary(
-        a=0.5,
-        R0=1.0,
-        Z0=0.0,
-        B0=3.0,
-        ka=1.7,
-        c_offsets=(0.02, 0.01),
-        s_offsets=(float(np.arcsin(0.2)),),
-    )
-
-
-def _source() -> KernelSource:
-    psin = np.linspace(0.0, 1.0, 8, dtype=np.float64)
-    current = 1.0 + 0.1 * psin
-    heat = 1.0e6 + 0.2e6 * psin
-    return KernelSource(
-        heat_profile=heat / MU0,
-        current_profile=current,
-        Ip=3.0e6,
-    )
-
-
-def _config() -> KernelConfig:
-    return KernelConfig(
-        method="powell",
-        initial="cold-zeros",
-        norm="none",
-        max_residual=1.0e12,
-        max_evaluations=1,
-    )
-
-
-def _payload(result: ParetoResult, args: argparse.Namespace) -> dict[str, Any]:
+def _planned_row(
+    case_key: str,
+    topology: KernelTopology,
+    thresholds: tuple[dict[str, float], ...],
+) -> dict[str, Any]:
     return {
-        "schema": "veqpy.numba.pareto_smoke.v1",
-        "cpu_affinity": cpu_affinity(),
-        "env": runtime_env(),
-        "run_note": (
-            "Tiny synthetic smoke run for Kernel.pareto() contract and JSON shape. "
-            "This is not a GEQDSK performance matrix or a stable timing benchmark."
-        ),
-        "args": {
-            "strategy": args.strategy,
-            "metric": args.metric,
-            "pareto_by": args.pareto_by,
-            "max_candidates": int(args.max_candidates),
-            "max_shape_error": [float(value) for value in args.max_shape_error],
+        "case": case_key,
+        "config": "Ref",
+        "route": "PF_psin_uniform_Ip",
+        "capacity": _topology_payload(topology),
+        "thresholds": list(thresholds),
+        "runtime": {"status": "not_requested"},
+    }
+
+
+def _topology_payload(topology: KernelTopology) -> dict[str, Any]:
+    return {
+        "key": topology.key,
+        "x_size": int(topology.x_size),
+        "profile_counts": topology_profile_counts(topology),
+        "grid": {
+            "Nr": int(topology.Nr),
+            "Nt": int(topology.Nt),
+            "L_max": int(topology.L_max),
+            "M_max": int(topology.M_max),
+            "K_max": int(topology.K_max),
         },
+        "sample_count": int(topology.sample_count),
+    }
+
+
+def _thresholds_for_boundary(
+    minor_radius: float,
+    scales: tuple[float, ...],
+) -> tuple[dict[str, float], ...]:
+    return tuple(
+        {"scale": float(scale), "meters": float(scale) * float(minor_radius)}
+        for scale in scales
+    )
+
+
+def _runtime_payload(
+    result: ParetoResult,
+    thresholds: tuple[dict[str, float], ...],
+    elapsed_ms: float,
+) -> dict[str, Any]:
+    candidate_count = len(result.samples)
+    valid_count = sum(1 for sample in result.samples if sample.result.success)
+    reference_ms = float(result.reference.time)
+    candidate_solve_ms = float(sum(sample.time for sample in result.samples))
+    solver_elapsed_ms = reference_ms + candidate_solve_ms
+    selected = {
+        f"{threshold['scale']:.16g}": _sample_payload(
+            result.selected[threshold["meters"]]
+        )
+        for threshold in thresholds
+        if threshold["meters"] in result.selected
+    }
+    return {
+        "status": "passed" if result.reference.result.success else "failed",
+        "elapsed_ms": float(elapsed_ms),
+        "reference_solve_ms": reference_ms,
+        "candidate_solve_ms": candidate_solve_ms,
+        "solver_elapsed_ms": solver_elapsed_ms,
+        "overhead_ms": float(elapsed_ms) - solver_elapsed_ms,
+        "candidate_count": int(candidate_count),
+        "valid_candidate_count": int(valid_count),
+        "frontier_count": int(len(result.frontier)),
+        "evaluations_per_second": _evaluations_per_second(candidate_count, elapsed_ms),
         "reference": _sample_payload(result.reference),
         "samples": [_sample_payload(sample) for sample in result.samples],
         "frontier": [_sample_payload(sample) for sample in result.frontier],
-        "selected": {
-            f"{threshold:.16g}": _sample_payload(sample)
-            for threshold, sample in result.selected.items()
-        },
+        "selected": selected,
     }
+
+
+def _evaluations_per_second(candidate_count: int, elapsed_ms: float) -> float:
+    if elapsed_ms <= 0.0:
+        return float("nan")
+    return 1000.0 * float(candidate_count) / float(elapsed_ms)
 
 
 def _sample_payload(sample: ParetoSample) -> dict[str, Any]:
     return {
         "signature": sample.signature.to_variant_kwargs(),
         "counts": int(sample.counts),
-        "time": float(sample.time),
+        "time_ms": float(sample.time),
         "complexity": int(sample.complexity),
         "shape_error": float(sample.shape_error),
         "success": bool(sample.result.success),
@@ -194,36 +193,181 @@ def _sample_payload(sample: ParetoSample) -> dict[str, Any]:
     }
 
 
-def _print_summary(console, payload: dict[str, Any]) -> None:
-    args = payload["args"]
-    console.print(
-        Text(
-            "Numba Pareto smoke: "
-            f"strategy={args['strategy']} metric={args['metric']} pareto_by={args['pareto_by']}",
-            style="bold cyan",
-        )
-    )
-    table = Table(box=REPORT_TABLE_BOX, show_lines=False, expand=False, padding=(0, 1))
-    table.add_column("role", no_wrap=True)
-    table.add_column("status", no_wrap=True)
-    table.add_column("counts", justify="right")
-    table.add_column(Text("time (ms)"), justify="right")
-    table.add_column("complexity", justify="right")
-    table.add_column(Text("R error (m)"), justify="right")
-    table.add_column("nfev", justify="right")
+def _summary(rows: list[dict[str, Any]]) -> dict[str, int]:
+    counts = {
+        "total": len(rows),
+        "runtime_passed": 0,
+        "runtime_failed": 0,
+        "runtime_not_requested": 0,
+    }
+    for row in rows:
+        status = row.get("runtime", {}).get("status")
+        if status == "passed":
+            counts["runtime_passed"] += 1
+        elif status == "failed":
+            counts["runtime_failed"] += 1
+        elif status == "not_requested":
+            counts["runtime_not_requested"] += 1
+    return counts
 
-    reference = payload["reference"]
-    for sample in payload["frontier"]:
-        table.add_row(
-            "ref" if sample["signature"] == reference["signature"] else "candidate",
-            status_cell("passed" if sample["success"] else "failed"),
-            str(sample["counts"]),
-            format_optional_float(sample["time"], precision=3),
-            str(sample["complexity"]),
-            format_optional_sci(sample["shape_error"]),
-            str(sample["nfev"]),
+
+def _print_summary(console, rows: list[dict[str, Any]]) -> None:
+    summary = Table(box=REPORT_TABLE_BOX, show_lines=False, expand=False, padding=(0, 1))
+    summary.add_column("case", no_wrap=True)
+    summary.add_column("status", no_wrap=True)
+    summary.add_column("ref x", justify="right")
+    summary.add_column("evals", justify="right")
+    summary.add_column("frontier", justify="right")
+    summary.add_column(Text("elapsed (ms)"), justify="right")
+    summary.add_column(Text("eval/s"), justify="right")
+
+    for row in rows:
+        runtime = row.get("runtime", {})
+        reference = runtime.get("reference", {})
+        summary.add_row(
+            str(row.get("case", "n/a")),
+            status_cell(runtime.get("status", "n/a")),
+            str(reference.get("counts", row.get("capacity", {}).get("x_size", "n/a"))),
+            str(runtime.get("candidate_count", "n/a")),
+            str(runtime.get("frontier_count", "n/a")),
+            format_optional_float(runtime.get("elapsed_ms"), precision=1),
+            format_optional_float(runtime.get("evaluations_per_second"), precision=2),
         )
-    console.print(table)
+    console.print(summary)
+    console.print()
+
+    selected_table = Table(box=REPORT_TABLE_BOX, show_lines=False, expand=False, padding=(0, 1))
+    selected_table.add_column("case", no_wrap=True)
+    selected_table.add_column("tol", justify="right")
+    selected_table.add_column(Text("tol (m)"), justify="right")
+    selected_table.add_column("x", justify="right")
+    selected_table.add_column("complexity", justify="right")
+    selected_table.add_column(Text("time (ms)"), justify="right")
+    selected_table.add_column(Text("R error (m)"), justify="right")
+    for row in rows:
+        selected = row.get("runtime", {}).get("selected", {})
+        thresholds = row.get("thresholds", [])
+        for threshold in thresholds:
+            scale = float(threshold["scale"])
+            sample = selected.get(f"{scale:.16g}")
+            selected_table.add_row(
+                str(row.get("case", "n/a")),
+                f"{scale:g} a",
+                format_optional_sci(threshold["meters"]),
+                str(sample["counts"]) if sample else "n/a",
+                str(sample["complexity"]) if sample else "n/a",
+                format_optional_float(sample["time_ms"], precision=3) if sample else "n/a",
+                format_optional_sci(sample["shape_error"]) if sample else "n/a",
+            )
+    console.print(selected_table)
+
+
+def _parse_args(argv: list[str] | None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--case", action="append", choices=CASE_KEYS)
+    parser.add_argument(
+        "--strategy",
+        choices=("tail", "energy", "adaptive", "balanced"),
+        default="adaptive",
+    )
+    parser.add_argument("--metric", choices=("rms", "max"), default="rms")
+    parser.add_argument("--pareto-by", choices=("counts", "time", "complexity"), default="counts")
+    parser.add_argument("--max-candidates", type=int, default=32)
+    parser.add_argument("--max-evaluations", type=int, default=400)
+    parser.add_argument("--nr", type=int, default=REFERENCE_LAYOUT_NR)
+    parser.add_argument("--nt", type=int, default=REFERENCE_LAYOUT_NT)
+    parser.add_argument(
+        "--threshold-scale",
+        action="append",
+        type=float,
+        default=None,
+        help="Shape-error tolerance as a fraction of boundary minor radius a; may be repeated.",
+    )
+    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument("--no-write", action="store_true")
+    parser.add_argument("--quiet-progress", action="store_true", help=argparse.SUPPRESS)
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(argv)
+    console = reporting_console()
+    case_keys = selected_cases(args.case)
+    threshold_scales = tuple(
+        float(scale) for scale in (args.threshold_scale or DEFAULT_THRESHOLD_SCALES)
+    )
+
+    if not args.quiet_progress:
+        print_config_tree(
+            console,
+            (
+                f"cases: [green]{', '.join(case_keys)}[/]",
+                "backend: [green]numba[/]",
+                "capacity: [green]GEQDSK Ref topology[/]",
+                "route: [green]PF/psin/uniform/Ip[/]",
+                f"grid: [green]{args.nr} x {args.nt}[/]",
+                f"strategy: [green]{args.strategy}[/]",
+                f"metric: [green]{args.metric}[/]",
+                f"pareto_by: [green]{args.pareto_by}[/]",
+                f"max candidates/case: [green]{args.max_candidates}[/]",
+                f"thresholds: [green]{', '.join(f'{scale:g}*a' for scale in threshold_scales)}[/]",
+            ),
+        )
+        console.print()
+        console.print(Text("[progress]", style="bold cyan"))
+
+    rows: list[dict[str, Any]] = []
+    with progress_context(console, quiet=args.quiet_progress) as progress:
+        task_id = None
+        if progress is not None:
+            task_id = progress.add_task(
+                "numba-pareto",
+                total=len(case_keys),
+                current="-",
+                phase="[cyan]run[/]",
+            )
+        for case_key in case_keys:
+            row = _run_case(args, case_key, threshold_scales)
+            rows.append(row)
+            if progress is not None and task_id is not None:
+                progress.update(
+                    task_id,
+                    current=case_key,
+                    phase=progress_phase(row.get("runtime", {}).get("status")),
+                )
+                progress.advance(task_id)
+
+    payload = {
+        "schema": "veqpy.numba.pareto_geqdsk.v1",
+        "cpu_affinity": cpu_affinity(),
+        "env": runtime_env(),
+        "run_note": (
+            "GEQDSK Ref-capacity Pareto screening benchmark. max_candidates is the "
+            "candidate solve budget per case and excludes the reference solve. "
+            "threshold_scale values are multiplied by each boundary minor radius a."
+        ),
+        "args": {
+            "cases": list(case_keys),
+            "strategy": args.strategy,
+            "metric": args.metric,
+            "pareto_by": args.pareto_by,
+            "max_candidates": int(args.max_candidates),
+            "max_evaluations": int(args.max_evaluations),
+            "nr": int(args.nr),
+            "nt": int(args.nt),
+            "threshold_scale": list(threshold_scales),
+        },
+        "summary": _summary(rows),
+        "rows": rows,
+    }
+    if not args.no_write:
+        write_json(args.output, payload)
+        if not args.quiet_progress:
+            console.print()
+            print_outputs_tree(console, {"json": args.output}, repo_root=REPO_ROOT)
+            console.print()
+    _print_summary(console, rows)
+    return 0
 
 
 if __name__ == "__main__":
