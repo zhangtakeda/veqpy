@@ -83,6 +83,28 @@ class Kernel:
     def prepare(self, *, force: bool = False, dry_run: bool = False) -> KernelPrepareResult:
         return self._impl.prepare(force=force, dry_run=dry_run)
 
+    def variant(
+        self,
+        *,
+        h_count: int | None = None,
+        v_count: int | None = None,
+        kappa_count: int | None = None,
+        psin_count: int | None = None,
+        F_count: int | None = None,
+        c_counts: tuple[int, ...] | None = None,
+        s_counts: tuple[int, ...] | None = None,
+    ) -> "Kernel":
+        self._impl.variant(
+            h_count=h_count,
+            v_count=v_count,
+            kappa_count=kappa_count,
+            psin_count=psin_count,
+            F_count=F_count,
+            c_counts=c_counts,
+            s_counts=s_counts,
+        )
+        return self
+
     def solve(
         self,
         boundary: KernelBoundary,

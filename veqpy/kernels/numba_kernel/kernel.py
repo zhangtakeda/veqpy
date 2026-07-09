@@ -24,6 +24,7 @@ from veqpy.kernels.types import (
     KernelTopology,
     SolveResult,
 )
+from veqpy.kernels.variant import build_kernel_variant_topology
 from veqpy.model import Equilibrium
 
 from .solver import NumbaSolver
@@ -95,6 +96,38 @@ class _NumbaKernelImpl:
         )
         self._prepare_result = prepared
         return prepared
+
+    def variant(
+        self,
+        *,
+        h_count: int | None = None,
+        v_count: int | None = None,
+        kappa_count: int | None = None,
+        psin_count: int | None = None,
+        F_count: int | None = None,
+        c_counts: tuple[int, ...] | None = None,
+        s_counts: tuple[int, ...] | None = None,
+    ) -> "_NumbaKernelImpl":
+        plan = build_kernel_variant_topology(
+            self.topology,
+            h_count=h_count,
+            v_count=v_count,
+            kappa_count=kappa_count,
+            psin_count=psin_count,
+            F_count=F_count,
+            c_counts=c_counts,
+            s_counts=s_counts,
+        )
+        if not plan.contained:
+            # The topology constructor normally catches this first because
+            # variant preserves L_max/M_max/K_max. Keep the guard local so the
+            # runtime cannot silently accept an over-capacity active topology.
+            raise ValueError("variant counts exceed current Numba kernel capacity")
+        if not self._solver.variant(plan.topology):
+            self._solver = NumbaSolver(plan.topology)
+        self.topology = plan.topology
+        self._clear_variant_state()
+        return self
 
     def solve(
         self,
@@ -210,14 +243,23 @@ class _NumbaKernelImpl:
         self.result = None
         self._last_boundary = None
         self._last_source = None
+        self._prepare_result = None
+
+    def _clear_variant_state(self) -> None:
+        self.result = None
+        self._last_boundary = None
+        self._last_source = None
+        self._prepare_result = None
 
     def close(self) -> None:
         return None
 
     def _warm_start_x(self, config: KernelConfig) -> np.ndarray | None:
-        if self.result is not None and config.continuation.startswith("warm"):
-            return self.result.x.copy()
-        return None
+        if self.result is None or not config.continuation.startswith("warm"):
+            return None
+        if self.result.x.shape != (self.x_size,):
+            return None
+        return self.result.x.copy()
 
     def _runtime_config(
         self,
