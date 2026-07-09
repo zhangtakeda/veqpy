@@ -32,7 +32,7 @@ Benchmark entry points use backend names directly:
 - `benchmarks/numba_variant_sweep.py`: Numba `Kernel.variant()` switch cost vs
   fresh Kernel construction benchmark.
 - `benchmarks/cxx_routes.py`: Cxx route matrix compared with Numba.
-- `benchmarks/cxx_geqdsk_pareto.py`: Cxx GEQDSK matrix compared with Numba.
+- `benchmarks/cxx_geqdsk.py`: Cxx GEQDSK matrix compared with Numba.
 - `benchmarks/cxx_continuation.py`: Cxx continuation-policy nfev benchmark.
 - `benchmarks/cxx_boundary_fitters.py`: raw-boundary `qr`/`gnqr`/`least-square`
   fitter timing and diff matrix across Numba and Cxx.

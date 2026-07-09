@@ -130,7 +130,7 @@ The Cxx backend is the native C++/nanobind kernel layer used for
 topology-specific shared-library kernels and Cxx-vs-Numba benchmarks.
 
 Representative Cxx-vs-Numba timing data from
-`benchmarks/cxx_geqdsk_pareto.py` is summarized below. The three benchmark
+`benchmarks/cxx_geqdsk.py` is summarized below. The three benchmark
 families are GEQDSK-backed cases:
 
 - `D-shaped`: `data/SOLOVEV.geqdsk`
@@ -223,24 +223,25 @@ quadrature, and calculus now live in the corresponding source module headers.
 
 ## Paper and Reproducibility Resources
 
-VEQPy is associated with the companion manuscript **"VEQ: a fast parametric
-Grad--Shafranov solver for fixed-boundary tokamak equilibria with flexible source
-inputs"**.
+VEQPy is associated with the companion manuscript **[Zhang2026]**. Related VEQ-family and representation papers include:
 
-Related VEQ-family and representation papers include:
+- [**[Zhang2026]**: primary VEQ paper on the fixed-boundary Grad-Shafranov solver][veq-arxiv]
 
-- [**Zhang2026**: primary VEQ paper on the fixed-boundary Grad-Shafranov solver][veq-arxiv]
-  > Ruohan Zhang, Huasheng Xie, Yueyan Li, Weiqi Meng, Feng Wang, and Zhengxiong Wang,
+  > _Ruohan Zhang, Huasheng Xie, Yueyan Li, Weiqi Meng, Feng Wang, and Zhengxiong Wang,
   > "VEQ: a fast parametric Grad-Shafranov solver for fixed-boundary tokamak equilibria
-  > with flexible source profiles", arXiv:2606.11821, 2026.
-- [**Xie2026**: minimum-parameter fixed-boundary Grad-Shafranov representation][veq-min-parameters-arxiv]
-  > Huasheng Xie and Yueyan Li,
+  > with flexible source profiles", arXiv:2606.11821, 2026._
+
+- [**[Xie2026]**: minimum-parameter fixed-boundary Grad-Shafranov representation][veq-min-parameters-arxiv]
+
+  > _Huasheng Xie and Yueyan Li,
   > "What Is the Minimum Number of Parameters Required to Represent Solutions of the
-  > Grad-Shafranov Equation?", arXiv:2601.02942, 2026.
-- [**Li2026**: VEQ-R toroidal-rotation effects in spherical-torus equilibria][veqr-arxiv]
-  > Xingyu Li, Huasheng Xie, Lai Wei, and Zhengxiong Wang,
+  > Grad-Shafranov Equation?", arXiv:2601.02942, 2026._
+
+- [**[Li2026]**: VEQ-R toroidal-rotation effects in spherical-torus equilibria][veqr-arxiv]
+
+  > _Xingyu Li, Huasheng Xie, Lai Wei, and Zhengxiong Wang,
   > "Investigation of Toroidal Rotation Effects on Spherical Torus Equilibria using
-  > the Fast Spectral Solver VEQ-R", arXiv:2602.11422, 2026.
+  > the Fast Spectral Solver VEQ-R", arXiv:2602.11422, 2026._
 
 ---
 
