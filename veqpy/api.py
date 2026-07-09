@@ -113,6 +113,7 @@ def pareto(
     source: KernelSource,
     *,
     topology: KernelTopology,
+    candidates: Sequence[object] | object,
     config: KernelConfig | None = None,
     recipe: KernelRecipe | None = None,
     registry: object | None = None,
@@ -121,14 +122,12 @@ def pareto(
     pin_cpu: bool | int | None = None,
     force: bool = False,
     case_name: str | None = None,
-    max_shape_error: float | Sequence[float] | None = None,
-    pareto_by: str = "counts",
-    strategy: str = "tail",
+    reference: SolveResult | None = None,
+    target: str = "counts",
     metric: str = "rms",
-    max_candidates: int = 500,
     **config_overrides: Any,
 ) -> ParetoResult:
-    """Prepare a short-lived kernel, run one Pareto search, and close it."""
+    """Prepare a short-lived kernel, evaluate Pareto candidates, and close it."""
 
     kernel_recipe = KernelRecipe(backend="numba", layout="degree") if recipe is None else recipe
     kernel = Kernel(
@@ -145,13 +144,12 @@ def pareto(
         return kernel.pareto(
             boundary,
             source,
+            candidates=candidates,
             config=config,
             case_name=case_name,
-            max_shape_error=max_shape_error,
-            pareto_by=pareto_by,
-            strategy=strategy,
+            reference=reference,
+            target=target,
             metric=metric,
-            max_candidates=max_candidates,
             **config_overrides,
         )
     finally:

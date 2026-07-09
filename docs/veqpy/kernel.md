@@ -106,39 +106,48 @@ prepare, or equilibrium snapshot calls.
 
 ## Pareto Topology Reduction
 
-`Kernel.pareto(...)` is a Numba-only exploration interface for intentionally
-over-large active-count topologies. It solves the current high-parameter
-topology as a reference, generates smaller count-only topology candidates,
-solves each candidate through the existing Numba variant runtime, and returns a
-`ParetoResult` containing the reference, evaluated samples, frontier, and
-threshold selections. The method restores the caller-visible Kernel topology,
-result, history, and last runtime case before returning.
+`Kernel.pareto(...)` is a Numba-only evaluator for intentionally over-large
+active-count topologies. The active topology is the high-parameter reference.
+Callers pass explicit reduced count-only candidates, and `pareto()` solves those
+candidates through the existing Numba variant runtime. It returns a
+`ParetoResult` containing the reference, evaluated samples, and frontier. The
+method restores the caller-visible Kernel topology, result, history, and last
+runtime case before returning.
 
 ```python
+reference = kernel.solve(boundary, source)
+
 pareto = kernel.pareto(
     boundary,
     source,
+    candidates=[
+        {"h": 6, "v": 4, "psin": 3},
+        kernel.topology,  # the reference topology is ignored if supplied
+    ],
     config=KernelConfig(method="powell"),
-    max_shape_error=[1.0e-3, 5.0e-4],
-    pareto_by="complexity",   # "counts", "time", or "complexity"
-    strategy="adaptive",      # "tail", "energy", "adaptive", or "balanced"
+    reference=reference,       # optional; omitted means solve the reference first
+    target="complexity",      # "counts", "time", or "complexity"
     metric="rms",             # "rms" or "max"
-    max_candidates=500,
 )
 ```
+
+Candidate entries may be `KernelTopology` instances, internal count signatures,
+or mappings such as `{"h": 4, "psin": 2, "c0": 1}` and
+`{"h_count": 4, "c_counts": (1,)}`. Candidates are canonicalized with the same
+capacity and source-family rules as `Kernel.variant(...)`; duplicate candidates
+and the reference topology are ignored.
 
 Shape error is measured directly on the Kernel solve grid using only the
 major-radius surface `R`, without constructing candidate `Equilibrium`
 snapshots. `metric="rms"` computes `sqrt(mean((R_candidate - R_ref)**2))`;
 `metric="max"` computes `max(abs(R_candidate - R_ref))`. Both values are in
-meters and are not normalized. `max_shape_error=1.0e-3` therefore means a
-one-millimeter major-radius error threshold.
+meters and are not normalized.
 
-Each `ParetoSample` reports three cost columns whose names match `pareto_by`:
+Each `ParetoSample` reports three cost columns whose names match `target`:
 `counts` is `topology.x_size`, `time` is `SolveResult.elapsed_ms`, and
 `complexity` is the fixed integer score
 `nfev*Nx + jvp_evaluations*Nx**2 + jacobian_component_evaluations*Nx**2 + linear_iterations*Nx**2`,
 where `Nx=counts`. `samples` contains evaluated reduced candidates only;
 `reference` stores the high-parameter reference; `frontier` includes the
-reference as the exact endpoint. For each threshold, `selected[threshold]` is
-the lowest-cost frontier sample with `shape_error <= threshold`.
+reference as the exact endpoint. Threshold-based choices are caller-side
+post-processing over `frontier`, not part of the `ParetoResult` contract.

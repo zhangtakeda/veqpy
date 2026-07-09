@@ -10,14 +10,14 @@ from veqpy.kernels.numba_kernel.pareto_runtime import sample_r_surface
 from veqpy.kernels.pareto import (
     KernelParetoSignature,
     ParetoSample,
-    adaptive_seed_candidate_count,
     coefficient_blocks_from_packed_state,
     generate_adaptive_refinement_signatures,
     generate_pareto_signatures,
-    normalize_pareto_by,
-    normalize_pareto_max_candidates,
+    normalize_pareto_candidates,
     normalize_pareto_metric,
+    normalize_pareto_neighborhood_size,
     normalize_pareto_strategy,
+    normalize_pareto_target,
     normalize_shape_error_thresholds,
     pareto_frontier,
     pareto_sample_complexity,
@@ -119,25 +119,25 @@ def make_sample(
 
 
 def test_pareto_parameter_normalization() -> None:
-    assert normalize_pareto_by("COUNTS") == "counts"
+    assert normalize_pareto_target("COUNTS") == "counts"
     assert normalize_pareto_metric("Max") == "max"
     assert normalize_pareto_strategy(" adaptive ") == "adaptive"
-    assert normalize_pareto_max_candidates(0) == 0
-    assert normalize_pareto_max_candidates(500) == 500
+    assert normalize_pareto_neighborhood_size(0) == 0
+    assert normalize_pareto_neighborhood_size(2) == 2
     assert normalize_shape_error_thresholds(None) == ()
     assert normalize_shape_error_thresholds(1.0e-3) == (1.0e-3,)
     assert normalize_shape_error_thresholds([1.0e-3, 2.0e-3]) == (1.0e-3, 2.0e-3)
 
-    with pytest.raises(ValueError, match="pareto_by"):
-        normalize_pareto_by("elapsed")
+    with pytest.raises(ValueError, match="target"):
+        normalize_pareto_target("elapsed")
     with pytest.raises(ValueError, match="metric"):
         normalize_pareto_metric("mean")
     with pytest.raises(ValueError, match="strategy"):
         normalize_pareto_strategy("random")
-    with pytest.raises(TypeError, match="max_candidates"):
-        normalize_pareto_max_candidates(True)  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="neighborhood_size"):
+        normalize_pareto_neighborhood_size(True)  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="non-negative"):
-        normalize_pareto_max_candidates(-1)
+        normalize_pareto_neighborhood_size(-1)
     with pytest.raises(ValueError, match="finite"):
         normalize_shape_error_thresholds(float("inf"))
     with pytest.raises(ValueError, match="non-negative"):
@@ -172,6 +172,36 @@ def test_pareto_shape_error_measures_r_surface_in_meters() -> None:
         pareto_shape_error(reference, candidate[:, :1], metric="rms")
 
 
+def test_pareto_candidates_normalize_mappings_topologies_and_signatures() -> None:
+    topology = make_topology(h_count=4, v_count=3, psin_count=2, c_counts=(2,), s_counts=(2,))
+    candidate_topology = topology_from_pareto_signature(
+        topology,
+        KernelParetoSignature(
+            h_count=2,
+            v_count=1,
+            kappa_count=1,
+            psin_count=1,
+            F_count=0,
+            c_counts=(1,),
+            s_counts=(1,),
+        ),
+    )
+
+    signatures = normalize_pareto_candidates(
+        topology,
+        (
+            {"h": 2, "v_count": 1, "kappa": 1, "psin": 1, "c_counts": (1,), "s1": 1},
+            candidate_topology,
+            KernelParetoSignature.from_topology(topology),
+        ),
+    )
+
+    assert signatures == (KernelParetoSignature.from_topology(candidate_topology),)
+
+    with pytest.raises(ValueError, match="unknown"):
+        normalize_pareto_candidates(topology, {"unknown": 1})
+
+
 def test_coefficient_blocks_decode_degree_first_layout() -> None:
     x = np.array([10.0, 20.0, 30.0], dtype=np.float64)
     blocks = coefficient_blocks_from_packed_state(
@@ -191,16 +221,14 @@ def test_balanced_pareto_strategy_is_deterministic_and_capacity_bounded() -> Non
     first = generate_pareto_signatures(
         topology,
         strategy="balanced",
-        max_candidates=10,
     )
     second = generate_pareto_signatures(
         topology,
         strategy="balanced",
-        max_candidates=10,
     )
 
     assert first == second
-    assert len(first) == 10
+    assert first
     assert KernelParetoSignature.from_topology(topology) not in first
     for signature in first:
         candidate = topology_from_pareto_signature(topology, signature)
@@ -220,7 +248,6 @@ def test_tail_strategy_keeps_more_coefficients_for_large_max_tail() -> None:
         topology,
         strategy="tail",
         coefficients_by_profile=coefficients,
-        max_candidates=20,
     )
 
     assert signatures
@@ -240,7 +267,6 @@ def test_energy_strategy_keeps_more_coefficients_for_large_l2_tail() -> None:
         topology,
         strategy="energy",
         coefficients_by_profile=coefficients,
-        max_candidates=20,
     )
 
     assert signatures
@@ -261,13 +287,47 @@ def test_adaptive_strategy_starts_from_combined_seed_candidates() -> None:
         topology,
         strategy="adaptive",
         coefficients_by_profile=coefficients,
-        max_candidates=6,
     )
-    balanced = generate_pareto_signatures(topology, strategy="balanced", max_candidates=6)
+    balanced = generate_pareto_signatures(topology, strategy="balanced")
 
-    assert len(adaptive) == 6
+    assert adaptive
     assert set(adaptive) != set(balanced)
     assert len(set(adaptive)) == len(adaptive)
+
+
+def test_adaptive_seed_includes_structural_floor_neighborhood() -> None:
+    topology = make_topology(h_count=3, v_count=0, kappa_count=3, psin_count=3, s_counts=(3,))
+    coefficients = {
+        "h": np.ones(3, dtype=np.float64),
+        "k": np.ones(3, dtype=np.float64),
+        "psin": np.ones(3, dtype=np.float64),
+        "s1": np.ones(3, dtype=np.float64),
+    }
+
+    adaptive = generate_pareto_signatures(
+        topology,
+        strategy="adaptive",
+        coefficients_by_profile=coefficients,
+    )
+
+    assert KernelParetoSignature(
+        h_count=1,
+        v_count=0,
+        kappa_count=1,
+        psin_count=1,
+        F_count=0,
+        c_counts=(),
+        s_counts=(1,),
+    ) in adaptive
+    assert KernelParetoSignature(
+        h_count=1,
+        v_count=0,
+        kappa_count=2,
+        psin_count=1,
+        F_count=0,
+        c_counts=(),
+        s_counts=(1,),
+    ) in adaptive
 
 
 def test_adaptive_refinement_generates_unseen_local_neighbors() -> None:
@@ -293,7 +353,7 @@ def test_adaptive_refinement_generates_unseen_local_neighbors() -> None:
         topology,
         frontier=(sample,),
         seen_signatures={KernelParetoSignature.from_topology(topology), signature},
-        max_candidates=10,
+        neighborhood_size=1,
     )
 
     assert neighbors
@@ -302,6 +362,59 @@ def test_adaptive_refinement_generates_unseen_local_neighbors() -> None:
     assert all(neighbor.psin_count >= 1 for neighbor in neighbors)
     assert any(neighbor.h_count == 1 for neighbor in neighbors)
     assert any(neighbor.h_count == 3 for neighbor in neighbors)
+
+
+def test_adaptive_refinement_moves_fourier_harmonic_pairs() -> None:
+    topology = make_topology(
+        h_count=1,
+        v_count=0,
+        kappa_count=0,
+        psin_count=1,
+        c_counts=(3, 2),
+        s_counts=(3, 2),
+    )
+    signature = KernelParetoSignature(
+        h_count=1,
+        v_count=0,
+        kappa_count=0,
+        psin_count=1,
+        F_count=0,
+        c_counts=(2, 1),
+        s_counts=(2, 1),
+    )
+    sample = make_sample(
+        topology=topology_from_pareto_signature(topology, signature),
+        counts=6,
+        time=1.0,
+        complexity=6,
+        shape_error=0.1,
+    )
+
+    neighbors = generate_adaptive_refinement_signatures(
+        topology,
+        frontier=(sample,),
+        seen_signatures={KernelParetoSignature.from_topology(topology), signature},
+        neighborhood_size=1,
+    )
+
+    assert KernelParetoSignature(
+        h_count=1,
+        v_count=0,
+        kappa_count=0,
+        psin_count=1,
+        F_count=0,
+        c_counts=(3, 1),
+        s_counts=(3, 1),
+    ) in neighbors
+    assert KernelParetoSignature(
+        h_count=1,
+        v_count=0,
+        kappa_count=0,
+        psin_count=1,
+        F_count=0,
+        c_counts=(2,),
+        s_counts=(2,),
+    ) in neighbors
 
 
 def test_numba_pareto_r_sampler_matches_equilibrium_without_history_mutation() -> None:
@@ -347,118 +460,93 @@ def test_kernel_pareto_balanced_runs_and_restores_public_state() -> None:
     config = pareto_smoke_config()
     existing = kernel.solve(boundary, source, config=config)
     history_before = list(kernel.history)
+    candidates = generate_pareto_signatures(topology, strategy="balanced")[:4]
 
     result = kernel.pareto(
         boundary,
         source,
+        candidates=candidates,
         config=config,
-        max_shape_error=[1.0e6],
-        pareto_by="counts",
-        strategy="balanced",
+        reference=existing,
+        target="counts",
         metric="rms",
-        max_candidates=3,
     )
 
     assert result.reference.shape_error == 0.0
-    assert len(result.samples) <= 3
+    assert result.samples
     assert result.frontier
-    assert result.selected[1.0e6].result.success
-    assert result.pareto_by == "counts"
+    assert result.target == "counts"
     assert result.metric == "rms"
-    assert result.strategy == "balanced"
     assert kernel.topology == topology
     assert kernel.result is existing
     assert kernel.history == history_before
 
 
-@pytest.mark.parametrize("pareto_by", ["counts", "time", "complexity"])
+def test_numba_pareto_private_progress_callback_reports_candidate_steps() -> None:
+    topology = make_topology(h_count=4, v_count=3, kappa_count=2, psin_count=3)
+    kernel = Kernel(topology=topology, recipe=KernelRecipe(backend="numba"))
+    events: list[tuple[str, int, int]] = []
+    candidates = generate_pareto_signatures(topology, strategy="balanced")[:3]
+
+    result = kernel._impl.pareto(  # type: ignore[attr-defined]
+        tiny_boundary(),
+        tiny_source(),
+        candidates=candidates,
+        config=pareto_smoke_config(),
+        _progress_callback=lambda phase, completed, total: events.append(
+            (phase, completed, total)
+        ),
+    )
+
+    assert result.samples
+    assert ("ref", 0, 0) in events
+    assert events[-1] == ("run", len(result.samples), len(result.samples))
+
+
+@pytest.mark.parametrize("target", ["counts", "time", "complexity"])
 @pytest.mark.parametrize("metric", ["rms", "max"])
-def test_kernel_pareto_cost_axes_and_metrics_are_accepted(pareto_by: str, metric: str) -> None:
+def test_kernel_pareto_cost_axes_and_metrics_are_accepted(target: str, metric: str) -> None:
     topology = make_topology(h_count=3, v_count=2, kappa_count=1, psin_count=2)
     kernel = Kernel(topology=topology, recipe=KernelRecipe(backend="numba"))
+    candidates = generate_pareto_signatures(topology, strategy="balanced")[:2]
     result = kernel.pareto(
         tiny_boundary(),
         tiny_source(),
+        candidates=candidates,
         config=pareto_smoke_config(),
-        max_shape_error=1.0e6,
-        pareto_by=pareto_by,
-        strategy="balanced",
+        target=target,
         metric=metric,
-        max_candidates=1,
     )
 
-    assert result.pareto_by == pareto_by
+    assert result.target == target
     assert result.metric == metric
-    assert len(result.samples) <= 1
-    assert 1.0e6 in result.selected
-
-
-def test_kernel_pareto_adaptive_uses_seed_budget_for_small_searches() -> None:
-    kernel = Kernel(
-        topology=make_topology(h_count=3, v_count=2, kappa_count=1, psin_count=2),
-        recipe=KernelRecipe(backend="numba"),
-    )
-
-    result = kernel.pareto(
-        tiny_boundary(),
-        tiny_source(),
-        config=pareto_smoke_config(),
-        strategy="adaptive",
-        max_candidates=1,
-        max_shape_error=1.0e6,
-    )
-
-    assert adaptive_seed_candidate_count(1) == 1
-    assert len(result.samples) == 1
+    assert result.samples
     assert len({sample.signature for sample in result.samples}) == len(result.samples)
-    assert 1.0e6 in result.selected
-
-
-def test_kernel_pareto_adaptive_refines_after_seed_frontier() -> None:
-    max_candidates = 5
-    kernel = Kernel(
-        topology=make_topology(h_count=4, v_count=3, kappa_count=2, psin_count=3),
-        recipe=KernelRecipe(backend="numba"),
-    )
-
-    result = kernel.pareto(
-        tiny_boundary(),
-        tiny_source(),
-        config=pareto_smoke_config(),
-        strategy="adaptive",
-        max_candidates=max_candidates,
-        max_shape_error=1.0e6,
-    )
-
-    assert adaptive_seed_candidate_count(max_candidates) == 3
-    assert len(result.samples) > 3
-    assert len(result.samples) <= max_candidates
-    assert len({sample.signature for sample in result.samples}) == len(result.samples)
-    assert result.frontier
 
 
 def test_function_api_pareto_defaults_to_numba_backend() -> None:
+    topology = make_topology(h_count=3, v_count=2, kappa_count=1, psin_count=2)
+    candidates = generate_pareto_signatures(topology, strategy="balanced")[:2]
     result = pareto_api(
         tiny_boundary(),
         tiny_source(),
-        topology=make_topology(h_count=3, v_count=2, kappa_count=1, psin_count=2),
+        topology=topology,
+        candidates=candidates,
         config=pareto_smoke_config(),
-        max_shape_error=1.0e6,
-        strategy="balanced",
-        max_candidates=0,
+        target="counts",
     )
 
     assert result.reference.result.success
-    assert result.samples == ()
-    assert result.frontier == (result.reference,)
-    assert result.selected[1.0e6] is result.reference
+    assert result.samples
+    assert result.frontier
+    assert result.target == "counts"
 
 
 def test_kernel_pareto_is_numba_only_for_now() -> None:
     kernel = Kernel(topology=make_topology(), recipe=KernelRecipe(backend="cxx"))
 
     with pytest.raises(NotImplementedError, match="Numba backend"):
-        kernel.pareto(tiny_boundary(), tiny_source(), config=pareto_smoke_config())
+        kernel.pareto(tiny_boundary(), tiny_source(), candidates=(), config=pareto_smoke_config())
 
 
 def test_pareto_frontier_filters_failed_and_dominated_samples() -> None:
@@ -485,13 +573,13 @@ def test_pareto_frontier_filters_failed_and_dominated_samples() -> None:
         ),
     )
 
-    by_counts = pareto_frontier(samples, pareto_by="counts")
+    by_counts = pareto_frontier(samples, target="counts")
     assert [sample.counts for sample in by_counts] == [5, 6, 8]
 
-    by_time = pareto_frontier(samples, pareto_by="time")
+    by_time = pareto_frontier(samples, target="time")
     assert [sample.time for sample in by_time] == [2.0]
 
-    by_complexity = pareto_frontier(samples, pareto_by="complexity")
+    by_complexity = pareto_frontier(samples, target="complexity")
     assert [sample.complexity for sample in by_complexity] == [20]
 
 
@@ -503,7 +591,7 @@ def test_select_pareto_thresholds_chooses_lowest_cost_under_error() -> None:
         make_sample(topology=topology, counts=8, time=2.0, complexity=20, shape_error=0.10),
     )
 
-    selected = select_pareto_thresholds(frontier, [0.25, 0.15, 0.05], pareto_by="counts")
+    selected = select_pareto_thresholds(frontier, [0.25, 0.15, 0.05], target="counts")
 
     assert selected[0.25].counts == 6
     assert selected[0.15].counts == 8

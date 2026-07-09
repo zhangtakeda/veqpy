@@ -2,8 +2,8 @@
 Module: veqpy.kernels.pareto
 
 Role:
-- Define public Pareto search result contracts and backend-neutral helpers.
-- Keep cost/frontier/threshold semantics independent from backend execution.
+- Define public Pareto evaluator result contracts and backend-neutral helpers.
+- Keep cost/frontier/threshold post-processing independent from backend execution.
 """
 
 from __future__ import annotations
@@ -17,9 +17,12 @@ import numpy as np
 from veqpy.kernels.types import KernelTopology, SolveResult
 from veqpy.kernels.variant import build_kernel_variant_topology
 
-PARETO_BY_OPTIONS = ("counts", "time", "complexity")
+PARETO_TARGET_OPTIONS = ("counts", "time", "complexity")
 PARETO_METRIC_OPTIONS = ("rms", "max")
 PARETO_STRATEGY_OPTIONS = ("tail", "energy", "adaptive", "balanced")
+_REF_PRUNE_SAMPLE_COUNT = 512
+_REF_PRUNE_CORE_GRID_LIMIT = 12_000
+_REF_PRUNE_BASES = (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53)
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,7 +63,7 @@ class KernelParetoSignature:
 
 @dataclass(frozen=True, slots=True)
 class ParetoSample:
-    """One solved topology sample in a Kernel Pareto search."""
+    """One solved topology sample in a Kernel Pareto evaluation."""
 
     topology: KernelTopology
     signature: KernelParetoSignature
@@ -73,21 +76,17 @@ class ParetoSample:
 
 @dataclass(frozen=True, slots=True)
 class ParetoResult:
-    """Full Kernel Pareto search result."""
+    """Result from evaluating explicit reduced topologies against one reference."""
 
     reference: ParetoSample
     samples: tuple[ParetoSample, ...]
     frontier: tuple[ParetoSample, ...]
-    selected: dict[float, ParetoSample]
-    thresholds: tuple[float, ...]
-    pareto_by: str
+    target: str
     metric: str
-    strategy: str
-    max_candidates: int
 
 
-def normalize_pareto_by(value: str) -> str:
-    return _normalize_option(value, PARETO_BY_OPTIONS, "pareto_by")
+def normalize_pareto_target(value: str) -> str:
+    return _normalize_option(value, PARETO_TARGET_OPTIONS, "target")
 
 
 def normalize_pareto_metric(value: str) -> str:
@@ -98,11 +97,11 @@ def normalize_pareto_strategy(value: str) -> str:
     return _normalize_option(value, PARETO_STRATEGY_OPTIONS, "strategy")
 
 
-def normalize_pareto_max_candidates(value: int) -> int:
+def normalize_pareto_neighborhood_size(value: int) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
-        raise TypeError("max_candidates must be an integer")
+        raise TypeError("neighborhood_size must be an integer")
     if value < 0:
-        raise ValueError("max_candidates must be non-negative")
+        raise ValueError("neighborhood_size must be non-negative")
     return int(value)
 
 
@@ -172,17 +171,67 @@ def topology_from_pareto_signature(
     return plan.topology
 
 
+def pareto_signature_from_candidate(
+    capacity_topology: KernelTopology,
+    candidate: KernelTopology | KernelParetoSignature | Mapping[str, object],
+) -> KernelParetoSignature:
+    """Canonicalize one user-supplied reduced topology candidate."""
+
+    if isinstance(candidate, KernelParetoSignature):
+        topology = topology_from_pareto_signature(capacity_topology, candidate)
+        return KernelParetoSignature.from_topology(topology)
+    if isinstance(candidate, KernelTopology):
+        topology = topology_from_pareto_signature(
+            capacity_topology,
+            KernelParetoSignature.from_topology(candidate),
+        )
+        return KernelParetoSignature.from_topology(topology)
+    if isinstance(candidate, Mapping):
+        return _signature_from_count_map(
+            capacity_topology,
+            _count_map_from_candidate_mapping(candidate),
+        )
+    raise TypeError(
+        "Pareto candidates must be KernelTopology, KernelParetoSignature, or mappings"
+    )
+
+
+def normalize_pareto_candidates(
+    capacity_topology: KernelTopology,
+    candidates: Sequence[KernelTopology | KernelParetoSignature | Mapping[str, object]]
+    | KernelTopology
+    | KernelParetoSignature
+    | Mapping[str, object],
+) -> tuple[KernelParetoSignature, ...]:
+    """Return unique non-reference candidate signatures in caller order."""
+
+    if isinstance(candidates, KernelTopology | KernelParetoSignature) or isinstance(
+        candidates,
+        Mapping,
+    ):
+        raw_candidates = (candidates,)
+    elif isinstance(candidates, Sequence) and not isinstance(candidates, str):
+        raw_candidates = tuple(candidates)
+    else:
+        raise TypeError("candidates must be a candidate or a sequence of candidates")
+
+    reference = KernelParetoSignature.from_topology(capacity_topology)
+    unique: dict[KernelParetoSignature, KernelParetoSignature] = {}
+    for candidate in raw_candidates:
+        signature = pareto_signature_from_candidate(capacity_topology, candidate)
+        if signature == reference:
+            continue
+        unique.setdefault(signature, signature)
+    return tuple(unique.values())
+
+
 def generate_pareto_signatures(
     capacity_topology: KernelTopology,
     *,
     strategy: str,
     coefficients_by_profile: Mapping[str, np.ndarray] | None = None,
-    max_candidates: int,
 ) -> tuple[KernelParetoSignature, ...]:
     strategy_name = normalize_pareto_strategy(strategy)
-    candidate_limit = normalize_pareto_max_candidates(max_candidates)
-    if candidate_limit == 0:
-        return ()
 
     if strategy_name == "balanced":
         candidates = _balanced_signatures(capacity_topology)
@@ -201,14 +250,7 @@ def generate_pareto_signatures(
     else:
         candidates = _adaptive_seed_signatures(capacity_topology, coefficients_by_profile)
 
-    return _unique_candidate_signatures(capacity_topology, candidates)[:candidate_limit]
-
-
-def adaptive_seed_candidate_count(max_candidates: int) -> int:
-    candidate_limit = normalize_pareto_max_candidates(max_candidates)
-    if candidate_limit == 0:
-        return 0
-    return max(1, int(np.ceil(0.6 * candidate_limit)))
+    return _unique_candidate_signatures(capacity_topology, candidates)
 
 
 def generate_adaptive_refinement_signatures(
@@ -216,12 +258,12 @@ def generate_adaptive_refinement_signatures(
     *,
     frontier: Sequence[ParetoSample],
     seen_signatures: set[KernelParetoSignature],
-    max_candidates: int,
+    neighborhood_size: int,
 ) -> tuple[KernelParetoSignature, ...]:
-    candidate_limit = normalize_pareto_max_candidates(max_candidates)
-    if candidate_limit == 0:
+    radius = normalize_pareto_neighborhood_size(neighborhood_size)
+    if radius == 0:
         return ()
-    names = _active_count_names(capacity_topology)
+    axes = _refinement_count_axes(capacity_topology)
     reference_counts = _count_map_from_signature(
         KernelParetoSignature.from_topology(capacity_topology)
     )
@@ -231,23 +273,30 @@ def generate_adaptive_refinement_signatures(
 
     for sample in frontier:
         counts = _count_map_from_signature(sample.signature)
-        for name in names:
-            current = counts.get(name, 0)
-            original = reference_counts.get(name, 0)
-            for delta in (-1, 1):
-                trial_count = min(original, max(minimums.get(name, 0), current + delta))
-                if trial_count == current:
+        for axis in axes:
+            for delta in range(-radius, radius + 1):
+                if delta == 0:
                     continue
                 trial = dict(counts)
-                trial[name] = trial_count
+                changed = False
+                for name in axis:
+                    current = counts.get(name, 0)
+                    original = reference_counts.get(name, 0)
+                    trial_count = min(
+                        original,
+                        max(minimums.get(name, 0), current + delta),
+                    )
+                    if trial_count != current:
+                        changed = True
+                    trial[name] = trial_count
+                if not changed:
+                    continue
                 _ensure_one_active_count(trial, reference_counts, minimums)
                 signature = _signature_from_count_map(capacity_topology, trial)
                 if signature in seen:
                     continue
                 seen.add(signature)
                 candidates.append(signature)
-                if len(candidates) >= candidate_limit:
-                    return tuple(candidates)
     return tuple(candidates)
 
 
@@ -270,9 +319,9 @@ def pareto_shape_error(reference_R: np.ndarray, candidate_R: np.ndarray, *, metr
 def pareto_frontier(
     samples: Sequence[ParetoSample],
     *,
-    pareto_by: str,
+    target: str,
 ) -> tuple[ParetoSample, ...]:
-    cost_name = normalize_pareto_by(pareto_by)
+    cost_name = normalize_pareto_target(target)
     valid = [
         sample
         for sample in samples
@@ -303,9 +352,9 @@ def select_pareto_thresholds(
     frontier: Sequence[ParetoSample],
     thresholds: Sequence[float],
     *,
-    pareto_by: str,
+    target: str,
 ) -> dict[float, ParetoSample]:
-    cost_name = normalize_pareto_by(pareto_by)
+    cost_name = normalize_pareto_target(target)
     normalized_thresholds = normalize_shape_error_thresholds(tuple(thresholds))
     selected: dict[float, ParetoSample] = {}
     for threshold in normalized_thresholds:
@@ -359,6 +408,7 @@ def _adaptive_seed_signatures(
             coefficients_by_profile,
             score_mode="energy",
         ),
+        *_ref_prune_seed_signatures(capacity_topology, coefficients_by_profile),
     )
 
 
@@ -493,6 +543,399 @@ def _unique_candidate_signatures(
     )
 
 
+def _ref_prune_seed_signatures(
+    capacity_topology: KernelTopology,
+    coefficients_by_profile: Mapping[str, np.ndarray] | None,
+) -> tuple[KernelParetoSignature, ...]:
+    reference_counts = _count_map_from_signature(
+        KernelParetoSignature.from_topology(capacity_topology)
+    )
+    minimums = _minimum_counts_by_name(capacity_topology)
+    names = tuple(name for name, count in reference_counts.items() if count > 0)
+    candidates: list[KernelParetoSignature] = []
+    structural_floor = _seed_floor_counts(reference_counts, minimums)
+    candidates.append(_signature_from_count_map(capacity_topology, structural_floor))
+    for name in names:
+        current = int(structural_floor.get(name, minimums.get(name, 0)))
+        if current >= int(reference_counts[name]):
+            continue
+        counts = dict(structural_floor)
+        counts[name] = current + 1
+        candidates.append(_signature_from_count_map(capacity_topology, counts))
+
+    for ratio in (0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875):
+        counts = dict(structural_floor)
+        for name in names:
+            original = reference_counts[name]
+            floor = structural_floor.get(name, minimums.get(name, 0))
+            value = int(round(original * ratio))
+            if name in structural_floor and original > 0:
+                value = max(1, value)
+            counts[name] = min(original, max(floor, value))
+        candidates.append(_signature_from_count_map(capacity_topology, counts))
+
+    if coefficients_by_profile is not None:
+        for threshold in (0.5, 0.8, 0.9, 0.95, 0.99, 0.999):
+            counts = dict(structural_floor)
+            for name in names:
+                coeff = np.asarray(coefficients_by_profile.get(name, ()), dtype=np.float64)
+                original = reference_counts[name]
+                if coeff.size != original:
+                    value = int(round(original * threshold))
+                else:
+                    value = _energy_retention_count(coeff, threshold)
+                floor = structural_floor.get(name, minimums.get(name, 0))
+                counts[name] = min(original, max(floor, value))
+            candidates.append(_signature_from_count_map(capacity_topology, counts))
+
+    candidates.extend(
+        _structured_ref_prune_seed_signatures(
+            capacity_topology,
+            reference_counts=reference_counts,
+            structural_floor=structural_floor,
+        )
+    )
+
+    core_names = tuple(
+        name for name in ("psin", "h", "k", "v", "F") if int(reference_counts.get(name, 0)) > 0
+    )
+    shell_names = _fourier_shell_names(reference_counts)
+    for index in range(1, _REF_PRUNE_SAMPLE_COUNT + 1):
+        counts = dict(structural_floor)
+        for offset, name in enumerate(core_names):
+            floor = structural_floor.get(name, minimums.get(name, 0))
+            counts[name] = _stratified_count(
+                index,
+                _REF_PRUNE_BASES[offset % len(_REF_PRUNE_BASES)],
+                floor,
+                reference_counts[name],
+            )
+        if shell_names:
+            depth = _stratified_count(
+                index,
+                _REF_PRUNE_BASES[5],
+                1,
+                len(shell_names),
+            )
+            previous_cap = max(reference_counts[name] for name in shell_names[0])
+            for shell_index, shell in enumerate(shell_names[:depth]):
+                floor = max(structural_floor.get(name, 0) for name in shell)
+                floor = max(1, floor)
+                cap = min(previous_cap, min(reference_counts[name] for name in shell))
+                if floor > cap:
+                    break
+                level = _stratified_count(
+                    index,
+                    _REF_PRUNE_BASES[(6 + shell_index) % len(_REF_PRUNE_BASES)],
+                    floor,
+                    cap,
+                )
+                for name in shell:
+                    counts[name] = min(reference_counts[name], level)
+                previous_cap = level
+        candidates.append(_signature_from_count_map(capacity_topology, counts))
+    return tuple(candidates)
+
+
+def _structured_ref_prune_seed_signatures(
+    capacity_topology: KernelTopology,
+    *,
+    reference_counts: Mapping[str, int],
+    structural_floor: Mapping[str, int],
+) -> tuple[KernelParetoSignature, ...]:
+    core_names = tuple(
+        name for name in ("psin", "h", "k", "v", "F") if int(reference_counts.get(name, 0)) > 0
+    )
+    core_grid = _structured_core_count_grid(reference_counts, structural_floor, core_names)
+    shell_names = _fourier_shell_names(reference_counts)
+    candidates: list[KernelParetoSignature] = []
+
+    for core_counts in core_grid:
+        ratio = _normalized_core_ratio(core_counts, reference_counts, structural_floor)
+        spread = _normalized_core_spread(core_counts, reference_counts, structural_floor)
+        pattern_maps = _structured_fourier_pattern_maps(
+            reference_counts,
+            shell_names=shell_names,
+            ratio=ratio,
+            spread=spread,
+        )
+        for pattern in pattern_maps:
+            counts = dict(structural_floor)
+            counts.update(core_counts)
+            counts.update(pattern)
+            _ensure_one_active_count(counts, reference_counts, structural_floor)
+            candidates.append(_signature_from_count_map(capacity_topology, counts))
+    return tuple(candidates)
+
+
+def _structured_core_count_grid(
+    reference_counts: Mapping[str, int],
+    structural_floor: Mapping[str, int],
+    core_names: Sequence[str],
+) -> tuple[dict[str, int], ...]:
+    names = tuple(core_names)
+    if not names:
+        return ({},)
+
+    full_product = 1
+    for name in names:
+        floor = int(structural_floor.get(name, 0))
+        ceiling = int(reference_counts[name])
+        full_product *= max(1, ceiling - floor + 1)
+
+    ranges: list[tuple[int, ...]] = []
+    for name in names:
+        floor = int(structural_floor.get(name, 0))
+        ceiling = int(reference_counts[name])
+        if full_product <= _REF_PRUNE_CORE_GRID_LIMIT:
+            values = tuple(range(floor, ceiling + 1))
+        else:
+            values = _count_breakpoints(floor, ceiling)
+        ranges.append(values)
+
+    grid: list[dict[str, int]] = []
+    partial: dict[str, int] = {}
+
+    def visit(offset: int) -> None:
+        if offset == len(names):
+            grid.append(dict(partial))
+            return
+        name = names[offset]
+        for value in ranges[offset]:
+            partial[name] = int(value)
+            visit(offset + 1)
+        partial.pop(name, None)
+
+    visit(0)
+    return tuple(grid)
+
+
+def _count_breakpoints(lower: int, upper: int) -> tuple[int, ...]:
+    lo = int(lower)
+    hi = int(upper)
+    if hi <= lo:
+        return (lo,)
+    values = {lo, hi, max(lo, min(hi, 1))}
+    for ratio in (0.125, 0.2, 0.25, 1.0 / 3.0, 0.4, 0.5, 0.6, 2.0 / 3.0, 0.75, 0.875):
+        values.add(min(hi, max(lo, int(round(hi * ratio)))))
+    return tuple(sorted(values))
+
+
+def _normalized_core_ratio(
+    core_counts: Mapping[str, int],
+    reference_counts: Mapping[str, int],
+    structural_floor: Mapping[str, int],
+) -> float:
+    ratios = [
+        _normalized_count_position(
+            int(value),
+            int(structural_floor.get(name, 0)),
+            int(reference_counts[name]),
+        )
+        for name, value in core_counts.items()
+    ]
+    if not ratios:
+        return 0.0
+    return float(np.mean(np.asarray(ratios, dtype=np.float64)))
+
+
+def _normalized_core_spread(
+    core_counts: Mapping[str, int],
+    reference_counts: Mapping[str, int],
+    structural_floor: Mapping[str, int],
+) -> float:
+    ratios = [
+        _normalized_count_position(
+            int(value),
+            int(structural_floor.get(name, 0)),
+            int(reference_counts[name]),
+        )
+        for name, value in core_counts.items()
+    ]
+    if len(ratios) <= 1:
+        return 0.0
+    return float(max(ratios) - min(ratios))
+
+
+def _normalized_count_position(value: int, lower: int, upper: int) -> float:
+    if upper <= lower:
+        return 0.0
+    return min(1.0, max(0.0, float(value - lower) / float(upper - lower)))
+
+
+def _structured_fourier_pattern_maps(
+    reference_counts: Mapping[str, int],
+    *,
+    shell_names: Sequence[tuple[str, ...]],
+    ratio: float,
+    spread: float,
+) -> tuple[dict[str, int], ...]:
+    if not shell_names:
+        return ({},)
+
+    clamped_ratio = min(1.0, max(0.0, float(ratio)))
+    candidates = (
+        _banded_fourier_pattern(
+            reference_counts,
+            shell_names=shell_names,
+            ratio=clamped_ratio,
+            spread=float(spread),
+        ),
+    )
+
+    unique: dict[tuple[tuple[str, int], ...], dict[str, int]] = {}
+    for candidate in candidates:
+        normalized = {
+            name: min(int(reference_counts[name]), max(0, int(count)))
+            for name, count in candidate.items()
+            if int(reference_counts.get(name, 0)) > 0 and int(count) > 0
+        }
+        unique.setdefault(tuple(sorted(normalized.items())), normalized)
+    return tuple(unique.values()) or ({},)
+
+
+def _banded_fourier_pattern(
+    reference_counts: Mapping[str, int],
+    *,
+    shell_names: Sequence[tuple[str, ...]],
+    ratio: float,
+    spread: float,
+) -> dict[str, int]:
+    first_cap = max(int(reference_counts[name]) for name in shell_names[0])
+    tail_cap = _tail_shell_capacity(reference_counts, shell_names)
+    low_head = max(1, int(round(0.2 * first_cap)))
+    mid_head = max(low_head, int(round(0.4 * first_cap)))
+    high_head = max(mid_head, int(round(0.6 * first_cap)))
+    near_head = max(high_head, int(round(0.9 * first_cap)))
+    low_mid = max(1, int(round(0.4 * tail_cap)))
+    high_mid = max(low_mid, int(round(0.6 * tail_cap)))
+
+    if ratio < 0.30:
+        levels = (low_head, 1)
+    elif ratio < 0.40 and spread < 0.30:
+        levels = (low_head, low_mid, low_mid, 1)
+    elif ratio < 0.40:
+        levels = (mid_head, 1, 1)
+    elif ratio < 0.55:
+        levels = (mid_head, low_mid, 1, 1, 1)
+    elif ratio < 0.72:
+        levels = (high_head, tail_cap, high_mid, low_mid, low_mid, 1)
+    else:
+        levels = (near_head, tail_cap, tail_cap, tail_cap, tail_cap, low_mid, 1)
+    return _shell_pattern_from_levels(reference_counts, shell_names, levels)
+
+
+def _tail_shell_capacity(
+    reference_counts: Mapping[str, int],
+    shell_names: Sequence[tuple[str, ...]],
+) -> int:
+    if len(shell_names) <= 1:
+        return max(int(reference_counts[name]) for name in shell_names[0])
+    return max(
+        min(int(reference_counts[name]) for name in shell)
+        for shell in shell_names[1:]
+        if shell
+    )
+
+
+def _shell_pattern_from_levels(
+    reference_counts: Mapping[str, int],
+    shell_names: Sequence[tuple[str, ...]],
+    levels: Sequence[int],
+) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    previous = max(int(reference_counts[name]) for shell in shell_names for name in shell)
+    for shell, raw_level in zip(shell_names, levels, strict=False):
+        level = min(previous, max(1, int(round(raw_level))))
+        changed = False
+        for name in shell:
+            count = min(int(reference_counts[name]), level)
+            if count > 0:
+                counts[name] = count
+                changed = True
+        if not changed:
+            break
+        previous = level
+    return counts
+
+
+def _seed_floor_counts(
+    reference_counts: Mapping[str, int],
+    minimums: Mapping[str, int],
+) -> dict[str, int]:
+    floors = {name: int(value) for name, value in minimums.items() if int(value) > 0}
+    for name in ("h", "k", "v", "c0", "s1"):
+        if int(reference_counts.get(name, 0)) > 0:
+            floors.setdefault(name, 1)
+    return floors
+
+
+def _energy_retention_count(coefficients: np.ndarray, threshold: float) -> int:
+    values = np.asarray(coefficients, dtype=np.float64)
+    if values.size == 0:
+        return 0
+    energy = values * values
+    total = float(np.sum(energy))
+    if total <= 0.0 or not np.isfinite(total):
+        return 1
+    cumulative = np.cumsum(energy) / total
+    return int(np.searchsorted(cumulative, float(threshold), side="left") + 1)
+
+
+def _fourier_shell_names(reference_counts: Mapping[str, int]) -> tuple[tuple[str, ...], ...]:
+    shells: list[tuple[str, ...]] = []
+    order = 0
+    while True:
+        shell = tuple(
+            name
+            for name in (f"c{order}", f"s{order + 1}")
+            if int(reference_counts.get(name, 0)) > 0
+        )
+        if not shell:
+            break
+        shells.append(shell)
+        order += 1
+    return tuple(shells)
+
+
+def _refinement_count_axes(topology: KernelTopology) -> tuple[tuple[str, ...], ...]:
+    reference_counts = _count_map_from_signature(KernelParetoSignature.from_topology(topology))
+    scalar_axes = tuple(
+        (name,)
+        for name in ("psin", "h", "k", "v", "F")
+        if int(reference_counts.get(name, 0)) > 0
+    )
+    shell_axes = _fourier_shell_names(reference_counts)
+    individual_fourier_axes = tuple(
+        (name,)
+        for shell in shell_axes
+        for name in shell
+        if int(reference_counts.get(name, 0)) > 0
+    )
+    return (*scalar_axes, *shell_axes, *individual_fourier_axes)
+
+
+def _radical_inverse(index: int, base: int) -> float:
+    inverse = 0.0
+    fraction = 1.0 / float(base)
+    current = int(index)
+    while current > 0:
+        inverse += float(current % int(base)) * fraction
+        current //= int(base)
+        fraction /= float(base)
+    return inverse
+
+
+def _stratified_count(index: int, base: int, lower: int, upper: int) -> int:
+    lower_int = int(lower)
+    upper_int = int(upper)
+    if upper_int <= lower_int:
+        return lower_int
+    span = upper_int - lower_int + 1
+    value = lower_int + int(np.floor(_radical_inverse(index, base) * span))
+    return min(upper_int, max(lower_int, value))
+
+
 def _active_count_names(topology: KernelTopology) -> tuple[str, ...]:
     return tuple(name for name, count in topology.active_profiles if int(count) > 0)
 
@@ -519,6 +962,51 @@ def _count_map_from_signature(signature: KernelParetoSignature) -> dict[str, int
         {f"s{order}": int(count) for order, count in enumerate(signature.s_counts, start=1)}
     )
     return counts
+
+
+def _count_map_from_candidate_mapping(candidate: Mapping[str, object]) -> dict[str, int]:
+    field_names = {
+        "h_count": "h",
+        "v_count": "v",
+        "kappa_count": "k",
+        "k_count": "k",
+        "psin_count": "psin",
+        "F_count": "F",
+    }
+    profile_names = {"h", "v", "k", "kappa", "psin", "F"}
+    counts: dict[str, int] = {}
+    for raw_name, raw_value in candidate.items():
+        name = str(raw_name)
+        if name in field_names:
+            counts[field_names[name]] = _candidate_count_value(raw_value, name)
+        elif name == "c_counts":
+            for order, value in enumerate(_candidate_count_sequence(raw_value, name)):
+                counts[f"c{order}"] = value
+        elif name == "s_counts":
+            for order, value in enumerate(_candidate_count_sequence(raw_value, name), start=1):
+                counts[f"s{order}"] = value
+        elif name in profile_names:
+            counts["k" if name == "kappa" else name] = _candidate_count_value(raw_value, name)
+        elif _is_c_profile(name) or _is_s_profile(name):
+            counts[name] = _candidate_count_value(raw_value, name)
+        else:
+            raise ValueError(f"unknown Pareto candidate count field {name!r}")
+    return counts
+
+
+def _candidate_count_sequence(value: object, name: str) -> tuple[int, ...]:
+    if isinstance(value, str) or not isinstance(value, Sequence):
+        raise TypeError(f"{name} must be a sequence of non-negative integers")
+    return tuple(_candidate_count_value(item, name) for item in value)
+
+
+def _candidate_count_value(value: object, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int | np.integer):
+        raise TypeError(f"{name} must be a non-negative integer")
+    count = int(value)
+    if count < 0:
+        raise ValueError(f"{name} must be non-negative")
+    return count
 
 
 def _signature_from_count_map(

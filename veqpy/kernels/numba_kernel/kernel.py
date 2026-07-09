@@ -7,7 +7,7 @@ Role:
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import fields, replace
 from time import perf_counter
 from typing import Any
@@ -20,19 +20,12 @@ from veqpy.kernels.pareto import (
     KernelParetoSignature,
     ParetoResult,
     ParetoSample,
-    adaptive_seed_candidate_count,
-    coefficient_blocks_from_packed_state,
-    generate_adaptive_refinement_signatures,
-    generate_pareto_signatures,
-    normalize_pareto_by,
-    normalize_pareto_max_candidates,
+    normalize_pareto_candidates,
     normalize_pareto_metric,
-    normalize_pareto_strategy,
-    normalize_shape_error_thresholds,
+    normalize_pareto_target,
     pareto_frontier,
     pareto_sample_complexity,
     pareto_shape_error,
-    select_pareto_thresholds,
     topology_from_pareto_signature,
 )
 from veqpy.kernels.types import (
@@ -52,6 +45,7 @@ from .solver import NumbaSolver
 
 _JVP_EPS_SCALE = float(np.sqrt(1.0e-12))
 _JACOBIAN_REL_STEP = 1.0e-7
+_ParetoProgressCallback = Callable[[str, int, int], None]
 
 
 class _NumbaKernelImpl:
@@ -191,20 +185,19 @@ class _NumbaKernelImpl:
         boundary: KernelBoundary,
         source: KernelSource,
         *,
+        candidates: Sequence[object] | object,
         config: KernelConfig | None = None,
         case_name: str | None = None,
-        max_shape_error: float | Sequence[float] | None = None,
-        pareto_by: str = "counts",
-        strategy: str = "tail",
+        reference: SolveResult | None = None,
+        target: str = "counts",
         metric: str = "rms",
-        max_candidates: int = 500,
         **config_overrides: Any,
     ) -> ParetoResult:
-        pareto_by_name = normalize_pareto_by(pareto_by)
-        strategy_name = normalize_pareto_strategy(strategy)
+        progress_callback = config_overrides.pop("_progress_callback", None)
+        if progress_callback is not None and not callable(progress_callback):
+            raise TypeError("_progress_callback must be callable")
+        target_name = normalize_pareto_target(target)
         metric_name = normalize_pareto_metric(metric)
-        candidate_limit = normalize_pareto_max_candidates(max_candidates)
-        thresholds = normalize_shape_error_thresholds(max_shape_error)
         kernel_config = self._runtime_config(config, config_overrides)
         kernel_boundary = self._kernel_boundary(boundary)
         kernel_source = self._kernel_source(source, case_name=case_name)
@@ -217,12 +210,21 @@ class _NumbaKernelImpl:
         saved_prepare_result = self._prepare_result
 
         try:
+            candidate_signatures = normalize_pareto_candidates(saved_topology, candidates)
             self._activate_pareto_topology(saved_topology)
-            reference_result = self._solve_pareto_case(
-                kernel_boundary,
-                kernel_source,
-                kernel_config,
-            )
+            if reference is None:
+                self._emit_pareto_progress(progress_callback, "ref", 0, 0)
+                reference_result = self._solve_pareto_case(
+                    kernel_boundary,
+                    kernel_source,
+                    kernel_config,
+                )
+            else:
+                reference_result = reference
+                if int(reference_result.x.size) != int(saved_topology.x_size):
+                    raise ValueError(
+                        "reference result packed state does not match the active topology"
+                    )
             if not reference_result.success:
                 raise RuntimeError("Kernel.pareto reference solve did not converge")
             reference_R = sample_r_surface(
@@ -238,91 +240,33 @@ class _NumbaKernelImpl:
                 reference_result,
                 shape_error=0.0,
             )
-            coefficient_blocks = coefficient_blocks_from_packed_state(
-                reference_result.x,
-                profile_names=self._solver.runtime.plan.profile_names,
-                profile_L=self._solver.runtime.plan.profile_L,
-                coeff_index=self._solver.runtime.plan.coeff_index,
+            self._emit_pareto_progress(
+                progress_callback,
+                "run",
+                0,
+                len(candidate_signatures),
             )
-            samples: list[ParetoSample] = []
-            if strategy_name == "adaptive":
-                seed_limit = adaptive_seed_candidate_count(candidate_limit)
-                seed_signatures = generate_pareto_signatures(
-                    saved_topology,
-                    strategy=strategy_name,
-                    coefficients_by_profile=coefficient_blocks,
-                    max_candidates=seed_limit,
-                )
-                samples.extend(
-                    self._solve_pareto_signatures(
-                        seed_signatures,
-                        capacity_topology=saved_topology,
-                        boundary=kernel_boundary,
-                        source=kernel_source,
-                        config=kernel_config,
-                        reference_R=reference_R,
-                        metric=metric_name,
-                    )
-                )
-                remaining = candidate_limit - len(samples)
-                if remaining > 0:
-                    preliminary_frontier = pareto_frontier(
-                        (reference_sample, *samples),
-                        pareto_by=pareto_by_name,
-                    )
-                    seen = {reference_signature, *(sample.signature for sample in samples)}
-                    refinement_signatures = generate_adaptive_refinement_signatures(
-                        saved_topology,
-                        frontier=preliminary_frontier,
-                        seen_signatures=seen,
-                        max_candidates=remaining,
-                    )
-                    samples.extend(
-                        self._solve_pareto_signatures(
-                            refinement_signatures,
-                            capacity_topology=saved_topology,
-                            boundary=kernel_boundary,
-                            source=kernel_source,
-                            config=kernel_config,
-                            reference_R=reference_R,
-                            metric=metric_name,
-                        )
-                    )
-            else:
-                signatures = generate_pareto_signatures(
-                    saved_topology,
-                    strategy=strategy_name,
-                    coefficients_by_profile=coefficient_blocks,
-                    max_candidates=candidate_limit,
-                )
-                samples.extend(
-                    self._solve_pareto_signatures(
-                        signatures,
-                        capacity_topology=saved_topology,
-                        boundary=kernel_boundary,
-                        source=kernel_source,
-                        config=kernel_config,
-                        reference_R=reference_R,
-                        metric=metric_name,
-                    )
-                )
+            samples = self._solve_pareto_signatures(
+                candidate_signatures,
+                capacity_topology=saved_topology,
+                boundary=kernel_boundary,
+                source=kernel_source,
+                config=kernel_config,
+                reference_R=reference_R,
+                metric=metric_name,
+                progress_callback=progress_callback,
+                progress_phase="run",
+                progress_completed=0,
+                progress_total=len(candidate_signatures),
+            )
 
-            frontier = pareto_frontier((reference_sample, *samples), pareto_by=pareto_by_name)
-            selected = select_pareto_thresholds(
-                frontier,
-                thresholds,
-                pareto_by=pareto_by_name,
-            )
+            frontier = pareto_frontier((reference_sample, *samples), target=target_name)
             return ParetoResult(
                 reference=reference_sample,
                 samples=tuple(samples),
                 frontier=frontier,
-                selected=selected,
-                thresholds=thresholds,
-                pareto_by=pareto_by_name,
+                target=target_name,
                 metric=metric_name,
-                strategy=strategy_name,
-                max_candidates=candidate_limit,
             )
         finally:
             self._activate_pareto_topology(saved_topology)
@@ -342,8 +286,13 @@ class _NumbaKernelImpl:
         config: KernelConfig,
         reference_R: np.ndarray,
         metric: str,
+        progress_callback: _ParetoProgressCallback | None = None,
+        progress_phase: str = "run",
+        progress_completed: int = 0,
+        progress_total: int | None = None,
     ) -> list[ParetoSample]:
         samples: list[ParetoSample] = []
+        total = len(signatures) if progress_total is None else int(progress_total)
         for signature in signatures:
             candidate_topology = topology_from_pareto_signature(capacity_topology, signature)
             self._activate_pareto_topology(candidate_topology)
@@ -370,7 +319,25 @@ class _NumbaKernelImpl:
                     ),
                 )
             )
+            self._emit_pareto_progress(
+                progress_callback,
+                progress_phase,
+                progress_completed + len(samples),
+                total,
+            )
         return samples
+
+    @staticmethod
+    def _emit_pareto_progress(
+        progress_callback: object,
+        phase: str,
+        completed: int,
+        total: int,
+    ) -> None:
+        if progress_callback is None:
+            return
+        assert callable(progress_callback)
+        progress_callback(phase, int(completed), max(int(total), 0))
 
     def residual(self, x: Any, boundary: KernelBoundary, source: KernelSource) -> np.ndarray:
         out = np.empty(self.x_size, dtype=np.float64)
