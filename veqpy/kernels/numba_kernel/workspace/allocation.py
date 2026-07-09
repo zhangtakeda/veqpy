@@ -57,7 +57,10 @@ def allocate_runtime_state(
         profile_index=profile_index,
         active_profile_ids=active_profile_ids,
         profile_L=profile_L,
+        active_slot_capacity=len(profile_names),
+        active_coeff_capacity=int(grid_workspace.L_max) + 1,
     )
+    x_capacity = max(int(x_size), len(profile_names) * (int(grid_workspace.L_max) + 1))
     geometry_workspace = GeometryWorkspace(
         nr=nr,
         nt=nt,
@@ -70,9 +73,9 @@ def allocate_runtime_state(
     residual_workspace = ResidualWorkspace(
         nr=nr,
         nt=nt,
-        x_size=x_size,
+        x_size=x_capacity,
         radial_weights=np.asarray(grid_workspace.weights, dtype=np.float64),
-        active_residual_block_count=int(active_profile_ids.size),
+        active_residual_block_count=len(profile_names),
     )
     return (
         profile_workspace,

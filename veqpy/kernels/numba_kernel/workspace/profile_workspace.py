@@ -53,6 +53,12 @@ class ProfileWorkspace:
     active_amplitude_powers: np.ndarray
     active_lengths: np.ndarray
     active_coeff_index_rows: np.ndarray
+    _active_profile_ids_buffer: np.ndarray
+    _active_offsets_buffer: np.ndarray
+    _active_scales_buffer: np.ndarray
+    _active_amplitude_powers_buffer: np.ndarray
+    _active_lengths_buffer: np.ndarray
+    _active_coeff_index_rows_buffer: np.ndarray
     c_family_fields: np.ndarray
     s_family_fields: np.ndarray
     c_family_base_fields: np.ndarray
@@ -69,28 +75,36 @@ class ProfileWorkspace:
         profile_index: dict[str, int],
         active_profile_ids: np.ndarray,
         profile_L: np.ndarray,
+        active_slot_capacity: int | None = None,
+        active_coeff_capacity: int | None = None,
     ) -> None:
         """Allocate profile-stage runtime memory and profile-slot metadata."""
 
         n_profiles = len(profile_names)
         n_active = int(active_profile_ids.size)
-        max_active_len = 0
-        if n_active > 0:
-            # The active coefficient index table is rectangular for Numba.  Rows
-            # shorter than max_active_len are padded with -1 and length-guarded.
-            max_active_len = max(int(profile_L[int(p)]) + 1 for p in active_profile_ids)
+        slot_capacity = n_profiles if active_slot_capacity is None else int(active_slot_capacity)
+        coeff_capacity = 0 if active_coeff_capacity is None else int(active_coeff_capacity)
+        if active_coeff_capacity is None and n_active > 0:
+            coeff_capacity = max(int(profile_L[int(p)]) + 1 for p in active_profile_ids)
+        if slot_capacity < n_active:
+            raise ValueError("active profile capacity is smaller than current active profile count")
 
         self.profile_names = tuple(profile_names)
         self.profile_index = dict(profile_index)
         self.profile_fields = np.empty((n_profiles, 3, nr), dtype=np.float64)
         self.profile_rp_fields = np.empty((n_profiles, 3, nr), dtype=np.float64)
         self.profile_env_fields = np.empty((n_profiles, 3, nr), dtype=np.float64)
-        self.active_profile_ids = np.asarray(active_profile_ids, dtype=np.int64)
-        self.active_offsets = np.empty(n_active, dtype=np.float64)
-        self.active_scales = np.empty(n_active, dtype=np.float64)
-        self.active_amplitude_powers = np.empty(n_active, dtype=np.float64)
-        self.active_lengths = np.empty(n_active, dtype=np.int64)
-        self.active_coeff_index_rows = np.full((n_active, max_active_len), -1, dtype=np.int64)
+        self._active_profile_ids_buffer = np.empty(slot_capacity, dtype=np.int64)
+        self._active_offsets_buffer = np.empty(slot_capacity, dtype=np.float64)
+        self._active_scales_buffer = np.empty(slot_capacity, dtype=np.float64)
+        self._active_amplitude_powers_buffer = np.empty(slot_capacity, dtype=np.float64)
+        self._active_lengths_buffer = np.empty(slot_capacity, dtype=np.int64)
+        self._active_coeff_index_rows_buffer = np.full(
+            (slot_capacity, coeff_capacity),
+            -1,
+            dtype=np.int64,
+        )
+        self.configure_active_metadata(active_profile_ids)
 
         self.c_family_fields = np.empty((m_max + 1, 3, nr), dtype=np.float64)
         self.s_family_fields = np.zeros((m_max + 1, 3, nr), dtype=np.float64)
@@ -110,6 +124,23 @@ class ProfileWorkspace:
             s_name = f"s{order}"
             if s_name in profile_index:
                 self.s_family_source_profile_ids[order] = profile_index[s_name]
+
+    def configure_active_metadata(self, active_profile_ids: np.ndarray) -> None:
+        """Expose active metadata views backed by capacity-sized buffers."""
+
+        active_ids = np.asarray(active_profile_ids, dtype=np.int64)
+        n_active = int(active_ids.size)
+        if n_active > self._active_profile_ids_buffer.size:
+            raise ValueError("active profile count exceeds workspace capacity")
+        self._active_profile_ids_buffer[:n_active] = active_ids
+        self.active_profile_ids = self._active_profile_ids_buffer[:n_active]
+        self.active_offsets = self._active_offsets_buffer[:n_active]
+        self.active_scales = self._active_scales_buffer[:n_active]
+        self.active_amplitude_powers = self._active_amplitude_powers_buffer[:n_active]
+        self.active_lengths = self._active_lengths_buffer[:n_active]
+        self.active_coeff_index_rows = self._active_coeff_index_rows_buffer[:n_active]
+        self.active_lengths.fill(0)
+        self.active_coeff_index_rows.fill(-1)
 
     def refresh_profile_slot(
         self,

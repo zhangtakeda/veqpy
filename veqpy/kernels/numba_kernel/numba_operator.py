@@ -372,7 +372,7 @@ def bind_fused_residual_runner(
 
     def runner(x: np.ndarray) -> np.ndarray:
         runner_into(x, packed_residual)
-        return packed_residual.copy()
+        return packed_residual[: x.shape[0]].copy()
 
     return runner
 
