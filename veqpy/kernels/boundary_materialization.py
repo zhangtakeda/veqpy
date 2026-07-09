@@ -36,6 +36,7 @@ class MaterializedKernelBoundary:
     fit_max_curve_error: float | None
     fit_c_order: int | None
     fit_s_order: int | None
+    fit_method: str | None
 
 
 BoundaryFitter = Callable[..., dict[str, float | np.ndarray]]
@@ -61,9 +62,10 @@ def materialize_kernel_boundary(
             fit_max_curve_error=boundary.fit_max_curve_error,
             fit_c_order=boundary.fit_c_order,
             fit_s_order=boundary.fit_s_order,
+            fit_method=boundary.fit_method,
         )
 
-    R_boundary, Z_boundary, c_order, s_order, fit_maxtol = raw
+    R_boundary, Z_boundary, c_order, s_order, fit_maxtol, fit_method = raw
     started = perf_counter()
     fitted = _fit_boundary_params(
         fitter,
@@ -73,6 +75,7 @@ def materialize_kernel_boundary(
         c_order=c_order,
         s_order=s_order,
         maxtol=fit_maxtol,
+        method=fit_method,
     )
     elapsed_ms = (perf_counter() - started) * 1000.0
     materialized_boundary = KernelBoundary(
@@ -92,6 +95,7 @@ def materialize_kernel_boundary(
         fit_max_curve_error=float(fitted["max_curve_error"]),
         fit_c_order=int(fitted["c_order"]),
         fit_s_order=int(fitted["s_order"]),
+        fit_method=str(fitted.get("method", fit_method)),
     )
 
 
@@ -103,6 +107,7 @@ def materialized_boundary_fit_payload(
     boundary = materialized.boundary
     return {
         "fit_backend": materialized.fit_backend,
+        "fit_method": materialized.fit_method,
         "fit_elapsed_ms": float(materialized.fit_elapsed_ms),
         "rms": materialized.fit_rms,
         "max_curve_error": materialized.fit_max_curve_error,
@@ -126,6 +131,7 @@ def _fit_boundary_params(
     c_order: int,
     s_order: int,
     maxtol: float,
+    method: str,
 ) -> dict[str, float | np.ndarray]:
     if fitter is None:
         fitter = _fitter_for_backend(fit_backend)
@@ -135,6 +141,7 @@ def _fit_boundary_params(
         c_order=c_order,
         s_order=s_order,
         maxtol=maxtol,
+        method=method,
     )
 
 

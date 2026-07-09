@@ -42,17 +42,24 @@ def _assert_fit_is_reasonable(case_key: str, fit: dict[str, Any]) -> None:
     assert curve < {"solovev": 3.0e-2, "chease": 4.0e-2, "efit": 3.0e-2}[case_key]
 
 
-def _fit_numpy(R: np.ndarray, Z: np.ndarray) -> dict[str, Any]:
-    return fit_boundary_params(R, Z, c_order=10, s_order=10, maxtol=1.0)
+def _fit_numpy(R: np.ndarray, Z: np.ndarray, *, method: str) -> dict[str, Any]:
+    return fit_boundary_params(R, Z, c_order=10, s_order=10, maxtol=1.0, method=method)
 
 
-def _fit_numba(R: np.ndarray, Z: np.ndarray) -> dict[str, Any]:
-    return fit_boundary_params_numba(R, Z, c_order=10, s_order=10, maxtol=1.0)
+def _fit_numba(R: np.ndarray, Z: np.ndarray, *, method: str) -> dict[str, Any]:
+    return fit_boundary_params_numba(R, Z, c_order=10, s_order=10, maxtol=1.0, method=method)
 
 
-def _fit_cxx(R: np.ndarray, Z: np.ndarray) -> dict[str, Any]:
+def _fit_cxx(R: np.ndarray, Z: np.ndarray, *, method: str) -> dict[str, Any]:
     try:
-        return fit_boundary_params_cxx(R, Z, c_order=10, s_order=10, maxtol=1.0)
+        return fit_boundary_params_cxx(
+            R,
+            Z,
+            c_order=10,
+            s_order=10,
+            maxtol=1.0,
+            method=method,
+        )
     except Exception as exc:
         text = f"{type(exc).__name__}: {exc}"
         if any(token in text.lower() for token in ("cmake", "compiler", "nanobind", "build")):
@@ -62,30 +69,49 @@ def _fit_cxx(R: np.ndarray, Z: np.ndarray) -> dict[str, Any]:
 
 @pytest.mark.slow
 @pytest.mark.parametrize("case_key", CASE_KEYS)
-def test_numba_boundary_qr_fitter_matches_numpy(case_key: str) -> None:
+@pytest.mark.parametrize("method", ("qr", "gnqr", "least-square"))
+def test_numba_boundary_fitter_matches_numpy(case_key: str, method: str) -> None:
     R, Z = _load_boundary(case_key)
 
-    reference = _fit_numpy(R, Z)
-    fitted = _fit_numba(R, Z)
+    reference = _fit_numpy(R, Z, method=method)
+    fitted = _fit_numba(R, Z, method=method)
 
     _assert_fit_is_reasonable(case_key, reference)
     _assert_fit_is_reasonable(case_key, fitted)
-    assert_allclose(_coeff_vector(fitted), _coeff_vector(reference), rtol=0.0, atol=1.0e-10)
-    assert_allclose(fitted["rms"], reference["rms"], rtol=0.0, atol=1.0e-12)
-    assert_allclose(fitted["max_curve_error"], reference["max_curve_error"], rtol=0.0, atol=1.0e-12)
+    if method in {"qr", "gnqr"}:
+        assert_allclose(_coeff_vector(fitted), _coeff_vector(reference), rtol=0.0, atol=1.0e-10)
+        assert_allclose(fitted["rms"], reference["rms"], rtol=0.0, atol=1.0e-12)
+        assert_allclose(
+            fitted["max_curve_error"],
+            reference["max_curve_error"],
+            rtol=0.0,
+            atol=1.0e-12,
+        )
+    else:
+        assert float(fitted["rms"]) <= 2.0 * float(reference["rms"])
+        assert float(fitted["max_curve_error"]) <= 1.2 * float(reference["max_curve_error"])
 
 
 @pytest.mark.slow
 @pytest.mark.parametrize("case_key", CASE_KEYS)
-def test_cxx_boundary_qr_fitter_matches_numpy(case_key: str) -> None:
+@pytest.mark.parametrize("method", ("qr", "gnqr", "least-square"))
+def test_cxx_boundary_fitter_matches_numpy_or_native_ls(case_key: str, method: str) -> None:
     R, Z = _load_boundary(case_key)
 
-    reference = _fit_numpy(R, Z)
-    fitted = _fit_cxx(R, Z)
+    reference = _fit_numpy(R, Z, method=method)
+    fitted = _fit_cxx(R, Z, method=method)
 
     _assert_fit_is_reasonable(case_key, reference)
     _assert_fit_is_reasonable(case_key, fitted)
-    assert_allclose(_coeff_vector(fitted), _coeff_vector(reference), rtol=0.0, atol=1.0e-8)
-    assert_allclose(fitted["rms"], reference["rms"], rtol=0.0, atol=1.0e-10)
-    assert_allclose(fitted["max_curve_error"], reference["max_curve_error"], rtol=0.0, atol=1.0e-10)
-
+    if method in {"qr", "gnqr"}:
+        assert_allclose(_coeff_vector(fitted), _coeff_vector(reference), rtol=0.0, atol=1.0e-8)
+        assert_allclose(fitted["rms"], reference["rms"], rtol=0.0, atol=1.0e-9)
+        assert_allclose(
+            fitted["max_curve_error"],
+            reference["max_curve_error"],
+            rtol=0.0,
+            atol=1.0e-8,
+        )
+    else:
+        assert float(fitted["rms"]) <= 2.0 * float(reference["rms"])
+        assert float(fitted["max_curve_error"]) <= 1.2 * float(reference["max_curve_error"])

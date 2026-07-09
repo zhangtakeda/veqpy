@@ -41,6 +41,7 @@ from veqpy.kernels.abi.options import (
     residual_normalization_code,
     solver_method_code,
 )
+from veqpy.kernels.boundary_fit import normalize_boundary_fit_method
 from veqpy.kernels.errors import TopologyError
 
 _BUILD_PRESET_KWARGS: dict[str, dict[str, object]] = {
@@ -161,15 +162,18 @@ class KernelBoundary:
     c_order: InitVar[int | None] = None
     s_order: InitVar[int | None] = None
     fit_maxtol: InitVar[float] = 1.0e-2
+    method: InitVar[str | None] = None
     fit_rms: float | None = field(init=False)
     fit_max_curve_error: float | None = field(init=False)
     fit_c_order: int | None = field(init=False)
     fit_s_order: int | None = field(init=False)
+    fit_method: str | None = field(init=False)
     _raw_R_boundary: np.ndarray | None = field(init=False, repr=False, compare=False)
     _raw_Z_boundary: np.ndarray | None = field(init=False, repr=False, compare=False)
     _raw_c_order: int | None = field(init=False, repr=False, compare=False)
     _raw_s_order: int | None = field(init=False, repr=False, compare=False)
     _raw_fit_maxtol: float = field(init=False, repr=False, compare=False)
+    _raw_fit_method: str | None = field(init=False, repr=False, compare=False)
     _s_offsets_with_s0: np.ndarray = field(init=False, repr=False, compare=False)
 
     def __post_init__(
@@ -179,6 +183,7 @@ class KernelBoundary:
         c_order: int | None,
         s_order: int | None,
         fit_maxtol: float,
+        method: str | None,
     ) -> None:
         if self.B0 is None:
             raise ValueError("B0 is required")
@@ -193,18 +198,23 @@ class KernelBoundary:
                 s_order=s_order,
                 fit_maxtol=fit_maxtol,
             )
+            raw_fit_method = normalize_boundary_fit_method(method)
             c_offsets_input = None
             s_offsets_input = None
             object.__setattr__(self, "fit_rms", None)
             object.__setattr__(self, "fit_max_curve_error", None)
             object.__setattr__(self, "fit_c_order", None)
             object.__setattr__(self, "fit_s_order", None)
+            object.__setattr__(self, "fit_method", raw_fit_method)
             object.__setattr__(self, "_raw_R_boundary", raw_R)
             object.__setattr__(self, "_raw_Z_boundary", raw_Z)
             object.__setattr__(self, "_raw_c_order", raw_c_order)
             object.__setattr__(self, "_raw_s_order", raw_s_order)
             object.__setattr__(self, "_raw_fit_maxtol", raw_fit_maxtol)
+            object.__setattr__(self, "_raw_fit_method", raw_fit_method)
         else:
+            if method is not None:
+                raise ValueError("method is only valid when RZ boundary points are provided")
             missing = [
                 name
                 for name, value in (("a", self.a), ("R0", self.R0), ("Z0", self.Z0))
@@ -223,11 +233,13 @@ class KernelBoundary:
             object.__setattr__(self, "fit_max_curve_error", None)
             object.__setattr__(self, "fit_c_order", None)
             object.__setattr__(self, "fit_s_order", None)
+            object.__setattr__(self, "fit_method", None)
             object.__setattr__(self, "_raw_R_boundary", None)
             object.__setattr__(self, "_raw_Z_boundary", None)
             object.__setattr__(self, "_raw_c_order", None)
             object.__setattr__(self, "_raw_s_order", None)
             object.__setattr__(self, "_raw_fit_maxtol", float(fit_maxtol))
+            object.__setattr__(self, "_raw_fit_method", None)
         object.__setattr__(self, "B0", float(self.B0))
         object.__setattr__(self, "c_offsets", _readonly_1d_or_default(c_offsets_input, "c_offsets"))
         s_offsets = _float_tuple_or_default(s_offsets_input, "s_offsets", default=())
@@ -296,7 +308,7 @@ def kernel_boundary_has_raw_points(boundary: KernelBoundary) -> bool:
 
 def kernel_boundary_raw_fit_spec(
     boundary: KernelBoundary,
-) -> tuple[np.ndarray, np.ndarray, int, int, float] | None:
+) -> tuple[np.ndarray, np.ndarray, int, int, float, str] | None:
     """Return raw R/Z fit input for internal Kernel materialization."""
 
     if boundary._raw_R_boundary is None or boundary._raw_Z_boundary is None:
@@ -309,6 +321,7 @@ def kernel_boundary_raw_fit_spec(
         boundary._raw_c_order,
         boundary._raw_s_order,
         boundary._raw_fit_maxtol,
+        str(boundary._raw_fit_method),
     )
 
 
@@ -317,7 +330,7 @@ def kernel_boundary_shape_orders(boundary: KernelBoundary) -> tuple[int, int]:
 
     raw = kernel_boundary_raw_fit_spec(boundary)
     if raw is not None:
-        _, _, c_order, s_order, _ = raw
+        _, _, c_order, s_order, _, _ = raw
         return c_order, s_order
     return int(np.asarray(boundary.c_offsets, dtype=np.float64).size) - 1, len(boundary.s_offsets)
 

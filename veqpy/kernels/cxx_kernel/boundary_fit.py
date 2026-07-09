@@ -2,7 +2,7 @@
 Module: veqpy.kernels.cxx_kernel.boundary_fit
 
 Role:
-- Build and load the standalone native boundary phase-QR fitter.
+- Build and load the standalone native boundary fitters.
 
 Notes:
 - The fitter is topology-independent and accepts runtime R/Z scatter length plus
@@ -25,6 +25,8 @@ from types import ModuleType
 from typing import Any
 
 import numpy as np
+
+from veqpy.kernels.boundary_fit import normalize_boundary_fit_method
 
 from .builder import (
     DEFAULT_CXX_COMPILER,
@@ -55,8 +57,10 @@ def fit_boundary_params_cxx(
     c_order: int,
     s_order: int,
     maxtol: float = 1.0e-2,
+    method: str | None = "gnqr",
+    algorithm: str | None = None,
 ) -> dict[str, float | np.ndarray]:
-    """Fit RZ boundary samples with the native phase-QR implementation."""
+    """Fit RZ boundary samples with the native boundary fitter."""
 
     R = np.ascontiguousarray(R_boundary, dtype=np.float64)
     Z = np.ascontiguousarray(Z_boundary, dtype=np.float64)
@@ -68,8 +72,19 @@ def fit_boundary_params_cxx(
     if maxtol <= 0.0:
         raise ValueError(f"maxtol must be positive, got {maxtol!r}")
 
+    if algorithm is not None:
+        method = _method_from_legacy_algorithm(algorithm)
+    method = normalize_boundary_fit_method(method)
+
     native = _boundary_fit_module()
-    payload = native.fit_boundary_qr(R, Z, int(c_order), int(s_order))
+    if method == "qr":
+        payload = native.fit_boundary_qr(R, Z, int(c_order), int(s_order))
+    elif method == "gnqr":
+        payload = native.fit_boundary_weighted_gnqr(R, Z, int(c_order), int(s_order))
+    elif method == "least-square":
+        payload = native.fit_boundary_least_square(R, Z, int(c_order), int(s_order))
+    else:
+        raise AssertionError(f"unhandled boundary fit method {method!r}")
     result = {
         "R0": float(payload["R0"]),
         "Z0": float(payload["Z0"]),
@@ -81,6 +96,7 @@ def fit_boundary_params_cxx(
         "max_curve_error": float(payload["max_curve_error"]),
         "c_order": int(payload["c_order"]),
         "s_order": int(payload["s_order"]),
+        "method": method,
     }
     if result["rms"] >= maxtol:
         warnings.warn(
@@ -91,6 +107,19 @@ def fit_boundary_params_cxx(
             stacklevel=2,
         )
     return result
+
+
+def _method_from_legacy_algorithm(algorithm: str) -> str:
+    normalized = str(algorithm).strip().lower().replace("-", "_")
+    if normalized in {"weighted_qr", "qr"}:
+        return "qr"
+    if normalized in {"weighted_gnqr", "gnqr"}:
+        return "gnqr"
+    if normalized in {"least_square", "least_squares", "ls"}:
+        return "least-square"
+    if normalized == "phase_qr":
+        raise ValueError("legacy algorithm='phase_qr' is no longer a public boundary method")
+    raise ValueError(f"unsupported legacy boundary fit algorithm {algorithm!r}")
 
 
 @lru_cache(maxsize=1)

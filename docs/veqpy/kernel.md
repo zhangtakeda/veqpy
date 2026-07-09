@@ -19,9 +19,14 @@ For sine Fourier data, Kernel-level public inputs are s1-started:
 The runtime adds the structural s0=0 slot before backend calls.
 `KernelBoundary` accepts either explicit parameterized geometry
 (`a`, `R0`, `Z0`, `B0`, `ka`, `c_offsets`, `s_offsets`) or raw LCFS point arrays
-(`R_boundary`, `Z_boundary`) plus `c_order`/`s_order`; the latter form performs
-the least-squares Fourier projection during construction and records fit
-diagnostics on `fit_*` fields.
+(`R_boundary`, `Z_boundary`) plus `c_order`/`s_order`. Raw point boundaries are
+stored without mutating the input arrays and are materialized into Fourier
+coefficients when a Kernel backend consumes the boundary. The optional
+`method` selects the fitter: `qr` is weighted QR, `gnqr` is weighted QR plus two
+fixed-geometry Gauss-Newton steps, and `least-square` is the bounded full R/Z
+least-squares fit initialized from the analytic `R0/Z0/a/ka` estimates. The
+default is `gnqr`. Fit diagnostics are recorded on `fit_*` metadata after
+materialization; the original frozen `KernelBoundary` is not updated in place.
 
 The direct Numba implementation is a private Kernel backend. Its internal runtime
 owns packed layout metadata, source materialization, residual workspaces, and

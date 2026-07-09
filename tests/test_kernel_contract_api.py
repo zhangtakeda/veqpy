@@ -105,6 +105,7 @@ def test_kernel_boundary_accepts_parameterized_and_rz_inputs() -> None:
     assert explicit.fit_max_curve_error is None
     assert explicit.fit_c_order is None
     assert explicit.fit_s_order is None
+    assert explicit.fit_method is None
     assert_allclose(kernel_boundary_s_offsets_with_s0(explicit), [0.0, explicit.s_offsets[0]])
 
     R_boundary, Z_boundary = ellipse_boundary_points()
@@ -115,12 +116,14 @@ def test_kernel_boundary_accepts_parameterized_and_rz_inputs() -> None:
         c_order=0,
         s_order=0,
         fit_maxtol=1.0e-8,
+        method="qr",
     )
     assert kernel_boundary_has_raw_points(fitted)
     assert fitted.a is None
     assert fitted.R0 is None
     assert fitted.Z0 is None
     assert fitted.fit_rms is None
+    assert fitted.fit_method == "qr"
 
     materialized = materialize_kernel_boundary(fitted)
     materialized_boundary = materialized.boundary
@@ -136,6 +139,7 @@ def test_kernel_boundary_accepts_parameterized_and_rz_inputs() -> None:
     assert materialized.fit_max_curve_error < 1.0e-8
     assert materialized.fit_c_order == 0
     assert materialized.fit_s_order == 0
+    assert materialized.fit_method == "qr"
 
     with pytest.raises(ValueError, match="provided together"):
         KernelBoundary(B0=3.0, R_boundary=R_boundary, Z_boundary=Z_boundary, c_order=0)
@@ -148,6 +152,8 @@ def test_kernel_boundary_accepts_parameterized_and_rz_inputs() -> None:
             c_order=0,
             s_order=0,
         )
+    with pytest.raises(ValueError, match="method is only valid"):
+        KernelBoundary(a=0.5, R0=1.0, Z0=0.1, B0=3.0, ka=1.7, method="gnqr")
 
 
 class RecordingSolver:
