@@ -9,6 +9,8 @@ from veqpy.kernels.numba_kernel.pareto_runtime import sample_r_surface
 from veqpy.kernels.pareto import (
     KernelParetoSignature,
     ParetoSample,
+    coefficient_blocks_from_packed_state,
+    generate_pareto_signatures,
     normalize_pareto_by,
     normalize_pareto_max_candidates,
     normalize_pareto_metric,
@@ -18,6 +20,7 @@ from veqpy.kernels.pareto import (
     pareto_sample_complexity,
     pareto_shape_error,
     select_pareto_thresholds,
+    topology_from_pareto_signature,
 )
 from veqpy.kernels.types import KernelTopology, SolveResult
 
@@ -162,6 +165,104 @@ def test_pareto_shape_error_measures_r_surface_in_meters() -> None:
 
     with pytest.raises(ValueError, match="shape mismatch"):
         pareto_shape_error(reference, candidate[:, :1], metric="rms")
+
+
+def test_coefficient_blocks_decode_degree_first_layout() -> None:
+    x = np.array([10.0, 20.0, 30.0], dtype=np.float64)
+    blocks = coefficient_blocks_from_packed_state(
+        x,
+        profile_names=("h", "psin"),
+        profile_L=np.array([1, 0], dtype=np.int64),
+        coeff_index=np.array([[0, 2], [1, -1]], dtype=np.int64),
+    )
+
+    assert_allclose(blocks["h"], [10.0, 30.0])
+    assert_allclose(blocks["psin"], [20.0])
+
+
+def test_balanced_pareto_strategy_is_deterministic_and_capacity_bounded() -> None:
+    topology = make_topology(h_count=5, v_count=4, kappa_count=3, psin_count=3)
+
+    first = generate_pareto_signatures(
+        topology,
+        strategy="balanced",
+        max_candidates=10,
+    )
+    second = generate_pareto_signatures(
+        topology,
+        strategy="balanced",
+        max_candidates=10,
+    )
+
+    assert first == second
+    assert len(first) == 10
+    assert KernelParetoSignature.from_topology(topology) not in first
+    for signature in first:
+        candidate = topology_from_pareto_signature(topology, signature)
+        assert candidate.x_size <= topology.x_size
+        assert signature.psin_count >= 1
+
+
+def test_tail_strategy_keeps_more_coefficients_for_large_max_tail() -> None:
+    topology = make_topology(h_count=5, v_count=5, kappa_count=0, psin_count=2)
+    coefficients = {
+        "h": np.array([1.0, 0.01, 0.001, 0.0001, 0.00001], dtype=np.float64),
+        "v": np.ones(5, dtype=np.float64),
+        "psin": np.ones(2, dtype=np.float64),
+    }
+
+    signatures = generate_pareto_signatures(
+        topology,
+        strategy="tail",
+        coefficients_by_profile=coefficients,
+        max_candidates=20,
+    )
+
+    assert signatures
+    assert any(signature.h_count < signature.v_count for signature in signatures)
+    assert all(signature.psin_count >= 1 for signature in signatures)
+
+
+def test_energy_strategy_keeps_more_coefficients_for_large_l2_tail() -> None:
+    topology = make_topology(h_count=5, v_count=5, kappa_count=0, psin_count=2)
+    coefficients = {
+        "h": np.ones(5, dtype=np.float64),
+        "v": np.array([1.0, 0.01, 0.001, 0.0001, 0.00001], dtype=np.float64),
+        "psin": np.ones(2, dtype=np.float64),
+    }
+
+    signatures = generate_pareto_signatures(
+        topology,
+        strategy="energy",
+        coefficients_by_profile=coefficients,
+        max_candidates=20,
+    )
+
+    assert signatures
+    assert any(signature.h_count > signature.v_count for signature in signatures)
+    assert all(signature.psin_count >= 1 for signature in signatures)
+
+
+def test_adaptive_strategy_starts_from_combined_seed_candidates() -> None:
+    topology = make_topology(h_count=4, v_count=4, kappa_count=2, psin_count=2)
+    coefficients = {
+        "h": np.array([1.0, 0.01, 0.001, 0.0001], dtype=np.float64),
+        "v": np.ones(4, dtype=np.float64),
+        "k": np.array([1.0, 0.1], dtype=np.float64),
+        "psin": np.ones(2, dtype=np.float64),
+    }
+
+    adaptive = generate_pareto_signatures(
+        topology,
+        strategy="adaptive",
+        coefficients_by_profile=coefficients,
+        max_candidates=6,
+    )
+    balanced = generate_pareto_signatures(topology, strategy="balanced", max_candidates=6)
+
+    assert len(adaptive) == 6
+    assert set(adaptive) != set(balanced)
+    assert len(set(adaptive)) == len(adaptive)
 
 
 def test_numba_pareto_r_sampler_matches_equilibrium_without_history_mutation() -> None:
