@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from numerical_helpers import assert_finite
+from _helpers import assert_finite
 
 from benchmarks._common import (
     CASE_REFERENCE_GFILES,
@@ -29,14 +29,15 @@ def test_geqdsk_boundary_fit_is_small_against_reference_points(case_key: str) ->
         maxtol=1.0,
     )
 
-    assert float(fit["rms"]) < {"solovev": 2.0e-3, "chease": 1.0e-2, "efit": 5.0e-3}[
-        case_key
-    ]
-    assert float(fit["max_curve_error"]) < {
-        "solovev": 3.0e-2,
-        "chease": 4.0e-2,
-        "efit": 3.0e-2,
-    }[case_key]
+    assert float(fit["rms"]) < {"solovev": 2.0e-3, "chease": 1.0e-2, "efit": 5.0e-3}[case_key]
+    assert (
+        float(fit["max_curve_error"])
+        < {
+            "solovev": 3.0e-2,
+            "chease": 4.0e-2,
+            "efit": 3.0e-2,
+        }[case_key]
+    )
     assert np.isfinite(float(geqdsk.Bt0))
 
 

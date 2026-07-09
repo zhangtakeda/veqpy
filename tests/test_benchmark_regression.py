@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pytest
-from numerical_helpers import (
+from _helpers import (
     assert_finite,
     assert_runtime_passed,
     benchmark_args,

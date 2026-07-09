@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from helpers import MU0, pf_reference_profiles
+from _helpers import MU0, pf_reference_profiles
 from numpy.linalg import norm
 from numpy.testing import assert_allclose
 
@@ -113,9 +113,7 @@ def route_kernel_source(
         nr=nr,
     )
     heat_profile = (
-        rho * (1.0e6 + 0.4e6 * rho * rho)
-        if coordinate == "rho"
-        else 1.0e6 + 0.4e6 * rho * rho
+        rho * (1.0e6 + 0.4e6 * rho * rho) if coordinate == "rho" else 1.0e6 + 0.4e6 * rho * rho
     )
     if route == "PI":
         current_profile = rho * rho * (1.0e6 + 2.0e6 * rho * rho)
@@ -125,9 +123,7 @@ def route_kernel_source(
         current_profile = rho * (1.0 + 2.0 * rho * rho)
     elif route == "PF":
         current_profile = (
-            rho * (1.0 + 2.0 * rho * rho)
-            if coordinate == "rho"
-            else 1.0 + 2.0 * rho * rho
+            rho * (1.0 + 2.0 * rho * rho) if coordinate == "rho" else 1.0 + 2.0 * rho * rho
         )
     else:
         current_profile = 1.0 + 2.0 * rho * rho
@@ -443,8 +439,7 @@ def test_kernel_numba_backend_powell_uses_hybr_budget(
     assert result.success
 
 
-def test_kernel_numba_backend_build_equilibrium_uses_direct_runtime(
-) -> None:
+def test_kernel_numba_backend_build_equilibrium_uses_direct_runtime() -> None:
     topology = make_kernel_topology()
     kernel = numba_kernel(topology=topology)
     boundary = tiny_kernel_boundary()
