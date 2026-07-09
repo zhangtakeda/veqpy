@@ -37,6 +37,7 @@ from .native_abi import (
 )
 from .registry import KernelRegistry
 from .solver import CxxSolver
+from .validation import validate_supported_for_cxx_backend
 
 if TYPE_CHECKING:
     from veqpy.model import Equilibrium
@@ -61,6 +62,7 @@ class _CxxKernelImpl:
         if not isinstance(self.recipe, KernelRecipe):
             raise TypeError(f"recipe must be KernelRecipe, got {type(self.recipe).__name__}")
         self._validate_native_recipe(self.recipe)
+        validate_supported_for_cxx_backend(topology)
         self.config = KernelConfig() if config is None else self._kernel_config(config)
         self.pin_cpu = pin_cpu
         self.registry = registry or KernelRegistry(
@@ -89,6 +91,21 @@ class _CxxKernelImpl:
             prepared=not dry_run,
             dry_run=dry_run,
             artifact=artifact,
+        )
+
+    def variant(
+        self,
+        *,
+        h_count: int | None = None,
+        v_count: int | None = None,
+        kappa_count: int | None = None,
+        psin_count: int | None = None,
+        F_count: int | None = None,
+        c_counts: tuple[int, ...] | None = None,
+        s_counts: tuple[int, ...] | None = None,
+    ) -> "_CxxKernelImpl":
+        raise NotImplementedError(
+            "Kernel.variant() is currently supported only by the Numba backend"
         )
 
     def solve(
