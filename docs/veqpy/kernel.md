@@ -27,6 +27,13 @@ fixed-geometry Gauss-Newton steps, and `least-square` is the bounded full R/Z
 least-squares fit initialized from the analytic `R0/Z0/a/ka` estimates. The
 default is `gnqr`. Fit diagnostics are recorded on `fit_*` metadata after
 materialization; the original frozen `KernelBoundary` is not updated in place.
+Use `raw_boundary.fit(backend="numba")` to explicitly fit once and return an
+equivalent parameterized `KernelBoundary` carrying `fit_rms`,
+`fit_max_curve_error`, `fit_c_order`, `fit_s_order`, and `fit_method` metadata.
+The default manual-fit backend is `numba`; `numpy` is available for the shared
+Python fitter, and `cxx` uses the optional native fitter when its toolchain is
+available. The returned boundary can be reused in later solves without fitting
+the raw points again.
 
 The direct Numba implementation is a private Kernel backend. Its internal runtime
 owns packed layout metadata, source materialization, residual workspaces, and

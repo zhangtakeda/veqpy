@@ -140,6 +140,11 @@ def test_kernel_boundary_accepts_parameterized_and_rz_inputs() -> None:
     assert materialized.fit_c_order == 0
     assert materialized.fit_s_order == 0
     assert materialized.fit_method == "qr"
+    assert materialized_boundary.fit_rms == materialized.fit_rms
+    assert materialized_boundary.fit_max_curve_error == materialized.fit_max_curve_error
+    assert materialized_boundary.fit_c_order == materialized.fit_c_order
+    assert materialized_boundary.fit_s_order == materialized.fit_s_order
+    assert materialized_boundary.fit_method == materialized.fit_method
 
     with pytest.raises(ValueError, match="provided together"):
         KernelBoundary(B0=3.0, R_boundary=R_boundary, Z_boundary=Z_boundary, c_order=0)
@@ -154,6 +159,91 @@ def test_kernel_boundary_accepts_parameterized_and_rz_inputs() -> None:
         )
     with pytest.raises(ValueError, match="method is only valid"):
         KernelBoundary(a=0.5, R0=1.0, Z0=0.1, B0=3.0, ka=1.7, method="gnqr")
+
+
+def test_kernel_boundary_fit_returns_parameterized_boundary() -> None:
+    R_boundary, Z_boundary = ellipse_boundary_points()
+    raw = KernelBoundary(
+        B0=3.0,
+        R_boundary=R_boundary,
+        Z_boundary=Z_boundary,
+        c_order=0,
+        s_order=0,
+        fit_maxtol=1.0e-8,
+        method="qr",
+    )
+
+    fitted = raw.fit()
+
+    assert kernel_boundary_has_raw_points(raw)
+    assert not kernel_boundary_has_raw_points(fitted)
+    assert_allclose(fitted.a, 0.5, rtol=0.0, atol=1.0e-8)
+    assert_allclose(fitted.R0, 1.0, rtol=0.0, atol=1.0e-8)
+    assert_allclose(fitted.Z0, 0.1, rtol=0.0, atol=1.0e-8)
+    assert_allclose(fitted.B0, 3.0)
+    assert_allclose(fitted.ka, 1.7, rtol=0.0, atol=1.0e-8)
+    assert_allclose(fitted.c_offsets, [0.0], atol=1.0e-8)
+    assert fitted.s_offsets == ()
+    assert fitted.fit_rms is not None and fitted.fit_rms < 1.0e-8
+    assert fitted.fit_max_curve_error is not None and fitted.fit_max_curve_error < 1.0e-8
+    assert fitted.fit_c_order == 0
+    assert fitted.fit_s_order == 0
+    assert fitted.fit_method == "qr"
+
+
+def test_kernel_boundary_fit_is_idempotent_for_parameterized_boundary() -> None:
+    explicit = tiny_kernel_boundary()
+
+    assert explicit.fit() is explicit
+    with pytest.raises(ValueError, match="fit overrides"):
+        explicit.fit(method="qr")
+
+
+def test_kernel_boundary_fit_overrides_raw_fit_options() -> None:
+    R_boundary, Z_boundary = ellipse_boundary_points()
+    raw = KernelBoundary(
+        B0=3.0,
+        R_boundary=R_boundary,
+        Z_boundary=Z_boundary,
+        c_order=0,
+        s_order=0,
+        fit_maxtol=1.0,
+        method="qr",
+    )
+
+    fitted = raw.fit(method="gnqr", c_order=1, s_order=1, maxtol=1.0)
+
+    assert not kernel_boundary_has_raw_points(fitted)
+    assert fitted.fit_c_order == 1
+    assert fitted.fit_s_order == 1
+    assert fitted.fit_method == "gnqr"
+    assert fitted.c_offsets.shape == (2,)
+    assert len(fitted.s_offsets) == 1
+    with pytest.raises(ValueError, match="provided together"):
+        raw.fit(c_order=1)
+
+
+def test_kernel_boundary_fit_accepts_backend_override() -> None:
+    R_boundary, Z_boundary = ellipse_boundary_points()
+    raw = KernelBoundary(
+        B0=3.0,
+        R_boundary=R_boundary,
+        Z_boundary=Z_boundary,
+        c_order=0,
+        s_order=0,
+        fit_maxtol=1.0e-8,
+        method="qr",
+    )
+
+    fitted = raw.fit(backend="numpy")
+
+    assert not kernel_boundary_has_raw_points(fitted)
+    assert_allclose(fitted.a, 0.5, rtol=0.0, atol=1.0e-8)
+    assert_allclose(fitted.R0, 1.0, rtol=0.0, atol=1.0e-8)
+    assert_allclose(fitted.Z0, 0.1, rtol=0.0, atol=1.0e-8)
+    assert fitted.fit_method == "qr"
+    with pytest.raises(ValueError, match="unsupported boundary fitter backend"):
+        raw.fit(backend="missing")
 
 
 class RecordingSolver:

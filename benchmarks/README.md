@@ -26,7 +26,7 @@ construction for the same active GEQDSK topology.
 - `cxx_routes.py`: Cxx backend route matrix compared with the Numba backend.
 - `cxx_geqdsk_pareto.py`: GEQDSK Cxx backend matrix compared with the Numba backend.
 - `cxx_continuation.py`: Cxx backend continuation-policy benchmark.
-- `cxx_boundary_fitters.py`: boundary R/Z scatter-to-coefficient QR fitter comparison.
+- `cxx_boundary_fitters.py`: boundary R/Z scatter-to-coefficient fitter method/backend matrix.
 - `_common.py`: shared Kernel-case construction, timing, route specs, and JSON helpers.
 
 ## Reproduce

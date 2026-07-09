@@ -40,9 +40,7 @@ from benchmarks._reporting import (  # noqa: E402
 from benchmarks._reporting import (  # noqa: E402
     console as reporting_console,
 )
-from veqpy.kernels.boundary_fit import fit_boundary_params  # noqa: E402
-from veqpy.kernels.cxx_kernel.boundary_fit import fit_boundary_params_cxx  # noqa: E402
-from veqpy.kernels.numba_kernel.boundary_fit import fit_boundary_params_numba  # noqa: E402
+from veqpy import KernelBoundary  # noqa: E402
 from veqpy.model import Geqdsk  # noqa: E402
 
 DEFAULT_OUTPUT = REPO_ROOT / "benchmarks" / "results" / "boundary_fitters.json"
@@ -55,146 +53,67 @@ SUPPORTED_BACKENDS = ("numpy", "numba", "cxx")
 DEFAULT_BACKENDS = ("numba", "cxx")
 
 
-def _load_boundary_points(case_key: str) -> tuple[np.ndarray, np.ndarray]:
+def _load_boundary_points(case_key: str) -> tuple[np.ndarray, np.ndarray, float]:
     geqdsk = Geqdsk(CASE_REFERENCE_GFILES[case_key])
     points = np.asarray(geqdsk.boundary, dtype=np.float64)
     if points.ndim != 2 or points.shape[1] != 2:
         raise ValueError(f"{case_key} boundary must be an (n, 2) array, got {points.shape}")
-    return points[:, 0].copy(), points[:, 1].copy()
+    return points[:, 0].copy(), points[:, 1].copy(), float(geqdsk.Bt0)
 
 
-def _fit_numpy(
+def _raw_boundary(
     R_boundary: np.ndarray,
     Z_boundary: np.ndarray,
+    B0: float,
     *,
     c_order: int,
     s_order: int,
     maxtol: float,
-    method: str,
-) -> dict[str, Any]:
-    return fit_boundary_params(
-        R_boundary,
-        Z_boundary,
+    method: str | None = None,
+) -> KernelBoundary:
+    return KernelBoundary(
+        B0=B0,
+        R_boundary=R_boundary,
+        Z_boundary=Z_boundary,
         c_order=c_order,
         s_order=s_order,
-        maxtol=maxtol,
-        method=method,
-    )
-
-
-def _fit_numba(
-    R_boundary: np.ndarray,
-    Z_boundary: np.ndarray,
-    *,
-    c_order: int,
-    s_order: int,
-    maxtol: float,
-    method: str,
-) -> dict[str, Any]:
-    return fit_boundary_params_numba(
-        R_boundary,
-        Z_boundary,
-        c_order=c_order,
-        s_order=s_order,
-        maxtol=maxtol,
-        method=method,
-    )
-
-
-def _fit_cxx(
-    R_boundary: np.ndarray,
-    Z_boundary: np.ndarray,
-    *,
-    c_order: int,
-    s_order: int,
-    maxtol: float,
-    method: str,
-) -> dict[str, Any]:
-    return fit_boundary_params_cxx(
-        R_boundary,
-        Z_boundary,
-        c_order=c_order,
-        s_order=s_order,
-        maxtol=maxtol,
+        fit_maxtol=maxtol,
         method=method,
     )
 
 
 def _fit_once(
-    backend: str,
-    R_boundary: np.ndarray,
-    Z_boundary: np.ndarray,
+    boundary: KernelBoundary,
     *,
+    backend: str,
     method: str,
-    c_order: int,
-    s_order: int,
-    maxtol: float,
-) -> dict[str, Any]:
-    if backend == "numpy":
-        return _fit_numpy(
-            R_boundary,
-            Z_boundary,
-            c_order=c_order,
-            s_order=s_order,
-            maxtol=maxtol,
-            method=method,
-        )
-    if backend == "numba":
-        return _fit_numba(
-            R_boundary,
-            Z_boundary,
-            c_order=c_order,
-            s_order=s_order,
-            maxtol=maxtol,
-            method=method,
-        )
-    if backend == "cxx":
-        return _fit_cxx(
-            R_boundary,
-            Z_boundary,
-            c_order=c_order,
-            s_order=s_order,
-            maxtol=maxtol,
-            method=method,
-        )
-    raise ValueError(f"unsupported boundary fitter backend {backend!r}")
+) -> KernelBoundary:
+    return boundary.fit(backend=backend, method=method)
 
 
 def _measure_fit(
     backend: str,
-    R_boundary: np.ndarray,
-    Z_boundary: np.ndarray,
+    boundary: KernelBoundary,
     *,
     method: str,
-    c_order: int,
-    s_order: int,
-    maxtol: float,
     warmup: int,
     repeat: int,
 ) -> dict[str, Any]:
     for _ in range(warmup):
         _fit_once(
-            backend,
-            R_boundary,
-            Z_boundary,
+            boundary,
+            backend=backend,
             method=method,
-            c_order=c_order,
-            s_order=s_order,
-            maxtol=maxtol,
         )
 
     samples_ms: list[float] = []
-    result: dict[str, Any] | None = None
+    result: KernelBoundary | None = None
     for _ in range(repeat):
         started = perf_counter_ns()
         result = _fit_once(
-            backend,
-            R_boundary,
-            Z_boundary,
+            boundary,
+            backend=backend,
             method=method,
-            c_order=c_order,
-            s_order=s_order,
-            maxtol=maxtol,
         )
         samples_ms.append((perf_counter_ns() - started) / 1.0e6)
 
@@ -203,19 +122,20 @@ def _measure_fit(
     return {"timing": float_stats(samples_ms), "fit": _fit_payload(result)}
 
 
-def _fit_payload(result: dict[str, Any]) -> dict[str, Any]:
+def _fit_payload(boundary: KernelBoundary) -> dict[str, Any]:
+    s_offsets = np.concatenate(([0.0], np.asarray(boundary.s_offsets, dtype=np.float64)))
     return {
-        "R0": float(result["R0"]),
-        "Z0": float(result["Z0"]),
-        "a": float(result["a"]),
-        "ka": float(result["ka"]),
-        "c_order": int(result["c_order"]),
-        "s_order": int(result["s_order"]),
-        "method": str(result.get("method", "n/a")),
-        "rms": float(result["rms"]),
-        "max_curve_error": float(result["max_curve_error"]),
-        "c_offsets": np.asarray(result["c_offsets"], dtype=np.float64).tolist(),
-        "s_offsets": np.asarray(result["s_offsets"], dtype=np.float64).tolist(),
+        "R0": float(boundary.R0),
+        "Z0": float(boundary.Z0),
+        "a": float(boundary.a),
+        "ka": float(boundary.ka),
+        "c_order": int(boundary.fit_c_order),
+        "s_order": int(boundary.fit_s_order),
+        "method": str(boundary.fit_method),
+        "rms": float(boundary.fit_rms),
+        "max_curve_error": float(boundary.fit_max_curve_error),
+        "c_offsets": np.asarray(boundary.c_offsets, dtype=np.float64).tolist(),
+        "s_offsets": s_offsets.tolist(),
     }
 
 
@@ -255,7 +175,15 @@ def _measure_case(
     method: str,
     backend: str,
 ) -> dict[str, Any]:
-    R_boundary, Z_boundary = _load_boundary_points(case_key)
+    R_boundary, Z_boundary, B0 = _load_boundary_points(case_key)
+    boundary = _raw_boundary(
+        R_boundary,
+        Z_boundary,
+        B0,
+        c_order=args.c_order,
+        s_order=args.s_order,
+        maxtol=args.maxtol,
+    )
     row = {
         "case": case_key,
         "method": method,
@@ -269,23 +197,12 @@ def _measure_case(
 
     try:
         reference = _fit_payload(
-            _fit_numpy(
-                R_boundary,
-                Z_boundary,
-                c_order=args.c_order,
-                s_order=args.s_order,
-                maxtol=args.maxtol,
-                method=method,
-            )
+            boundary.fit(backend="numpy", method=method)
         )
         measurement = _measure_fit(
             backend,
-            R_boundary,
-            Z_boundary,
+            boundary,
             method=method,
-            c_order=args.c_order,
-            s_order=args.s_order,
-            maxtol=args.maxtol,
             warmup=args.warmup,
             repeat=args.repeat,
         )
@@ -470,7 +387,7 @@ def main(argv: list[str] | None = None) -> int:
         "warmup": int(args.warmup),
         "maxtol": float(args.maxtol),
         "order": {"c_order": int(args.c_order), "s_order": int(args.s_order)},
-        "timing_note": "Wall time around one scatter-to-coefficient boundary fit call.",
+        "timing_note": "Wall time around one KernelBoundary.fit scatter-to-coefficient call.",
         "cpu_affinity": cpu_affinity(),
         "env": runtime_env(),
         "platform": runtime_platform_payload(),

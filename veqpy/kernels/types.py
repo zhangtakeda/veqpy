@@ -246,6 +246,28 @@ class KernelBoundary:
         object.__setattr__(self, "s_offsets", s_offsets)
         object.__setattr__(self, "_s_offsets_with_s0", _s_offsets_runtime_array(s_offsets))
 
+    def fit(
+        self,
+        *,
+        backend: str = "numba",
+        method: str | None = None,
+        c_order: int | None = None,
+        s_order: int | None = None,
+        maxtol: float | None = None,
+    ) -> KernelBoundary:
+        """Return a parameterized boundary fitted from stored R/Z points."""
+
+        from veqpy.kernels.boundary_materialization import fit_kernel_boundary
+
+        return fit_kernel_boundary(
+            self,
+            fit_backend=backend,
+            method=method,
+            c_order=c_order,
+            s_order=s_order,
+            maxtol=maxtol,
+        )
+
     def _coerce_boundary_points(
         self,
         *,
@@ -292,6 +314,25 @@ class KernelBoundary:
             _nonnegative_int(s_order, "s_order"),
             normalized_maxtol,
         )
+
+
+def _kernel_boundary_with_fit_metadata(
+    boundary: KernelBoundary,
+    *,
+    fit_rms: float,
+    fit_max_curve_error: float,
+    fit_c_order: int,
+    fit_s_order: int,
+    fit_method: str,
+) -> KernelBoundary:
+    """Attach fitter-owned diagnostics to a freshly parameterized boundary."""
+
+    object.__setattr__(boundary, "fit_rms", float(fit_rms))
+    object.__setattr__(boundary, "fit_max_curve_error", float(fit_max_curve_error))
+    object.__setattr__(boundary, "fit_c_order", int(fit_c_order))
+    object.__setattr__(boundary, "fit_s_order", int(fit_s_order))
+    object.__setattr__(boundary, "fit_method", str(fit_method))
+    return boundary
 
 
 def kernel_boundary_s_offsets_with_s0(boundary: KernelBoundary) -> np.ndarray:
