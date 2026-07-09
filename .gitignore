@@ -1,4 +1,4 @@
-# Python caches and tool state
+# Python caches and tool state.
 __pycache__/
 *.py[cod]
 *$py.class
@@ -7,12 +7,12 @@ __pycache__/
 .mypy_cache/
 .ipynb_checkpoints/
 
-# Python build and editable-install metadata
+# Python build and editable-install metadata.
 build/
 dist/
 *.egg-info/
 
-# LaTeX build artifacts
+# LaTeX build artifacts.
 *.aux
 *.bbl
 *.bcf
@@ -33,23 +33,23 @@ dist/
 *.vrb
 *-blx.bib
 
-# Local-only manuscript guidance/reference material
-/*.md
-!README.md
-/*.pdf
-AGENTS.md
-
-# Root-only scratch tools stay local; benchmark generators live under tests/.
-/tools/
-worklog/
-
-# Local environments
+# Local environments and hidden tool state.
 .*
 !/.gitignore
 
 # Keep CI configuration trackable if added later.
 !/.github/
 !/.github/**
+
+# Local-only root documents and manuscript reference material.
+/*.md
+!README.md
+/*.pdf
+AGENTS.md
+
+# Root-only scratch tools stay local.
+/tools/
+worklog/
 
 # Public input data is limited to GEQDSK files unless explicitly unignored.
 data/*
@@ -59,14 +59,11 @@ data/*
 # Test source is trackable; generated outputs stay local.
 tests/*
 !tests/*.py
-!tests/helpers.py
-!tests/baselines/
-!tests/baselines/**
 tests/_outputs/
 tests/demo/
 tests/benchmark/
 
-# Example source is trackable; generated outputs stay local.
+# Example/demo generated outputs stay local.
 outputs/
 tmp/
 veqlib/artifact/
@@ -74,7 +71,6 @@ veqlib/artifact/
 # Root-only manuscript scratch/artifact directories.
 /figures/
 /references/
-# /scripts/
 /benchmarks/results/
 /docs_cn/
 /*.png

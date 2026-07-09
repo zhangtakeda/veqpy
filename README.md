@@ -225,22 +225,22 @@ quadrature, and calculus now live in the corresponding source module headers.
 
 VEQPy is associated with the companion manuscript **"VEQ: a fast parametric
 Grad--Shafranov solver for fixed-boundary tokamak equilibria with flexible source
-inputs"**. The current branch keeps the maintained package surface and benchmark
-helpers under [`benchmarks/`][benchmarks].
+inputs"**.
 
 Related VEQ-family and representation papers include:
 
-- Ruohan Zhang, Huasheng Xie, Yueyan Li, Weiqi Meng, Feng Wang, and Zhengxiong Wang,
-  "VEQ: a fast parametric Grad-Shafranov solver for fixed-boundary tokamak equilibria
-  with flexible source profiles", arXiv:2606.11821, 2026.
-  [https://arxiv.org/abs/2606.11821][veq-arxiv]
-- Huasheng Xie and Yueyan Li, "What Is the Minimum Number of Parameters Required to
-  Represent Solutions of the Grad-Shafranov Equation?", arXiv:2601.02942, 2026.
-  [https://arxiv.org/abs/2601.02942][veq-min-parameters-arxiv]
-- Xingyu Li, Huasheng Xie, Lai Wei, and Zhengxiong Wang, "Investigation of Toroidal
-  Rotation Effects on Spherical Torus Equilibria using the Fast Spectral Solver VEQ-R",
-  arXiv:2602.11422, 2026.
-  [https://arxiv.org/abs/2602.11422][veqr-arxiv]
+- [**Zhang2026**: primary VEQ paper on the fixed-boundary Grad-Shafranov solver][veq-arxiv]
+  > Ruohan Zhang, Huasheng Xie, Yueyan Li, Weiqi Meng, Feng Wang, and Zhengxiong Wang,
+  > "VEQ: a fast parametric Grad-Shafranov solver for fixed-boundary tokamak equilibria
+  > with flexible source profiles", arXiv:2606.11821, 2026.
+- [**Xie2026**: minimum-parameter fixed-boundary Grad-Shafranov representation][veq-min-parameters-arxiv]
+  > Huasheng Xie and Yueyan Li,
+  > "What Is the Minimum Number of Parameters Required to Represent Solutions of the
+  > Grad-Shafranov Equation?", arXiv:2601.02942, 2026.
+- [**Li2026**: VEQ-R toroidal-rotation effects in spherical-torus equilibria][veqr-arxiv]
+  > Xingyu Li, Huasheng Xie, Lai Wei, and Zhengxiong Wang,
+  > "Investigation of Toroidal Rotation Effects on Spherical Torus Equilibria using
+  > the Fast Spectral Solver VEQ-R", arXiv:2602.11422, 2026.
 
 ---
 
@@ -267,8 +267,8 @@ Related VEQ-family and representation papers include:
 [python]: https://www.python.org/
 [ci]: https://github.com/zhangtakeda/veqpy/actions/workflows/ci.yml
 [license]: LICENSE
-[tests]: tests/
 [benchmarks]: benchmarks/
+[tests]: tests/
 [architecture-doc]: docs/veqpy/architecture.md
 [model-doc]: docs/veqpy/model.md
 [kernel-doc]: docs/veqpy/kernel.md
