@@ -8,15 +8,12 @@ ROOT_EXPORTS = {
     "Kernel",
     "KernelBoundary",
     "KernelConfig",
-    "KernelParetoSignature",
-    "KernelPrepareResult",
     "KernelRecipe",
     "KernelSource",
     "KernelTopology",
     "ParetoResult",
     "ParetoSample",
     "SolveResult",
-    "TopologyError",
     "build",
     "fit",
     "pareto",
@@ -27,15 +24,12 @@ KERNEL_EXPORTS = {
     "Kernel",
     "KernelBoundary",
     "KernelConfig",
-    "KernelParetoSignature",
-    "KernelPrepareResult",
     "KernelRecipe",
     "KernelSource",
     "KernelTopology",
     "ParetoResult",
     "ParetoSample",
     "SolveResult",
-    "TopologyError",
     "config_with_overrides",
 }
 
@@ -74,6 +68,15 @@ def test_package_roots_export_current_public_contracts() -> None:
         exported = set(package.__all__)
         assert expected <= exported
         assert all(hasattr(package, name) for name in expected)
+
+
+def test_package_roots_do_not_export_internal_kernel_helpers() -> None:
+    internal_names = {"KernelParetoSignature", "KernelPrepareResult", "TopologyError"}
+
+    for package_name in ("veqpy", "veqpy.kernels"):
+        package = importlib.import_module(package_name)
+        assert internal_names.isdisjoint(package.__all__)
+        assert all(not hasattr(package, name) for name in internal_names)
 
 
 def test_api_module_exposes_function_entrypoints() -> None:

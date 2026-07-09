@@ -8,7 +8,7 @@ Role:
 Public API:
 - Kernel and KernelRecipe.
 - KernelTopology, KernelBoundary, KernelSource, and KernelConfig.
-- KernelPrepareResult, SolveResult, and TopologyError.
+- SolveResult, ParetoResult, and ParetoSample result records.
 - build, fit, pareto, and solve function-style entrypoints.
 
 Dependencies:
@@ -35,30 +35,24 @@ from veqpy.kernels import (
     Kernel,
     KernelBoundary,
     KernelConfig,
-    KernelParetoSignature,
-    KernelPrepareResult,
     KernelRecipe,
     KernelSource,
     KernelTopology,
     ParetoResult,
     ParetoSample,
     SolveResult,
-    TopologyError,
 )
 
 __all__ = [
     "Kernel",
     "KernelBoundary",
     "KernelConfig",
-    "KernelParetoSignature",
-    "KernelPrepareResult",
     "KernelRecipe",
     "KernelSource",
     "KernelTopology",
     "ParetoResult",
     "ParetoSample",
     "SolveResult",
-    "TopologyError",
     "build",
     "fit",
     "pareto",

@@ -25,7 +25,6 @@ def test_core_public_imports_are_available() -> None:
     assert veqpy.KernelTopology
     assert veqpy.KernelBoundary
     assert veqpy.KernelSource
-    assert veqpy.KernelParetoSignature
     assert veqpy.ParetoResult
     assert veqpy.ParetoSample
     assert veqpy.fit

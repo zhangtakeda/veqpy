@@ -10,7 +10,6 @@ from veqpy import (
     KernelRecipe,
     KernelSource,
     KernelTopology,
-    TopologyError,
 )
 
 
@@ -61,7 +60,7 @@ def test_l_max_accepts_capacity_values() -> None:
 
     assert inferred.L_max == 2
     assert expanded.L_max == 5
-    with pytest.raises(TopologyError, match="L_max"):
+    with pytest.raises(ValueError, match="L_max"):
         make_topology(L_max=1)
 
 
@@ -92,9 +91,9 @@ def test_kernel_variant_rejects_counts_beyond_fixed_capacity() -> None:
 
     kernel.variant(h_count=6)
     assert kernel.topology.h_count == 6
-    with pytest.raises(TopologyError, match="L_max"):
+    with pytest.raises(ValueError, match="L_max"):
         kernel.variant(h_count=7)
-    with pytest.raises(TopologyError, match="M_max"):
+    with pytest.raises(ValueError, match="M_max"):
         kernel.variant(c_counts=(1, 1, 1, 1))
 
 
@@ -161,14 +160,14 @@ def test_kernel_variant_rejects_source_family_invalid_counts() -> None:
         ),
         recipe=KernelRecipe(backend="numba"),
     )
-    with pytest.raises(TopologyError, match="F_count"):
+    with pytest.raises(ValueError, match="F_count"):
         pj2.variant(F_count=0)
 
     psin = Kernel(
         topology=make_topology(psin_count=2, L_max=5),
         recipe=KernelRecipe(backend="numba"),
     )
-    with pytest.raises(TopologyError, match="psin_count"):
+    with pytest.raises(ValueError, match="psin_count"):
         psin.variant(psin_count=0)
 
 
@@ -182,5 +181,5 @@ def test_cxx_variant_is_not_supported() -> None:
 def test_cxx_rejects_capacity_style_l_max() -> None:
     topology = make_topology(L_max=5)
 
-    with pytest.raises(TopologyError, match="capacity-style L_max"):
+    with pytest.raises(ValueError, match="capacity-style L_max"):
         Kernel(topology=topology, recipe=KernelRecipe(backend="cxx"))
