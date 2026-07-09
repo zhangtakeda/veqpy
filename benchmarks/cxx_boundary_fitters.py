@@ -20,6 +20,7 @@ from benchmarks._common import (  # noqa: E402
     CASE_KEYS,
     CASE_REFERENCE_GFILES,
     REPO_ROOT,
+    benchmark_result_path,
     cpu_affinity,
     float_stats,
     runtime_env,
@@ -43,7 +44,7 @@ from benchmarks._reporting import (  # noqa: E402
 from veqpy import KernelBoundary  # noqa: E402
 from veqpy.model import Geqdsk  # noqa: E402
 
-DEFAULT_OUTPUT = REPO_ROOT / "benchmarks" / "results" / "boundary_fitters.json"
+DEFAULT_OUTPUT = benchmark_result_path("cxx_boundary_fitters")
 DEFAULT_C_ORDER = 10
 DEFAULT_S_ORDER = 10
 DEFAULT_MAXTOL = 1.0

@@ -22,6 +22,7 @@ from benchmarks._common import (
     REFERENCE_LAYOUT_NT,
     REPO_ROOT,
     RouteBenchmarkSpec,
+    benchmark_result_path,
     cpu_affinity,
     geqdsk_kernel_case,
     geqdsk_signature,
@@ -46,7 +47,7 @@ from benchmarks._reporting import (
 )
 from veqpy import Kernel, KernelRecipe, KernelTopology
 
-DEFAULT_OUTPUT = REPO_ROOT / "benchmarks" / "results" / "numba_variant_sweep.json"
+DEFAULT_OUTPUT = benchmark_result_path("numba_variant_sweep")
 
 
 def _measure_case_sweep(

@@ -24,6 +24,7 @@ from benchmarks._common import (
     REPO_ROOT,
     SYNTHETIC_SOLVER_LABEL,
     RouteBenchmarkSpec,
+    benchmark_result_path,
     cpu_affinity,
     default_kernel_cache_root,
     engine_payload,
@@ -53,7 +54,7 @@ from benchmarks._reporting import (
 )
 from veqpy import KernelRecipe
 
-DEFAULT_OUTPUT = REPO_ROOT / "benchmarks" / "results" / "cxx_geqdsk.json"
+DEFAULT_OUTPUT = benchmark_result_path("cxx_geqdsk")
 VALIDATION_ATOL = 1.0e-6
 NATIVE_SOLVER_METHOD = "powell"
 NATIVE_SOLVER_INITIAL_POLICY = "cold"

@@ -25,6 +25,7 @@ from benchmarks._common import (
     REFERENCE_LAYOUT_NT,
     REPO_ROOT,
     RouteBenchmarkSpec,
+    benchmark_result_path,
     cpu_affinity,
     geqdsk_kernel_case,
     runtime_env,
@@ -48,7 +49,7 @@ from benchmarks._reporting import (
 from veqpy import Kernel, KernelRecipe, KernelTopology, ParetoResult, ParetoSample
 from veqpy.kernels.pareto import select_pareto_thresholds
 
-DEFAULT_OUTPUT = REPO_ROOT / "benchmarks" / "results" / "numba_pareto.json"
+DEFAULT_OUTPUT = benchmark_result_path("numba_pareto")
 DEFAULT_THRESHOLD_SCALES = (1.0e-2, 5.0e-3, 1.0e-3)
 DEFAULT_MAX_EVALUATIONS = 2000
 SWEEP_MODES = ("partial", "full")

@@ -28,6 +28,7 @@ from benchmarks._common import (
     SYNTHETIC_SOLVER_MAX_EVALUATIONS,
     SYNTHETIC_SOLVER_MAX_RESIDUAL,
     SYNTHETIC_SOLVER_METHOD,
+    benchmark_result_path,
     benchmark_route_case_diagnostics,
     cpu_affinity,
     extract_shape_x,
@@ -64,7 +65,7 @@ from benchmarks._reporting import (
 )
 from veqpy import KernelRecipe
 
-DEFAULT_OUTPUT = REPO_ROOT / "benchmarks" / "results" / "numba_routes.json"
+DEFAULT_OUTPUT = benchmark_result_path("numba_routes")
 
 
 def _measure_row(args: argparse.Namespace, spec) -> dict[str, Any]:

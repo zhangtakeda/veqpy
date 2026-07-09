@@ -21,6 +21,7 @@ from benchmarks._common import (
     SYNTHETIC_SOLVER_LABEL,
     SYNTHETIC_SOLVER_MAX_EVALUATIONS,
     SYNTHETIC_SOLVER_MAX_RESIDUAL,
+    benchmark_result_path,
     cpu_affinity,
     default_kernel_cache_root,
     engine_payload,
@@ -56,7 +57,7 @@ from benchmarks._reporting import (
 )
 from veqpy import KernelRecipe
 
-DEFAULT_OUTPUT = REPO_ROOT / "benchmarks" / "results" / "cxx_routes.json"
+DEFAULT_OUTPUT = benchmark_result_path("cxx_routes")
 VALIDATION_ATOL = 1.0e-6
 NATIVE_SOLVER_INITIAL_POLICY = "cold"
 NATIVE_SOLVER_CONTINUATION_POLICY = "cold"

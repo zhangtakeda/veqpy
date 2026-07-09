@@ -24,6 +24,7 @@ from benchmarks._common import (
     REFERENCE_SOLVER_MAXFEV,
     REPO_ROOT,
     RouteBenchmarkSpec,
+    benchmark_result_dir,
     continuation_points,
     cpu_affinity,
     default_kernel_cache_root,
@@ -46,7 +47,7 @@ from benchmarks._reporting import (
 )
 from veqpy import Kernel, KernelConfig, KernelRecipe
 
-DEFAULT_OUTPUT_DIR = REPO_ROOT / "benchmarks" / "results" / "cxx_continuation"
+DEFAULT_OUTPUT_DIR = benchmark_result_dir("cxx_continuation")
 UPDATE_CHOICES = ("ip", "boundary", "source", "mixed")
 DEFAULT_SPANS = (0.01,)
 POLICY_CHOICES = (
@@ -453,7 +454,7 @@ def main(argv: list[str] | None = None) -> int:
     comparison_rows = _comparison_rows(payload)
     if not args.no_write:
         args.output_dir.mkdir(parents=True, exist_ok=True)
-        raw_path = args.output_dir / "raw_results.json"
+        raw_path = args.output_dir / "cxx_continuation.json"
         csv_path = args.output_dir / "summary.csv"
         md_path = args.output_dir / "summary.md"
         write_json(raw_path, payload)

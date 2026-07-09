@@ -46,6 +46,15 @@ REPO_ROOT = THIS_FILE.parents[1]
 CORE_DIR = REPO_ROOT / "veqpy" / "kernels" / "cxx_kernel" / "core"
 RESULTS_DIR = REPO_ROOT / "benchmarks" / "results"
 
+
+def benchmark_result_dir(name: str) -> Path:
+    return RESULTS_DIR / name
+
+
+def benchmark_result_path(name: str, filename: str | None = None) -> Path:
+    return benchmark_result_dir(name) / (filename or f"{name}.json")
+
+
 MU0 = 4.0e-7 * np.pi
 
 ROUTE_BENCHMARK_MODES = ("PF", "PP", "PI", "PJ1", "PJ2", "PQ")
