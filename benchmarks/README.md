@@ -15,10 +15,14 @@ are recorded in the JSON outputs.
 
 `cxx_continuation.py` is the explicit continuation-policy benchmark. Its
 table reports effective function evaluations rather than solve-time medians.
+`numba_variant_sweep.py` is also separate from the solve-time tables: it reports
+a single-pass `Kernel.variant()` switch cost against fresh Numba `Kernel`
+construction for the same active GEQDSK topology.
 
 ## Scripts
 
 - `numba_routes.py`: Numba backend synthetic route matrix through `veqpy.Kernel`.
+- `numba_variant_sweep.py`: Numba `Kernel.variant()` construction-cost comparison.
 - `cxx_routes.py`: Cxx backend route matrix compared with the Numba backend.
 - `cxx_geqdsk_pareto.py`: GEQDSK Cxx backend matrix compared with the Numba backend.
 - `cxx_continuation.py`: Cxx backend continuation-policy benchmark.
@@ -29,6 +33,7 @@ table reports effective function evaluations rather than solve-time medians.
 
 ```bash
 .venv/bin/python benchmarks/numba_routes.py --quiet-progress
+.venv/bin/python benchmarks/numba_variant_sweep.py --quiet-progress
 .venv/bin/python benchmarks/cxx_routes.py --quiet-progress
 .venv/bin/python benchmarks/cxx_geqdsk_pareto.py --quiet-progress
 .venv/bin/python benchmarks/cxx_continuation.py --quiet-progress

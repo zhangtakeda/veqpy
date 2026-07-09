@@ -8,7 +8,7 @@ from numerical_helpers import (
     skip_if_native_unavailable,
 )
 
-from benchmarks import cxx_routes, numba_routes
+from benchmarks import cxx_routes, numba_routes, numba_variant_sweep
 from benchmarks._common import (
     CASE_KEYS,
     CONFIG_LABELS,
@@ -42,6 +42,22 @@ def test_geqdsk_benchmark_cases_materialize_from_reference_inputs(
     assert case.boundary.B0 > 0.0
     assert case.source.heat_profile.size == case.topology.sample_count
     assert case.source.current_profile.size == case.topology.sample_count
+
+
+def test_variant_sweep_benchmark_plans_geqdsk_pareto_rows() -> None:
+    args = benchmark_args(no_run=True)
+
+    rows = []
+    for case_key in CASE_KEYS:
+        rows.extend(numba_variant_sweep._measure_case_sweep(args, case_key, CONFIG_LABELS))
+
+    assert len(rows) == len(CASE_KEYS) * len(CONFIG_LABELS)
+    assert {row["row"] for row in rows} == {
+        f"{case_key}:{config_label.lower()}"
+        for case_key in CASE_KEYS
+        for config_label in CONFIG_LABELS
+    }
+    assert all(row["runtime"]["status"] == "not_requested" for row in rows)
 
 
 @pytest.mark.slow
