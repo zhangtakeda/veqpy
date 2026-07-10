@@ -91,7 +91,7 @@ kernel.variant(
 
 Omitted arguments and explicit `None` inherit the current active count.
 `variant()` does not change fixed setup or capacity fields such as
-`Nr/Nt/route/coordinate/nodes/sample_count/ip_constraint/beta_constraint`,
+`Nr/Nt/route/coordinate/nodes/sample_count/constraint`,
 `quadrature`, `calculus`, `L_max`, `M_max`, or `K_max`. New counts must fit the
 current capacity limits: radial counts require `count <= L_max + 1`, cosine
 orders require `order <= M_max`, and sine orders use the public s1-started

@@ -45,7 +45,7 @@ def make_kernel_topology(**overrides: object) -> KernelTopology:
         "route": "pf",
         "coordinate": "PSIN",
         "nodes": "uniform",
-        "ip_constraint": True,
+        "constraint": "ip",
         "sample_count": 9,
     }
     params.update(overrides)
@@ -294,6 +294,16 @@ class RecordingRegistry:
 
 def test_veqpy_root_exports_kernel_surface() -> None:
     assert veqpy.__all__ == [
+        "Reactive",
+        "Registry",
+        "Serial",
+        "depends_on",
+        "read_serializer",
+        "write_serializer",
+        "build",
+        "fit",
+        "pareto",
+        "solve",
         "Kernel",
         "KernelBoundary",
         "KernelConfig",
@@ -303,10 +313,10 @@ def test_veqpy_root_exports_kernel_surface() -> None:
         "ParetoResult",
         "ParetoSample",
         "SolveResult",
-        "build",
-        "fit",
-        "pareto",
-        "solve",
+        "Equilibrium",
+        "Geqdsk",
+        "Grid",
+        "Profile",
     ]
 
 
@@ -326,7 +336,9 @@ def test_kernel_topology_and_runtime_source_is_user_facing_contract() -> None:
     assert recipe_identity_payload(family_recipe)["preset"] == "release"
     assert topology.route == "PF"
     assert topology.coordinate == "psin"
-    assert topology.ip_constraint is True
+    assert topology.constraint == "ip"
+    assert topology.source_uses_ip_constraint is True
+    assert topology.source_uses_beta_constraint is False
     assert topology.sample_count == 9
     assert topology.x_size == 9
 
@@ -356,6 +368,40 @@ def test_kernel_topology_and_runtime_source_is_user_facing_contract() -> None:
 
 
 @pytest.mark.parametrize(
+    ("constraint", "expected_flags", "expected_code", "expected_label"),
+    [
+        ("none", (False, False), 0, "null"),
+        ("ip", (True, False), 1, "Ip"),
+        ("beta", (False, True), 2, "beta"),
+        ("both", (True, True), 3, "Ip_beta"),
+    ],
+)
+def test_kernel_topology_constraint_api_maps_to_internal_contract(
+    constraint: str,
+    expected_flags: tuple[bool, bool],
+    expected_code: int,
+    expected_label: str,
+) -> None:
+    topology = make_kernel_topology(route="PP", constraint=constraint)
+
+    assert topology.constraint == constraint
+    assert (
+        topology.source_uses_ip_constraint,
+        topology.source_uses_beta_constraint,
+    ) == expected_flags
+    assert topology.source_constraint_code == expected_code
+    assert topology.constraint_label == expected_label
+
+
+def test_kernel_topology_constraint_api_rejects_invalid_values() -> None:
+    with pytest.raises(ValueError, match="constraint must be one of ip, beta, both, none"):
+        make_kernel_topology(constraint="current")
+
+    with pytest.raises(ValueError, match="does not support constraint 'Ip_beta'"):
+        make_kernel_topology(route="PF", constraint="both")
+
+
+@pytest.mark.parametrize(
     ("route", "current_profile", "expected_current"),
     [
         ("PF", np.array([0.0, 0.75, 3.0], dtype=np.float64), np.array([0.0, 0.75, 3.0])),
@@ -376,7 +422,7 @@ def test_kernel_source_materialization_locks_route_scaling(
         coordinate="rho",
         nodes="uniform",
         sample_count=3,
-        ip_constraint=False,
+        constraint="none",
         psin_count=0,
         F_count=1 if route == "PJ2" else 0,
         h_count=1,
@@ -405,8 +451,7 @@ def test_kernel_source_materialization_does_not_reject_profile_magnitude() -> No
         coordinate="rho",
         nodes="uniform",
         sample_count=3,
-        ip_constraint=False,
-        beta_constraint=True,
+        constraint="beta",
         psin_count=0,
         F_count=0,
         h_count=1,
@@ -434,7 +479,7 @@ def test_kernel_source_materialization_repairs_irregular_axis_profiles() -> None
         coordinate="rho",
         nodes="uniform",
         sample_count=9,
-        ip_constraint=True,
+        constraint="ip",
         psin_count=0,
         h_count=1,
         kappa_count=0,

@@ -566,7 +566,7 @@ def _prepare_source(topology: KernelTopology) -> KernelSource:
         heat_profile=heat_profile,
         current_profile=current_profile,
         Ip=1.0e6,
-        beta=0.5 if topology.beta_constraint else np.nan,
+        beta=0.5 if topology.source_uses_beta_constraint else np.nan,
     )
 
 

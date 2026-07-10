@@ -13,7 +13,7 @@ Notes:
 from __future__ import annotations
 
 from dataclasses import InitVar, dataclass, field, fields, replace
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 
@@ -22,6 +22,7 @@ from veqpy.kernels.abi.enums import (
     SOURCE_ACTIVE_FAMILY_CODES,
     SOURCE_CONSTRAINT_CODES_BY_FLAGS,
     SOURCE_CONSTRAINT_FLAG_ORDER,
+    SOURCE_CONSTRAINT_FLAGS_BY_NAME,
     SOURCE_CONSTRAINT_FLAGS_BY_ROUTE,
     SOURCE_CONSTRAINT_LABELS_BY_FLAGS,
     SOURCE_COORDINATE_CODES,
@@ -392,8 +393,7 @@ class KernelTopology:
     route: str
     coordinate: str
     nodes: str
-    ip_constraint: bool = False
-    beta_constraint: bool = False
+    constraint: Literal["ip", "beta", "both", "none"] = "none"
     sample_count: int | None = None
     quadrature: str = "legendre"
     calculus: str = "spectral"
@@ -443,8 +443,8 @@ class KernelTopology:
         nodes = _normalize_token(self.nodes, "nodes").lower()
         if nodes not in SOURCE_NODES_CODES:
             raise TopologyError(f"unsupported source nodes {nodes!r}")
-        ip_constraint = _canonical_bool(self.ip_constraint, "ip_constraint")
-        beta_constraint = _canonical_bool(self.beta_constraint, "beta_constraint")
+        constraint = _normalize_source_constraint(self.constraint)
+        ip_constraint, beta_constraint = SOURCE_CONSTRAINT_FLAGS_BY_NAME[constraint]
         _validate_source_constraint(route, ip_constraint, beta_constraint)
         quadrature = _normalize_token(self.quadrature, "quadrature").lower()
         if quadrature != "legendre":
@@ -479,8 +479,7 @@ class KernelTopology:
             "route": route,
             "coordinate": coordinate,
             "nodes": nodes,
-            "ip_constraint": ip_constraint,
-            "beta_constraint": beta_constraint,
+            "constraint": constraint,
             "sample_count": sample_count,
             "quadrature": quadrature,
             "calculus": calculus,
@@ -671,6 +670,14 @@ def _validate_source_constraint(route: str, ip_constraint: bool, beta_constraint
     if flags not in SOURCE_CONSTRAINT_FLAGS_BY_ROUTE[route]:
         label = SOURCE_CONSTRAINT_LABELS_BY_FLAGS[flags]
         raise TopologyError(f"{route} source topology does not support constraint {label!r}")
+
+
+def _normalize_source_constraint(value: str) -> str:
+    normalized = _normalize_token(value, "constraint").lower()
+    if normalized in SOURCE_CONSTRAINT_FLAGS_BY_NAME:
+        return normalized
+    choices = ", ".join(SOURCE_CONSTRAINT_FLAGS_BY_NAME)
+    raise TopologyError(f"constraint must be one of {choices}")
 
 
 def _normalize_layout(value: str) -> str:

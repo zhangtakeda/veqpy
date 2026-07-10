@@ -45,7 +45,7 @@ def make_kernel_topology(**overrides: object) -> KernelTopology:
         "route": "PF",
         "coordinate": "psin",
         "nodes": "uniform",
-        "ip_constraint": True,
+        "constraint": "ip",
         "sample_count": 9,
     }
     params.update(overrides)
@@ -87,7 +87,7 @@ def route_kernel_topology(route: str, coordinate: str, nodes: str) -> KernelTopo
         "route": route,
         "coordinate": coordinate,
         "nodes": nodes,
-        "ip_constraint": True,
+        "constraint": "ip",
         "sample_count": 8 if nodes == "grid" else 9,
     }
     if route == "PJ2":

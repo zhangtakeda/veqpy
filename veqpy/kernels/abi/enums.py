@@ -22,6 +22,12 @@ SOURCE_CONSTRAINT_CODES_BY_FLAGS = {
     (False, True): 2,
     (True, True): 3,
 }
+SOURCE_CONSTRAINT_FLAGS_BY_NAME = {
+    "ip": (True, False),
+    "beta": (False, True),
+    "both": (True, True),
+    "none": (False, False),
+}
 SOURCE_CONSTRAINT_LABELS_BY_FLAGS = {
     (False, False): "null",
     (True, False): "Ip",

@@ -42,7 +42,7 @@ def _topology(route: str, coordinate: str, nodes: str, *, sample_count: int = 9)
         route=route,
         coordinate=coordinate,
         nodes=nodes,
-        ip_constraint=True,
+        constraint="ip",
         sample_count=sample_count,
     )
 

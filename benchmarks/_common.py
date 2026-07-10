@@ -509,6 +509,16 @@ def constraint_flags(label: str) -> tuple[bool, bool]:
     raise ValueError(f"unknown source constraint {label!r}")
 
 
+def _constraint_api_name(label: str) -> str:
+    flags = constraint_flags(label)
+    return {
+        (False, False): "none",
+        (True, False): "ip",
+        (False, True): "beta",
+        (True, True): "both",
+    }[flags]
+
+
 def iter_route_specs(
     scope: str = DEFAULT_ROUTE_SCOPE,
     *,
@@ -704,7 +714,7 @@ def synthetic_route_reference() -> RouteReference:
         route="PF",
         coordinate="rho",
         nodes="uniform",
-        ip_constraint=True,
+        constraint="ip",
         sample_count=DEFAULT_ROUTE_SAMPLE_COUNT,
         M_max=DEFAULT_ROUTE_M_MAX,
         K_max=DEFAULT_ROUTE_K_MAX,
@@ -1138,8 +1148,7 @@ def route_kernel_case(
         route=spec.mode,
         coordinate=spec.coordinate,
         nodes=spec.nodes,
-        ip_constraint=ip_constraint,
-        beta_constraint=beta_constraint,
+        constraint=_constraint_api_name(spec.constraint),
         sample_count=count,
         L_max=None,
         M_max=DEFAULT_ROUTE_M_MAX,
@@ -1212,8 +1221,7 @@ def geqdsk_kernel_case(
         route=spec.mode,
         coordinate=spec.coordinate,
         nodes=spec.nodes,
-        ip_constraint=ip_constraint,
-        beta_constraint=beta_constraint,
+        constraint=_constraint_api_name(spec.constraint),
         sample_count=count,
         L_max=None,
         M_max=m_max,
@@ -1302,8 +1310,8 @@ def route_topology_payload(
             "coordinate": topology.coordinate,
             "nodes": topology.nodes,
             "constraint": topology.constraint_label,
-            "uses_Ip": bool(topology.ip_constraint),
-            "uses_beta": bool(topology.beta_constraint),
+            "uses_Ip": bool(topology.source_uses_ip_constraint),
+            "uses_beta": bool(topology.source_uses_beta_constraint),
             "sample_count": int(topology.sample_count),
         },
         "layout": {"packed": recipe.layout},

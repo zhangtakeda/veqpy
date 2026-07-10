@@ -42,7 +42,7 @@ def make_topology(**overrides: object) -> KernelTopology:
         "route": "PF",
         "coordinate": "psin",
         "nodes": "uniform",
-        "ip_constraint": True,
+        "constraint": "ip",
         "sample_count": 8,
     }
     params.update(overrides)

@@ -157,8 +157,8 @@ family.
 | X-point(130)    |     6.871710 |     22.346156 |     3.252x |      2.99e-10 |
 
 The package-level Kernel API is intentionally semantic: users construct
-`KernelTopology` for the solve topology, including `ip_constraint` and
-`beta_constraint` boolean source constraints, then pass it explicitly as
+`KernelTopology` for the solve topology, including a source `constraint` of
+`"ip"`, `"beta"`, `"both"`, or `"none"`, then pass it explicitly as
 `Kernel(topology=topology)` or `build(topology=topology, ...)`.
 `KernelBoundary`/`KernelSource` carry runtime cases, `KernelConfig` carries the
 handle-level default solve policy, and `KernelRecipe` remains the shared backend
