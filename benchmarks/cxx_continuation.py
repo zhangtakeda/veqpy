@@ -170,7 +170,7 @@ def _measure_case(
     base = geqdsk_kernel_case(
         case_key,
         config_label,
-        route_spec=RouteBenchmarkSpec("PF", "psin", "uniform", "Ip"),
+        route_spec=RouteBenchmarkSpec("PF", "psin", "uniform", "ip"),
         method=args.method,
         max_evaluations=args.max_evaluations,
         initial="cold",

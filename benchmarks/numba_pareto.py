@@ -846,7 +846,7 @@ def _run_case(
     threshold_scales: tuple[float, ...],
     progress_callback: Callable[[str, int, int], None] | None = None,
 ) -> dict[str, Any]:
-    route_spec = RouteBenchmarkSpec("PF", "psin", "uniform", "Ip")
+    route_spec = RouteBenchmarkSpec("PF", "psin", "uniform", "ip")
     kernel_case = geqdsk_kernel_case(
         case_key,
         "Ref",
@@ -918,7 +918,7 @@ def _planned_row(
     return {
         "case": case_key,
         "config": "Ref",
-        "route": "PF_psin_uniform_Ip",
+        "route": "PF_psin_uniform_ip",
         "capacity": _topology_payload(topology),
         "boundary": _boundary_payload(boundary),
         "thresholds": list(thresholds),
@@ -1163,7 +1163,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"cases: [green]{', '.join(case_keys)}[/]",
                 "backend: [green]numba[/]",
                 "capacity: [green]GEQDSK Ref topology[/]",
-                "route: [green]PF/psin/uniform/Ip[/]",
+                "route: [green]PF/psin/uniform/ip[/]",
                 f"grid: [green]{args.nr} x {args.nt}[/]",
                 f"sweep mode: [green]{args.sweep_mode}[/]",
                 f"metric: [green]{args.metric}[/]",

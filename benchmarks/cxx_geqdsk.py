@@ -81,7 +81,7 @@ def _native_engine_label(args: argparse.Namespace) -> str:
 
 
 def _measure_case(args: argparse.Namespace, case_key: str, config_label: str) -> dict[str, Any]:
-    route_spec = RouteBenchmarkSpec("PF", "psin", "uniform", "Ip")
+    route_spec = RouteBenchmarkSpec("PF", "psin", "uniform", "ip")
     signature = geqdsk_signature(case_key, config_label)
     case = geqdsk_kernel_case(
         case_key,

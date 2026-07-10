@@ -21,10 +21,10 @@ from benchmarks._common import (
 )
 
 ROUTE_REGRESSION_CASES = (
-    RouteBenchmarkSpec("PF", "rho", "uniform", "Ip"),
-    RouteBenchmarkSpec("PP", "psin", "uniform", "Ip"),
-    RouteBenchmarkSpec("PJ2", "psin", "uniform", "Ip"),
-    RouteBenchmarkSpec("PQ", "rho", "uniform", "Ip"),
+    RouteBenchmarkSpec("PF", "rho", "uniform", "ip"),
+    RouteBenchmarkSpec("PP", "psin", "uniform", "ip"),
+    RouteBenchmarkSpec("PJ2", "psin", "uniform", "ip"),
+    RouteBenchmarkSpec("PQ", "rho", "uniform", "ip"),
 )
 
 

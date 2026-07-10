@@ -121,7 +121,7 @@ jobs:
               route="PF",
               coordinate="psin",
               nodes="uniform",
-              ip_constraint=True,
+              constraint="ip",
               sample_count=5,
           )
           prepared = Kernel(

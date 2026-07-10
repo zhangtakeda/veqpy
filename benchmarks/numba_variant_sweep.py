@@ -55,7 +55,7 @@ def _measure_case_sweep(
     case_key: str,
     config_labels: tuple[str, ...],
 ) -> list[dict[str, Any]]:
-    route_spec = RouteBenchmarkSpec("PF", "psin", "uniform", "Ip")
+    route_spec = RouteBenchmarkSpec("PF", "psin", "uniform", "ip")
     capacity_case = geqdsk_kernel_case(case_key, "Ref", route_spec=route_spec)
     target_cases = {
         config_label: geqdsk_kernel_case(case_key, config_label, route_spec=route_spec)

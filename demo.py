@@ -34,7 +34,7 @@ topology = veq.KernelTopology(
     route="PF",
     coordinate="psin",
     nodes="uniform",
-    ip_constraint=True,
+    constraint="ip",
     sample_count=51,
 )
 kernel = veq.build(
