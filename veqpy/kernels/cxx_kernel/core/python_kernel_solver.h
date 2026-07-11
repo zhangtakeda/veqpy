@@ -1106,11 +1106,10 @@ namespace cxx_python
                     cold_policy_code = continue_policy;
                 }
             }
-            auto next_context = std::make_unique<SolveState>(next_input, nonlinear_workspace_);
+            context_->reset_case(next_input);
             if (should_refine_cold)
-                refine_cold_initial_state(*next_context, cold_policy_code);
-            refresh_initial_residual_scale(*next_context);
-            context_ = std::move(next_context);
+                refine_cold_initial_state(*context_, cold_policy_code);
+            refresh_initial_residual_scale(*context_);
         }
 
         SolverKind                    solver_;

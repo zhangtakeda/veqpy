@@ -38,5 +38,5 @@ Benchmark entry points use backend names directly:
   fitter timing and diff matrix across Numba and Cxx.
 
 The native backend needs a C++20 toolchain plus CMake, nanobind, GCEM,
-nlohmann-json, CMINPACK, LAPACKE/LAPACK, and OpenBLAS. Normal Numba usage does
+CMINPACK, LAPACKE/LAPACK, and OpenBLAS. Normal Numba usage does
 not require compiling native artifacts.

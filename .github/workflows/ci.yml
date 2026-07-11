@@ -44,8 +44,7 @@ jobs:
             git \
             libcminpack-dev \
             liblapacke-dev \
-            libopenblas-dev \
-            nlohmann-json3-dev
+            libopenblas-dev
           git clone --depth 1 --branch v1.18.0 https://github.com/kthohr/gcem.git "${RUNNER_TEMP}/gcem"
           cmake -S "${RUNNER_TEMP}/gcem" -B "${RUNNER_TEMP}/gcem-build" \
             -DCMAKE_INSTALL_PREFIX="${HOME}/opt/gcem-install"

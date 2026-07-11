@@ -4,11 +4,14 @@
 
 #include <algorithm>
 #include <array>
-#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <span>
 #include <stdexcept>
+
+#if defined(VEQPY_CXX_DETAILED_SOLVE_TIMING)
+    #include <chrono>
+#endif
 
 #ifdef ENABLE_ENZYME
     #include <enzyme/enzyme>
@@ -110,6 +113,13 @@ namespace cxx_kernel_api
                        nonlinear::Workspace<CompiledShape::x_size>& workspace)
                 : op(make_operator_for_case(case_input)), input(case_input), nonlinear_workspace(workspace)
             {
+            }
+
+            void reset_case(const RuntimeCase& case_input) noexcept
+            {
+                input = case_input;
+                op.reprepare(setup_for_case(input));
+                op.set_runtime_scalars(runtime_scalars_for_case(input));
             }
 
             void reset_solve_counters() noexcept
@@ -272,19 +282,27 @@ namespace cxx_kernel_api
 
         void scaled_residual_z_no_count(SolveState& context, const double* z, double* fvec) noexcept
         {
+#if defined(VEQPY_CXX_DETAILED_SOLVE_TIMING)
             const auto   callback_started = std::chrono::steady_clock::now();
+#endif
             const auto   x = decode_z_to_x(std::span<const double, CompiledShape::x_size>{z, CompiledShape::x_size},
                                          context.input.x_scale);
             PackedVector raw{uninitialized};
+#if defined(VEQPY_CXX_DETAILED_SOLVE_TIMING)
             const auto   kernel_started = std::chrono::steady_clock::now();
+#endif
             context.raw_residual(std::span<const double, CompiledShape::x_size>{x.data(), CompiledShape::x_size},
                                  std::span<double, CompiledShape::x_size>{raw.data(), CompiledShape::x_size});
+#if defined(VEQPY_CXX_DETAILED_SOLVE_TIMING)
             context.residual_kernel_ms += elapsed_ms_since(kernel_started);
             const auto scale_started = std::chrono::steady_clock::now();
+#endif
             for (size_t i = 0; i < CompiledShape::x_size; ++i)
                 fvec[i] = raw[i] / context.input.residual_scale[i];
+#if defined(VEQPY_CXX_DETAILED_SOLVE_TIMING)
             context.residual_scale_ms += elapsed_ms_since(scale_started);
             context.residual_callback_ms += elapsed_ms_since(callback_started);
+#endif
         }
 
 #ifdef ENABLE_ENZYME
@@ -439,9 +457,13 @@ namespace cxx_kernel_api
             {
                 constexpr size_t          n = CompiledShape::x_size;
                 std::array<double, n * n> column_major{};
+#if defined(VEQPY_CXX_DETAILED_SOLVE_TIMING)
                 const auto                started = std::chrono::steady_clock::now();
+#endif
                 fill_enzyme_jacobian_z(*context, z, column_major.data(), static_cast<int>(n));
+#if defined(VEQPY_CXX_DETAILED_SOLVE_TIMING)
                 context->jacobian_callback_ms += elapsed_ms_since(started);
+#endif
                 for (size_t row = 0; row < n; ++row)
                     for (size_t col = 0; col < n; ++col)
                         jacobian[row * n + col] = column_major[row + n * col];
@@ -449,9 +471,13 @@ namespace cxx_kernel_api
 
             void jvp(const double* z, const double* v, double* jv) const
             {
+#if defined(VEQPY_CXX_DETAILED_SOLVE_TIMING)
                 const auto started = std::chrono::steady_clock::now();
+#endif
                 fill_enzyme_jvp_z(*context, z, v, jv);
+#if defined(VEQPY_CXX_DETAILED_SOLVE_TIMING)
                 context->jvp_callback_ms += elapsed_ms_since(started);
+#endif
             }
 #endif
         };
@@ -493,10 +519,14 @@ namespace cxx_kernel_api
             result.solver_nfev = nfev;
             result.x         = decode_z_to_x(std::span<const double, CompiledShape::x_size>{z, CompiledShape::x_size},
                                      context.input.x_scale);
+#if defined(VEQPY_CXX_DETAILED_SOLVE_TIMING)
             const auto final_residual_started = std::chrono::steady_clock::now();
+#endif
             context.raw_residual(std::span<const double, CompiledShape::x_size>{result.x.data(), CompiledShape::x_size},
                                  std::span<double, CompiledShape::x_size>{result.raw.data(), CompiledShape::x_size});
+#if defined(VEQPY_CXX_DETAILED_SOLVE_TIMING)
             result.final_residual_ms = elapsed_ms_since(final_residual_started);
+#endif
             for (size_t i = 0; i < CompiledShape::x_size; ++i)
                 result.scaled[i] = result.raw[i] / context.input.residual_scale[i];
             result.raw_norm             = norm2(std::span<const double, CompiledShape::x_size>{
