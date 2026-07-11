@@ -236,9 +236,9 @@ namespace profiles
             return count;
         }
 
-        static constexpr size_t active_count   = compute_active_count();
-        static constexpr size_t max_active_len = compute_max_active_len();
-        static constexpr size_t x_size         = compute_x_size();
+        static constexpr size_t active_count         = compute_active_count();
+        static constexpr size_t max_active_len       = compute_max_active_len();
+        static constexpr size_t x_size               = compute_x_size();
         static constexpr bool   layout_profile_first = LayoutProfileFirst;
 
         static consteval auto make_profile_L()
@@ -379,48 +379,25 @@ namespace profiles
                     }
                 }
                 for (size_t degree = 0; degree < max_active_len; ++degree)
-                {
                     if (out[degree] < 0)
                         out[degree] = x_pos;
-                }
             }
             out[max_active_len] = x_pos;
             return out;
         }
 
-        static consteval auto make_c_family_source_profile_ids()
-        {
-            std::array<int, Mmax + 1> out{};
-            for (size_t order = 0; order <= Mmax; ++order)
-                out[order] = c_slot(order).optimized() ? static_cast<int>(c_profile_id(order)) : -1;
-            return out;
-        }
-
-        static consteval auto make_s_family_source_profile_ids()
-        {
-            std::array<int, Mmax + 1> out{};
-            out[0] = -1;
-            for (size_t order = 1; order <= Mmax; ++order)
-                out[order] = s_slot(order).optimized() ? static_cast<int>(s_profile_id(order)) : -1;
-            return out;
-        }
-
-        static constexpr auto profile_L                   = make_profile_L();
-        static constexpr auto active_profile_ids          = make_active_profile_ids();
-        static constexpr auto active_lengths              = make_active_lengths();
-        static constexpr auto active_c_orders             = make_active_c_orders();
-        static constexpr auto active_s_orders             = make_active_s_orders();
-        static constexpr auto coeff_index                 = make_coeff_index();
-        static constexpr auto order_offsets               = make_order_offsets();
-        static constexpr auto c_family_source_profile_ids = make_c_family_source_profile_ids();
-        static constexpr auto s_family_source_profile_ids = make_s_family_source_profile_ids();
+        static constexpr auto profile_L          = make_profile_L();
+        static constexpr auto active_profile_ids = make_active_profile_ids();
+        static constexpr auto active_lengths     = make_active_lengths();
+        static constexpr auto active_c_orders    = make_active_c_orders();
+        static constexpr auto active_s_orders    = make_active_s_orders();
+        static constexpr auto coeff_index        = make_coeff_index();
+        static constexpr auto order_offsets      = make_order_offsets();
     };
 } // namespace profiles
 
 namespace profiles::detail
 {
-    using math::max;
-    using math::sqrt;
     using std::size_t;
     using tensor::Matrix;
     using tensor::Vector;
@@ -443,35 +420,34 @@ namespace profiles::detail
         return out;
     }
 
-    template <size_t Lmax, size_t Count, size_t Nr>
+    template <size_t Lmax, size_t Count, size_t Nr, typename Transform>
         requires(Count > 0)
-    constexpr void update_polys(Matrix<double, Nr, 3>&          polys,
-                                const Vector<double, Count>&    coeffs,
-                                const Matrix<double, Lmax, Nr>& T,
-                                const Matrix<double, Lmax, Nr>& T_r,
-                                const Matrix<double, Lmax, Nr>& T_rr) noexcept
+    constexpr void update_profile_fused(std::span<double, Nr * 3>       profile,
+                                        const Vector<double, Count>&    coeffs,
+                                        const Matrix<double, Lmax, Nr>& T,
+                                        const Matrix<double, Lmax, Nr>& T_r,
+                                        const Matrix<double, Lmax, Nr>& T_rr,
+                                        Transform&&                     transform) noexcept
     {
         static_assert(Lmax >= 1, "profile basis table must contain stored T1.. rows");
         static_assert(Count <= Lmax + 1, "profile count exceeds shared basis rows plus T0");
 
         for (size_t i = 0; i < Nr; ++i)
         {
-            double value = coeffs[0];
-            double diff  = 0.0;
-            double diff2 = 0.0;
-
+            ProfileValues polys{coeffs[0], 0.0, 0.0};
             for (size_t k = 1; k < Count; ++k)
             {
                 const size_t row   = k - 1;
                 const double coeff = coeffs[k];
-                value += coeff * T(row, i);
-                diff += coeff * T_r(row, i);
-                diff2 += coeff * T_rr(row, i);
+                polys.value += coeff * T(row, i);
+                polys.diff += coeff * T_r(row, i);
+                polys.diff2 += coeff * T_rr(row, i);
             }
 
-            polys(i, 0) = value;
-            polys(i, 1) = diff;
-            polys(i, 2) = diff2;
+            const ProfileValues values = transform(i, polys);
+            profile[i * 3]             = values.value;
+            profile[i * 3 + 1]         = values.diff;
+            profile[i * 3 + 2]         = values.diff2;
         }
     }
 
@@ -517,128 +493,6 @@ namespace profiles::detail
         }
     }
 
-    template <size_t Kmax, size_t Nr>
-    constexpr void update_enveloped_profiles(Matrix<double, Nr, 3>&          profiles,
-                                             const Matrix<double, Nr, 3>&    polys,
-                                             const Matrix<double, Kmax, Nr>& rhos) noexcept
-    {
-        for (size_t i = 0; i < Nr; ++i)
-        {
-            const double rho   = rho_at(rhos, i);
-            const double y     = y_at(rhos, i);
-            const double value = polys(i, 0);
-            const double diff  = polys(i, 1);
-            const double diff2 = polys(i, 2);
-
-            profiles(i, 0) = y * value;
-            profiles(i, 1) = -2.0 * rho * value + y * diff;
-            profiles(i, 2) = -2.0 * value - 4.0 * rho * diff + y * diff2;
-        }
-    }
-
-    template <size_t Kmax, size_t Nr>
-    constexpr void update_kappa_from_polys(Matrix<double, Nr, 3>&          profiles,
-                                           const Matrix<double, Nr, 3>&    polys,
-                                           const Matrix<double, Kmax, Nr>& rhos,
-                                           double                          ka) noexcept
-    {
-        for (size_t i = 0; i < Nr; ++i)
-        {
-            const double rho     = rho_at(rhos, i);
-            const double y       = y_at(rhos, i);
-            const double value   = polys(i, 0);
-            const double diff    = polys(i, 1);
-            const double diff2   = polys(i, 2);
-            const double base    = y * value;
-            const double base_r  = -2.0 * rho * value + y * diff;
-            const double base_rr = -2.0 * value - 4.0 * rho * diff + y * diff2;
-
-            profiles(i, 0) = ka + base;
-            profiles(i, 1) = base_r;
-            profiles(i, 2) = base_rr;
-        }
-    }
-
-    template <size_t Kmax, size_t Nr>
-    constexpr void update_psin_from_polys(Matrix<double, Nr, 3>&          profiles,
-                                          const Matrix<double, Nr, 3>&    polys,
-                                          const Matrix<double, Kmax, Nr>& rhos) noexcept
-    {
-        for (size_t i = 0; i < Nr; ++i)
-        {
-            const double rho     = rho_at(rhos, i);
-            const double y       = y_at(rhos, i);
-            const double value   = polys(i, 0);
-            const double diff    = polys(i, 1);
-            const double diff2   = polys(i, 2);
-            const double base    = y * value;
-            const double base_r  = -2.0 * rho * value + y * diff;
-            const double base_rr = -2.0 * value - 4.0 * rho * diff + y * diff2;
-            const double amp     = 1.0 + base;
-            const double rp      = rho2_at(rhos, i);
-            const double rp_r    = 2.0 * rho;
-            const double rp_rr   = 2.0;
-
-            profiles(i, 0) = rp * amp;
-            profiles(i, 1) = rp_r * amp + rp * base_r;
-            profiles(i, 2) = rp_rr * amp + 2.0 * rp_r * base_r + rp * base_rr;
-        }
-    }
-
-    template <size_t Kmax, size_t Nr>
-    constexpr void update_F_from_polys(Matrix<double, Nr, 3>&          profiles,
-                                       const Matrix<double, Nr, 3>&    polys,
-                                       const Matrix<double, Kmax, Nr>& rhos,
-                                       double                          scale) noexcept
-    {
-        for (size_t i = 0; i < Nr; ++i)
-        {
-            const double rho               = rho_at(rhos, i);
-            const double y                 = y_at(rhos, i);
-            const double value             = polys(i, 0);
-            const double diff              = polys(i, 1);
-            const double diff2             = polys(i, 2);
-            const double base              = y * value;
-            const double base_r            = -2.0 * rho * value + y * diff;
-            const double base_rr           = -2.0 * value - 4.0 * rho * diff + y * diff2;
-            const double amp_raw_unclamped = 1.0 + base;
-            const double amp_raw           = max(amp_raw_unclamped, F_squared_amplitude_floor);
-            const double amp               = sqrt(amp_raw);
-            const double inv_amp           = 1.0 / amp;
-            const double inv_amp3          = inv_amp / amp_raw;
-            const double amp_r             = 0.5 * base_r * inv_amp;
-            const double amp_rr            = 0.5 * base_rr * inv_amp - 0.25 * base_r * base_r * inv_amp3;
-
-            profiles(i, 0) = scale * amp;
-            profiles(i, 1) = scale * amp_r;
-            profiles(i, 2) = scale * amp_rr;
-        }
-    }
-
-    template <size_t Kmax, size_t Power, size_t Nr>
-    constexpr void update_fourier_from_polys(Matrix<double, Nr, 3>&          profiles,
-                                             const Matrix<double, Nr, 3>&    polys,
-                                             const Matrix<double, Kmax, Nr>& rhos,
-                                             double                          offset) noexcept
-    {
-        for (size_t i = 0; i < Nr; ++i)
-        {
-            const ProfileValues rp      = rho_power_rows<Kmax, Power>(rhos, i);
-            const double        rho     = rho_at(rhos, i);
-            const double        y       = y_at(rhos, i);
-            const double        value   = polys(i, 0);
-            const double        diff    = polys(i, 1);
-            const double        diff2   = polys(i, 2);
-            const double        base    = y * value;
-            const double        base_r  = -2.0 * rho * value + y * diff;
-            const double        base_rr = -2.0 * value - 4.0 * rho * diff + y * diff2;
-            const double        amp     = offset + base;
-
-            profiles(i, 0) = rp.value * amp;
-            profiles(i, 1) = rp.diff * amp + rp.value * base_r;
-            profiles(i, 2) = rp.diff2 * amp + 2.0 * rp.diff * base_r + rp.value * base_rr;
-        }
-    }
 } // namespace profiles::detail
 
 namespace profiles
@@ -697,35 +551,61 @@ namespace profiles
 
         template <size_t Nr>
             requires(h_slot.enabled() && h_count > 0 && basis_rows + 1 >= h_count)
-        static constexpr void update_h(Matrix<double, Nr, 3>&                profiles,
+        static constexpr void update_h(std::span<double, Nr * 3>             profile,
                                        const Vector<double, h_count>&        coeffs,
                                        const Matrix<double, basis_rows, Nr>& T,
                                        const Matrix<double, basis_rows, Nr>& T_r,
                                        const Matrix<double, basis_rows, Nr>& T_rr,
                                        const Matrix<double, rho_rows, Nr>&   rhos) noexcept
         {
-            Matrix<double, Nr, 3> polys{uninitialized};
-            detail::update_polys<basis_rows, h_count>(polys, coeffs, T, T_r, T_rr);
-            detail::update_enveloped_profiles<rho_rows>(profiles, polys, rhos);
+            detail::update_profile_fused<basis_rows, h_count, Nr>(profile,
+                                                                  coeffs,
+                                                                  T,
+                                                                  T_r,
+                                                                  T_rr,
+                                                                  [&rhos](size_t i, detail::ProfileValues polys)
+                                                                  {
+                                                                      const double rho = detail::rho_at(rhos, i);
+                                                                      const double y   = detail::y_at(rhos, i);
+                                                                      return detail::ProfileValues{
+                                                                          y * polys.value,
+                                                                          -2.0 * rho * polys.value + y * polys.diff,
+                                                                          -2.0 * polys.value - 4.0 * rho * polys.diff +
+                                                                              y * polys.diff2,
+                                                                      };
+                                                                  });
         }
 
         template <size_t Nr>
             requires(v_slot.enabled() && v_count > 0 && basis_rows + 1 >= v_count)
-        static constexpr void update_v(Matrix<double, Nr, 3>&                profiles,
+        static constexpr void update_v(std::span<double, Nr * 3>             profile,
                                        const Vector<double, v_count>&        coeffs,
                                        const Matrix<double, basis_rows, Nr>& T,
                                        const Matrix<double, basis_rows, Nr>& T_r,
                                        const Matrix<double, basis_rows, Nr>& T_rr,
                                        const Matrix<double, rho_rows, Nr>&   rhos) noexcept
         {
-            Matrix<double, Nr, 3> polys{uninitialized};
-            detail::update_polys<basis_rows, v_count>(polys, coeffs, T, T_r, T_rr);
-            detail::update_enveloped_profiles<rho_rows>(profiles, polys, rhos);
+            detail::update_profile_fused<basis_rows, v_count, Nr>(profile,
+                                                                  coeffs,
+                                                                  T,
+                                                                  T_r,
+                                                                  T_rr,
+                                                                  [&rhos](size_t i, detail::ProfileValues polys)
+                                                                  {
+                                                                      const double rho = detail::rho_at(rhos, i);
+                                                                      const double y   = detail::y_at(rhos, i);
+                                                                      return detail::ProfileValues{
+                                                                          y * polys.value,
+                                                                          -2.0 * rho * polys.value + y * polys.diff,
+                                                                          -2.0 * polys.value - 4.0 * rho * polys.diff +
+                                                                              y * polys.diff2,
+                                                                      };
+                                                                  });
         }
 
         template <size_t Nr>
             requires(kappa_slot.enabled() && kappa_count > 0 && basis_rows + 1 >= kappa_count)
-        static constexpr void update_kappa(Matrix<double, Nr, 3>&                profiles,
+        static constexpr void update_kappa(std::span<double, Nr * 3>             profile,
                                            const Vector<double, kappa_count>&    coeffs,
                                            const Matrix<double, basis_rows, Nr>& T,
                                            const Matrix<double, basis_rows, Nr>& T_r,
@@ -733,28 +613,60 @@ namespace profiles
                                            const Matrix<double, rho_rows, Nr>&   rhos,
                                            double                                ka) noexcept
         {
-            Matrix<double, Nr, 3> polys{uninitialized};
-            detail::update_polys<basis_rows, kappa_count>(polys, coeffs, T, T_r, T_rr);
-            detail::update_kappa_from_polys<rho_rows>(profiles, polys, rhos, ka);
+            detail::update_profile_fused<basis_rows, kappa_count, Nr>(
+                profile,
+                coeffs,
+                T,
+                T_r,
+                T_rr,
+                [&rhos, ka](size_t i, detail::ProfileValues polys)
+                {
+                    const double rho  = detail::rho_at(rhos, i);
+                    const double y    = detail::y_at(rhos, i);
+                    const double base = y * polys.value;
+                    return detail::ProfileValues{
+                        ka + base,
+                        -2.0 * rho * polys.value + y * polys.diff,
+                        -2.0 * polys.value - 4.0 * rho * polys.diff + y * polys.diff2,
+                    };
+                });
         }
 
         template <size_t Nr>
             requires(psin_slot.enabled() && psin_count > 0 && basis_rows + 1 >= psin_count)
-        static constexpr void update_psin(Matrix<double, Nr, 3>&                profiles,
+        static constexpr void update_psin(std::span<double, Nr * 3>             profile,
                                           const Vector<double, psin_count>&     coeffs,
                                           const Matrix<double, basis_rows, Nr>& T,
                                           const Matrix<double, basis_rows, Nr>& T_r,
                                           const Matrix<double, basis_rows, Nr>& T_rr,
                                           const Matrix<double, rho_rows, Nr>&   rhos) noexcept
         {
-            Matrix<double, Nr, 3> polys{uninitialized};
-            detail::update_polys<basis_rows, psin_count>(polys, coeffs, T, T_r, T_rr);
-            detail::update_psin_from_polys<rho_rows>(profiles, polys, rhos);
+            detail::update_profile_fused<basis_rows, psin_count, Nr>(
+                profile,
+                coeffs,
+                T,
+                T_r,
+                T_rr,
+                [&rhos](size_t i, detail::ProfileValues polys)
+                {
+                    const double rho     = detail::rho_at(rhos, i);
+                    const double y       = detail::y_at(rhos, i);
+                    const double base    = y * polys.value;
+                    const double base_r  = -2.0 * rho * polys.value + y * polys.diff;
+                    const double base_rr = -2.0 * polys.value - 4.0 * rho * polys.diff + y * polys.diff2;
+                    const double amp     = 1.0 + base;
+                    const double rp      = detail::rho2_at(rhos, i);
+                    return detail::ProfileValues{
+                        rp * amp,
+                        2.0 * rho * amp + rp * base_r,
+                        2.0 * amp + 4.0 * rho * base_r + rp * base_rr,
+                    };
+                });
         }
 
         template <size_t Nr>
             requires(F_slot.enabled() && F_count > 0 && basis_rows + 1 >= F_count)
-        static constexpr void update_F(Matrix<double, Nr, 3>&                profiles,
+        static constexpr void update_F(std::span<double, Nr * 3>             profile,
                                        const Vector<double, F_count>&        coeffs,
                                        const Matrix<double, basis_rows, Nr>& T,
                                        const Matrix<double, basis_rows, Nr>& T_r,
@@ -762,14 +674,32 @@ namespace profiles
                                        const Matrix<double, rho_rows, Nr>&   rhos,
                                        double                                scale) noexcept
         {
-            Matrix<double, Nr, 3> polys{uninitialized};
-            detail::update_polys<basis_rows, F_count>(polys, coeffs, T, T_r, T_rr);
-            detail::update_F_from_polys<rho_rows>(profiles, polys, rhos, scale);
+            detail::update_profile_fused<basis_rows, F_count, Nr>(
+                profile,
+                coeffs,
+                T,
+                T_r,
+                T_rr,
+                [&rhos, scale](size_t i, detail::ProfileValues polys)
+                {
+                    const double rho     = detail::rho_at(rhos, i);
+                    const double y       = detail::y_at(rhos, i);
+                    const double base_r  = -2.0 * rho * polys.value + y * polys.diff;
+                    const double base_rr = -2.0 * polys.value - 4.0 * rho * polys.diff + y * polys.diff2;
+                    const double amp_raw = math::max(1.0 + y * polys.value, detail::F_squared_amplitude_floor);
+                    const double amp     = math::sqrt(amp_raw);
+                    const double inv_amp = 1.0 / amp;
+                    return detail::ProfileValues{
+                        scale * amp,
+                        scale * 0.5 * base_r * inv_amp,
+                        scale * (0.5 * base_rr * inv_amp - 0.25 * base_r * base_r * inv_amp / amp_raw),
+                    };
+                });
         }
 
         template <size_t Order, size_t Nr>
             requires(c_count<Order>() > 0 && basis_rows + 1 >= c_count<Order>() && rho_rows >= fourier_power<Order>())
-        static constexpr void update_c(Matrix<double, Nr, 3>&                  profiles,
+        static constexpr void update_c(std::span<double, Nr * 3>               profile,
                                        const Vector<double, c_count<Order>()>& coeffs,
                                        const Matrix<double, basis_rows, Nr>&   T,
                                        const Matrix<double, basis_rows, Nr>&   T_r,
@@ -780,14 +710,32 @@ namespace profiles
             constexpr size_t Count = c_count<Order>();
             constexpr size_t Power = fourier_power<Order>();
 
-            Matrix<double, Nr, 3> polys{uninitialized};
-            detail::update_polys<basis_rows, Count>(polys, coeffs, T, T_r, T_rr);
-            detail::update_fourier_from_polys<rho_rows, Power>(profiles, polys, rhos, offset);
+            detail::update_profile_fused<basis_rows, Count, Nr>(
+                profile,
+                coeffs,
+                T,
+                T_r,
+                T_rr,
+                [&rhos, offset](size_t i, detail::ProfileValues polys)
+                {
+                    const detail::ProfileValues rp      = detail::rho_power_rows<rho_rows, Power>(rhos, i);
+                    const double                rho     = detail::rho_at(rhos, i);
+                    const double                y       = detail::y_at(rhos, i);
+                    const double                base    = y * polys.value;
+                    const double                base_r  = -2.0 * rho * polys.value + y * polys.diff;
+                    const double                base_rr = -2.0 * polys.value - 4.0 * rho * polys.diff + y * polys.diff2;
+                    const double                amp     = offset + base;
+                    return detail::ProfileValues{
+                        rp.value * amp,
+                        rp.diff * amp + rp.value * base_r,
+                        rp.diff2 * amp + 2.0 * rp.diff * base_r + rp.value * base_rr,
+                    };
+                });
         }
 
         template <size_t Order, size_t Nr>
             requires(s_count<Order>() > 0 && basis_rows + 1 >= s_count<Order>() && rho_rows >= fourier_power<Order>())
-        static constexpr void update_s(Matrix<double, Nr, 3>&                  profiles,
+        static constexpr void update_s(std::span<double, Nr * 3>               profile,
                                        const Vector<double, s_count<Order>()>& coeffs,
                                        const Matrix<double, basis_rows, Nr>&   T,
                                        const Matrix<double, basis_rows, Nr>&   T_r,
@@ -798,9 +746,27 @@ namespace profiles
             constexpr size_t Count = s_count<Order>();
             constexpr size_t Power = fourier_power<Order>();
 
-            Matrix<double, Nr, 3> polys{uninitialized};
-            detail::update_polys<basis_rows, Count>(polys, coeffs, T, T_r, T_rr);
-            detail::update_fourier_from_polys<rho_rows, Power>(profiles, polys, rhos, offset);
+            detail::update_profile_fused<basis_rows, Count, Nr>(
+                profile,
+                coeffs,
+                T,
+                T_r,
+                T_rr,
+                [&rhos, offset](size_t i, detail::ProfileValues polys)
+                {
+                    const detail::ProfileValues rp      = detail::rho_power_rows<rho_rows, Power>(rhos, i);
+                    const double                rho     = detail::rho_at(rhos, i);
+                    const double                y       = detail::y_at(rhos, i);
+                    const double                base    = y * polys.value;
+                    const double                base_r  = -2.0 * rho * polys.value + y * polys.diff;
+                    const double                base_rr = -2.0 * polys.value - 4.0 * rho * polys.diff + y * polys.diff2;
+                    const double                amp     = offset + base;
+                    return detail::ProfileValues{
+                        rp.value * amp,
+                        rp.diff * amp + rp.value * base_r,
+                        rp.diff2 * amp + 2.0 * rp.diff * base_r + rp.value * base_rr,
+                    };
+                });
         }
     };
 
@@ -967,14 +933,11 @@ namespace profiles
         static constexpr size_t phase_tb_rt           = 4;
         static constexpr size_t phase_tb_tt           = 5;
 
-        using ProfileField  = Matrix<double, radial_nodes, 3>;
         using ProfileSlab   = Tensor<double, profile_field_count, radial_nodes, 3>;
         using FamilySlab    = Tensor<double, family_field_count, radial_nodes, 3>;
         using PhaseBaseSlab = Tensor<double, radial_nodes, GridType::theta_rows, phase_component_count>;
 
         ProfileSlab                            profile_fields{};
-        ProfileSlab                            profile_rp_fields{};
-        ProfileSlab                            profile_env_fields{};
         FamilySlab                             c_family_fields{};
         FamilySlab                             s_family_fields{};
         FamilySlab                             c_family_base_fields{};
@@ -988,8 +951,6 @@ namespace profiles
         constexpr void clear() noexcept
         {
             profile_fields.clear();
-            profile_rp_fields.clear();
-            profile_env_fields.clear();
             c_family_fields.clear();
             s_family_fields.clear();
             c_family_base_fields.clear();
@@ -1021,18 +982,6 @@ namespace profiles
         {
             static_assert(ProfileId < profile_field_count, "profile id exceeds runtime profile slab");
             return profile_fields(ProfileId, node, component);
-        }
-
-        template <size_t ProfileId>
-        constexpr ProfileField profile_matrix() const noexcept
-        {
-            static_assert(ProfileId < profile_field_count, "profile id exceeds runtime profile slab");
-
-            ProfileField out{uninitialized};
-            for (size_t node = 0; node < radial_nodes; ++node)
-                for (size_t component = 0; component < 3; ++component)
-                    out(node, component) = profile_fields(ProfileId, node, component);
-            return out;
         }
 
         template <size_t Order>
@@ -1085,15 +1034,6 @@ namespace profiles
             refresh_F_active(x, params);
             refresh_c_active<0>(x, params);
             refresh_s_active<1>(x, params);
-            refresh_fourier_family_fields();
-        }
-
-        constexpr void refresh_fourier_family_fields() noexcept
-        {
-            // Active family rows are overwritten below; boundary-only rows stay zero
-            // here and enter geometry through boundary_phase_base.
-            refresh_c_family_order<0>();
-            refresh_s_family_order<1>();
         }
 
         constexpr void load_fixed_from(const RuntimeProfiles& fixed_profiles) noexcept
@@ -1105,6 +1045,30 @@ namespace profiles
         }
 
     private:
+        template <size_t ProfileId>
+        constexpr std::span<double, radial_nodes * 3> profile_span() noexcept
+        {
+            static_assert(ProfileId < profile_field_count, "profile id exceeds runtime profile slab");
+            return std::span<double, radial_nodes * 3>{profile_fields.data() + ProfileId * radial_nodes * 3,
+                                                       radial_nodes * 3};
+        }
+
+        template <size_t Order>
+        constexpr std::span<double, radial_nodes * 3> c_family_span() noexcept
+        {
+            static_assert(Order < family_field_count, "c-family order exceeds runtime family slab");
+            return std::span<double, radial_nodes * 3>{c_family_fields.data() + Order * radial_nodes * 3,
+                                                       radial_nodes * 3};
+        }
+
+        template <size_t Order>
+        constexpr std::span<double, radial_nodes * 3> s_family_span() noexcept
+        {
+            static_assert(Order < family_field_count, "s-family order exceeds runtime family slab");
+            return std::span<double, radial_nodes * 3>{s_family_fields.data() + Order * radial_nodes * 3,
+                                                       radial_nodes * 3};
+        }
+
         template <size_t ProfileId, size_t Count>
         static constexpr Vector<double, Count> coefficients_from_x(std::span<const double, Shape::x_size> x) noexcept
         {
@@ -1116,16 +1080,6 @@ namespace profiles
                 out[degree] = x[static_cast<size_t>(x_index)];
             }
             return out;
-        }
-
-        template <size_t ProfileId>
-        constexpr void store_profile(const ProfileField& values) noexcept
-        {
-            static_assert(ProfileId < profile_field_count, "profile id exceeds runtime profile slab");
-
-            for (size_t node = 0; node < radial_nodes; ++node)
-                for (size_t component = 0; component < 3; ++component)
-                    profile_fields(ProfileId, node, component) = values(node, component);
         }
 
         template <size_t ProfileId>
@@ -1350,9 +1304,8 @@ namespace profiles
                 constexpr size_t profile_id = Shape::h_profile_id;
                 constexpr size_t count      = evaluator::h_count;
                 const auto       coeffs     = coefficients_from_x<profile_id, count>(x);
-                ProfileField     out{uninitialized};
-                evaluator::update_h(out, coeffs, GridType::T, GridType::T_r, GridType::T_rr, GridType::rhos);
-                store_profile<profile_id>(out);
+                evaluator::update_h(
+                    profile_span<profile_id>(), coeffs, GridType::T, GridType::T_r, GridType::T_rr, GridType::rhos);
             }
         }
 
@@ -1363,9 +1316,8 @@ namespace profiles
                 constexpr size_t profile_id = Shape::v_profile_id;
                 constexpr size_t count      = evaluator::v_count;
                 const auto       coeffs     = coefficients_from_x<profile_id, count>(x);
-                ProfileField     out{uninitialized};
-                evaluator::update_v(out, coeffs, GridType::T, GridType::T_r, GridType::T_rr, GridType::rhos);
-                store_profile<profile_id>(out);
+                evaluator::update_v(
+                    profile_span<profile_id>(), coeffs, GridType::T, GridType::T_r, GridType::T_rr, GridType::rhos);
             }
         }
 
@@ -1377,15 +1329,13 @@ namespace profiles
                 constexpr size_t profile_id = Shape::kappa_profile_id;
                 constexpr size_t count      = evaluator::kappa_count;
                 const auto       coeffs     = coefficients_from_x<profile_id, count>(x);
-                ProfileField     out{uninitialized};
-                evaluator::update_kappa(out,
+                evaluator::update_kappa(profile_span<profile_id>(),
                                         coeffs,
                                         GridType::T,
                                         GridType::T_r,
                                         GridType::T_rr,
                                         GridType::rhos,
                                         params.offsets[profile_id]);
-                store_profile<profile_id>(out);
             }
         }
 
@@ -1396,9 +1346,8 @@ namespace profiles
                 constexpr size_t profile_id = Shape::psin_profile_id;
                 constexpr size_t count      = evaluator::psin_count;
                 const auto       coeffs     = coefficients_from_x<profile_id, count>(x);
-                ProfileField     out{uninitialized};
-                evaluator::update_psin(out, coeffs, GridType::T, GridType::T_r, GridType::T_rr, GridType::rhos);
-                store_profile<profile_id>(out);
+                evaluator::update_psin(
+                    profile_span<profile_id>(), coeffs, GridType::T, GridType::T_r, GridType::T_rr, GridType::rhos);
             }
         }
 
@@ -1410,10 +1359,13 @@ namespace profiles
                 constexpr size_t profile_id = Shape::F_profile_id;
                 constexpr size_t count      = evaluator::F_count;
                 const auto       coeffs     = coefficients_from_x<profile_id, count>(x);
-                ProfileField     out{uninitialized};
-                evaluator::update_F(
-                    out, coeffs, GridType::T, GridType::T_r, GridType::T_rr, GridType::rhos, params.scales[profile_id]);
-                store_profile<profile_id>(out);
+                evaluator::update_F(profile_span<profile_id>(),
+                                    coeffs,
+                                    GridType::T,
+                                    GridType::T_r,
+                                    GridType::T_rr,
+                                    GridType::rhos,
+                                    params.scales[profile_id]);
             }
         }
 
@@ -1428,10 +1380,13 @@ namespace profiles
                     constexpr size_t profile_id = Shape::template c_profile_id<Order>();
                     constexpr size_t count      = evaluator::template c_count<Order>();
                     const auto       coeffs     = coefficients_from_x<profile_id, count>(x);
-                    ProfileField     out{uninitialized};
-                    evaluator::template update_c<Order>(
-                        out, coeffs, GridType::T, GridType::T_r, GridType::T_rr, GridType::rhos, 0.0);
-                    store_profile<profile_id>(out);
+                    evaluator::template update_c<Order>(c_family_span<Order>(),
+                                                        coeffs,
+                                                        GridType::T,
+                                                        GridType::T_r,
+                                                        GridType::T_rr,
+                                                        GridType::rhos,
+                                                        0.0);
                 }
                 refresh_c_active<Order + 1>(x, params);
             }
@@ -1448,49 +1403,15 @@ namespace profiles
                     constexpr size_t profile_id = Shape::template s_profile_id<Order>();
                     constexpr size_t count      = evaluator::template s_count<Order>();
                     const auto       coeffs     = coefficients_from_x<profile_id, count>(x);
-                    ProfileField     out{uninitialized};
-                    evaluator::template update_s<Order>(
-                        out, coeffs, GridType::T, GridType::T_r, GridType::T_rr, GridType::rhos, 0.0);
-                    store_profile<profile_id>(out);
+                    evaluator::template update_s<Order>(s_family_span<Order>(),
+                                                        coeffs,
+                                                        GridType::T,
+                                                        GridType::T_r,
+                                                        GridType::T_rr,
+                                                        GridType::rhos,
+                                                        0.0);
                 }
                 refresh_s_active<Order + 1>(x, params);
-            }
-        }
-
-        template <size_t ProfileId, size_t Order>
-        constexpr void copy_profile_to_family(FamilySlab& family) noexcept
-        {
-            for (size_t node = 0; node < radial_nodes; ++node)
-            {
-                for (size_t component = 0; component < 3; ++component)
-                {
-                    const double value             = profile_fields(ProfileId, node, component);
-                    family(Order, node, component) = value;
-                }
-            }
-        }
-
-        template <size_t Order>
-        constexpr void refresh_c_family_order() noexcept
-        {
-            if constexpr (Order < evaluator::c_family_size)
-            {
-                constexpr int profile_id = Shape::c_family_source_profile_ids[Order];
-                if constexpr (profile_id >= 0)
-                    copy_profile_to_family<static_cast<size_t>(profile_id), Order>(c_family_fields);
-                refresh_c_family_order<Order + 1>();
-            }
-        }
-
-        template <size_t Order>
-        constexpr void refresh_s_family_order() noexcept
-        {
-            if constexpr (Order <= evaluator::s_family_size)
-            {
-                constexpr int profile_id = Shape::s_family_source_profile_ids[Order];
-                if constexpr (profile_id >= 0)
-                    copy_profile_to_family<static_cast<size_t>(profile_id), Order>(s_family_fields);
-                refresh_s_family_order<Order + 1>();
             }
         }
     };
