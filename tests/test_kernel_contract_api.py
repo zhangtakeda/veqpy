@@ -787,6 +787,16 @@ def test_kernel_python_build_and_solve_native_flow(tmp_path: Path) -> None:
     assert result.scaled.shape == (handle.x_size,)
     assert_allclose(handle.residual(result.x, kernel_boundary, kernel_source), result.raw)
 
+    for method in ("powell", "levenberg-marquardt", "newton-krylov", "newton-raphson"):
+        config = KernelConfig(method=method, initial="cold", continuation="cold")
+        first = handle.solve(kernel_boundary, kernel_source, config=config)
+        second = handle.solve(kernel_boundary, kernel_source, config=config)
+        assert first.success is True
+        assert second.success is True
+        assert_allclose(second.x, first.x, rtol=0.0, atol=0.0)
+        assert_allclose(second.raw, first.raw, rtol=0.0, atol=0.0)
+        assert_allclose(second.scaled, first.scaled, rtol=0.0, atol=0.0)
+
     residual_out = np.empty(handle.x_size, dtype=np.float64)
     handle.residual_into(residual_out, result.x, kernel_boundary, kernel_source)
     assert_allclose(residual_out, result.raw)
