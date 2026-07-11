@@ -8,6 +8,11 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <memory>
+#include <new>
+#include <span>
+#include <stdexcept>
+#include <type_traits>
 
 namespace nonlinear::detail
 {
@@ -15,6 +20,74 @@ namespace nonlinear::detail
     using tensor::Matrix;
     using tensor::Vector;
     using tensor::uninitialized;
+
+    template <size_t N>
+    class Workspace
+    {
+        static constexpr size_t alignment = 64;
+        // Policies are mutually exclusive, so one arena only needs to cover the
+        // largest live layout.  Three N-by-N double buffers plus linear terms
+        // cover Powell, LM, GMRES, and Newton/LU with per-slice alignment slack.
+        static constexpr size_t capacity_bytes =
+            (3 * N * N + 32 * N + 16) * sizeof(double) + N * sizeof(int) + 12 * alignment;
+
+        struct AlignedDelete
+        {
+            void operator()(std::byte* pointer) const noexcept
+            {
+                ::operator delete(pointer, std::align_val_t{alignment});
+            }
+        };
+
+        std::unique_ptr<std::byte, AlignedDelete> storage_{
+            static_cast<std::byte*>(::operator new(capacity_bytes, std::align_val_t{alignment}))};
+        size_t cursor_ = 0;
+
+    public:
+        class Scope
+        {
+            Workspace* workspace_;
+            size_t     marker_;
+
+        public:
+            explicit Scope(Workspace& workspace) noexcept
+                : workspace_(&workspace), marker_(workspace.cursor_)
+            {
+            }
+
+            Scope(const Scope&)            = delete;
+            Scope& operator=(const Scope&) = delete;
+
+            ~Scope() { workspace_->cursor_ = marker_; }
+        };
+
+        Workspace() = default;
+
+        Workspace(const Workspace&)            = delete;
+        Workspace& operator=(const Workspace&) = delete;
+
+        void reset() noexcept { cursor_ = 0; }
+
+        template <typename T>
+        std::span<T> take(size_t count)
+        {
+            const size_t aligned = (cursor_ + alignment - 1) & ~(alignment - 1);
+            const size_t bytes   = count * sizeof(T);
+            if (aligned > capacity_bytes || bytes > capacity_bytes - aligned)
+                throw std::runtime_error("nonlinear workspace capacity exceeded");
+            auto* result = reinterpret_cast<T*>(storage_.get() + aligned);
+            cursor_      = aligned + bytes;
+            return {result, count};
+        }
+
+        template <typename T>
+        T& take_object()
+        {
+            static_assert(std::is_trivially_destructible_v<T>);
+            auto storage = take<std::byte>(sizeof(T));
+            return *::new (static_cast<void*>(storage.data())) T{};
+        }
+    };
 
     struct LevenbergMarquardt
     {
@@ -244,19 +317,26 @@ namespace nonlinear::detail
         static constexpr size_t variables = Functor::variables;
         static_assert(equations == variables, "NewtonRaphson requires a square residual");
 
-        Functor functor;
+        Functor               functor;
+        Workspace<variables>* workspace;
         double  tolerance            = 1.0e-8;
         int     max_iterations       = 50;
         int     evaluations          = 0;
         int     jacobian_evaluations = 0;
         int     info                 = 0;
 
-        explicit Context(const Functor& value) : functor(value) {}
+        Context(const Functor& value, Workspace<variables>& value_workspace)
+            : functor(value), workspace(&value_workspace)
+        {
+        }
 
         void optimize_inplace(double* x)
         {
-            constexpr size_t      n = variables;
-            DenseNewtonWork<n>    work{};
+            constexpr size_t n = variables;
+            typename Workspace<n>::Scope scope{*workspace};
+            auto& work = workspace->template take_object<DenseNewtonWork<n>>();
+            auto& factorization =
+                workspace->template take_object<linalg::Context<linalg::Doolittle, n, n>>();
             std::array<double, n> f{};
             evaluations          = 0;
             jacobian_evaluations = 0;
@@ -277,7 +357,9 @@ namespace nonlinear::detail
                 ++jacobian_evaluations;
                 for (size_t i = 0; i < n; ++i)
                     work.rhs[i] = -f[i];
-                linalg::solve_into(work.step, work.jacobian, work.rhs);
+                std::copy(work.rhs.begin(), work.rhs.end(), work.step.begin());
+                linalg::factorize_into(factorization, work.jacobian);
+                factorization.template substitute_inplace<1>(work.step.data());
 
                 double step_scale = 1.0;
                 bool   accepted   = false;
@@ -315,13 +397,31 @@ namespace nonlinear::detail
     template <size_t N>
     struct GmresWork
     {
-        std::array<double, (N + 1) * N> basis{};
-        std::array<double, (N + 1) * N> hessenberg{};
-        std::array<double, N>           givens_cos{};
-        std::array<double, N>           givens_sin{};
-        std::array<double, N + 1>       residual_axis{};
-        std::array<double, N>           arnoldi{};
-        std::array<double, N>           y{};
+        std::span<double> basis;
+        std::span<double> hessenberg;
+        std::span<double> givens_cos;
+        std::span<double> givens_sin;
+        std::span<double> residual_axis;
+        std::span<double> arnoldi;
+        std::span<double> y;
+
+        explicit GmresWork(Workspace<N>& workspace)
+            : basis(workspace.template take<double>((N + 1) * N)),
+              hessenberg(workspace.template take<double>((N + 1) * N)),
+              givens_cos(workspace.template take<double>(N)),
+              givens_sin(workspace.template take<double>(N)),
+              residual_axis(workspace.template take<double>(N + 1)),
+              arnoldi(workspace.template take<double>(N)),
+              y(workspace.template take<double>(N))
+        {
+            std::fill(basis.begin(), basis.end(), 0.0);
+            std::fill(hessenberg.begin(), hessenberg.end(), 0.0);
+            std::fill(givens_cos.begin(), givens_cos.end(), 0.0);
+            std::fill(givens_sin.begin(), givens_sin.end(), 0.0);
+            std::fill(residual_axis.begin(), residual_axis.end(), 0.0);
+            std::fill(arnoldi.begin(), arnoldi.end(), 0.0);
+            std::fill(y.begin(), y.end(), 0.0);
+        }
     };
 
     template <size_t N>
@@ -338,6 +438,7 @@ namespace nonlinear::detail
 
     template <typename Functor, size_t N>
     int gmres_solve(Functor&      functor,
+                    Workspace<N>& workspace,
                     const double* x,
                     const double* f_base,
                     const double* rhs,
@@ -346,7 +447,8 @@ namespace nonlinear::detail
                     double        tolerance,
                     int&          jvp_evaluations)
     {
-        GmresWork<N> work{};
+        typename Workspace<N>::Scope scope{workspace};
+        GmresWork<N>                  work{workspace};
         std::fill(solution, solution + N, 0.0);
 
         const double beta = norm2<N>(rhs);
@@ -435,7 +537,8 @@ namespace nonlinear::detail
         static constexpr size_t variables = Functor::variables;
         static_assert(equations == variables, "NewtonKrylov requires a square residual");
 
-        Functor functor;
+        Functor               functor;
+        Workspace<variables>* workspace;
         double  tolerance         = 1.0e-8;
         int     max_iterations    = 50;
         int     max_dimension     = static_cast<int>(variables);
@@ -444,7 +547,10 @@ namespace nonlinear::detail
         int     linear_iterations = 0;
         int     info              = 0;
 
-        explicit Context(const Functor& value) : functor(value) {}
+        Context(const Functor& value, Workspace<variables>& value_workspace)
+            : functor(value), workspace(&value_workspace)
+        {
+        }
 
         void optimize_inplace(double* x)
         {
@@ -472,8 +578,15 @@ namespace nonlinear::detail
             {
                 for (size_t i = 0; i < n; ++i)
                     rhs[i] = -f[i];
-                linear_iterations += gmres_solve<Functor, n>(
-                    functor, x, f.data(), rhs.data(), step.data(), max_dimension, tolerance * 0.1, jvp_evaluations);
+                linear_iterations += gmres_solve<Functor, n>(functor,
+                                                             *workspace,
+                                                             x,
+                                                             f.data(),
+                                                             rhs.data(),
+                                                             step.data(),
+                                                             max_dimension,
+                                                             tolerance * 0.1,
+                                                             jvp_evaluations);
 
                 double step_scale = 1.0;
                 bool   accepted   = false;
@@ -517,17 +630,17 @@ namespace nonlinear::detail
         static constexpr int    cminpack_size = static_cast<int>(variables);
         static constexpr int    lr_size       = cminpack_size * (cminpack_size + 1) / 2;
 
-        Functor                               functor;
-        Vector<double, equations>             fvec{uninitialized};
-        Vector<double, variables>             diag{uninitialized};
-        Vector<double, equations * variables> fjac{uninitialized};
-        Vector<double, equations * variables> jacobian{uninitialized};
-        Vector<double, static_cast<size_t>(lr_size)> r{uninitialized};
-        Vector<double, variables>             qtf{uninitialized};
-        Vector<double, variables>             wa1{uninitialized};
-        Vector<double, variables>             wa2{uninitialized};
-        Vector<double, variables>             wa3{uninitialized};
-        Vector<double, variables>             wa4{uninitialized};
+        Functor           functor;
+        std::span<double> fvec;
+        std::span<double> diag;
+        std::span<double> fjac;
+        std::span<double> jacobian;
+        std::span<double> r;
+        std::span<double> qtf;
+        std::span<double> wa1;
+        std::span<double> wa2;
+        std::span<double> wa3;
+        std::span<double> wa4;
         double                                tolerance            = 1.0e-8;
         double                                finite_difference_step = 1.0e-6;
         double                                initial_step_bound    = 1.0;
@@ -540,7 +653,20 @@ namespace nonlinear::detail
         int                                   jacobian_evaluations = 0;
         int                                   info                 = 0;
 
-        explicit Context(const Functor& value) : functor(value) {}
+        Context(const Functor& value, Workspace<variables>& workspace)
+            : functor(value),
+              fvec(workspace.template take<double>(equations)),
+              diag(workspace.template take<double>(variables)),
+              fjac(workspace.template take<double>(equations * variables)),
+              jacobian(workspace.template take<double>(equations * variables)),
+              r(workspace.template take<double>(static_cast<size_t>(lr_size))),
+              qtf(workspace.template take<double>(variables)),
+              wa1(workspace.template take<double>(variables)),
+              wa2(workspace.template take<double>(variables)),
+              wa3(workspace.template take<double>(variables)),
+              wa4(workspace.template take<double>(variables))
+        {
+        }
 
         void optimize_inplace(double* x)
         {
@@ -558,7 +684,7 @@ namespace nonlinear::detail
 
         void run_jacobian_backend(double* x)
         {
-            diag.fill(1.0);
+            std::fill(diag.begin(), diag.end(), 1.0);
             int nfev = 0;
             int njev = 0;
             info     = cminpack::hybrj(callback_with_jacobian,
@@ -589,7 +715,7 @@ namespace nonlinear::detail
 
         void run_finite_difference_backend(double* x)
         {
-            diag.fill(1.0);
+            std::fill(diag.begin(), diag.end(), 1.0);
             int nfev = 0;
             info     = cminpack::hybrd(callback,
                                    this,
@@ -662,17 +788,17 @@ namespace nonlinear::detail
         static constexpr int    cminpack_equations = static_cast<int>(equations);
         static constexpr int    cminpack_variables = static_cast<int>(variables);
 
-        Functor                               functor;
-        Vector<double, equations>             fvec{uninitialized};
-        Vector<double, variables>             diag{uninitialized};
-        Vector<double, equations * variables> fjac{uninitialized};
-        Vector<double, equations * variables> jacobian{uninitialized};
-        Vector<int, variables>                ipvt{uninitialized};
-        Vector<double, variables>             qtf{uninitialized};
-        Vector<double, variables>             wa1{uninitialized};
-        Vector<double, variables>             wa2{uninitialized};
-        Vector<double, variables>             wa3{uninitialized};
-        Vector<double, equations>             wa4{uninitialized};
+        Functor           functor;
+        std::span<double> fvec;
+        std::span<double> diag;
+        std::span<double> fjac;
+        std::span<double> jacobian;
+        std::span<int>    ipvt;
+        std::span<double> qtf;
+        std::span<double> wa1;
+        std::span<double> wa2;
+        std::span<double> wa3;
+        std::span<double> wa4;
         double                                tolerance            = 1.0e-8;
         double                                finite_difference_step = 0.0;
         double                                initial_step_bound    = 100.0;
@@ -683,7 +809,20 @@ namespace nonlinear::detail
         int                                   jacobian_evaluations = 0;
         int                                   info                 = 0;
 
-        explicit Context(const Functor& value) : functor(value) {}
+        Context(const Functor& value, Workspace<variables>& workspace)
+            : functor(value),
+              fvec(workspace.template take<double>(equations)),
+              diag(workspace.template take<double>(variables)),
+              fjac(workspace.template take<double>(equations * variables)),
+              jacobian(workspace.template take<double>(equations * variables)),
+              ipvt(workspace.template take<int>(variables)),
+              qtf(workspace.template take<double>(variables)),
+              wa1(workspace.template take<double>(variables)),
+              wa2(workspace.template take<double>(variables)),
+              wa3(workspace.template take<double>(variables)),
+              wa4(workspace.template take<double>(equations))
+        {
+        }
 
         void optimize_inplace(double* x)
         {
@@ -701,7 +840,7 @@ namespace nonlinear::detail
 
         void run_jacobian_backend(double* x)
         {
-            diag.fill(1.0);
+            std::fill(diag.begin(), diag.end(), 1.0);
             int nfev = 0;
             int njev = 0;
             info     = cminpack::lmder(callback_with_jacobian,
@@ -734,7 +873,7 @@ namespace nonlinear::detail
 
         void run_finite_difference_backend(double* x)
         {
-            diag.fill(1.0);
+            std::fill(diag.begin(), diag.end(), 1.0);
             int nfev = 0;
             info     = cminpack::lmdif(callback,
                                    this,
@@ -804,7 +943,7 @@ namespace nonlinear::detail
     {
         typename Policy::template Context<Functor> context;
 
-        explicit Solver(const Functor& functor) : context(functor) {}
+        Solver(const Functor& functor, Workspace<Functor::variables>& workspace) : context(functor, workspace) {}
 
         template <size_t N>
         void optimize_inplace(Vector<double, N>& x)
@@ -815,9 +954,10 @@ namespace nonlinear::detail
     };
 
     template <typename Policy, typename Functor>
-    Solver<Policy, Functor> make_solver(const Functor& functor)
+    Solver<Policy, Functor> make_solver(const Functor& functor, Workspace<Functor::variables>& workspace)
     {
-        return Solver<Policy, Functor>{functor};
+        workspace.reset();
+        return Solver<Policy, Functor>{functor, workspace};
     }
 } // namespace nonlinear::detail
 
@@ -828,5 +968,6 @@ namespace nonlinear
     using detail::NewtonRaphson;
     using detail::Powell;
     using detail::Solver;
+    using detail::Workspace;
     using detail::make_solver;
 } // namespace nonlinear

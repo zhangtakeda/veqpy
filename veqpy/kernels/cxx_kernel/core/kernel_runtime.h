@@ -104,9 +104,11 @@ namespace cxx_kernel_api
             double         jacobian_callback_ms           = 0.0;
             double         jvp_callback_ms                = 0.0;
             double         linear_solve_ms                = 0.0;
+            nonlinear::Workspace<CompiledShape::x_size>& nonlinear_workspace;
 
-            explicit SolveState(const RuntimeCase& case_input)
-                : op(make_operator_for_case(case_input)), input(case_input)
+            SolveState(const RuntimeCase&                                case_input,
+                       nonlinear::Workspace<CompiledShape::x_size>& workspace)
+                : op(make_operator_for_case(case_input)), input(case_input), nonlinear_workspace(workspace)
             {
             }
 
@@ -579,7 +581,7 @@ namespace cxx_kernel_api
             std::copy(encoded.begin(), encoded.end(), z.begin());
 
             ScaledResidualProblem problem{&context};
-            auto                  solver = nonlinear::make_solver<Policy>(problem);
+            auto                  solver = nonlinear::make_solver<Policy>(problem, context.nonlinear_workspace);
             configure_scaled_z_solver(solver.context, context.input);
 
             solver.optimize_inplace(z);
@@ -606,7 +608,8 @@ namespace cxx_kernel_api
             std::copy(encoded.begin(), encoded.end(), z.begin());
 
             ScaledResidualProblem problem{&context};
-            auto                  solver = nonlinear::make_solver<nonlinear::LevenbergMarquardt>(problem);
+            auto                  solver =
+                nonlinear::make_solver<nonlinear::LevenbergMarquardt>(problem, context.nonlinear_workspace);
             configure_levenberg_marquardt_solver(solver.context, context.input);
 
             solver.optimize_inplace(z);

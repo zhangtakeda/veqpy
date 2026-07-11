@@ -91,10 +91,11 @@ namespace cxx_python
     using AlphaArrayView           = nb::ndarray<nb::numpy, const double, nb::shape<2>, nb::c_contig>;
     using RuntimeArrayView         = nb::ndarray<nb::numpy, const double, nb::ndim<1>, nb::c_contig>;
 
-    inline std::unique_ptr<SolveState> make_context(SolverKind solver)
+    inline std::unique_ptr<SolveState>
+    make_context(SolverKind solver, nonlinear::Workspace<CompiledShape::x_size>& workspace)
     {
         RuntimeCase input   = build_inline_case(0, 0, solver);
-        auto      context = std::make_unique<SolveState>(input);
+        auto      context = std::make_unique<SolveState>(input, workspace);
 
         context->raw_residual(std::span<const double, CompiledShape::x_size>{input.x0.data(), CompiledShape::x_size},
                               std::span<double, CompiledShape::x_size>{
@@ -562,7 +563,8 @@ namespace cxx_python
     {
     public:
         explicit NativeSolver(int solver_code = static_cast<int>(cxx_kernel_api::SolverMethodPowell))
-            : solver_(solver_kind_from_runtime_method_code(solver_code)), context_(make_context(solver_))
+            : solver_(solver_kind_from_runtime_method_code(solver_code)),
+              context_(make_context(solver_, nonlinear_workspace_))
         {
         }
 
@@ -1104,7 +1106,7 @@ namespace cxx_python
                     cold_policy_code = continue_policy;
                 }
             }
-            auto next_context = std::make_unique<SolveState>(next_input);
+            auto next_context = std::make_unique<SolveState>(next_input, nonlinear_workspace_);
             if (should_refine_cold)
                 refine_cold_initial_state(*next_context, cold_policy_code);
             refresh_initial_residual_scale(*next_context);
@@ -1112,6 +1114,7 @@ namespace cxx_python
         }
 
         SolverKind                    solver_;
+        nonlinear::Workspace<CompiledShape::x_size> nonlinear_workspace_{};
         std::unique_ptr<SolveState> context_;
         SolveResult                   last_result_{};
         std::array<double, CompiledShape::x_size> older_solution_{};
