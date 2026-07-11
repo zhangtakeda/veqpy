@@ -174,7 +174,9 @@ finite-difference JVP/Jacobian calls, and `build_equilibrium()`.
 `build(topology=..., recipe=None, config=None)` creates a reusable `Kernel` and
 caches that default policy on the handle; `Kernel.solve(...)` can use it as-is,
 replace it with a one-off `config=...`, or override individual fields such as
-`method=...` for one call.
+`method=...` for one call. An explicit `x0=` packed array, active-profile
+coefficient dictionary, or previous `SolveResult` overrides warm continuation
+and the configured cold initial-state policy.
 
 The current production boundary is narrow: route/topology planning covers the
 benchmark matrix, while native execution is gated by the Cxx native-support

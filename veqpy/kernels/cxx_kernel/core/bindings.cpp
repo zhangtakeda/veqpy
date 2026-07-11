@@ -44,6 +44,10 @@ NB_MODULE(cxx_ext, module)
         .def("adopt_last_solution_as_initial",
              &cxx_python::NativeSolver::adopt_last_solution_as_initial,
              "Use the last accepted solve result as the current initial state.")
+        .def("set_initial_state",
+             &cxx_python::NativeSolver::set_initial_state,
+             nb::arg("x0"),
+             "Replace continuation and cold-policy state with an explicit packed initial state.")
         .def("residual_var_into",
              &cxx_python::NativeSolver::residual_var_into,
              nb::arg("out"),

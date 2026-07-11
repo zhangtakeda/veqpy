@@ -18,6 +18,7 @@ import numpy as np
 
 from veqpy.kernels.abi.source_semantics import MaterializedKernelSource, materialize_kernel_source
 from veqpy.kernels.boundary_materialization import materialize_kernel_boundary
+from veqpy.kernels.initial import KernelInitial, materialize_initial_state
 from veqpy.kernels.types import (
     KernelBoundary,
     KernelConfig,
@@ -116,11 +117,14 @@ class _CxxKernelImpl:
         *,
         config: KernelConfig | None = None,
         case_name: str | None = None,
+        x0: KernelInitial | None = None,
         **config_overrides: Any,
     ) -> SolveResult:
         elapsed_started = perf_counter()
         kernel_config = self._runtime_config(config, config_overrides)
         solver = self._set_runtime(boundary, source, kernel_config, case_name=case_name)
+        if x0 is not None:
+            solver.set_initial_state(materialize_initial_state(x0, self.topology, self.recipe))
         preprocess_ms = (perf_counter() - elapsed_started) * 1000.0
         native_value = solver.solve_direct()
         postprocess_started = perf_counter()

@@ -610,6 +610,51 @@ def test_kernel_numba_backend_warm_continuation_passes_previous_solution(
     assert_allclose(captured["x0"], first.x)
 
 
+def test_kernel_numba_backend_explicit_initial_state_overrides_warm_continuation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    topology = make_kernel_topology()
+    kernel = numba_kernel(topology=topology)
+    boundary = tiny_kernel_boundary()
+    source = tiny_kernel_source()
+    first = kernel.solve(
+        boundary,
+        source,
+        config=KernelConfig(
+            method="levenberg-marquardt",
+            initial="cold-zeros",
+            norm="none",
+            max_evaluations=2,
+        ),
+    )
+    captured: dict[str, np.ndarray | None] = {}
+
+    def fake_solve(
+        boundary_arg: KernelBoundary,
+        source_arg: KernelSource,
+        config_arg: KernelConfig,
+        *,
+        x0: np.ndarray | None,
+        **kwargs: object,
+    ):
+        del boundary_arg, source_arg, config_arg, kwargs
+        captured["x0"] = None if x0 is None else x0.copy()
+        return first
+
+    monkeypatch.setattr(kernel._impl._solver, "solve", fake_solve)
+    explicit = np.linspace(-0.5, 0.5, topology.x_size)
+    kernel.solve(
+        boundary,
+        source,
+        config=KernelConfig(continuation="warm", norm="none", max_evaluations=2),
+        x0=explicit,
+    )
+
+    assert captured["x0"] is not None
+    assert_allclose(captured["x0"], explicit)
+    assert not np.array_equal(captured["x0"], first.x)
+
+
 def test_kernel_numba_backend_jvp_and_jacobian_match_native_finite_differences() -> None:
     kernel = numba_kernel(topology=make_kernel_topology())
     boundary = tiny_kernel_boundary()

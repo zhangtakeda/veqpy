@@ -47,6 +47,7 @@ The recommended Kernel API is the package-root surface:
 | `KernelBoundary` | Runtime boundary input. Users may pass parameterized `a/R0/Z0/B0/ka/c_offsets/s_offsets` values or raw `R_boundary/Z_boundary` points for explicit fitting. |
 | `KernelSource` | Runtime heat/current profile arrays plus physical constraints such as `Ip`, `beta`, and optional `case_name`. |
 | `KernelConfig` | Solver policy for one invocation: method, residual limits, evaluation budget, initial/continuation policy, and normalization mode. |
+| `KernelInitial` | Type contract for an explicit per-call packed state, named coefficient dictionary, or previous `SolveResult`; it overrides continuation. |
 | `SolveResult` | Snapshot returned by `solve()`, containing timing, convergence counters, residuals, packed solution `x`, and scaling data. |
 | `ParetoSample` | One verified Pareto topology sample with `counts`, `time`, `complexity`, `shape_error`, and its `SolveResult`. |
 | `ParetoResult` | Result returned by `pareto()`, containing the reference sample, evaluated samples, and frontier. |

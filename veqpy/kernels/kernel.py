@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from veqpy.kernels.initial import KernelInitial
 from veqpy.kernels.pareto import ParetoResult
 from veqpy.kernels.types import (
     KernelBoundary,
@@ -114,6 +115,7 @@ class Kernel:
         *,
         config: KernelConfig | None = None,
         case_name: str | None = None,
+        x0: KernelInitial | None = None,
         **config_overrides: Any,
     ) -> SolveResult:
         return self._impl.solve(
@@ -121,6 +123,7 @@ class Kernel:
             source,
             config=config,
             case_name=case_name,
+            x0=x0,
             **config_overrides,
         )
 

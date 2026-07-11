@@ -71,6 +71,22 @@ Warm continuation is handle-local: after a solve, the next `Kernel.solve(...)`
 can reuse the previous solution when the continuation policy is warm. Use
 `kernel.clear()` to drop the stored result and history.
 
+An explicit `x0=` overrides both warm continuation and the configured cold
+initial-state policy. It may be a packed array-like, a previous `SolveResult`,
+or a complete dictionary of active profile coefficient arrays:
+
+```python
+result = kernel.solve(
+    boundary,
+    source,
+    x0={"h": h_coeff, "k": k_coeff, "s1": s1_coeff, "psin": psin_coeff},
+)
+```
+
+Named dictionaries are encoded according to `KernelRecipe.layout`; every active
+profile must be supplied and inactive or unknown names are rejected. Explicit
+states are per-call runtime data and do not enter native artifact identity.
+
 ## Topology Variants
 
 `Kernel.variant(...)` is for multi-topology count sweeps on Numba-backed

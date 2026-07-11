@@ -7,7 +7,7 @@ Role:
 Public API:
 - Reactive, serialization, and registry infrastructure.
 - build, fit, pareto, and solve function-style entrypoints.
-- Kernel and KernelRecipe.
+- Kernel, KernelRecipe, and KernelInitial.
 - KernelTopology, KernelBoundary, KernelSource, and KernelConfig.
 - SolveResult, ParetoResult, and ParetoSample result records.
 - Grid, Profile, Geqdsk, and Equilibrium model objects.
@@ -42,6 +42,7 @@ from veqpy.kernels import (
     Kernel,
     KernelBoundary,
     KernelConfig,
+    KernelInitial,
     KernelRecipe,
     KernelSource,
     KernelTopology,
@@ -70,6 +71,7 @@ __all__ = [
     "Kernel",
     "KernelBoundary",
     "KernelConfig",
+    "KernelInitial",
     "KernelRecipe",
     "KernelSource",
     "KernelTopology",

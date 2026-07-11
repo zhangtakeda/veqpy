@@ -270,6 +270,7 @@ class RecordingSolver:
         self.x_size = x_size
         self.runtime_args: tuple[object, ...] | None = None
         self.runtime_calls: list[tuple[object, ...]] = []
+        self.initial_states: list[np.ndarray] = []
 
     def set_kernel_runtime(self, *args: object) -> None:
         self.runtime_args = args
@@ -279,6 +280,9 @@ class RecordingSolver:
         x = np.zeros(self.x_size, dtype=np.float64)
         alpha = np.zeros(2, dtype=np.float64)
         return (0.0, True, 1, 2, 3, 4, 5, 6, 7, 8.0, 9.0, x, x, x, alpha)
+
+    def set_initial_state(self, x0: np.ndarray) -> None:
+        self.initial_states.append(np.asarray(x0, dtype=np.float64).copy())
 
     def residual_var_into(self, out: np.ndarray, x: np.ndarray) -> None:
         out.fill(0.0)
@@ -307,6 +311,7 @@ def test_veqpy_root_exports_kernel_surface() -> None:
         "Kernel",
         "KernelBoundary",
         "KernelConfig",
+        "KernelInitial",
         "KernelRecipe",
         "KernelSource",
         "KernelTopology",
@@ -630,6 +635,44 @@ def test_kernel_solve_uses_handle_default_config_with_per_call_overrides() -> No
     assert temporary_config.method == "powell"
 
 
+@pytest.mark.parametrize(
+    ("layout", "expected"),
+    [
+        (
+            "degree",
+            [1.0, 3.0, 5.0, 7.0, 2.0, 4.0, 6.0, 8.0, 9.0],
+        ),
+        (
+            "family",
+            [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0],
+        ),
+    ],
+)
+def test_explicit_named_initial_state_overrides_native_continuation(
+    layout: str,
+    expected: list[float],
+) -> None:
+    topology = make_kernel_topology()
+    recorder = RecordingSolver(x_size=topology.x_size)
+    handle = Kernel(
+        topology=topology,
+        recipe=KernelRecipe(layout=layout),
+        config=KernelConfig(continuation="warm"),
+        registry=RecordingRegistry(recorder),  # type: ignore[arg-type]
+    )
+    coefficients = {
+        "h": [1.0, 2.0],
+        "k": [3.0, 4.0],
+        "s1": [5.0, 6.0],
+        "psin": [7.0, 8.0, 9.0],
+    }
+
+    handle.solve(tiny_kernel_boundary(), tiny_kernel_source(), x0=coefficients)
+
+    assert len(recorder.initial_states) == 1
+    assert_allclose(recorder.initial_states[0], expected)
+
+
 def test_kernel_build_equilibrium_uses_last_runtime_case() -> None:
     topology = make_kernel_topology()
     recorder = RecordingSolver(x_size=topology.x_size)
@@ -786,6 +829,15 @@ def test_kernel_python_build_and_solve_native_flow(tmp_path: Path) -> None:
     assert result.raw.shape == (handle.x_size,)
     assert result.scaled.shape == (handle.x_size,)
     assert_allclose(handle.residual(result.x, kernel_boundary, kernel_source), result.raw)
+
+    explicit = handle.solve(
+        kernel_boundary,
+        kernel_source,
+        config=KernelConfig(method="powell", continuation="warm"),
+        x0=result,
+    )
+    assert explicit.success is True
+    assert explicit.x.shape == result.x.shape
 
     for method in ("powell", "levenberg-marquardt", "newton-krylov", "newton-raphson"):
         config = KernelConfig(method=method, initial="cold", continuation="cold")

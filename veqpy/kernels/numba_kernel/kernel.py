@@ -16,6 +16,7 @@ import numpy as np
 from numpy.linalg import norm
 
 from veqpy.kernels.boundary_materialization import materialize_kernel_boundary
+from veqpy.kernels.initial import KernelInitial, materialize_initial_state
 from veqpy.kernels.pareto import (
     KernelParetoSignature,
     ParetoResult,
@@ -151,6 +152,7 @@ class _NumbaKernelImpl:
         *,
         config: KernelConfig | None = None,
         case_name: str | None = None,
+        x0: KernelInitial | None = None,
         **config_overrides: Any,
     ) -> SolveResult:
         elapsed_started = perf_counter()
@@ -159,13 +161,17 @@ class _NumbaKernelImpl:
         kernel_source = self._kernel_source(source, case_name=case_name)
         self._last_boundary = kernel_boundary
         self._last_source = kernel_source
-        x0 = self._warm_start_x(kernel_config)
+        initial_x = (
+            materialize_initial_state(x0, self.topology, self.recipe)
+            if x0 is not None
+            else self._warm_start_x(kernel_config)
+        )
         preprocess_ms = (perf_counter() - elapsed_started) * 1000.0
         result = self._solver.solve(
             kernel_boundary,
             kernel_source,
             kernel_config,
-            x0=x0,
+            x0=initial_x,
             preprocess_ms=preprocess_ms,
             elapsed_started=elapsed_started,
         )

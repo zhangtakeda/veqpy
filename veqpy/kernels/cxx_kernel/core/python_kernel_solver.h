@@ -653,6 +653,15 @@ namespace cxx_python
             refresh_initial_residual_scale(*context_);
         }
 
+        void set_initial_state(PackedArrayView x0)
+        {
+            std::copy_n(x0.data(), CompiledShape::x_size, context_->input.x0.begin());
+            context_->input.x_scale = build_x_block_scale_vector<CompiledShape>(
+                context_->input.x0,
+                profile_params_for_case(context_->input));
+            refresh_initial_residual_scale(*context_);
+        }
+
         nb::tuple solve_direct()
         {
             const auto started = std::chrono::steady_clock::now();
