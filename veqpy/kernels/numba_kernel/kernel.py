@@ -39,7 +39,7 @@ from veqpy.kernels.types import (
     SolveResult,
 )
 from veqpy.kernels.variant import build_kernel_variant_topology
-from veqpy.model import Equilibrium
+from veqpy.model import Equilibrium, Grid
 
 from .pareto_runtime import sample_r_surface
 from .solver import NumbaSolver
@@ -407,7 +407,12 @@ class _NumbaKernelImpl:
         self._last_source = kernel_source
         _jacobian_into(matrix_out, packed_x, kernel_boundary, kernel_source, self._solver)
 
-    def build_equilibrium(self, x: Any | None = None) -> Equilibrium:
+    def build_equilibrium(
+        self,
+        x: Any | None = None,
+        *,
+        grid: Grid | None = None,
+    ) -> Equilibrium:
         if self._last_boundary is None or self._last_source is None:
             raise RuntimeError("build_equilibrium requires a previous Kernel runtime case")
         if x is None:
@@ -416,7 +421,12 @@ class _NumbaKernelImpl:
             packed_x = self.result.x
         else:
             packed_x = self._packed_input(x, "x")
-        return self._solver.build_equilibrium(packed_x, self._last_boundary, self._last_source)
+        return self._solver.build_equilibrium(
+            packed_x,
+            self._last_boundary,
+            self._last_source,
+            grid=grid,
+        )
 
     def clear(self) -> None:
         self.history.clear()

@@ -42,7 +42,7 @@ from .solver import CxxSolver
 from .validation import validate_supported_for_cxx_backend
 
 if TYPE_CHECKING:
-    from veqpy.model import Equilibrium
+    from veqpy.model import Equilibrium, Grid
 
 
 class _CxxKernelImpl:
@@ -224,7 +224,12 @@ class _CxxKernelImpl:
         self._set_runtime(boundary, source, self.config, case_name=None)
         self._cxx_solver().jacobian_into(matrix_out, packed_x)
 
-    def build_equilibrium(self, x: Any | None = None) -> Equilibrium:
+    def build_equilibrium(
+        self,
+        x: Any | None = None,
+        *,
+        grid: Grid | None = None,
+    ) -> Equilibrium:
         if self._last_boundary is None or self._last_source is None:
             raise RuntimeError("build_equilibrium requires a previous Kernel runtime case")
         if x is None:
@@ -236,7 +241,12 @@ class _CxxKernelImpl:
         from veqpy.kernels.numba_kernel.runtime import NumbaRuntime
 
         runtime = NumbaRuntime(self.topology)
-        return runtime.build_equilibrium(packed_x, self._last_boundary, self._last_source)
+        return runtime.build_equilibrium(
+            packed_x,
+            self._last_boundary,
+            self._last_source,
+            grid=grid,
+        )
 
     def clear(self) -> None:
         self.history.clear()

@@ -10,6 +10,7 @@ from numpy.linalg import norm
 from numpy.testing import assert_allclose
 
 from veqpy import (
+    Grid,
     Kernel,
     KernelBoundary,
     KernelConfig,
@@ -324,6 +325,19 @@ def test_kernel_numba_backend_build_equilibrium_runtime_state_rules() -> None:
     kernel.residual(x, boundary, source)
     equilibrium = kernel.build_equilibrium(x)
     assert np.isfinite(equilibrium.Ip)
+
+    output_grid = Grid(Nr=11, Nt=12, quadrature_scheme="uniform")
+    direct = kernel.build_equilibrium(x, grid=output_grid)
+    expected = equilibrium.resample(output_grid)
+    assert direct.grid is output_grid
+    assert_allclose(direct.rho, output_grid.rho)
+    assert_allclose(direct.psin, expected.psin)
+    assert_allclose(direct.psin_r, expected.psin_r)
+    assert_allclose(direct.psin_rr, expected.psin_rr)
+    assert_allclose(direct.FFn_psin, expected.FFn_psin)
+    assert_allclose(direct.Pn_psin, expected.Pn_psin)
+    assert_allclose(direct.R, expected.R)
+    assert_allclose(direct.Z, expected.Z)
 
     with pytest.raises(RuntimeError, match="previous solve result"):
         kernel.build_equilibrium()

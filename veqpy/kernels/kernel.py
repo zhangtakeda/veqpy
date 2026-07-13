@@ -32,7 +32,7 @@ from veqpy.kernels.types import (
 from .dispatch import _make_kernel_impl
 
 if TYPE_CHECKING:
-    from veqpy.model import Equilibrium
+    from veqpy.model import Equilibrium, Grid
 
 
 class Kernel:
@@ -189,8 +189,14 @@ class Kernel:
     ) -> None:
         self._impl.jacobian_into(out, x, boundary, source)
 
-    def build_equilibrium(self, x: Any | None = None) -> Equilibrium:
-        return self._impl.build_equilibrium(x)
+    def build_equilibrium(
+        self,
+        x: Any | None = None,
+        *,
+        grid: Grid | None = None,
+    ) -> Equilibrium:
+        """Materialize the latest or supplied state on the requested output grid."""
+        return self._impl.build_equilibrium(x, grid=grid)
 
     def clear(self) -> None:
         self._impl.clear()

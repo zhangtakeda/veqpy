@@ -344,6 +344,8 @@ class NumbaRuntime:
         x: np.ndarray,
         boundary: KernelBoundary,
         source: KernelSource,
+        *,
+        grid: Grid | None = None,
     ):
         self.set_case(boundary, source)
         x_eval = self.coerce_x(x)
@@ -375,6 +377,7 @@ class NumbaRuntime:
             psin_rr=root_fields[2],
             alpha1=float(self.source_workspace.alpha_state[0]),
             alpha2=float(self.source_workspace.alpha_state[1]),
+            output_grid=grid,
         )
 
     def _refresh_runtime_state(self, case: KernelRuntimeCase) -> None:

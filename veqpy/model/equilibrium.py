@@ -899,32 +899,13 @@ def _build_resampled_equilibrium(
         K_max=source_grid.K_max,
     )
 
-    # Plot/export grids are often uniform even when the solve grid is spectral;
-    # interpolate root profiles in rho and recompute psin_rr on the target grid.
-    # The original shape profiles remain analytic Profile objects, so geometry
-    # is re-evaluated on the target grid instead of interpolating R/Z surfaces.
-    psin_r = _resample_profile_linear(
-        source_grid.rho,
-        np.asarray(equilibrium.psin_r, dtype=np.float64),
-        plot_grid.rho,
-        left=0.0,
-    )
-    psin = _resample_profile_linear(
-        source_grid.rho,
-        np.asarray(equilibrium.psin, dtype=np.float64),
-        plot_grid.rho,
-    )
-    FFn_psin = _resample_profile_linear(
-        source_grid.rho,
-        np.asarray(equilibrium.FFn_psin, dtype=np.float64),
-        plot_grid.rho,
-        right=0.0,
-    )
-    Pn_psin = _resample_profile_linear(
-        source_grid.rho,
-        np.asarray(equilibrium.Pn_psin, dtype=np.float64),
-        plot_grid.rho,
-        right=0.0,
+    psin, psin_r, psin_rr, FFn_psin, Pn_psin = _resample_equilibrium_root_fields(
+        source_grid=source_grid,
+        target_grid=plot_grid,
+        psin=equilibrium.psin,
+        psin_r=equilibrium.psin_r,
+        FFn_psin=equilibrium.FFn_psin,
+        Pn_psin=equilibrium.Pn_psin,
     )
 
     return Equilibrium(
@@ -938,9 +919,50 @@ def _build_resampled_equilibrium(
         FFn_psin=FFn_psin,
         Pn_psin=Pn_psin,
         psin_r=psin_r,
-        psin_rr=plot_grid.differentiate(psin_r),
+        psin_rr=psin_rr,
         alpha1=equilibrium.alpha1,
         alpha2=equilibrium.alpha2,
+    )
+
+
+def _resample_equilibrium_root_fields(
+    *,
+    source_grid: Grid,
+    target_grid: Grid,
+    psin: np.ndarray,
+    psin_r: np.ndarray,
+    FFn_psin: np.ndarray,
+    Pn_psin: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Resample snapshot-owned radial fields without materializing geometry."""
+
+    source_rho = source_grid.rho
+    target_rho = target_grid.rho
+    psin_out = _resample_profile_linear(source_rho, psin, target_rho)
+    psin_r_out = _resample_profile_linear(
+        source_rho,
+        psin_r,
+        target_rho,
+        left=0.0,
+    )
+    FFn_out = _resample_profile_linear(
+        source_rho,
+        _regularize_axis_linear_profile(FFn_psin, source_rho, copy=True),
+        target_rho,
+        right=0.0,
+    )
+    Pn_out = _resample_profile_linear(
+        source_rho,
+        _regularize_axis_linear_profile(Pn_psin, source_rho, copy=True),
+        target_rho,
+        right=0.0,
+    )
+    return (
+        psin_out,
+        psin_r_out,
+        target_grid.differentiate(psin_r_out),
+        FFn_out,
+        Pn_out,
     )
 
 
