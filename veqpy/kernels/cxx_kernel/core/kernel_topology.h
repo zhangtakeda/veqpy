@@ -152,12 +152,8 @@ namespace cxx_kernel_api
         constexpr int    default_maxfev   = default_requested_max_evaluations > 500 ? default_requested_max_evaluations : 500;
         constexpr double default_hybr_eps = 1.0e-6;
         constexpr double default_hybr_factor              = 1.0;
-        constexpr int    default_hybr_mode                = 1;
-        constexpr int    default_hybr_nprint              = 0;
         constexpr double default_lm_eps                   = 0.0;
         constexpr double default_lm_factor                = 100.0;
-        constexpr int    default_lm_mode                  = 2;
-        constexpr int    default_lm_nprint                = 0;
         constexpr double default_accepted_residual_factor = 10.0;
         constexpr double default_accepted_residual_floor  = 1.0e-5;
         constexpr double default_x_scale_floor            = 1.0e-2;

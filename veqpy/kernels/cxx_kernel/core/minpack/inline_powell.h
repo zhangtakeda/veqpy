@@ -206,8 +206,6 @@ inline int powell_finite_difference(
     constexpr int n = static_cast<int>(N);
     constexpr int ml = n - 1;
     constexpr int mu = n - 1;
-    constexpr int mode = 1;
-    constexpr int nprint = 0;
     constexpr int ldfjac = n;
     constexpr int lr = n * (n + 1) / 2;
     /* Initialized data */
@@ -425,14 +423,6 @@ inline int powell_finite_difference(
 	    factor <= 0. || ldfjac < n || lr < n * (n + 1) / 2) {
 	goto TERMINATE;
     }
-    if (mode == 2) {
-        for (j = 1; j <= n; ++j) {
-            if (diag[j] <= 0.) {
-                goto TERMINATE;
-            }
-        }
-    }
-
 /*     evaluate the function at the starting point */
 /*     and calculate its norm. */
 
@@ -477,16 +467,14 @@ inline int powell_finite_difference(
         __cminpack_func__(qrfac)(n, n, &fjac[fjac_offset], ldfjac, FALSE_, iwa, 1,
               &wa1[1], &wa2[1], &wa3[1]);
 
-/*        on the first iteration and if mode is 1, scale according */
-/*        to the norms of the columns of the initial jacobian. */
+/*        on the first iteration, scale according to the norms of */
+/*        the columns of the initial jacobian. */
 
         if (iter == 1) {
-            if (mode != 2) {
-                for (j = 1; j <= n; ++j) {
-                    diag[j] = wa2[j];
-                    if (wa2[j] == 0.) {
-                        diag[j] = 1.;
-                    }
+            for (j = 1; j <= n; ++j) {
+                diag[j] = wa2[j];
+                if (wa2[j] == 0.) {
+                    diag[j] = 1.;
                 }
             }
 
@@ -545,29 +533,15 @@ inline int powell_finite_difference(
 
 /*        rescale if necessary. */
 
-        if (mode != 2) {
-            for (j = 1; j <= n; ++j) {
-                /* Computing MAX */
-                d1 = diag[j], d2 = wa2[j];
-                diag[j] = max(d1,d2);
-            }
+        for (j = 1; j <= n; ++j) {
+            /* Computing MAX */
+            d1 = diag[j], d2 = wa2[j];
+            diag[j] = max(d1,d2);
         }
 
 /*        beginning of the inner loop. */
 
         for (;;) {
-
-/*           if requested, call fcn to enable printing of iterates. */
-
-            if (nprint > 0) {
-                iflag = 0;
-                if ((iter - 1) % nprint == 0) {
-                    iflag = evaluate(&x[1], &fvec[1], 0);
-                }
-                if (iflag < 0) {
-                    goto TERMINATE;
-                }
-            }
 
 /*           determine the direction p. */
 
@@ -754,9 +728,6 @@ TERMINATE:
     if (iflag < 0) {
 	info = iflag;
     }
-    if (nprint > 0) {
-	evaluate(&x[1], &fvec[1], 0);
-    }
     return info;
 
 /*     last card of subroutine hybrd. */
@@ -775,8 +746,6 @@ inline int powell_with_jacobian(
     real* __restrict wa1, real* __restrict wa2, real* __restrict wa3, real* __restrict wa4)
 {
     constexpr int n = static_cast<int>(N);
-    constexpr int mode = 1;
-    constexpr int nprint = 0;
     constexpr int ldfjac = n;
     constexpr int lr = n * (n + 1) / 2;
     /* Initialized data */
@@ -982,14 +951,6 @@ inline int powell_with_jacobian(
 	    0. || lr < n * (n + 1) / 2) {
 	goto TERMINATE;
     }
-    if (mode == 2) {
-        for (j = 1; j <= n; ++j) {
-            if (diag[j] <= 0.) {
-                goto TERMINATE;
-            }
-        }
-    }
-
 /*     evaluate the function at the starting point */
 /*     and calculate its norm. */
 
@@ -1026,16 +987,14 @@ inline int powell_with_jacobian(
         __cminpack_func__(qrfac)(n, n, &fjac[fjac_offset], ldfjac, FALSE_, iwa, 1,
               &wa1[1], &wa2[1], &wa3[1]);
 
-/*        on the first iteration and if mode is 1, scale according */
-/*        to the norms of the columns of the initial jacobian. */
+/*        on the first iteration, scale according to the norms of */
+/*        the columns of the initial jacobian. */
 
         if (iter == 1) {
-            if (mode != 2) {
-                for (j = 1; j <= n; ++j) {
-                    diag[j] = wa2[j];
-                    if (wa2[j] == 0.) {
-                        diag[j] = 1.;
-                    }
+            for (j = 1; j <= n; ++j) {
+                diag[j] = wa2[j];
+                if (wa2[j] == 0.) {
+                    diag[j] = 1.;
                 }
             }
 
@@ -1094,29 +1053,15 @@ inline int powell_with_jacobian(
 
 /*        rescale if necessary. */
 
-        if (mode != 2) {
-            for (j = 1; j <= n; ++j) {
-                /* Computing MAX */
-                d1 = diag[j], d2 = wa2[j];
-                diag[j] = max(d1,d2);
-            }
+        for (j = 1; j <= n; ++j) {
+            /* Computing MAX */
+            d1 = diag[j], d2 = wa2[j];
+            diag[j] = max(d1,d2);
         }
 
 /*        beginning of the inner loop. */
 
         for (;;) {
-
-/*           if requested, call fcn to enable printing of iterates. */
-
-            if (nprint > 0) {
-                iflag = 0;
-                if ((iter - 1) % nprint == 0) {
-                    iflag = evaluate(&x[1], &fvec[1], &fjac[fjac_offset], ldfjac, 0);
-                }
-                if (iflag < 0) {
-                    goto TERMINATE;
-                }
-            }
 
 /*           determine the direction p. */
 
@@ -1301,9 +1246,6 @@ TERMINATE:
 
     if (iflag < 0) {
 	info = iflag;
-    }
-    if (nprint > 0) {
-	evaluate(&x[1], &fvec[1], &fjac[fjac_offset], ldfjac, 0);
     }
     return info;
 

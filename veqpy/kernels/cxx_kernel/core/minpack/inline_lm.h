@@ -138,8 +138,6 @@ inline int lm_finite_difference(
 {
     constexpr int m = static_cast<int>(N);
     constexpr int n = static_cast<int>(N);
-    constexpr int mode = 2;
-    constexpr int nprint = 0;
     constexpr int ldfjac = m;
     /* Initialized data */
 
@@ -150,7 +148,7 @@ inline int lm_finite_difference(
 #define p0001 1e-4
 
     /* System generated locals */
-    real d1, d2;
+    real d1;
 
     /* Local variables */
     int i, j, l;
@@ -359,11 +357,9 @@ inline int lm_finite_difference(
 	    gtol < 0. || maxfev <= 0 || factor <= 0.) {
 	goto TERMINATE;
     }
-    if (mode == 2) {
-        for (j = 0; j < n; ++j) {
-            if (diag[j] <= 0.) {
-                goto TERMINATE;
-            }
+    for (j = 0; j < n; ++j) {
+        if (diag[j] <= 0.) {
+            goto TERMINATE;
         }
     }
 
@@ -395,35 +391,12 @@ inline int lm_finite_difference(
             goto TERMINATE;
         }
 
-/*        if requested, call fcn to enable printing of iterates. */
-
-        if (nprint > 0) {
-            iflag = 0;
-            if ((iter - 1) % nprint == 0) {
-                iflag = evaluate(x, fvec, 0);
-            }
-            if (iflag < 0) {
-                goto TERMINATE;
-            }
-        }
-
 /*        compute the qr factorization of the jacobian. */
 
         __cminpack_func__(qrfac)(m, n, fjac, ldfjac, TRUE_, ipvt, n,
               wa1, wa2, wa3);
 
-/*        on the first iteration and if mode is 1, scale according */
-/*        to the norms of the columns of the initial jacobian. */
-
         if (iter == 1) {
-            if (mode != 2) {
-                for (j = 0; j < n; ++j) {
-                    diag[j] = wa2[j];
-                    if (wa2[j] == 0.) {
-                        diag[j] = 1.;
-                    }
-                }
-            }
 /*        on the first iteration, calculate the norm of the scaled x */
 /*        and initialize the step bound delta. */
 
@@ -483,15 +456,6 @@ inline int lm_finite_difference(
         }
         if (info != 0) {
             goto TERMINATE;
-        }
-
-/*        rescale if necessary. */
-
-        if (mode != 2) {
-            for (j = 0; j < n; ++j) {
-                d1 = diag[j], d2 = wa2[j];
-                diag[j] = max(d1,d2);
-            }
         }
 
 /*        beginning of the inner loop. */
@@ -647,9 +611,6 @@ TERMINATE:
     if (iflag < 0) {
 	info = iflag;
     }
-    if (nprint > 0) {
-	evaluate(x, fvec, 0);
-    }
     return info;
 
 /*     last card of subroutine lmdif. */
@@ -669,8 +630,6 @@ inline int lm_with_jacobian(
 {
     constexpr int m = static_cast<int>(N);
     constexpr int n = static_cast<int>(N);
-    constexpr int mode = 2;
-    constexpr int nprint = 0;
     constexpr int ldfjac = m;
     /* Initialized data */
 
@@ -681,7 +640,7 @@ inline int lm_with_jacobian(
 #define p0001 1e-4
 
     /* System generated locals */
-    real d1, d2;
+    real d1;
 
     /* Local variables */
     int i, j, l;
@@ -888,11 +847,9 @@ inline int lm_with_jacobian(
         gtol < 0. || maxfev <= 0 || factor <= 0.) {
         goto TERMINATE;
     }
-    if (mode == 2) {
-        for (j = 0; j < n; ++j) {
-            if (diag[j] <= 0.) {
-                goto TERMINATE;
-            }
+    for (j = 0; j < n; ++j) {
+        if (diag[j] <= 0.) {
+            goto TERMINATE;
         }
     }
 
@@ -923,35 +880,12 @@ inline int lm_with_jacobian(
             goto TERMINATE;
         }
 
-/*        if requested, call fcn to enable printing of iterates. */
-
-        if (nprint > 0) {
-            iflag = 0;
-            if ((iter - 1) % nprint == 0) {
-                iflag = evaluate(x, fvec, fjac, ldfjac, 0);
-            }
-            if (iflag < 0) {
-                goto TERMINATE;
-            }
-        }
-
 /*        compute the qr factorization of the jacobian. */
 
         __cminpack_func__(qrfac)(m, n, fjac, ldfjac, TRUE_, ipvt, n,
               wa1, wa2, wa3);
 
-/*        on the first iteration and if mode is 1, scale according */
-/*        to the norms of the columns of the initial jacobian. */
-
         if (iter == 1) {
-            if (mode != 2) {
-                for (j = 0; j < n; ++j) {
-                    diag[j] = wa2[j];
-                    if (wa2[j] == 0.) {
-                        diag[j] = 1.;
-                    }
-                }
-            }
 /*        on the first iteration, calculate the norm of the scaled x */
 /*        and initialize the step bound delta. */
 
@@ -1011,15 +945,6 @@ inline int lm_with_jacobian(
         }
         if (info != 0) {
             goto TERMINATE;
-        }
-
-/*        rescale if necessary. */
-
-        if (mode != 2) {
-            for (j = 0; j < n; ++j) {
-                d1 = diag[j], d2 = wa2[j];
-                diag[j] = max(d1,d2);
-            }
         }
 
 /*        beginning of the inner loop. */
@@ -1174,9 +1099,6 @@ TERMINATE:
 
     if (iflag < 0) {
 	info = iflag;
-    }
-    if (nprint > 0) {
-	evaluate(x, fvec, fjac, ldfjac, 0);
     }
     return info;
 
