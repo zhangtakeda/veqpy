@@ -76,7 +76,7 @@ def test_fixed_size_linalg_matches_lapacke_on_reference_cases(
         env={**os.environ, "OPENBLAS_NUM_THREADS": "1"},
     )
     rows = [line.split() for line in completed.stdout.splitlines()]
-    assert len(rows) == 22
+    assert len(rows) == 28
     for name, internal_error, lapack_error, delta in rows:
         assert name in {
             "doolittle",
@@ -89,6 +89,8 @@ def test_fixed_size_linalg_matches_lapacke_on_reference_cases(
             "bunch_kaufman_two_by_two",
             "bunch_kaufman_one_by_one_swap",
             "householder_subnormal",
+            "golub_reinsch",
+            "golub_reinsch_rank_deficient",
         }
         assert float(internal_error) <= 1.0e-11
         assert float(lapack_error) <= 1.0e-11

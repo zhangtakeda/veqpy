@@ -24,6 +24,20 @@ namespace
     template <std::size_t Rows, std::size_t Cols>
     using Mat = tensor::Matrix<double, Rows, Cols>;
 
+    constexpr auto constexpr_golub_reinsch_reference()
+    {
+        Mat<2, 2> matrix{tensor::uninitialized};
+        matrix(0, 0) = 3.0;
+        matrix(0, 1) = 0.0;
+        matrix(1, 0) = 0.0;
+        matrix(1, 1) = 2.0;
+        return linalg::factorize<linalg::GolubReinsch>(matrix);
+    }
+
+    constexpr auto constexpr_svd = constexpr_golub_reinsch_reference();
+    static_assert(constexpr_svd.info == 0);
+    static_assert(constexpr_svd.S_vec[0] == 3.0 && constexpr_svd.S_vec[1] == 2.0);
+
     template <std::size_t Rows, std::size_t Cols>
     double relative_error(const Mat<Rows, Cols>& got, const Mat<Rows, Cols>& expected)
     {
@@ -70,14 +84,14 @@ namespace
         return (static_cast<double>(value) - 20.0) / 41.0;
     }
 
-    template <std::size_t N, std::size_t P>
-    void form_rhs(const Mat<N, N>& matrix, const Mat<N, P>& expected, Mat<N, P>& rhs)
+    template <std::size_t Rows, std::size_t Columns, std::size_t P>
+    void form_rhs(const Mat<Rows, Columns>& matrix, const Mat<Columns, P>& expected, Mat<Rows, P>& rhs)
     {
-        for (std::size_t row = 0; row < N; ++row)
+        for (std::size_t row = 0; row < Rows; ++row)
             for (std::size_t rhs_column = 0; rhs_column < P; ++rhs_column)
             {
                 double value = 0.0;
-                for (std::size_t column = 0; column < N; ++column)
+                for (std::size_t column = 0; column < Columns; ++column)
                     value += matrix(row, column) * expected(column, rhs_column);
                 rhs(row, rhs_column) = value;
             }
@@ -491,6 +505,156 @@ namespace
         emit("householder_subnormal", std::abs(static_cast<double>(context.info - info)),
              relative_error<M * N>(context.QR_mat.data(), factor.data()), relative_error<N>(context.tau_vec.data(), tau.data()));
     }
+
+    template <std::size_t Dimension>
+    double orthogonality_error(const double* matrix)
+    {
+        double maximum_error = 0.0;
+        for (std::size_t left = 0; left < Dimension; ++left)
+            for (std::size_t right = 0; right < Dimension; ++right)
+            {
+                double value = 0.0;
+                for (std::size_t row = 0; row < Dimension; ++row)
+                    value += matrix[row * Dimension + left] * matrix[row * Dimension + right];
+                maximum_error = std::max(maximum_error, std::abs(value - (left == right ? 1.0 : 0.0)));
+            }
+        return maximum_error;
+    }
+
+    template <std::size_t Rows, std::size_t Columns>
+    double svd_reconstruction_error(const Mat<Rows, Columns>& matrix,
+                                    const linalg::Context<linalg::GolubReinsch, Rows, Columns>& context)
+    {
+        constexpr std::size_t rank = std::min(Rows, Columns);
+        double maximum_error = 0.0;
+        double maximum_value = 0.0;
+        for (std::size_t row = 0; row < Rows; ++row)
+            for (std::size_t column = 0; column < Columns; ++column)
+            {
+                double value = 0.0;
+                for (std::size_t index = 0; index < rank; ++index)
+                    value += context.U_mat(row, index) * context.S_vec[index] * context.Vt_mat(index, column);
+                maximum_error = std::max(maximum_error, std::abs(value - matrix(row, column)));
+                maximum_value = std::max(maximum_value, std::abs(matrix(row, column)));
+            }
+        return maximum_error / std::max(maximum_value, std::numeric_limits<double>::min());
+    }
+
+    template <std::size_t Rows, std::size_t Columns, std::size_t P>
+    void run_golub_reinsch()
+    {
+        constexpr std::size_t rank = std::min(Rows, Columns);
+        constexpr std::size_t work_rows = Rows > Columns ? Rows : Columns;
+        Mat<Rows, Columns> matrix{tensor::uninitialized};
+        Mat<Columns, P> expected{tensor::uninitialized};
+        Mat<Rows, P> rhs{tensor::uninitialized};
+        Mat<work_rows, P> work{};
+        Mat<Columns, P> internal{tensor::uninitialized};
+        for (std::size_t row = 0; row < Rows; ++row)
+            for (std::size_t column = 0; column < Columns; ++column)
+                matrix(row, column) = entry(row, column, 7) + (row == column ? 2.0 : 0.0);
+        if constexpr (Rows >= Columns)
+        {
+            for (std::size_t row = 0; row < Columns; ++row)
+                for (std::size_t rhs_column = 0; rhs_column < P; ++rhs_column)
+                    expected(row, rhs_column) = 0.125 + 0.05 * static_cast<double>((2 * row + rhs_column) % 11);
+        }
+        else
+        {
+            Mat<Rows, P> row_space_seed{tensor::uninitialized};
+            for (std::size_t row = 0; row < Rows; ++row)
+                for (std::size_t rhs_column = 0; rhs_column < P; ++rhs_column)
+                    row_space_seed(row, rhs_column) =
+                        0.125 + 0.05 * static_cast<double>((2 * row + rhs_column) % 11);
+            for (std::size_t row = 0; row < Columns; ++row)
+                for (std::size_t rhs_column = 0; rhs_column < P; ++rhs_column)
+                {
+                    double value = 0.0;
+                    for (std::size_t column = 0; column < Rows; ++column)
+                        value += matrix(column, row) * row_space_seed(column, rhs_column);
+                    expected(row, rhs_column) = value;
+                }
+        }
+        form_rhs(matrix, expected, rhs);
+
+        linalg::Context<linalg::GolubReinsch, Rows, Columns> context;
+        context.factorize_from(matrix.data());
+        std::copy(rhs.data(), rhs.data() + rhs.count, work.data());
+        context.template substitute_inplace<P>(work.data());
+        std::copy(work.data(), work.data() + internal.count, internal.data());
+
+        std::array<double, Rows * Columns> factor{};
+        std::array<double, Rows * Rows> lapack_u{};
+        std::array<double, Columns * Columns> lapack_vt{};
+        std::array<double, rank> lapack_s{};
+        std::copy(matrix.data(), matrix.data() + matrix.count, factor.data());
+        const lapack_int info = LAPACKE_dgesdd(
+            LAPACK_ROW_MAJOR, 'A', static_cast<lapack_int>(Rows), static_cast<lapack_int>(Columns), factor.data(),
+            static_cast<lapack_int>(Columns), lapack_s.data(), lapack_u.data(), static_cast<lapack_int>(Rows),
+            lapack_vt.data(), static_cast<lapack_int>(Columns));
+        if (info != 0)
+            std::abort();
+
+        const double orthogonality = std::max(orthogonality_error<Rows>(context.U_mat.data()),
+                                              orthogonality_error<Columns>(context.Vt_mat.data()));
+        const double factor_error = std::max(svd_reconstruction_error(matrix, context), orthogonality);
+        emit("golub_reinsch", std::max(factor_error, std::abs(static_cast<double>(context.info))),
+             relative_error<rank>(context.S_vec.data(), lapack_s.data()), relative_error(internal, expected));
+    }
+
+    void run_golub_reinsch_rank_deficient()
+    {
+        constexpr std::size_t Rows = 8;
+        constexpr std::size_t Columns = 4;
+        constexpr std::size_t P = 1;
+        constexpr std::size_t rank = std::min(Rows, Columns);
+        Mat<Rows, Columns> matrix{tensor::uninitialized};
+        Mat<Rows, P> seed{tensor::uninitialized};
+        Mat<Columns, P> expected{tensor::uninitialized};
+        Mat<Rows, P> rhs{tensor::uninitialized};
+        Mat<Rows, P> work{};
+        Mat<Columns, P> internal{tensor::uninitialized};
+        for (std::size_t row = 0; row < Rows; ++row)
+        {
+            matrix(row, 0) = entry(row, 0, 9) + (row == 0 ? 2.0 : 0.0);
+            matrix(row, 1) = entry(row, 1, 9) + (row == 1 ? 2.0 : 0.0);
+            matrix(row, 2) = matrix(row, 0) - 2.0 * matrix(row, 1);
+            matrix(row, 3) = entry(row, 3, 9) + (row == 3 ? 2.0 : 0.0);
+            seed(row, 0) = 0.1 + 0.05 * static_cast<double>(row % 5);
+        }
+        for (std::size_t row = 0; row < Columns; ++row)
+        {
+            double value = 0.0;
+            for (std::size_t column = 0; column < Rows; ++column)
+                value += matrix(column, row) * seed(column, 0);
+            expected(row, 0) = value;
+        }
+        form_rhs(matrix, expected, rhs);
+
+        linalg::Context<linalg::GolubReinsch, Rows, Columns> context;
+        context.factorize_from(matrix.data());
+        std::copy(rhs.data(), rhs.data() + rhs.count, work.data());
+        context.template substitute_inplace<P>(work.data());
+        std::copy(work.data(), work.data() + internal.count, internal.data());
+
+        std::array<double, Rows * Columns> factor{};
+        std::array<double, Rows * Rows> lapack_u{};
+        std::array<double, Columns * Columns> lapack_vt{};
+        std::array<double, rank> lapack_s{};
+        std::copy(matrix.data(), matrix.data() + matrix.count, factor.data());
+        const lapack_int info = LAPACKE_dgesdd(
+            LAPACK_ROW_MAJOR, 'A', static_cast<lapack_int>(Rows), static_cast<lapack_int>(Columns), factor.data(),
+            static_cast<lapack_int>(Columns), lapack_s.data(), lapack_u.data(), static_cast<lapack_int>(Rows),
+            lapack_vt.data(), static_cast<lapack_int>(Columns));
+        if (info != 0)
+            std::abort();
+
+        const double orthogonality = std::max(orthogonality_error<Rows>(context.U_mat.data()),
+                                              orthogonality_error<Columns>(context.Vt_mat.data()));
+        const double factor_error = std::max(svd_reconstruction_error(matrix, context), orthogonality);
+        emit("golub_reinsch_rank_deficient", std::max(factor_error, std::abs(static_cast<double>(context.info))),
+             relative_error<rank>(context.S_vec.data(), lapack_s.data()), relative_error(internal, expected));
+    }
 } // namespace
 
 int main()
@@ -518,5 +682,11 @@ int main()
     run_bunch_kaufman_two_by_two();
     run_bunch_kaufman_one_by_one_swap();
     run_householder_subnormal_reflector();
+    run_golub_reinsch<8, 4, 1>();
+    run_golub_reinsch<8, 8, 2>();
+    run_golub_reinsch<4, 8, 1>();
+    run_golub_reinsch<64, 32, 1>();
+    run_golub_reinsch<128, 64, 1>();
+    run_golub_reinsch_rank_deficient();
     return 0;
 }

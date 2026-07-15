@@ -71,6 +71,7 @@ namespaces = false
     "core/minpack/*.c",
     "core/minpack/*.h",
     "core/minpack/*.txt",
+    "core/lapack/*.txt",
 ]
 
 [tool.ruff]

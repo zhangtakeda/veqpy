@@ -260,6 +260,11 @@ VEQPy is associated with the companion manuscript **[Zhang2026]**. Related VEQ-f
   into the Cxx implementations; distributed under the
   [MINPACK license][minpack-license].
 
+- [**Reference LAPACK 3.12.1 source code**][lapack]: algorithm and
+  implementation reference for VEQPy's fixed-array Golub--Reinsch SVD and
+  unblocked dense linear-algebra kernels; distributed under the
+  [LAPACK license][lapack-license] (BSD-3-Clause).
+
 ---
 
 <p>
@@ -297,3 +302,5 @@ VEQPy is associated with the companion manuscript **[Zhang2026]**. Related VEQ-f
 [minpack]: https://netlib.org/minpack/
 [cminpack]: https://github.com/devernay/cminpack/tree/v1.3.11
 [minpack-license]: veqpy/kernels/cxx_kernel/core/minpack/CopyrightMINPACK.txt
+[lapack]: https://github.com/Reference-LAPACK/lapack/tree/v3.12.1
+[lapack-license]: veqpy/kernels/cxx_kernel/core/lapack/CopyrightLAPACK.txt

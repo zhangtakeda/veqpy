@@ -145,6 +145,320 @@ namespace linalg::detail
         alpha = beta;
     }
 
+    template <size_t Rows, size_t Columns>
+    constexpr void set_identity(double* matrix)
+    {
+        static_assert(Rows == Columns, "identity requires a square matrix");
+        for (size_t row = 0; row < Rows; ++row)
+            for (size_t column = 0; column < Columns; ++column)
+                matrix[row * Columns + column] = row == column ? 1.0 : 0.0;
+    }
+
+    template <size_t Rows, size_t Columns>
+    constexpr void rotate_columns(double* matrix, size_t left, size_t right, double cosine, double sine)
+    {
+        for (size_t row = 0; row < Rows; ++row)
+        {
+            const double x = matrix[row * Columns + left];
+            const double y = matrix[row * Columns + right];
+            matrix[row * Columns + left]  = x * cosine + y * sine;
+            matrix[row * Columns + right] = y * cosine - x * sine;
+        }
+    }
+
+    // Fixed-array Golub--Reinsch SVD.  The reduction follows DGEBD2's upper
+    // bidiagonal path; the implicit QR iteration is the vector-accumulating
+    // form used by DGESVD/DBDSQR.  The shapes are template parameters, so
+    // temporary storage and all loop bounds remain compile-time fixed.
+    template <size_t Rows, size_t Columns>
+    constexpr int golub_reinsch_tall(const double* source, double* u, double* singular_values, double* vt)
+    {
+        static_assert(Rows >= Columns, "the tall Golub-Reinsch kernel requires Rows >= Columns");
+
+        Matrix<double, Rows, Columns> reduced{tensor::uninitialized};
+        Vector<double, Columns>       off_diagonal{};
+        Vector<double, Columns>       tauq{};
+        Vector<double, Columns>       taup{};
+        Matrix<double, Columns, Columns> v{tensor::uninitialized};
+        std::copy(source, source + Rows * Columns, reduced.data());
+
+        double* bidiagonal = reduced.data();
+        double* e          = off_diagonal.data();
+        double* tau_q      = tauq.data();
+        double* tau_p      = taup.data();
+
+        // DGEBD2('upper'): H(i) is stored below the diagonal and G(i) to
+        // the right of the superdiagonal.  Do not overwrite either before
+        // the corresponding orthogonal factor has been generated below.
+        for (size_t index = 0; index < Columns; ++index)
+        {
+            double* left_tail = index + 1 < Rows ? bidiagonal + (index + 1) * Columns + index
+                                                  : bidiagonal + index * Columns + index;
+            larfg(Rows - index, bidiagonal[index * Columns + index], left_tail, Columns, tau_q[index]);
+            singular_values[index] = bidiagonal[index * Columns + index];
+
+            if (index + 1 < Columns)
+            {
+                if (tau_q[index] != 0.0)
+                    for (size_t column = index + 1; column < Columns; ++column)
+                    {
+                        double dot = bidiagonal[index * Columns + column];
+                        for (size_t row = index + 1; row < Rows; ++row)
+                            dot += bidiagonal[row * Columns + index] * bidiagonal[row * Columns + column];
+                        dot *= tau_q[index];
+                        bidiagonal[index * Columns + column] -= dot;
+                        for (size_t row = index + 1; row < Rows; ++row)
+                            bidiagonal[row * Columns + column] -= bidiagonal[row * Columns + index] * dot;
+                    }
+
+                const size_t right_count = Columns - index - 1;
+                double* right_tail = index + 2 < Columns ? bidiagonal + index * Columns + index + 2
+                                                          : bidiagonal + index * Columns + index + 1;
+                larfg(right_count, bidiagonal[index * Columns + index + 1], right_tail, 1, tau_p[index]);
+                e[index + 1] = bidiagonal[index * Columns + index + 1];
+
+                if (tau_p[index] != 0.0)
+                    for (size_t row = index + 1; row < Rows; ++row)
+                    {
+                        double dot = bidiagonal[row * Columns + index + 1];
+                        for (size_t column = index + 2; column < Columns; ++column)
+                            dot += bidiagonal[row * Columns + column] * bidiagonal[index * Columns + column];
+                        dot *= tau_p[index];
+                        bidiagonal[row * Columns + index + 1] -= dot;
+                        for (size_t column = index + 2; column < Columns; ++column)
+                            bidiagonal[row * Columns + column] -= bidiagonal[index * Columns + column] * dot;
+                    }
+            }
+        }
+
+        set_identity<Rows, Rows>(u);
+        for (size_t index = 0; index < Columns; ++index)
+        {
+            if (tau_q[index] == 0.0)
+                continue;
+            for (size_t row = 0; row < Rows; ++row)
+            {
+                double dot = u[row * Rows + index];
+                for (size_t reflector_row = index + 1; reflector_row < Rows; ++reflector_row)
+                    dot += u[row * Rows + reflector_row] * bidiagonal[reflector_row * Columns + index];
+                dot *= tau_q[index];
+                u[row * Rows + index] -= dot;
+                for (size_t reflector_row = index + 1; reflector_row < Rows; ++reflector_row)
+                    u[row * Rows + reflector_row] -= bidiagonal[reflector_row * Columns + index] * dot;
+            }
+        }
+
+        set_identity<Columns, Columns>(v.data());
+        for (size_t index = 0; index + 1 < Columns; ++index)
+        {
+            if (tau_p[index] == 0.0)
+                continue;
+            const size_t offset = index + 1;
+            for (size_t row = 0; row < Columns; ++row)
+            {
+                double dot = v[row * Columns + offset];
+                for (size_t reflector_column = offset + 1; reflector_column < Columns; ++reflector_column)
+                    dot += v[row * Columns + reflector_column] * bidiagonal[index * Columns + reflector_column];
+                dot *= tau_p[index];
+                v[row * Columns + offset] -= dot;
+                for (size_t reflector_column = offset + 1; reflector_column < Columns; ++reflector_column)
+                    v[row * Columns + reflector_column] -= bidiagonal[index * Columns + reflector_column] * dot;
+            }
+        }
+
+        double bidiagonal_norm = 0.0;
+        for (size_t index = 0; index < Columns; ++index)
+            bidiagonal_norm = math::max(bidiagonal_norm, math::abs(singular_values[index]) + math::abs(e[index]));
+        const double convergence_tolerance = 64.0 * std::numeric_limits<double>::epsilon() * bidiagonal_norm;
+
+        int info = 0;
+        for (size_t remaining = Columns; remaining > 0; --remaining)
+        {
+            const size_t k = remaining - 1;
+            bool         converged = false;
+            for (size_t iteration = 0; iteration < 6 * Columns; ++iteration)
+            {
+                size_t l = 0;
+                bool   cancel_rotation = false;
+                for (size_t scan = k + 1; scan > 0; --scan)
+                {
+                    l = scan - 1;
+                    if (math::abs(e[l]) <= convergence_tolerance)
+                        break;
+                    if (l == 0)
+                        break;
+                    if (math::abs(singular_values[l - 1]) <= convergence_tolerance)
+                    {
+                        cancel_rotation = true;
+                        break;
+                    }
+                }
+
+                if (cancel_rotation)
+                {
+                    double cosine = 0.0;
+                    double sine   = 1.0;
+                    for (size_t index = l; index <= k; ++index)
+                    {
+                        const double f = sine * e[index];
+                        e[index]       = cosine * e[index];
+                        if (math::abs(f) <= convergence_tolerance)
+                            break;
+                        const double g = singular_values[index];
+                        const double h = math::hypot(f, g);
+                        singular_values[index] = h;
+                        if (h == 0.0)
+                        {
+                            cosine = 1.0;
+                            sine   = 0.0;
+                        }
+                        else
+                        {
+                            cosine = g / h;
+                            sine   = -f / h;
+                        }
+                        rotate_columns<Rows, Rows>(u, index - 1, index, cosine, sine);
+                    }
+                }
+
+                const double z = singular_values[k];
+                if (l == k)
+                {
+                    if (z < 0.0)
+                    {
+                        singular_values[k] = -z;
+                        for (size_t row = 0; row < Columns; ++row)
+                            v[row * Columns + k] = -v[row * Columns + k];
+                    }
+                    converged = true;
+                    break;
+                }
+
+                const size_t km1 = k - 1;
+                double x         = singular_values[l];
+                const double y   = singular_values[km1];
+                double g         = e[km1];
+                double h         = e[k];
+                double f         = 0.0;
+                const double denominator = 2.0 * h * y;
+                if (x != 0.0 && denominator != 0.0)
+                {
+                    f = ((y - z) * (y + z) + (g - h) * (g + h)) / denominator;
+                    const double shift_denominator = f + signed_magnitude(math::hypot(f, 1.0), f);
+                    if (shift_denominator != 0.0)
+                        f = ((x - z) * (x + z) + h * (y / shift_denominator - h)) / x;
+                    else
+                        f = 0.0;
+                }
+
+                double cosine = 1.0;
+                double sine   = 1.0;
+                for (size_t index = l; index < k; ++index)
+                {
+                    const size_t next = index + 1;
+                    g                 = e[next];
+                    const double next_singular = singular_values[next];
+                    h                 = sine * g;
+                    g                 = cosine * g;
+                    double rotation_norm = math::hypot(f, h);
+                    e[index]           = rotation_norm;
+                    if (rotation_norm == 0.0)
+                    {
+                        cosine = 1.0;
+                        sine   = 0.0;
+                    }
+                    else
+                    {
+                        cosine = f / rotation_norm;
+                        sine   = h / rotation_norm;
+                    }
+                    f = x * cosine + g * sine;
+                    g = g * cosine - x * sine;
+                    h = next_singular * sine;
+                    const double y_rotated = next_singular * cosine;
+                    rotate_columns<Columns, Columns>(v.data(), index, next, cosine, sine);
+
+                    rotation_norm          = math::hypot(f, h);
+                    singular_values[index] = rotation_norm;
+                    if (rotation_norm == 0.0)
+                    {
+                        cosine = 1.0;
+                        sine   = 0.0;
+                    }
+                    else
+                    {
+                        cosine = f / rotation_norm;
+                        sine   = h / rotation_norm;
+                    }
+                    f = cosine * g + sine * y_rotated;
+                    x = cosine * y_rotated - sine * g;
+                    rotate_columns<Rows, Rows>(u, index, next, cosine, sine);
+                }
+                e[l]                = 0.0;
+                e[k]                = f;
+                singular_values[k]  = x;
+            }
+            if (!converged)
+            {
+                info = static_cast<int>(k + 1);
+                break;
+            }
+        }
+
+        // DGESVD returns non-negative singular values in decreasing order.
+        // The corresponding column exchanges preserve A = U*S*V^T.
+        for (size_t index = 0; index < Columns; ++index)
+        {
+            size_t largest = index;
+            for (size_t candidate = index + 1; candidate < Columns; ++candidate)
+                if (singular_values[candidate] > singular_values[largest])
+                    largest = candidate;
+            if (largest == index)
+                continue;
+            std::swap(singular_values[index], singular_values[largest]);
+            for (size_t row = 0; row < Rows; ++row)
+                std::swap(u[row * Rows + index], u[row * Rows + largest]);
+            for (size_t row = 0; row < Columns; ++row)
+                std::swap(v[row * Columns + index], v[row * Columns + largest]);
+        }
+
+        for (size_t row = 0; row < Columns; ++row)
+            for (size_t column = 0; column < Columns; ++column)
+                vt[row * Columns + column] = v[column * Columns + row];
+        return info;
+    }
+
+    template <size_t Rows, size_t Columns>
+    constexpr int golub_reinsch_factorize(const double* source, double* u, double* singular_values, double* vt)
+    {
+        if constexpr (Rows >= Columns)
+        {
+            return golub_reinsch_tall<Rows, Columns>(source, u, singular_values, vt);
+        }
+        else
+        {
+            Matrix<double, Columns, Rows> transposed{tensor::uninitialized};
+            Matrix<double, Columns, Columns> transposed_u{tensor::uninitialized};
+            Matrix<double, Rows, Rows> transposed_vt{tensor::uninitialized};
+            Vector<double, Rows> transposed_s{tensor::uninitialized};
+            for (size_t row = 0; row < Rows; ++row)
+                for (size_t column = 0; column < Columns; ++column)
+                    transposed[column * Rows + row] = source[row * Columns + column];
+
+            const int info = golub_reinsch_tall<Columns, Rows>(
+                transposed.data(), transposed_u.data(), transposed_s.data(), transposed_vt.data());
+            for (size_t row = 0; row < Rows; ++row)
+                for (size_t column = 0; column < Rows; ++column)
+                    u[row * Rows + column] = transposed_vt[column * Rows + row];
+            for (size_t index = 0; index < Rows; ++index)
+                singular_values[index] = transposed_s[index];
+            for (size_t row = 0; row < Columns; ++row)
+                for (size_t column = 0; column < Columns; ++column)
+                    vt[row * Columns + column] = transposed_u[column * Columns + row];
+            return info;
+        }
+    }
+
     struct BunchKaufman
     {
         template <size_t N1, size_t N2>
@@ -781,16 +1095,14 @@ namespace linalg::detail
         Matrix<double, N1, N1>           U_mat{tensor::uninitialized};
         Matrix<double, N2, N2>           Vt_mat{tensor::uninitialized};
         Vector<double, std::min(N1, N2)> S_vec{tensor::uninitialized};
+        int                               info{0};
 
         constexpr void factorize_from(const double* A)
         {
             double* U  = U_mat.data();
             double* Vt = Vt_mat.data();
             double* S  = S_vec.data();
-
-            if (std::is_constant_evaluated())
-                throw "GolubReinsch requires runtime LAPACK";
-            lapack_factorize_inplace(N1, N2, A, U, S, Vt);
+            info       = golub_reinsch_factorize<N1, N2>(A, U, S, Vt);
         }
 
         template <size_t P = 1>
@@ -799,10 +1111,36 @@ namespace linalg::detail
             const double* U  = U_mat.data();
             const double* Vt = Vt_mat.data();
             const double* S  = S_vec.data();
+            constexpr size_t rank = std::min(N1, N2);
+            Matrix<double, N1, P> projected{tensor::uninitialized};
+            Matrix<double, N2, P> spectral{};
+            Matrix<double, N2, P> result{tensor::uninitialized};
 
-            if (std::is_constant_evaluated())
-                throw "GolubReinsch requires runtime LAPACK";
-            lapack_substitute_inplace(N1, N2, U, S, Vt, x, P);
+            for (size_t row = 0; row < N1; ++row)
+                for (size_t rhs = 0; rhs < P; ++rhs)
+                {
+                    double value = 0.0;
+                    for (size_t column = 0; column < N1; ++column)
+                        value += U[column * N1 + row] * x[column * P + rhs];
+                    projected[row * P + rhs] = value;
+                }
+
+            // Preserve the legacy VEQ pseudoinverse cutoff while removing
+            // the CBLAS/DGESDD implementation that previously imposed it.
+            for (size_t index = 0; index < rank; ++index)
+                if (S[index] > 1.0e-12)
+                    for (size_t rhs = 0; rhs < P; ++rhs)
+                        spectral[index * P + rhs] = projected[index * P + rhs] / S[index];
+
+            for (size_t row = 0; row < N2; ++row)
+                for (size_t rhs = 0; rhs < P; ++rhs)
+                {
+                    double value = 0.0;
+                    for (size_t column = 0; column < N2; ++column)
+                        value += Vt[column * N2 + row] * spectral[column * P + rhs];
+                    result[row * P + rhs] = value;
+                }
+            std::copy(result.data(), result.data() + result.count, x);
         }
     };
 
