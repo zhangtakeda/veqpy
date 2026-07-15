@@ -8,9 +8,9 @@
 #include "cminpackP.h"
 
 __cminpack_attr__
-void __cminpack_func__(qrfac)(int m, int n, real *a, int
+void __cminpack_func__(qrfac_apply_qt)(int m, int n, real *a, int
 	lda, int pivot, int *ipvt, int lipvt, real *rdiag,
-	 real *acnorm, real *wa)
+	 real *acnorm, real *wa, real *qtf)
 {
 #ifdef USE_LAPACK
     __CLPK_integer m_ = m;
@@ -87,6 +87,19 @@ void __cminpack_func__(qrfac)(int m, int n, real *a, int
             a[k] *= t;
         }
     }
+
+    for (j = 0; j < n; ++j) {
+        if (a[j + j * lda] != 0.) {
+            real sum = 0.;
+            for (i = j; i < m; ++i) {
+                sum += a[i + j * lda] * qtf[i];
+            }
+            real transform = -sum / a[j + j * lda];
+            for (i = j; i < m; ++i) {
+                qtf[i] += a[i + j * lda] * transform;
+            }
+        }
+    }
     
     free(work);
     if (pivot) {
@@ -116,14 +129,16 @@ void __cminpack_func__(qrfac)(int m, int n, real *a, int
 
 /*     ********** */
 
-/*     subroutine qrfac */
+/*     subroutine qrfac_apply_qt */
 
 /*     this subroutine uses householder transformations with column */
 /*     pivoting (optional) to compute a qr factorization of the */
 /*     m by n matrix a. that is, qrfac determines an orthogonal */
 /*     matrix q, a permutation matrix p, and an upper trapezoidal */
 /*     matrix r with diagonal elements of nonincreasing magnitude, */
-/*     such that a*p = q*r. the householder transformation for */
+/*     such that a*p = q*r. it also applies q transpose to qtf */
+/*     while each householder vector is resident in cache. the */
+/*     householder transformation for */
 /*     column k, k = 1,2,...,min(m,n), is of the form */
 
 /*                           t */
@@ -135,7 +150,8 @@ void __cminpack_func__(qrfac)(int m, int n, real *a, int
 
 /*     the subroutine statement is */
 
-/*       subroutine qrfac(m,n,a,lda,pivot,ipvt,lipvt,rdiag,acnorm,wa) */
+/*       subroutine qrfac_apply_qt(m,n,a,lda,pivot,ipvt,lipvt, */
+/*                                 rdiag,acnorm,wa,qtf) */
 
 /*     where */
 
@@ -178,6 +194,10 @@ void __cminpack_func__(qrfac)(int m, int n, real *a, int
 
 /*       wa is a work array of length n. if pivot is false, then wa */
 /*         can coincide with rdiag. */
+
+/*       qtf is an input/output array of length m. on input it */
+/*         contains the vector to transform. on output it contains */
+/*         q transpose times that vector. */
 
 /*     subprograms called */
 
@@ -275,13 +295,20 @@ void __cminpack_func__(qrfac)(int m, int n, real *a, int
                     }
                 }
             }
+
+            sum = 0.;
+            for (i = j; i < m; ++i) {
+                sum += a[i + j * lda] * qtf[i];
+            }
+            temp = -sum / a[j + j * lda];
+            for (i = j; i < m; ++i) {
+                qtf[i] += a[i + j * lda] * temp;
+            }
         }
 	rdiag[j] = -ajnorm;
     }
 
 /*     last card of subroutine qrfac. */
 #endif /* !USE_LAPACK */
-} /* qrfac_ */
-
-
+} /* qrfac_apply_qt_ */
 

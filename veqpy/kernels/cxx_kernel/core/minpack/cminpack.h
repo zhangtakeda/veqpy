@@ -16,8 +16,9 @@ double dpmpar(int i);
 double enorm(int n, const double* x);
 void dogleg(int n, const double* r, int lr, const double* diag, const double* qtb,
             double delta, double* x, double* wa1, double* wa2);
-void qrfac(int m, int n, double* a, int lda, int pivot, int* ipvt, int lipvt,
-           double* rdiag, double* acnorm, double* wa);
+void qrfac_apply_qt(int m, int n, double* a, int lda, int pivot, int* ipvt,
+                    int lipvt, double* rdiag, double* acnorm, double* wa,
+                    double* qtf);
 void qrsolv(int n, double* r, int ldr, const int* ipvt, const double* diag,
             const double* qtb, double* x, double* sdiag, double* wa);
 void qform(int m, int n, double* q, int ldq, double* wa);

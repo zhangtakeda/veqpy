@@ -393,8 +393,11 @@ inline int lm_finite_difference(
 
 /*        compute the qr factorization of the jacobian. */
 
-        __cminpack_func__(qrfac)(m, n, fjac, ldfjac, TRUE_, ipvt, n,
-              wa1, wa2, wa3);
+        for (i = 0; i < m; ++i) {
+            qtf[i] = fvec[i];
+        }
+        __cminpack_func__(qrfac_apply_qt)(m, n, fjac, ldfjac, TRUE_, ipvt, n,
+              wa1, wa2, wa3, qtf);
 
         if (iter == 1) {
 /*        on the first iteration, calculate the norm of the scaled x */
@@ -413,22 +416,8 @@ inline int lm_finite_difference(
 /*        form (q transpose)*fvec and store the first n components in */
 /*        qtf. */
 
-        for (i = 0; i < m; ++i) {
-            wa4[i] = fvec[i];
-        }
         for (j = 0; j < n; ++j) {
-            if (fjac[j + j * ldfjac] != 0.) {
-                sum = 0.;
-                for (i = j; i < m; ++i) {
-                    sum += fjac[i + j * ldfjac] * wa4[i];
-                }
-                temp = -sum / fjac[j + j * ldfjac];
-                for (i = j; i < m; ++i) {
-                    wa4[i] += fjac[i + j * ldfjac] * temp;
-                }
-            }
             fjac[j + j * ldfjac] = wa1[j];
-            qtf[j] = wa4[j];
         }
 
 /*        compute the norm of the scaled gradient. */
@@ -882,8 +871,11 @@ inline int lm_with_jacobian(
 
 /*        compute the qr factorization of the jacobian. */
 
-        __cminpack_func__(qrfac)(m, n, fjac, ldfjac, TRUE_, ipvt, n,
-              wa1, wa2, wa3);
+        for (i = 0; i < m; ++i) {
+            qtf[i] = fvec[i];
+        }
+        __cminpack_func__(qrfac_apply_qt)(m, n, fjac, ldfjac, TRUE_, ipvt, n,
+              wa1, wa2, wa3, qtf);
 
         if (iter == 1) {
 /*        on the first iteration, calculate the norm of the scaled x */
@@ -902,22 +894,8 @@ inline int lm_with_jacobian(
 /*        form (q transpose)*fvec and store the first n components in */
 /*        qtf. */
 
-        for (i = 0; i < m; ++i) {
-            wa4[i] = fvec[i];
-        }
         for (j = 0; j < n; ++j) {
-            if (fjac[j + j * ldfjac] != 0.) {
-                sum = 0.;
-                for (i = j; i < m; ++i) {
-                    sum += fjac[i + j * ldfjac] * wa4[i];
-                }
-                temp = -sum / fjac[j + j * ldfjac];
-                for (i = j; i < m; ++i) {
-                    wa4[i] += fjac[i + j * ldfjac] * temp;
-                }
-            }
             fjac[j + j * ldfjac] = wa1[j];
-            qtf[j] = wa4[j];
         }
 
 /*        compute the norm of the scaled gradient. */

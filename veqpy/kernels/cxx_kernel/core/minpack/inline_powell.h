@@ -464,8 +464,11 @@ inline int powell_finite_difference(
 
 /*        compute the qr factorization of the jacobian. */
 
-        __cminpack_func__(qrfac)(n, n, &fjac[fjac_offset], ldfjac, FALSE_, iwa, 1,
-              &wa1[1], &wa2[1], &wa3[1]);
+        for (j = 1; j <= n; ++j) {
+            qtf[j] = fvec[j];
+        }
+        __cminpack_func__(qrfac_apply_qt)(n, n, &fjac[fjac_offset], ldfjac, FALSE_, iwa, 1,
+              &wa1[1], &wa2[1], &wa3[1], &qtf[1]);
 
 /*        on the first iteration, scale according to the norms of */
 /*        the columns of the initial jacobian. */
@@ -492,22 +495,6 @@ inline int powell_finite_difference(
         }
 
 /*        form (q transpose)*fvec and store in qtf. */
-
-        for (i = 1; i <= n; ++i) {
-            qtf[i] = fvec[i];
-        }
-        for (j = 1; j <= n; ++j) {
-            if (fjac[j + j * fjac_dim1] != 0.) {
-                sum = 0.;
-                for (i = j; i <= n; ++i) {
-                    sum += fjac[i + j * fjac_dim1] * qtf[i];
-                }
-                temp = -sum / fjac[j + j * fjac_dim1];
-                for (i = j; i <= n; ++i) {
-                    qtf[i] += fjac[i + j * fjac_dim1] * temp;
-                }
-            }
-        }
 
 /*        copy the triangular factor of the qr factorization into r. */
 
@@ -984,8 +971,11 @@ inline int powell_with_jacobian(
 
 /*        compute the qr factorization of the jacobian. */
 
-        __cminpack_func__(qrfac)(n, n, &fjac[fjac_offset], ldfjac, FALSE_, iwa, 1,
-              &wa1[1], &wa2[1], &wa3[1]);
+        for (j = 1; j <= n; ++j) {
+            qtf[j] = fvec[j];
+        }
+        __cminpack_func__(qrfac_apply_qt)(n, n, &fjac[fjac_offset], ldfjac, FALSE_, iwa, 1,
+              &wa1[1], &wa2[1], &wa3[1], &qtf[1]);
 
 /*        on the first iteration, scale according to the norms of */
 /*        the columns of the initial jacobian. */
@@ -1012,22 +1002,6 @@ inline int powell_with_jacobian(
         }
 
 /*        form (q transpose)*fvec and store in qtf. */
-
-        for (i = 1; i <= n; ++i) {
-            qtf[i] = fvec[i];
-        }
-        for (j = 1; j <= n; ++j) {
-            if (fjac[j + j * fjac_dim1] != 0.) {
-                sum = 0.;
-                for (i = j; i <= n; ++i) {
-                    sum += fjac[i + j * fjac_dim1] * qtf[i];
-                }
-                temp = -sum / fjac[j + j * fjac_dim1];
-                for (i = j; i <= n; ++i) {
-                    qtf[i] += fjac[i + j * fjac_dim1] * temp;
-                }
-            }
-        }
 
 /*        copy the triangular factor of the qr factorization into r. */
 
