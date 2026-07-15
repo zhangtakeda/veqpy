@@ -1010,22 +1010,6 @@ namespace linalg::detail
                 {
                     if (pivot_row != k)
                         std::swap_ranges(LU + k * N1, LU + (k + 1) * N1, LU + pivot_row * N1);
-
-                    if (k + 1 < N1)
-                    {
-                        const double pivot = LU[k * N1 + k];
-                        if (math::abs(pivot) >= lapack_safe_min)
-                        {
-                            const double reciprocal_pivot = 1.0 / pivot;
-                            for (size_t row = k + 1; row < N1; ++row)
-                                LU[row * N1 + k] *= reciprocal_pivot;
-                        }
-                        else
-                        {
-                            for (size_t row = k + 1; row < N1; ++row)
-                                LU[row * N1 + k] /= pivot;
-                        }
-                    }
                 }
                 else if (info == 0)
                 {
@@ -1034,17 +1018,45 @@ namespace linalg::detail
 
                 if (k + 1 < N1)
                 {
-                    // DGETF2's rank-one update is independent across the
-                    // trailing entries.  Visit a destination row at a time:
-                    // both the pivot tail and the destination tail are then
-                    // contiguous in VEQPy's row-major fixed storage.
+                    // Scaling the current column and applying its rank-one
+                    // update have no cross-row dependency.  Fuse them so a
+                    // row reaches its contiguous trailing tail only once;
+                    // safe-min scaling remains identical to DGETF2.
+                    const size_t  trailing   = N1 - k - 1;
                     const double* pivot_tail = LU + k * N1 + k + 1;
-                    for (size_t row = k + 1; row < N1; ++row)
+                    const double  pivot      = LU[k * N1 + k];
+                    if (pivot != 0.0 && math::abs(pivot) >= lapack_safe_min)
                     {
-                        const double multiplier = LU[row * N1 + k];
-                        double*      row_tail   = LU + row * N1 + k + 1;
-                        for (size_t column = k + 1; column < N1; ++column)
-                            row_tail[column - k - 1] -= multiplier * pivot_tail[column - k - 1];
+                        const double reciprocal_pivot = 1.0 / pivot;
+                        for (size_t row = k + 1; row < N1; ++row)
+                        {
+                            const double multiplier = LU[row * N1 + k] * reciprocal_pivot;
+                            LU[row * N1 + k]         = multiplier;
+                            double* row_tail = LU + row * N1 + k + 1;
+                            for (size_t offset = 0; offset < trailing; ++offset)
+                                row_tail[offset] -= multiplier * pivot_tail[offset];
+                        }
+                    }
+                    else if (pivot != 0.0)
+                    {
+                        for (size_t row = k + 1; row < N1; ++row)
+                        {
+                            const double multiplier = LU[row * N1 + k] / pivot;
+                            LU[row * N1 + k]         = multiplier;
+                            double* row_tail = LU + row * N1 + k + 1;
+                            for (size_t offset = 0; offset < trailing; ++offset)
+                                row_tail[offset] -= multiplier * pivot_tail[offset];
+                        }
+                    }
+                    else
+                    {
+                        for (size_t row = k + 1; row < N1; ++row)
+                        {
+                            const double multiplier = LU[row * N1 + k];
+                            double*      row_tail   = LU + row * N1 + k + 1;
+                            for (size_t offset = 0; offset < trailing; ++offset)
+                                row_tail[offset] -= multiplier * pivot_tail[offset];
+                        }
                     }
                 }
             }
