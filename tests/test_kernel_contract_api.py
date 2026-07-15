@@ -825,6 +825,9 @@ def test_kernel_python_build_and_solve_native_flow(tmp_path: Path) -> None:
         config=KernelConfig(method="powell", initial="cold"),
     )
     assert result.success is True
+    assert result.info > 0
+    assert result.nfev > 0
+    assert result.njev == 0
     assert result.x.shape == (handle.x_size,)
     assert result.raw.shape == (handle.x_size,)
     assert result.scaled.shape == (handle.x_size,)
@@ -845,6 +848,11 @@ def test_kernel_python_build_and_solve_native_flow(tmp_path: Path) -> None:
         second = handle.solve(kernel_boundary, kernel_source, config=config)
         assert first.success is True
         assert second.success is True
+        assert first.info > 0
+        assert first.nfev > 0
+        assert second.info == first.info
+        assert second.nfev == first.nfev
+        assert second.njev == first.njev
         assert_allclose(second.x, first.x, rtol=0.0, atol=0.0)
         assert_allclose(second.raw, first.raw, rtol=0.0, atol=0.0)
         assert_allclose(second.scaled, first.scaled, rtol=0.0, atol=0.0)
