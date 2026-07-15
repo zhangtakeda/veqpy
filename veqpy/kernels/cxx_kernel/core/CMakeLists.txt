@@ -501,9 +501,6 @@ set(
     minpack/dogleg.c
     minpack/dpmpar.c
     minpack/enorm.c
-    minpack/fdjac2.c
-    minpack/lmder.c
-    minpack/lmdif.c
     minpack/lmpar.c
     minpack/qform.c
     minpack/qrfac.c

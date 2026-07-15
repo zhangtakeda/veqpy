@@ -1299,10 +1299,11 @@ TERMINATE:
 
 } // namespace nonlinear::detail::minpack_inline
 
+#include "inline_lm.h"
+
 #undef real
 #undef min
 #undef max
 #undef abs
 #undef TRUE_
 #undef FALSE_
-
