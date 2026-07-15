@@ -109,6 +109,7 @@ namespace cxx_python
             CompiledShape::x_size,
         });
         context->input.residual_scale = build_residual_scale_for_context(*context, context->initial_raw);
+        context->refresh_inverse_residual_scale();
         for (size_t i = 0; i < CompiledShape::x_size; ++i)
             context->initial_scaled[i] = context->initial_raw[i] / context->input.residual_scale[i];
         context->initial_scaled_norm = norm2(std::span<const double, CompiledShape::x_size>{
@@ -396,6 +397,7 @@ namespace cxx_python
             CompiledShape::x_size,
         });
         context.input.residual_scale = build_residual_scale_for_context(context, context.initial_raw);
+        context.refresh_inverse_residual_scale();
         for (size_t i = 0; i < CompiledShape::x_size; ++i)
             context.initial_scaled[i] = context.initial_raw[i] / context.input.residual_scale[i];
         context.initial_scaled_norm = norm2(std::span<const double, CompiledShape::x_size>{

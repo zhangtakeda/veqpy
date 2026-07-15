@@ -1,12 +1,17 @@
 #pragma once
 
+#include <cstddef>
+
 namespace nonlinear::detail::minpack_inline
 {
-template <typename Evaluate>
-inline int fdjac2_inline(Evaluate&& evaluate, int m, int n, real* x,
-                         const real* fvec, real* fjac, int ldfjac,
-                         real epsfcn, real* wa)
+template <std::size_t N, typename Evaluate>
+inline int fdjac2_inline(Evaluate&& evaluate, real* __restrict x,
+                         const real* __restrict fvec, real* __restrict fjac,
+                         real epsfcn, real* __restrict wa)
 {
+    constexpr int m = static_cast<int>(N);
+    constexpr int n = static_cast<int>(N);
+    constexpr int ldfjac = m;
     /* Local variables */
     real h;
     int i, j;
@@ -123,13 +128,19 @@ inline int fdjac2_inline(Evaluate&& evaluate, int m, int n, real* x,
 
 
 
-template <typename Evaluate>
+template <std::size_t N, typename Evaluate>
 inline int lm_finite_difference(
-    Evaluate&& evaluate, int m, int n, real* x, real* fvec, real ftol,
-    real xtol, real gtol, int maxfev, real epsfcn, real* diag, int mode,
-    real factor, int nprint, int* nfev, real* fjac, int ldfjac, int* ipvt,
-    real* qtf, real* wa1, real* wa2, real* wa3, real* wa4)
+    Evaluate&& evaluate, real* __restrict x, real* __restrict fvec, real ftol,
+    real xtol, real gtol, int maxfev, real epsfcn, real* __restrict diag,
+    real factor, int* __restrict nfev, real* __restrict fjac, int* __restrict ipvt,
+    real* __restrict qtf, real* __restrict wa1, real* __restrict wa2,
+    real* __restrict wa3, real* __restrict wa4)
 {
+    constexpr int m = static_cast<int>(N);
+    constexpr int n = static_cast<int>(N);
+    constexpr int mode = 2;
+    constexpr int nprint = 0;
+    constexpr int ldfjac = m;
     /* Initialized data */
 
 #define p1 ((real).1)
@@ -377,7 +388,7 @@ inline int lm_finite_difference(
 
 /*        calculate the jacobian matrix. */
 
-        iflag = fdjac2_inline(evaluate, m, n, x, fvec, fjac, ldfjac,
+        iflag = fdjac2_inline<N>(evaluate, x, fvec, fjac,
                        epsfcn, wa4);
         *nfev += n;
         if (iflag < 0) {
@@ -413,7 +424,6 @@ inline int lm_finite_difference(
                     }
                 }
             }
-
 /*        on the first iteration, calculate the norm of the scaled x */
 /*        and initialize the step bound delta. */
 
@@ -479,7 +489,6 @@ inline int lm_finite_difference(
 
         if (mode != 2) {
             for (j = 0; j < n; ++j) {
-                /* Computing MAX */
                 d1 = diag[j], d2 = wa2[j];
                 diag[j] = max(d1,d2);
             }
@@ -650,13 +659,19 @@ TERMINATE:
 
 
 
-template <typename Evaluate>
+template <std::size_t N, typename Evaluate>
 inline int lm_with_jacobian(
-    Evaluate&& evaluate, int m, int n, real* x, real* fvec, real* fjac,
-    int ldfjac, real ftol, real xtol, real gtol, int maxfev, real* diag,
-    int mode, real factor, int nprint, int* nfev, int* njev, int* ipvt,
-    real* qtf, real* wa1, real* wa2, real* wa3, real* wa4)
+    Evaluate&& evaluate, real* __restrict x, real* __restrict fvec, real* __restrict fjac,
+    real ftol, real xtol, real gtol, int maxfev, real* __restrict diag,
+    real factor, int* __restrict nfev, int* __restrict njev, int* __restrict ipvt,
+    real* __restrict qtf, real* __restrict wa1, real* __restrict wa2,
+    real* __restrict wa3, real* __restrict wa4)
 {
+    constexpr int m = static_cast<int>(N);
+    constexpr int n = static_cast<int>(N);
+    constexpr int mode = 2;
+    constexpr int nprint = 0;
+    constexpr int ldfjac = m;
     /* Initialized data */
 
 #define p1 ((real).1)
@@ -869,9 +884,9 @@ inline int lm_with_jacobian(
 
 /*     check the input parameters for errors. */
 
-    if (n <= 0 || m < n || ldfjac < m || ftol < 0. || xtol < 0. || 
-	    gtol < 0. || maxfev <= 0 || factor <= 0.) {
-	goto TERMINATE;
+    if (n <= 0 || m < n || ldfjac < m || ftol < 0. || xtol < 0. ||
+        gtol < 0. || maxfev <= 0 || factor <= 0.) {
+        goto TERMINATE;
     }
     if (mode == 2) {
         for (j = 0; j < n; ++j) {
@@ -937,7 +952,6 @@ inline int lm_with_jacobian(
                     }
                 }
             }
-
 /*        on the first iteration, calculate the norm of the scaled x */
 /*        and initialize the step bound delta. */
 
@@ -1003,7 +1017,6 @@ inline int lm_with_jacobian(
 
         if (mode != 2) {
             for (j = 0; j < n; ++j) {
-                /* Computing MAX */
                 d1 = diag[j], d2 = wa2[j];
                 diag[j] = max(d1,d2);
             }
@@ -1174,4 +1187,3 @@ TERMINATE:
 
 
 } // namespace nonlinear::detail::minpack_inline
-

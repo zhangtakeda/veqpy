@@ -119,6 +119,12 @@ namespace nonlinear::detail
         requires(Functor& functor, const double* x, double* jacobian) { functor.jacobian(x, jacobian); };
 
     template <typename Functor>
+    inline constexpr bool has_column_major_jacobian_v =
+        requires(Functor& functor, const double* x, double* jacobian, int leading_dimension) {
+            functor.jacobian_column_major(x, jacobian, leading_dimension);
+        };
+
+    template <typename Functor>
     inline constexpr bool has_jvp_v =
         requires(Functor& functor, const double* x, const double* v, double* jv) { functor.jvp(x, v, jv); };
 
@@ -521,8 +527,7 @@ namespace nonlinear::detail
         static constexpr size_t equations = Functor::equations;
         static constexpr size_t variables = Functor::variables;
         static_assert(equations == variables, "Powell hybrid requires a square residual");
-        static constexpr int    cminpack_size = static_cast<int>(variables);
-        static constexpr int    lr_size       = cminpack_size * (cminpack_size + 1) / 2;
+        static constexpr size_t lr_size = variables * (variables + 1) / 2;
 
         Functor           functor;
         std::span<double> fvec;
@@ -539,10 +544,6 @@ namespace nonlinear::detail
         double                                finite_difference_step = 1.0e-6;
         double                                initial_step_bound    = 1.0;
         int                                   max_evaluations      = 1000;
-        int                                   lower_bandwidth      = cminpack_size - 1;
-        int                                   upper_bandwidth      = cminpack_size - 1;
-        int                                   scale_mode           = 1;
-        int                                   print_interval       = 0;
         int                                   evaluations          = 0;
         int                                   jacobian_evaluations = 0;
         int                                   info                 = 0;
@@ -552,8 +553,8 @@ namespace nonlinear::detail
               fvec(workspace.template take<double>(equations)),
               diag(workspace.template take<double>(variables)),
               fjac(workspace.template take<double>(equations * variables)),
-              jacobian(workspace.template take<double>(equations * variables)),
-              r(workspace.template take<double>(static_cast<size_t>(lr_size))),
+              jacobian(take_jacobian_workspace(workspace)),
+              r(workspace.template take<double>(lr_size)),
               qtf(workspace.template take<double>(variables)),
               wa1(workspace.template take<double>(variables)),
               wa2(workspace.template take<double>(variables)),
@@ -578,7 +579,6 @@ namespace nonlinear::detail
 
         void run_jacobian_backend(double* x)
         {
-            std::fill(diag.begin(), diag.end(), 1.0);
             int nfev = 0;
             int njev = 0;
             auto evaluate = [this](const double* values,
@@ -595,43 +595,52 @@ namespace nonlinear::detail
                 }
                 else if (flag == 2)
                 {
-                    evaluate_jacobian<Functor, equations, variables>(functor, values, jacobian.data());
+                    if constexpr (has_column_major_jacobian_v<Functor>)
+                    {
+                        functor.jacobian_column_major(values, jacobian_values, leading_dimension);
+                    }
+                    else
+                    {
+                        evaluate_jacobian<Functor, equations, variables>(functor, values, jacobian.data());
+                        for (size_t row = 0; row < equations; ++row)
+                            for (size_t col = 0; col < variables; ++col)
+                                jacobian_values[row + static_cast<size_t>(leading_dimension) * col] =
+                                    jacobian[row * variables + col];
+                    }
                     ++jacobian_evaluations;
-                    for (size_t row = 0; row < equations; ++row)
-                        for (size_t col = 0; col < variables; ++col)
-                            jacobian_values[row + static_cast<size_t>(leading_dimension) * col] =
-                                jacobian[row * variables + col];
                 }
                 return 0;
             };
-            info     = minpack_inline::powell_with_jacobian(evaluate,
-                                   cminpack_size,
-                                   x,
-                                   fvec.data(),
-                                   fjac.data(),
-                                   cminpack_size,
-                                   tolerance,
-                                   max_evaluations,
-                                   diag.data(),
-                                   scale_mode,
-                                   initial_step_bound,
-                                   print_interval,
-                                   &nfev,
-                                   &njev,
-                                   r.data(),
-                                   lr_size,
-                                   qtf.data(),
-                                   wa1.data(),
-                                   wa2.data(),
-                                   wa3.data(),
-                                   wa4.data());
+            info = minpack_inline::powell_with_jacobian<variables>(evaluate,
+                                                                   x,
+                                                                   fvec.data(),
+                                                                   fjac.data(),
+                                                                   tolerance,
+                                                                   max_evaluations,
+                                                                   diag.data(),
+                                                                   initial_step_bound,
+                                                                   &nfev,
+                                                                   &njev,
+                                                                   r.data(),
+                                                                   qtf.data(),
+                                                                   wa1.data(),
+                                                                   wa2.data(),
+                                                                   wa3.data(),
+                                                                   wa4.data());
             evaluations          = nfev;
             jacobian_evaluations = njev;
         }
 
+        static std::span<double> take_jacobian_workspace(Workspace<variables>& workspace)
+        {
+            if constexpr (!has_jacobian_v<Functor> || has_column_major_jacobian_v<Functor>)
+                return {};
+            else
+                return workspace.template take<double>(equations * variables);
+        }
+
         void run_finite_difference_backend(double* x)
         {
-            std::fill(diag.begin(), diag.end(), 1.0);
             int nfev = 0;
             auto evaluate = [this](const double* values, double* residual, int flag) {
                 if (flag > 0)
@@ -643,29 +652,22 @@ namespace nonlinear::detail
                 }
                 return 0;
             };
-            info     = minpack_inline::powell_finite_difference(evaluate,
-                                   cminpack_size,
-                                   x,
-                                   fvec.data(),
-                                   tolerance,
-                                   max_evaluations,
-                                   lower_bandwidth,
-                                   upper_bandwidth,
-                                   finite_difference_step,
-                                   diag.data(),
-                                   scale_mode,
-                                   initial_step_bound,
-                                   print_interval,
-                                   &nfev,
-                                   fjac.data(),
-                                   cminpack_size,
-                                   r.data(),
-                                   lr_size,
-                                   qtf.data(),
-                                   wa1.data(),
-                                   wa2.data(),
-                                   wa3.data(),
-                                   wa4.data());
+            info = minpack_inline::powell_finite_difference<variables>(evaluate,
+                                                                       x,
+                                                                       fvec.data(),
+                                                                       tolerance,
+                                                                       max_evaluations,
+                                                                       finite_difference_step,
+                                                                       diag.data(),
+                                                                       initial_step_bound,
+                                                                       &nfev,
+                                                                       fjac.data(),
+                                                                       r.data(),
+                                                                       qtf.data(),
+                                                                       wa1.data(),
+                                                                       wa2.data(),
+                                                                       wa3.data(),
+                                                                       wa4.data());
             evaluations = nfev;
         }
 
@@ -676,8 +678,7 @@ namespace nonlinear::detail
     {
         static constexpr size_t equations = Functor::equations;
         static constexpr size_t variables = Functor::variables;
-        static constexpr int    cminpack_equations = static_cast<int>(equations);
-        static constexpr int    cminpack_variables = static_cast<int>(variables);
+        static_assert(equations == variables, "VEQPy LM specialization requires a square residual");
 
         Functor           functor;
         std::span<double> fvec;
@@ -694,8 +695,6 @@ namespace nonlinear::detail
         double                                finite_difference_step = 0.0;
         double                                initial_step_bound    = 100.0;
         int                                   max_evaluations      = 1000;
-        int                                   scale_mode           = 2;
-        int                                   print_interval       = 0;
         int                                   evaluations          = 0;
         int                                   jacobian_evaluations = 0;
         int                                   info                 = 0;
@@ -705,7 +704,7 @@ namespace nonlinear::detail
               fvec(workspace.template take<double>(equations)),
               diag(workspace.template take<double>(variables)),
               fjac(workspace.template take<double>(equations * variables)),
-              jacobian(workspace.template take<double>(equations * variables)),
+              jacobian(take_jacobian_workspace(workspace)),
               ipvt(workspace.template take<int>(variables)),
               qtf(workspace.template take<double>(variables)),
               wa1(workspace.template take<double>(variables)),
@@ -748,40 +747,50 @@ namespace nonlinear::detail
                 }
                 else if (flag == 2)
                 {
-                    evaluate_jacobian<Functor, equations, variables>(functor, values, jacobian.data());
+                    if constexpr (has_column_major_jacobian_v<Functor>)
+                    {
+                        functor.jacobian_column_major(values, jacobian_values, leading_dimension);
+                    }
+                    else
+                    {
+                        evaluate_jacobian<Functor, equations, variables>(functor, values, jacobian.data());
+                        for (size_t row = 0; row < equations; ++row)
+                            for (size_t col = 0; col < variables; ++col)
+                                jacobian_values[row + static_cast<size_t>(leading_dimension) * col] =
+                                    jacobian[row * variables + col];
+                    }
                     ++jacobian_evaluations;
-                    for (size_t row = 0; row < equations; ++row)
-                        for (size_t col = 0; col < variables; ++col)
-                            jacobian_values[row + static_cast<size_t>(leading_dimension) * col] =
-                                jacobian[row * variables + col];
                 }
                 return 0;
             };
-            info     = minpack_inline::lm_with_jacobian(evaluate,
-                                   cminpack_equations,
-                                   cminpack_variables,
-                                   x,
-                                   fvec.data(),
-                                   fjac.data(),
-                                   cminpack_equations,
-                                   tolerance,
-                                   tolerance,
-                                   tolerance,
-                                   max_evaluations,
-                                   diag.data(),
-                                   scale_mode,
-                                   initial_step_bound,
-                                   print_interval,
-                                   &nfev,
-                                   &njev,
-                                   ipvt.data(),
-                                   qtf.data(),
-                                   wa1.data(),
-                                   wa2.data(),
-                                   wa3.data(),
-                                   wa4.data());
+            info = minpack_inline::lm_with_jacobian<variables>(evaluate,
+                                                               x,
+                                                               fvec.data(),
+                                                               fjac.data(),
+                                                               tolerance,
+                                                               tolerance,
+                                                               tolerance,
+                                                               max_evaluations,
+                                                               diag.data(),
+                                                               initial_step_bound,
+                                                               &nfev,
+                                                               &njev,
+                                                               ipvt.data(),
+                                                               qtf.data(),
+                                                               wa1.data(),
+                                                               wa2.data(),
+                                                               wa3.data(),
+                                                               wa4.data());
             evaluations          = nfev;
             jacobian_evaluations = njev;
+        }
+
+        static std::span<double> take_jacobian_workspace(Workspace<variables>& workspace)
+        {
+            if constexpr (!has_jacobian_v<Functor> || has_column_major_jacobian_v<Functor>)
+                return {};
+            else
+                return workspace.template take<double>(equations * variables);
         }
 
         void run_finite_difference_backend(double* x)
@@ -798,29 +807,24 @@ namespace nonlinear::detail
                 }
                 return 0;
             };
-            info     = minpack_inline::lm_finite_difference(evaluate,
-                                   cminpack_equations,
-                                   cminpack_variables,
-                                   x,
-                                   fvec.data(),
-                                   tolerance,
-                                   tolerance,
-                                   tolerance,
-                                   max_evaluations,
-                                   finite_difference_step,
-                                   diag.data(),
-                                   scale_mode,
-                                   initial_step_bound,
-                                   print_interval,
-                                   &nfev,
-                                   fjac.data(),
-                                   cminpack_equations,
-                                   ipvt.data(),
-                                   qtf.data(),
-                                   wa1.data(),
-                                   wa2.data(),
-                                   wa3.data(),
-                                   wa4.data());
+            info = minpack_inline::lm_finite_difference<variables>(evaluate,
+                                                                   x,
+                                                                   fvec.data(),
+                                                                   tolerance,
+                                                                   tolerance,
+                                                                   tolerance,
+                                                                   max_evaluations,
+                                                                   finite_difference_step,
+                                                                   diag.data(),
+                                                                   initial_step_bound,
+                                                                   &nfev,
+                                                                   fjac.data(),
+                                                                   ipvt.data(),
+                                                                   qtf.data(),
+                                                                   wa1.data(),
+                                                                   wa2.data(),
+                                                                   wa3.data(),
+                                                                   wa4.data());
             evaluations = nfev;
         }
 

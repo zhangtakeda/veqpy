@@ -4,14 +4,19 @@
 #include "minpackP.h"
 
 #include <utility>
+#include <cstddef>
 
 namespace nonlinear::detail::minpack_inline
 {
-template <typename Evaluate>
-inline int fdjac1_inline(Evaluate&& evaluate, int n, real* x, const real* fvec,
-                         real* fjac, int ldfjac, int ml, int mu, real epsfcn,
-                         real* wa1, real* wa2)
+template <std::size_t N, typename Evaluate>
+inline int fdjac1_inline(Evaluate&& evaluate, real* __restrict x, const real* __restrict fvec,
+                         real* __restrict fjac, real epsfcn,
+                         real* __restrict wa1, real* __restrict wa2)
 {
+    constexpr int n = static_cast<int>(N);
+    constexpr int ldfjac = n;
+    constexpr int ml = n - 1;
+    constexpr int mu = n - 1;
     /* System generated locals */
     int fjac_dim1, fjac_offset;
 
@@ -191,13 +196,20 @@ inline int fdjac1_inline(Evaluate&& evaluate, int n, real* x, const real* fvec,
 
 
 
-template <typename Evaluate>
+template <std::size_t N, typename Evaluate>
 inline int powell_finite_difference(
-    Evaluate&& evaluate, int n, real* x, real* fvec, real xtol, int maxfev,
-    int ml, int mu, real epsfcn, real* diag, int mode, real factor, int nprint,
-    int* nfev, real* fjac, int ldfjac, real* r, int lr, real* qtf,
-    real* wa1, real* wa2, real* wa3, real* wa4)
+    Evaluate&& evaluate, real* __restrict x, real* __restrict fvec, real xtol, int maxfev,
+    real epsfcn, real* __restrict diag, real factor,
+    int* __restrict nfev, real* __restrict fjac, real* __restrict r, real* __restrict qtf,
+    real* __restrict wa1, real* __restrict wa2, real* __restrict wa3, real* __restrict wa4)
 {
+    constexpr int n = static_cast<int>(N);
+    constexpr int ml = n - 1;
+    constexpr int mu = n - 1;
+    constexpr int mode = 1;
+    constexpr int nprint = 0;
+    constexpr int ldfjac = n;
+    constexpr int lr = n * (n + 1) / 2;
     /* Initialized data */
 
 #define p1 ((real).1)
@@ -453,8 +465,8 @@ inline int powell_finite_difference(
 
 /*        calculate the jacobian matrix. */
 
-        iflag = fdjac1_inline(evaluate, n, &x[1], &fvec[1], &fjac[fjac_offset], ldfjac,
-                       ml, mu, epsfcn, &wa1[1], &wa2[1]);
+        iflag = fdjac1_inline<N>(evaluate, &x[1], &fvec[1], &fjac[fjac_offset],
+                       epsfcn, &wa1[1], &wa2[1]);
         *nfev += msum;
         if (iflag < 0) {
             goto TERMINATE;
@@ -755,13 +767,18 @@ TERMINATE:
 
 
 
-template <typename Evaluate>
+template <std::size_t N, typename Evaluate>
 inline int powell_with_jacobian(
-    Evaluate&& evaluate, int n, real* x, real* fvec, real* fjac, int ldfjac,
-    real xtol, int maxfev, real* diag, int mode, real factor, int nprint,
-    int* nfev, int* njev, real* r, int lr, real* qtf,
-    real* wa1, real* wa2, real* wa3, real* wa4)
+    Evaluate&& evaluate, real* __restrict x, real* __restrict fvec, real* __restrict fjac,
+    real xtol, int maxfev, real* __restrict diag, real factor,
+    int* __restrict nfev, int* __restrict njev, real* __restrict r, real* __restrict qtf,
+    real* __restrict wa1, real* __restrict wa2, real* __restrict wa3, real* __restrict wa4)
 {
+    constexpr int n = static_cast<int>(N);
+    constexpr int mode = 1;
+    constexpr int nprint = 0;
+    constexpr int ldfjac = n;
+    constexpr int lr = n * (n + 1) / 2;
     /* Initialized data */
 
 #define p1 ((real).1)

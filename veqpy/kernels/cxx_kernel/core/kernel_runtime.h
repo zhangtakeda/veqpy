@@ -92,6 +92,7 @@ namespace cxx_kernel_api
         {
             CompiledOperator op;
             RuntimeCase      input{};
+            std::array<double, CompiledShape::x_size> inverse_residual_scale{};
             PackedVector   initial_raw{uninitialized};
             PackedVector   initial_scaled{uninitialized};
             std::array<double, 2> initial_alpha{};
@@ -113,6 +114,7 @@ namespace cxx_kernel_api
                        nonlinear::Workspace<CompiledShape::x_size>& workspace)
                 : op(make_operator_for_case(case_input)), input(case_input), nonlinear_workspace(workspace)
             {
+                refresh_inverse_residual_scale();
             }
 
             void reset_case(const RuntimeCase& case_input) noexcept
@@ -120,6 +122,13 @@ namespace cxx_kernel_api
                 input = case_input;
                 op.reprepare(setup_for_case(input));
                 op.set_runtime_scalars(runtime_scalars_for_case(input));
+                refresh_inverse_residual_scale();
+            }
+
+            void refresh_inverse_residual_scale() noexcept
+            {
+                for (size_t i = 0; i < CompiledShape::x_size; ++i)
+                    inverse_residual_scale[i] = 1.0 / input.residual_scale[i];
             }
 
             void reset_solve_counters() noexcept
@@ -291,14 +300,17 @@ namespace cxx_kernel_api
 #if defined(VEQPY_CXX_DETAILED_SOLVE_TIMING)
             const auto   kernel_started = std::chrono::steady_clock::now();
 #endif
-            context.raw_residual(std::span<const double, CompiledShape::x_size>{x.data(), CompiledShape::x_size},
-                                 std::span<double, CompiledShape::x_size>{raw.data(), CompiledShape::x_size});
+            context.op.evaluate(std::span<const double, CompiledShape::x_size>{x.data(), CompiledShape::x_size}, raw);
 #if defined(VEQPY_CXX_DETAILED_SOLVE_TIMING)
             context.residual_kernel_ms += elapsed_ms_since(kernel_started);
             const auto scale_started = std::chrono::steady_clock::now();
 #endif
             for (size_t i = 0; i < CompiledShape::x_size; ++i)
+#if defined(VEQPY_CXX_FP_MODE_RELAXED)
+                fvec[i] = raw[i] * context.inverse_residual_scale[i];
+#else
                 fvec[i] = raw[i] / context.input.residual_scale[i];
+#endif
 #if defined(VEQPY_CXX_DETAILED_SOLVE_TIMING)
             context.residual_scale_ms += elapsed_ms_since(scale_started);
             context.residual_callback_ms += elapsed_ms_since(callback_started);
@@ -453,6 +465,17 @@ namespace cxx_kernel_api
             }
 
 #ifdef ENABLE_ENZYME
+            void jacobian_column_major(const double* z, double* jacobian, int leading_dimension) const
+            {
+#if defined(VEQPY_CXX_DETAILED_SOLVE_TIMING)
+                const auto started = std::chrono::steady_clock::now();
+#endif
+                fill_enzyme_jacobian_z(*context, z, jacobian, leading_dimension);
+#if defined(VEQPY_CXX_DETAILED_SOLVE_TIMING)
+                context->jacobian_callback_ms += elapsed_ms_since(started);
+#endif
+            }
+
             void jacobian(const double* z, double* jacobian) const
             {
                 constexpr size_t          n = CompiledShape::x_size;
@@ -578,14 +601,6 @@ namespace cxx_kernel_api
                 solver_context.finite_difference_step = default_hybr_eps;
             if constexpr (requires { solver_context.initial_step_bound; })
                 solver_context.initial_step_bound = default_hybr_factor;
-            if constexpr (requires { solver_context.lower_bandwidth; })
-                solver_context.lower_bandwidth = static_cast<int>(CompiledShape::x_size) - 1;
-            if constexpr (requires { solver_context.upper_bandwidth; })
-                solver_context.upper_bandwidth = static_cast<int>(CompiledShape::x_size) - 1;
-            if constexpr (requires { solver_context.scale_mode; })
-                solver_context.scale_mode = default_hybr_mode;
-            if constexpr (requires { solver_context.print_interval; })
-                solver_context.print_interval = default_hybr_nprint;
         }
 
         template <typename SolverContext>
@@ -596,10 +611,6 @@ namespace cxx_kernel_api
                 solver_context.finite_difference_step = default_lm_eps;
             if constexpr (requires { solver_context.initial_step_bound; })
                 solver_context.initial_step_bound = default_lm_factor;
-            if constexpr (requires { solver_context.scale_mode; })
-                solver_context.scale_mode = default_lm_mode;
-            if constexpr (requires { solver_context.print_interval; })
-                solver_context.print_interval = default_lm_nprint;
         }
 
         template <typename Policy>
