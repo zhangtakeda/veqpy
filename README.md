@@ -247,13 +247,13 @@ VEQPy is associated with the companion manuscript **[Zhang2026]**. Related VEQ-f
 
 ## Acknowledgements
 
-The Cxx Powell hybrid and Levenberg-Marquardt implementations are derived from
-[MINPACK][minpack] by Burton S. Garbow, Kenneth E. Hillstrom, and Jorge J. Moré
-at Argonne National Laboratory, and from Frédéric Devernay's
-[CMinpack v1.3.11 translation][cminpack]. We thank the authors, Argonne, and the
-University of Chicago for making these well-tested numerical methods available.
-The derived sources retain the
-[original MINPACK/CMinpack license][minpack-license] in the source distribution.
+- [**MINPACK source code**][minpack]: algorithm and implementation reference for
+  the Powell hybrid and Levenberg-Marquardt solvers; distributed under the
+  [MINPACK license][minpack-license] (University of Chicago, 1999).
+
+- [**CMinpack v1.3.11 source code**][cminpack]: C translation used as a
+  source-level reference for the Cxx implementations; distributed under the
+  [MINPACK license][minpack-license].
 
 ---
 
