@@ -20,6 +20,15 @@ namespace linalg::detail
     template <typename Policy, size_t N1, size_t N2>
     using Context = typename Policy::template Context<N1, N2>;
 
+    // Test-only escape hatch: the reference driver compares the fixed-size
+    // implementation with LAPACKE at sizes that normally dispatch to LAPACK.
+    // Production builds do not define this macro.
+#if defined(VEQPY_CXX_FORCE_INTERNAL_LINALG)
+    inline constexpr bool runtime_lapack_enabled = false;
+#else
+    inline constexpr bool runtime_lapack_enabled = true;
+#endif
+
     inline constexpr size_t doolittle_lapack_min_size     = 128 * 128;
     inline constexpr size_t cholesky_lapack_min_size      = 16 * 16;
     inline constexpr size_t bunch_kaufman_lapack_min_size = 96 * 96;
@@ -225,7 +234,7 @@ namespace linalg::detail
             int*    ipiv = pivot_vec.data();
             std::copy(A, A + N1 * N1, L);
 
-            if constexpr (N1 * N1 >= bunch_kaufman_lapack_min_size)
+            if constexpr (runtime_lapack_enabled && N1 * N1 >= bunch_kaufman_lapack_min_size)
             {
                 if (!std::is_constant_evaluated())
                 {
@@ -315,7 +324,7 @@ namespace linalg::detail
             const double* L    = LDLT_mat.data();
             const int*    ipiv = pivot_vec.data();
 
-            if constexpr (N1 * N1 >= bunch_kaufman_lapack_min_size)
+            if constexpr (runtime_lapack_enabled && N1 * N1 >= bunch_kaufman_lapack_min_size)
             {
                 if (!std::is_constant_evaluated())
                 {
@@ -418,7 +427,7 @@ namespace linalg::detail
             double* L = LLT_mat.data();
             std::copy(A, A + N1 * N1, L);
 
-            if constexpr (N1 * N1 >= cholesky_lapack_min_size)
+            if constexpr (runtime_lapack_enabled && N1 * N1 >= cholesky_lapack_min_size)
             {
                 if (!std::is_constant_evaluated())
                 {
@@ -458,7 +467,7 @@ namespace linalg::detail
         {
             const double* L = LLT_mat.data();
 
-            if constexpr (N1 * N1 >= cholesky_lapack_min_size)
+            if constexpr (runtime_lapack_enabled && N1 * N1 >= cholesky_lapack_min_size)
             {
                 if (!std::is_constant_evaluated())
                 {
@@ -506,7 +515,7 @@ namespace linalg::detail
             int*    ipiv = pivot_vec.data();
             std::copy(A, A + N1 * N1, LU);
 
-            if constexpr (N1 * N1 >= doolittle_lapack_min_size)
+            if constexpr (runtime_lapack_enabled && N1 * N1 >= doolittle_lapack_min_size)
             {
                 if (!std::is_constant_evaluated())
                 {
@@ -554,7 +563,7 @@ namespace linalg::detail
             const double* LU   = LU_mat.data();
             const int*    ipiv = pivot_vec.data();
 
-            if constexpr (N1 * N1 >= doolittle_lapack_min_size)
+            if constexpr (runtime_lapack_enabled && N1 * N1 >= doolittle_lapack_min_size)
             {
                 if (!std::is_constant_evaluated())
                 {
@@ -633,7 +642,7 @@ namespace linalg::detail
             double* tau = tau_vec.data();
             std::copy(A, A + N1 * N2, QR);
 
-            if constexpr (N1 * N2 >= householder_lapack_min_size)
+            if constexpr (runtime_lapack_enabled && N1 * N2 >= householder_lapack_min_size)
             {
                 if (!std::is_constant_evaluated())
                 {
@@ -687,7 +696,7 @@ namespace linalg::detail
             const double* QR  = QR_mat.data();
             const double* tau = tau_vec.data();
 
-            if constexpr (N1 * N2 >= householder_lapack_min_size)
+            if constexpr (runtime_lapack_enabled && N1 * N2 >= householder_lapack_min_size)
             {
                 if (!std::is_constant_evaluated())
                 {
