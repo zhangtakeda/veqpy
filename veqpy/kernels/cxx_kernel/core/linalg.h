@@ -1123,16 +1123,28 @@ namespace linalg::detail
 
                 if (k + 1 < N2 && tau[k] != 0.0)
                 {
+                    // Form v^T A first, then visit every target row once.
+                    // The reflector vector remains a column (and therefore
+                    // has an unavoidable stride), but the trailing block is
+                    // read and written through contiguous row tails.
                     for (size_t column = k + 1; column < N2; ++column)
                     {
                         double dot = QR[k * N2 + column];
                         for (size_t row = k + 1; row < N1; ++row)
                             dot += QR[row * N2 + k] * QR[row * N2 + column];
-
-                        dot *= tau[k];
-                        QR[k * N2 + column] -= dot;
-                        for (size_t row = k + 1; row < N1; ++row)
-                            QR[row * N2 + column] -= QR[row * N2 + k] * dot;
+                        // tau[k + 1:] has not been formed yet, so reuse the
+                        // fixed context storage as this iteration's work
+                        // tail instead of materializing another stack array.
+                        tau[column] = dot * tau[k];
+                    }
+                    for (size_t column = k + 1; column < N2; ++column)
+                        QR[k * N2 + column] -= tau[column];
+                    for (size_t row = k + 1; row < N1; ++row)
+                    {
+                        const double multiplier = QR[row * N2 + k];
+                        double*      row_tail   = QR + row * N2 + k + 1;
+                        for (size_t column = k + 1; column < N2; ++column)
+                            row_tail[column - k - 1] -= multiplier * tau[column];
                     }
                 }
             }
@@ -1149,29 +1161,43 @@ namespace linalg::detail
                 if (tau[k] == 0.0)
                     continue;
 
+                Vector<double, P> reflector_work{tensor::uninitialized};
+                for (size_t j = 0; j < P; ++j)
+                    reflector_work[j] = x[k * P + j];
+                for (size_t i = k + 1; i < N1; ++i)
+                {
+                    const double  multiplier = QR[i * N2 + k];
+                    const double* rhs_row    = x + i * P;
+                    for (size_t j = 0; j < P; ++j)
+                        reflector_work[j] += multiplier * rhs_row[j];
+                }
                 for (size_t j = 0; j < P; ++j)
                 {
-                    double vTx_j = x[k * P + j];
-                    for (size_t i = k + 1; i < N1; ++i)
-                        vTx_j += QR[i * N2 + k] * x[i * P + j];
-
-                    vTx_j *= tau[k];
-                    x[k * P + j] -= vTx_j;
-                    for (size_t i = k + 1; i < N1; ++i)
-                        x[i * P + j] -= QR[i * N2 + k] * vTx_j;
+                    reflector_work[j] *= tau[k];
+                    x[k * P + j] -= reflector_work[j];
+                }
+                for (size_t i = k + 1; i < N1; ++i)
+                {
+                    const double multiplier = QR[i * N2 + k];
+                    double*      rhs_row    = x + i * P;
+                    for (size_t j = 0; j < P; ++j)
+                        rhs_row[j] -= multiplier * reflector_work[j];
                 }
             }
 
-            for (size_t j = 0; j < P; ++j)
+            for (size_t i = N2; i > 0; --i)
             {
-                for (size_t i = N2; i > 0; --i)
+                const double* factor_row = QR + (i - 1) * N2;
+                double*       rhs_row    = x + (i - 1) * P;
+                for (size_t column = i; column < N2; ++column)
                 {
-                    double sum = x[(i - 1) * P + j];
-                    for (size_t k = i; k < N2; ++k)
-                        sum -= QR[(i - 1) * N2 + k] * x[k * P + j];
-
-                    x[(i - 1) * P + j] = sum / QR[(i - 1) * N2 + (i - 1)];
+                    const double  multiplier = factor_row[column];
+                    const double* solved_row = x + column * P;
+                    for (size_t j = 0; j < P; ++j)
+                        rhs_row[j] -= multiplier * solved_row[j];
                 }
+                for (size_t j = 0; j < P; ++j)
+                    rhs_row[j] /= factor_row[i - 1];
             }
         }
     };
