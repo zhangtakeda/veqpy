@@ -685,7 +685,7 @@ namespace cxx_kernel_api
 #ifdef ENABLE_ENZYME
                 return "Enzyme batched dense Jacobian through nonlinear::LevenbergMarquardt";
 #else
-                return "CMINPACK forward difference through nonlinear::LevenbergMarquardt";
+                return "in-tree MINPACK forward difference through nonlinear::LevenbergMarquardt";
 #endif
             case SolverKind::NewtonKrylov:
 #ifdef ENABLE_ENZYME
@@ -703,7 +703,7 @@ namespace cxx_kernel_api
 #ifdef ENABLE_ENZYME
                 return "Enzyme batched dense Jacobian through nonlinear::Powell";
 #else
-                return "CMINPACK forward difference through nonlinear::Powell";
+                return "in-tree MINPACK forward difference through nonlinear::Powell";
 #endif
             }
             return "unknown";

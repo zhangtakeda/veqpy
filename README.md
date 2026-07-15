@@ -94,7 +94,7 @@ VEQPy is a single public package. `veqpy.model` owns model-layer objects,
 private Numba/Cxx backends, and `veqpy.api` provides thin function-style
 entrypoints. The native C++ backend is optional for normal
 Python/Numba use and requires a local C++20 toolchain and native libraries such
-as CMake 3.24+, `clang++`, nanobind, GCEM, CMINPACK,
+as CMake 3.24+, `clang++`, nanobind, GCEM,
 LAPACKE/LAPACK, and OpenBLAS.
 
 All commands below use `.venv` explicitly; activating the environment is optional.
@@ -245,6 +245,16 @@ VEQPy is associated with the companion manuscript **[Zhang2026]**. Related VEQ-f
   > "Investigation of Toroidal Rotation Effects on Spherical Torus Equilibria using
   > the Fast Spectral Solver VEQ-R", arXiv:2602.11422, 2026._
 
+## Acknowledgements
+
+The Cxx Powell hybrid and Levenberg-Marquardt implementations are derived from
+[MINPACK][minpack] by Burton S. Garbow, Kenneth E. Hillstrom, and Jorge J. Moré
+at Argonne National Laboratory, and from Frédéric Devernay's
+[CMinpack v1.3.11 translation][cminpack]. We thank the authors, Argonne, and the
+University of Chicago for making these well-tested numerical methods available.
+The derived sources retain the
+[original MINPACK/CMinpack license][minpack-license] in the source distribution.
+
 ---
 
 <p>
@@ -279,3 +289,6 @@ VEQPy is associated with the companion manuscript **[Zhang2026]**. Related VEQ-f
 [veq-arxiv]: https://arxiv.org/abs/2606.11821
 [veq-min-parameters-arxiv]: https://arxiv.org/abs/2601.02942
 [veqr-arxiv]: https://arxiv.org/abs/2602.11422
+[minpack]: https://netlib.org/minpack/
+[cminpack]: https://github.com/devernay/cminpack/tree/v1.3.11
+[minpack-license]: veqpy/kernels/cxx_kernel/core/minpack/CopyrightMINPACK.txt

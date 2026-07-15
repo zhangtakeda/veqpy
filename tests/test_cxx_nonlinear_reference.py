@@ -48,13 +48,6 @@ def _gcem_include() -> Path:
     pytest.skip("GCEM headers are unavailable")
 
 
-def _cminpack_include() -> Path:
-    for candidate in (Path("/usr/include/cminpack-1"), Path("/usr/local/include")):
-        if (candidate / "cminpack.h").is_file():
-            return candidate
-    pytest.skip("CMINPACK headers are unavailable")
-
-
 @pytest.fixture(scope="module")
 def nonlinear_reference_driver(tmp_path_factory: pytest.TempPathFactory) -> Path:
     compiler = shutil.which("clang++")
@@ -69,10 +62,7 @@ def nonlinear_reference_driver(tmp_path_factory: pytest.TempPathFactory) -> Path
         str(CORE_DIR),
         "-I",
         str(_gcem_include()),
-        "-I",
-        str(_cminpack_include()),
         str(DRIVER_SOURCE),
-        str(CORE_DIR / "nonlinear.cpp"),
         *(
             str(CORE_DIR / "minpack" / source)
             for source in (

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(cxx_kernel LANGUAGES C CXX)
+project(cxx_kernel LANGUAGES CXX)
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
@@ -288,11 +288,6 @@ function(cxx_link_dependencies target)
     find_package(gcem CONFIG REQUIRED)
     target_link_libraries("${target}" PRIVATE gcem)
 
-    find_path(CMINPACK_INCLUDE_DIR NAMES cminpack.h PATH_SUFFIXES cminpack-1 REQUIRED)
-    find_library(CMINPACK_LIBRARY NAMES cminpack REQUIRED)
-    target_include_directories("${target}" PRIVATE "${CMINPACK_INCLUDE_DIR}")
-    target_link_libraries("${target}" PRIVATE "${CMINPACK_LIBRARY}")
-
     find_path(LAPACKE_INCLUDE_DIR NAMES lapacke.h REQUIRED)
     find_library(LAPACKE_LIBRARY NAMES lapacke REQUIRED)
     find_library(LAPACK_LIBRARY NAMES lapack REQUIRED)
@@ -502,7 +497,6 @@ cxx_require_clang()
 
 set(
     VEQPY_CXX_COMMON_SOURCES
-    nonlinear.cpp
     linalg.cpp
     minpack/dogleg.c
     minpack/dpmpar.c
@@ -519,6 +513,10 @@ set(
     minpack/r1mpyq.c
     minpack/r1updt.c
     minpack/qrsolv.c
+)
+set_source_files_properties(
+    ${VEQPY_CXX_COMMON_SOURCES}
+    PROPERTIES LANGUAGE CXX
 )
 
 function(cxx_configure_target target)
