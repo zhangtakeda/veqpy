@@ -711,9 +711,19 @@ namespace linalg::detail
                         if (k + 1 < N1)
                         {
                             const double d11 = 1.0 / L[k * N1 + k];
-                            for (size_t column = k + 1; column < N1; ++column)
-                                for (size_t row = column; row < N1; ++row)
-                                    L[row * N1 + column] -= L[row * N1 + k] * L[column * N1 + k] * d11;
+                            // The lower-triangular Schur complement has one
+                            // independent update per stored entry.  Keeping a
+                            // destination row contiguous avoids the
+                            // column-stride stores of the literal DSYTF2
+                            // loop.  Delay scaling L(:, k) until every
+                            // update has consumed its original value.
+                            for (size_t row = k + 1; row < N1; ++row)
+                            {
+                                const double row_k = L[row * N1 + k];
+                                double*      row_tail = L + row * N1 + k + 1;
+                                for (size_t column = k + 1; column <= row; ++column)
+                                    row_tail[column - k - 1] -= row_k * L[column * N1 + k] * d11;
+                            }
                             for (size_t row = k + 1; row < N1; ++row)
                                 L[row * N1 + k] *= d11;
                         }
@@ -726,16 +736,24 @@ namespace linalg::detail
                         const double scale = 1.0 / (d11 * d22 - 1.0);
                         d21 = scale / d21;
 
-                        for (size_t column = k + 2; column < N1; ++column)
+                        // A row reaches its diagonal only after the W terms
+                        // for all prior columns have been stored below.  This
+                        // is algebraically the same lower-triangle traversal
+                        // as DSYTF2, but makes each destination tail
+                        // contiguous in row-major storage.
+                        for (size_t row = k + 2; row < N1; ++row)
                         {
-                            const double wk = d21 * (d11 * L[column * N1 + k] - L[column * N1 + (k + 1)]);
-                            const double wkp1 =
-                                d21 * (d22 * L[column * N1 + (k + 1)] - L[column * N1 + k]);
-                            for (size_t row = column; row < N1; ++row)
-                                L[row * N1 + column] -=
-                                    L[row * N1 + k] * wk + L[row * N1 + (k + 1)] * wkp1;
-                            L[column * N1 + k]       = wk;
-                            L[column * N1 + (k + 1)] = wkp1;
+                            const double row_k   = L[row * N1 + k];
+                            const double row_kp1 = L[row * N1 + (k + 1)];
+                            const double wk      = d21 * (d11 * row_k - row_kp1);
+                            const double wkp1    = d21 * (d22 * row_kp1 - row_k);
+                            double*      row_tail = L + row * N1 + k + 2;
+                            for (size_t column = k + 2; column < row; ++column)
+                                row_tail[column - k - 2] -=
+                                    row_k * L[column * N1 + k] + row_kp1 * L[column * N1 + (k + 1)];
+                            L[row * N1 + row] -= row_k * wk + row_kp1 * wkp1;
+                            L[row * N1 + k]       = wk;
+                            L[row * N1 + (k + 1)] = wkp1;
                         }
                     }
                 }
