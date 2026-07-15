@@ -8,8 +8,8 @@
 #include "cminpackP.h"
 
 __cminpack_attr__
-void __cminpack_func__(lmpar)(int n, real *r, int ldr, 
-	const int *ipvt, const real *diag, const real *qtb, real delta, 
+void __cminpack_func__(lmpar_unit)(int n, real *r, int ldr,
+	const int *ipvt, const real *qtb, real delta,
 	real *par, real *x, real *sdiag, real *wa1, 
 	real *wa2)
 {
@@ -33,10 +33,10 @@ void __cminpack_func__(lmpar)(int n, real *r, int ldr,
 
 /*     ********** */
 
-/*     subroutine lmpar */
+/*     subroutine lmpar_unit */
 
 /*     given an m by n matrix a, an n by n nonsingular diagonal */
-/*     matrix d, an m-vector b, and a positive number delta, */
+/*     unit matrix d, an m-vector b, and a positive number delta, */
 /*     the problem is to determine a value for the parameter */
 /*     par such that if x solves the system */
 
@@ -73,7 +73,7 @@ void __cminpack_func__(lmpar)(int n, real *r, int ldr,
 
 /*     the subroutine statement is */
 
-/*       subroutine lmpar(n,r,ldr,ipvt,diag,qtb,delta,par,x,sdiag, */
+/*       subroutine lmpar_unit(n,r,ldr,ipvt,qtb,delta,par,x,sdiag, */
 /*                        wa1,wa2) */
 
 /*     where */
@@ -92,9 +92,6 @@ void __cminpack_func__(lmpar)(int n, real *r, int ldr,
 /*       ipvt is an integer input array of length n which defines the */
 /*         permutation matrix p such that a*p = q*r. column j of p */
 /*         is column ipvt(j) of the identity matrix. */
-
-/*       diag is an input array of length n which must contain the */
-/*         diagonal elements of the matrix d. */
 
 /*       qtb is an input array of length n which must contain the first */
 /*         n elements of the vector (q transpose)*b. */
@@ -117,7 +114,7 @@ void __cminpack_func__(lmpar)(int n, real *r, int ldr,
 
 /*     subprograms called */
 
-/*       minpack-supplied ... dpmpar,enorm,qrsolv */
+/*       minpack-supplied ... dpmpar,enorm,qrsolv_isotropic */
 
 /*       fortran-supplied ... dabs,dmax1,dmin1,dsqrt */
 
@@ -174,10 +171,7 @@ void __cminpack_func__(lmpar)(int n, real *r, int ldr,
 /*     for acceptance of the gauss-newton direction. */
 
     iter = 0;
-    for (j = 0; j < n; ++j) {
-	wa2[j] = diag[j] * x[j];
-    }
-    dxnorm = __cminpack_func__(enorm)(n, wa2);
+    dxnorm = __cminpack_func__(enorm)(n, x);
     fp = dxnorm - delta;
     if (fp <= p1 * delta) {
 	goto TERMINATE;
@@ -191,7 +185,7 @@ void __cminpack_func__(lmpar)(int n, real *r, int ldr,
     if (nsing >= n) {
         for (j = 0; j < n; ++j) {
             l = ipvt[j]-1;
-            wa1[j] = diag[l] * (wa2[l] / dxnorm);
+            wa1[j] = x[l] / dxnorm;
         }
 #     ifdef USE_BLAS
         __cminpack_blas__(trsv)("U", "T", "N", &n, r, &ldr, wa1, &c__1);
@@ -225,8 +219,7 @@ void __cminpack_func__(lmpar)(int n, real *r, int ldr,
             sum += r[i + j * ldr] * qtb[i];
         }
 #     endif
-        l = ipvt[j]-1;
-        wa1[j] = sum / diag[l];
+        wa1[j] = sum;
     }
     gnorm = __cminpack_func__(enorm)(n, wa1);
     paru = gnorm / delta;
@@ -256,14 +249,8 @@ void __cminpack_func__(lmpar)(int n, real *r, int ldr,
             *par = max(d1,d2);
         }
         temp = sqrt(*par);
-        for (j = 0; j < n; ++j) {
-            wa1[j] = temp * diag[j];
-        }
-        __cminpack_func__(qrsolv)(n, r, ldr, ipvt, wa1, qtb, x, sdiag, wa2);
-        for (j = 0; j < n; ++j) {
-            wa2[j] = diag[j] * x[j];
-        }
-        dxnorm = __cminpack_func__(enorm)(n, wa2);
+        __cminpack_func__(qrsolv_isotropic)(n, r, ldr, ipvt, temp, qtb, x, sdiag, wa2);
+        dxnorm = __cminpack_func__(enorm)(n, x);
         temp = fp;
         fp = dxnorm - delta;
 
@@ -280,7 +267,7 @@ void __cminpack_func__(lmpar)(int n, real *r, int ldr,
 #     ifdef USE_BLAS
         for (j = 0; j < nsing; ++j) {
             l = ipvt[j]-1;
-            wa1[j] = diag[l] * (wa2[l] / dxnorm);
+            wa1[j] = x[l] / dxnorm;
         }
         for (j = nsing; j < n; ++j) {
             wa1[j] = 0.;
@@ -294,7 +281,7 @@ void __cminpack_func__(lmpar)(int n, real *r, int ldr,
 #     else /* !USE_BLAS */
         for (j = 0; j < n; ++j) {
             l = ipvt[j]-1;
-            wa1[j] = diag[l] * (wa2[l] / dxnorm);
+            wa1[j] = x[l] / dxnorm;
         }
         for (j = 0; j < n; ++j) {
             wa1[j] /= sdiag[j];
@@ -338,6 +325,4 @@ TERMINATE:
 
 /*     last card of subroutine lmpar. */
 
-} /* lmpar_ */
-
-
+} /* lmpar_unit_ */

@@ -3,8 +3,8 @@
 #include "cminpackP.h"
 
 __cminpack_attr__
-void __cminpack_func__(qrsolv)(int n, real *r, int ldr, 
-	const int *ipvt, const real *diag, const real *qtb, real *x, 
+void __cminpack_func__(qrsolv_isotropic)(int n, real *r, int ldr,
+	const int *ipvt, real diagonal, const real *qtb, real *x,
 	real *sdiag, real *wa)
 {
     /* Initialized data */
@@ -20,9 +20,9 @@ void __cminpack_func__(qrsolv)(int n, real *r, int ldr,
 
 /*     ********** */
 
-/*     subroutine qrsolv */
+/*     subroutine qrsolv_isotropic */
 
-/*     given an m by n matrix a, an n by n diagonal matrix d, */
+/*     given an m by n matrix a, a scaled identity matrix d, */
 /*     and an m-vector b, the problem is to determine an x which */
 /*     solves the system */
 
@@ -54,7 +54,7 @@ void __cminpack_func__(qrsolv)(int n, real *r, int ldr,
 
 /*     the subroutine statement is */
 
-/*       subroutine qrsolv(n,r,ldr,ipvt,diag,qtb,x,sdiag,wa) */
+/*       subroutine qrsolv_isotropic(n,r,ldr,ipvt,diagonal,qtb,x,sdiag,wa) */
 
 /*     where */
 
@@ -73,8 +73,7 @@ void __cminpack_func__(qrsolv)(int n, real *r, int ldr,
 /*         permutation matrix p such that a*p = q*r. column j of p */
 /*         is column ipvt(j) of the identity matrix. */
 
-/*       diag is an input array of length n which must contain the */
-/*         diagonal elements of the matrix d. */
+/*       diagonal is the shared diagonal element of the matrix d. */
 
 /*       qtb is an input array of length n which must contain the first */
 /*         n elements of the vector (q transpose)*b. */
@@ -114,12 +113,10 @@ void __cminpack_func__(qrsolv)(int n, real *r, int ldr,
 /*        prepare the row of d to be eliminated, locating the */
 /*        diagonal element using p from the qr factorization. */
 
-	l = ipvt[j]-1;
-	if (diag[l] != 0.) {
-            for (k = j; k < n; ++k) {
-                sdiag[k] = 0.;
-            }
-            sdiag[j] = diag[l];
+        for (k = j; k < n; ++k) {
+            sdiag[k] = 0.;
+        }
+        sdiag[j] = diagonal;
 
 /*        the transformations to eliminate the row of d */
 /*        modify only a single element of (q transpose)*b */
@@ -173,8 +170,6 @@ void __cminpack_func__(qrsolv)(int n, real *r, int ldr,
 #                 endif /* !USE_BLAS */
                 }
             }
-        }
-
 /*        store the diagonal element of s and restore */
 /*        the corresponding diagonal element of r. */
 
@@ -217,6 +212,4 @@ void __cminpack_func__(qrsolv)(int n, real *r, int ldr,
 
 /*     last card of subroutine qrsolv. */
 
-} /* qrsolv_ */
-
-
+} /* qrsolv_isotropic_ */

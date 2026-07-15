@@ -28,6 +28,10 @@ inline int fdjac2_inline(Evaluate&& evaluate, real* __restrict x,
 
 /*     the subroutine statement is */
 
+/*     VEQPy fixes mode to user scaling with a unit diagonal and */
+/*     disables iteration printing, so diag, mode, and nprint are */
+/*     intentionally absent from the specialized signature. */
+
 /*       subroutine fdjac2(fcn,m,n,x,fvec,fjac,ldfjac,iflag,epsfcn,wa) */
 
 /*     where */
@@ -131,8 +135,8 @@ inline int fdjac2_inline(Evaluate&& evaluate, real* __restrict x,
 template <std::size_t N, typename Evaluate>
 inline int lm_finite_difference(
     Evaluate&& evaluate, real* __restrict x, real* __restrict fvec, real ftol,
-    real xtol, real gtol, int maxfev, real epsfcn, real* __restrict diag,
-    real factor, int* __restrict nfev, real* __restrict fjac, int* __restrict ipvt,
+    real xtol, real gtol, int maxfev, real epsfcn, real factor,
+    int* __restrict nfev, real* __restrict fjac, int* __restrict ipvt,
     real* __restrict qtf, real* __restrict wa1, real* __restrict wa2,
     real* __restrict wa3, real* __restrict wa4)
 {
@@ -334,7 +338,7 @@ inline int lm_finite_difference(
 
 /*       user-supplied ...... fcn */
 
-/*       minpack-supplied ... dpmpar,enorm,fdjac2,lmpar,qrfac */
+/*       minpack-supplied ... dpmpar,enorm,fdjac2,lmpar_unit,qrfac_apply_qt */
 
 /*       fortran-supplied ... dabs,dmax1,dmin1,dsqrt,mod */
 
@@ -357,12 +361,6 @@ inline int lm_finite_difference(
 	    gtol < 0. || maxfev <= 0 || factor <= 0.) {
 	goto TERMINATE;
     }
-    for (j = 0; j < n; ++j) {
-        if (diag[j] <= 0.) {
-            goto TERMINATE;
-        }
-    }
-
 /*     evaluate the function at the starting point */
 /*     and calculate its norm. */
 
@@ -403,10 +401,7 @@ inline int lm_finite_difference(
 /*        on the first iteration, calculate the norm of the scaled x */
 /*        and initialize the step bound delta. */
 
-            for (j = 0; j < n; ++j) {
-                wa3[j] = diag[j] * x[j];
-            }
-            xnorm = __cminpack_func__(enorm)(n, wa3);
+            xnorm = __cminpack_func__(enorm)(n, x);
             delta = factor * xnorm;
             if (delta == 0.) {
                 delta = factor;
@@ -453,7 +448,7 @@ inline int lm_finite_difference(
 
 /*           determine the levenberg-marquardt parameter. */
 
-            __cminpack_func__(lmpar)(n, fjac, ldfjac, ipvt, diag, qtf, delta,
+            __cminpack_func__(lmpar_unit)(n, fjac, ldfjac, ipvt, qtf, delta,
                   &par, wa1, wa2, wa3, wa4);
 
 /*           store the direction p and x + p. calculate the norm of p. */
@@ -461,9 +456,8 @@ inline int lm_finite_difference(
             for (j = 0; j < n; ++j) {
                 wa1[j] = -wa1[j];
                 wa2[j] = x[j] + wa1[j];
-                wa3[j] = diag[j] * wa1[j];
             }
-            pnorm = __cminpack_func__(enorm)(n, wa3);
+            pnorm = __cminpack_func__(enorm)(n, wa1);
 
 /*           on the first iteration, adjust the initial step bound. */
 
@@ -543,12 +537,11 @@ inline int lm_finite_difference(
 
                 for (j = 0; j < n; ++j) {
                     x[j] = wa2[j];
-                    wa2[j] = diag[j] * x[j];
                 }
                 for (i = 0; i < m; ++i) {
                     fvec[i] = wa4[i];
                 }
-                xnorm = __cminpack_func__(enorm)(n, wa2);
+                xnorm = __cminpack_func__(enorm)(n, x);
                 fnorm = fnorm1;
                 ++iter;
             }
@@ -612,8 +605,8 @@ TERMINATE:
 template <std::size_t N, typename Evaluate>
 inline int lm_with_jacobian(
     Evaluate&& evaluate, real* __restrict x, real* __restrict fvec, real* __restrict fjac,
-    real ftol, real xtol, real gtol, int maxfev, real* __restrict diag,
-    real factor, int* __restrict nfev, int* __restrict njev, int* __restrict ipvt,
+    real ftol, real xtol, real gtol, int maxfev, real factor,
+    int* __restrict nfev, int* __restrict njev, int* __restrict ipvt,
     real* __restrict qtf, real* __restrict wa1, real* __restrict wa2,
     real* __restrict wa3, real* __restrict wa4)
 {
@@ -653,6 +646,10 @@ inline int lm_with_jacobian(
 /*     subroutine which calculates the functions and the jacobian. */
 
 /*     the subroutine statement is */
+
+/*     VEQPy fixes mode to user scaling with a unit diagonal and */
+/*     disables iteration printing, so diag, mode, and nprint are */
+/*     intentionally absent from the specialized signature. */
 
 /*       subroutine lmder(fcn,m,n,x,fvec,fjac,ldfjac,ftol,xtol,gtol, */
 /*                        maxfev,diag,mode,factor,nprint,info,nfev, */
@@ -812,7 +809,7 @@ inline int lm_with_jacobian(
 
 /*       user-supplied ...... fcn */
 
-/*       minpack-supplied ... dpmpar,enorm,lmpar,qrfac */
+/*       minpack-supplied ... dpmpar,enorm,lmpar_unit,qrfac_apply_qt */
 
 /*       fortran-supplied ... dabs,dmax1,dmin1,dsqrt,mod */
 
@@ -836,12 +833,6 @@ inline int lm_with_jacobian(
         gtol < 0. || maxfev <= 0 || factor <= 0.) {
         goto TERMINATE;
     }
-    for (j = 0; j < n; ++j) {
-        if (diag[j] <= 0.) {
-            goto TERMINATE;
-        }
-    }
-
 /*     evaluate the function at the starting point */
 /*     and calculate its norm. */
 
@@ -881,10 +872,7 @@ inline int lm_with_jacobian(
 /*        on the first iteration, calculate the norm of the scaled x */
 /*        and initialize the step bound delta. */
 
-            for (j = 0; j < n; ++j) {
-                wa3[j] = diag[j] * x[j];
-            }
-            xnorm = __cminpack_func__(enorm)(n, wa3);
+            xnorm = __cminpack_func__(enorm)(n, x);
             delta = factor * xnorm;
             if (delta == 0.) {
                 delta = factor;
@@ -931,7 +919,7 @@ inline int lm_with_jacobian(
 
 /*           determine the levenberg-marquardt parameter. */
 
-            __cminpack_func__(lmpar)(n, fjac, ldfjac, ipvt, diag, qtf, delta,
+            __cminpack_func__(lmpar_unit)(n, fjac, ldfjac, ipvt, qtf, delta,
                   &par, wa1, wa2, wa3, wa4);
 
 /*           store the direction p and x + p. calculate the norm of p. */
@@ -939,9 +927,8 @@ inline int lm_with_jacobian(
             for (j = 0; j < n; ++j) {
                 wa1[j] = -wa1[j];
                 wa2[j] = x[j] + wa1[j];
-                wa3[j] = diag[j] * wa1[j];
             }
-            pnorm = __cminpack_func__(enorm)(n, wa3);
+            pnorm = __cminpack_func__(enorm)(n, wa1);
 
 /*           on the first iteration, adjust the initial step bound. */
 
@@ -1021,12 +1008,11 @@ inline int lm_with_jacobian(
 
                 for (j = 0; j < n; ++j) {
                     x[j] = wa2[j];
-                    wa2[j] = diag[j] * x[j];
                 }
                 for (i = 0; i < m; ++i) {
                     fvec[i] = wa4[i];
                 }
-                xnorm = __cminpack_func__(enorm)(n, wa2);
+                xnorm = __cminpack_func__(enorm)(n, x);
                 fnorm = fnorm1;
                 ++iter;
             }

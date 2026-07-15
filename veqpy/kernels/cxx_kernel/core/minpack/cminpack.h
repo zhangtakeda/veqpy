@@ -19,13 +19,14 @@ void dogleg(int n, const double* r, int lr, const double* diag, const double* qt
 void qrfac_apply_qt(int m, int n, double* a, int lda, int pivot, int* ipvt,
                     int lipvt, double* rdiag, double* acnorm, double* wa,
                     double* qtf, double* packed_r, int* singular);
-void qrsolv(int n, double* r, int ldr, const int* ipvt, const double* diag,
-            const double* qtb, double* x, double* sdiag, double* wa);
+void qrsolv_isotropic(int n, double* r, int ldr, const int* ipvt,
+                      double diagonal, const double* qtb, double* x,
+                      double* sdiag, double* wa);
 void qform(int m, int n, double* q, int ldq, double* wa);
 void r1updt(int m, int n, double* s, int ls, const double* u, double* v,
             double* w, int* sing);
 void r1mpyq_pair(int n, double* q, int ldq, double* qtf,
                  const double* v, const double* w);
-void lmpar(int n, double* r, int ldr, const int* ipvt, const double* diag,
-           const double* qtb, double delta, double* par, double* x,
-           double* sdiag, double* wa1, double* wa2);
+void lmpar_unit(int n, double* r, int ldr, const int* ipvt,
+                const double* qtb, double delta, double* par, double* x,
+                double* sdiag, double* wa1, double* wa2);

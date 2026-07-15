@@ -682,7 +682,6 @@ namespace nonlinear::detail
 
         Functor           functor;
         std::span<double> fvec;
-        std::span<double> diag;
         std::span<double> fjac;
         std::span<double> jacobian;
         std::span<int>    ipvt;
@@ -702,7 +701,6 @@ namespace nonlinear::detail
         Context(const Functor& value, Workspace<variables>& workspace)
             : functor(value),
               fvec(workspace.template take<double>(equations)),
-              diag(workspace.template take<double>(variables)),
               fjac(workspace.template take<double>(equations * variables)),
               jacobian(take_jacobian_workspace(workspace)),
               ipvt(workspace.template take<int>(variables)),
@@ -730,7 +728,6 @@ namespace nonlinear::detail
 
         void run_jacobian_backend(double* x)
         {
-            std::fill(diag.begin(), diag.end(), 1.0);
             int nfev = 0;
             int njev = 0;
             auto evaluate = [this](const double* values,
@@ -771,7 +768,6 @@ namespace nonlinear::detail
                                                                tolerance,
                                                                tolerance,
                                                                max_evaluations,
-                                                               diag.data(),
                                                                initial_step_bound,
                                                                &nfev,
                                                                &njev,
@@ -795,7 +791,6 @@ namespace nonlinear::detail
 
         void run_finite_difference_backend(double* x)
         {
-            std::fill(diag.begin(), diag.end(), 1.0);
             int nfev = 0;
             auto evaluate = [this](const double* values, double* residual, int flag) {
                 if (flag > 0)
@@ -815,7 +810,6 @@ namespace nonlinear::detail
                                                                    tolerance,
                                                                    max_evaluations,
                                                                    finite_difference_step,
-                                                                   diag.data(),
                                                                    initial_step_bound,
                                                                    &nfev,
                                                                    fjac.data(),
