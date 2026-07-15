@@ -844,7 +844,7 @@ namespace nonlinear::detail
             std::fill(diag.begin(), diag.end(), 1.0);
             int nfev = 0;
             int njev = 0;
-            info     = cminpack::lmder(callback_with_jacobian,
+            info     = ::lmder(callback_with_jacobian,
                                    this,
                                    cminpack_equations,
                                    cminpack_variables,
@@ -876,7 +876,7 @@ namespace nonlinear::detail
         {
             std::fill(diag.begin(), diag.end(), 1.0);
             int nfev = 0;
-            info     = cminpack::lmdif(callback,
+            info     = ::lmdif(callback,
                                    this,
                                    cminpack_equations,
                                    cminpack_variables,
