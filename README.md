@@ -130,8 +130,8 @@ The Cxx backend is the native C++/nanobind kernel layer used for
 topology-specific shared-library kernels and Cxx-vs-Numba benchmarks.
 
 Representative Cxx-vs-Numba timing data from
-`benchmarks/cxx_geqdsk.py` is summarized below. The three benchmark
-families are GEQDSK-backed cases:
+`benchmarks/cxx_geqdsk.py` is summarized below. The three benchmark families
+are GEQDSK-backed cases:
 
 - `D-shaped`: `data/SOLOVEV.geqdsk`
 - `H-mode`: `data/CHEASE.geqdsk`
@@ -143,18 +143,18 @@ family.
 
 | case(params)    |     Cxx (ms) |    Numba (ms) |    speedup | solution diff |
 | --------------- | -----------: | ------------: | ---------: | ------------: |
-| D-shaped(4)     |     0.246913 |      1.943412 |     7.871x |      1.17e-12 |
-| D-shaped(5)     |     0.233480 |      2.052858 |     8.792x |      3.14e-12 |
-| **D-shaped(9)** | **0.324843** |  **2.651577** | **8.163x** |  **8.04e-12** |
-| D-shaped(75)    |     1.525350 |      7.799670 |     5.113x |      1.48e-10 |
-| H-mode(27)      |     0.833330 |      5.856498 |     7.028x |      3.12e-11 |
-| H-mode(36)      |     1.030506 |      7.133881 |     6.923x |      2.75e-11 |
-| **H-mode(60)**  | **2.336699** | **14.254966** | **6.100x** |  **4.45e-08** |
-| H-mode(130)     |    12.946364 |     42.713799 |     3.299x |      2.55e-09 |
-| X-point(19)     |     0.486021 |      3.708758 |     7.631x |      1.55e-11 |
-| X-point(29)     |     0.683057 |      4.524502 |     6.624x |      3.92e-11 |
-| **X-point(94)** | **2.889962** | **11.066233** | **3.829x** |  **8.34e-11** |
-| X-point(130)    |     6.871710 |     22.346156 |     3.252x |      2.99e-10 |
+| D-shaped(4)     |     0.172940 |      1.911798 |    11.055x |      1.17e-12 |
+| D-shaped(5)     |     0.214899 |      2.136862 |     9.944x |      3.14e-12 |
+| **D-shaped(9)** | **0.202695** |  **2.513709** | **12.401x** |  **8.04e-12** |
+| D-shaped(75)    |     1.000413 |      7.288244 |     7.285x |      1.48e-10 |
+| H-mode(27)      |     0.707322 |      5.654250 |     7.994x |      3.12e-11 |
+| H-mode(36)      |     0.844900 |      7.095212 |     8.398x |      2.75e-11 |
+| **H-mode(60)**  | **1.680737** | **14.683981** | **8.737x** |  **1.26e-08** |
+| H-mode(130)     |     8.265414 |     43.981732 |     5.321x |      1.29e-08 |
+| X-point(19)     |     0.374766 |      3.517772 |     9.387x |      1.55e-11 |
+| X-point(29)     |     0.549881 |      4.886525 |     8.887x |      3.92e-11 |
+| **X-point(94)** | **1.965438** | **11.530335** |  **5.867x** |  **8.39e-11** |
+| X-point(130)    |     4.267138 |     24.079790 |     5.643x |      2.99e-10 |
 
 The package-level Kernel API is intentionally semantic: users construct
 `KernelTopology` for the solve topology, including a source `constraint` of
