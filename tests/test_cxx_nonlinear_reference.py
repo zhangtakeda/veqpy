@@ -10,6 +10,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CORE_DIR = REPO_ROOT / "veqpy" / "kernels" / "cxx_kernel" / "core"
 DRIVER_SOURCE = REPO_ROOT / "tests" / "cxx" / "nonlinear_reference_cases.cpp"
+FASTMATH_FINITE_SOURCE = REPO_ROOT / "tests" / "cxx" / "fastmath_finite_cases.cpp"
 
 EXPECTED_CMINPACK_1_3_6 = {
     "powell_fd_rosenbrock": (1, 27, 0, (1.0, 1.0, 0.0)),
@@ -84,6 +85,32 @@ def nonlinear_reference_driver(tmp_path_factory: pytest.TempPathFactory) -> Path
     return output
 
 
+@pytest.fixture(scope="module")
+def fastmath_finite_driver(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    compiler = shutil.which("clang++")
+    if compiler is None:
+        pytest.skip("clang++ is unavailable")
+    output = tmp_path_factory.mktemp("cxx-fastmath-finite") / "fastmath-finite-driver"
+    command = [
+        compiler,
+        "-std=c++20",
+        "-O3",
+        "-ffast-math",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        str(CORE_DIR),
+        "-isystem",
+        str(_gcem_include()),
+        str(FASTMATH_FINITE_SOURCE),
+        "-o",
+        str(output),
+    ]
+    subprocess.run(command, check=True, cwd=REPO_ROOT)
+    return output
+
+
 def _records(driver: Path) -> dict[str, tuple[int, int, int, tuple[float, ...]]]:
     completed = subprocess.run(
         [str(driver)],
@@ -109,3 +136,33 @@ def test_cminpack_reference_cases_are_deterministic(nonlinear_reference_driver: 
     second = _records(nonlinear_reference_driver)
     assert second == first
     assert first == EXPECTED_CMINPACK_1_3_6
+
+
+@pytest.mark.parametrize(
+    ("bits", "expected"),
+    (
+        (0x0000000000000000, True),
+        (0x8000000000000000, True),
+        (0x0000000000000001, True),
+        (0x3FF0000000000000, True),
+        (0x7FEFFFFFFFFFFFFF, True),
+        (0x7FF0000000000000, False),
+        (0xFFF0000000000000, False),
+        (0x7FF0000000000001, False),
+        (0x7FF8000000000000, False),
+        (0xFFF8000000000000, False),
+    ),
+)
+def test_bitwise_finite_check_survives_fastmath(
+    fastmath_finite_driver: Path,
+    bits: int,
+    expected: bool,
+) -> None:
+    completed = subprocess.run(
+        [str(fastmath_finite_driver), f"{bits:016x}"],
+        check=True,
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.stdout.strip() == str(int(expected))

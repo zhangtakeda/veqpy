@@ -22,6 +22,7 @@
 #include "kernel_runtime.h"
 #include "kernel_topology.h"
 #include "linalg.h"
+#include "math.h"
 #include "tensor.h"
 
 namespace nb = nanobind;
@@ -836,7 +837,7 @@ namespace cxx_python
             if (!has_latest_solution_ || !context_->has_initial_residual)
                 return false;
             const double threshold = acceptance_threshold(context_->input);
-            if (!std::isfinite(context_->initial_raw_norm) || context_->initial_raw_norm > threshold)
+            if (!math::is_finite(context_->initial_raw_norm) || context_->initial_raw_norm > threshold)
                 return false;
 
             const std::string accepted_by =
@@ -866,7 +867,7 @@ namespace cxx_python
                 return false;
             for (size_t i = 0; i < CompiledShape::x_size; ++i)
             {
-                if (!std::isfinite(candidate[i]))
+                if (!math::is_finite(candidate[i]))
                     return false;
                 const double delta = std::abs(candidate[i] - latest_solution_[i]);
                 const double scale = std::max({std::abs(latest_solution_[i]), context_->input.x_scale[i], 1.0e-8});
@@ -895,9 +896,9 @@ namespace cxx_python
             ++certification_evals;
 
             const double raw_norm = norm2(std::span<const double, CompiledShape::x_size>{raw.data(), CompiledShape::x_size});
-            if (std::isfinite(raw_norm) && raw_norm < best_raw_norm)
+            if (math::is_finite(raw_norm) && raw_norm < best_raw_norm)
                 best_raw_norm = raw_norm;
-            if (!std::isfinite(raw_norm) || raw_norm > acceptance_threshold(context_->input))
+            if (!math::is_finite(raw_norm) || raw_norm > acceptance_threshold(context_->input))
                 return false;
 
             PackedVector scaled{uninitialized};
@@ -985,7 +986,7 @@ namespace cxx_python
 
                 bool finite_step = true;
                 for (size_t i = 0; i < CompiledShape::x_size; ++i)
-                    finite_step = finite_step && std::isfinite(step[i]);
+                    finite_step = finite_step && math::is_finite(step[i]);
                 if (!finite_step)
                     return false;
 
@@ -1002,7 +1003,7 @@ namespace cxx_python
                 ++certification_evals;
                 const double trial_norm =
                     norm2(std::span<const double, CompiledShape::x_size>{trial_raw.data(), CompiledShape::x_size});
-                if (!std::isfinite(trial_norm))
+                if (!math::is_finite(trial_norm))
                     return false;
 
                 if (trial_norm <= acceptance_threshold(context_->input))
@@ -1064,7 +1065,7 @@ namespace cxx_python
             fallback.fast_path   = continue_policy_name(context_->input.continue_policy_code);
             fallback.fallback_used = true;
             fallback.fallback_reason =
-                std::isfinite(best_raw_norm) ? "fast_path_raw_norm_above_threshold" : "fast_path_nonfinite_raw_norm";
+                math::is_finite(best_raw_norm) ? "fast_path_raw_norm_above_threshold" : "fast_path_nonfinite_raw_norm";
             fallback.fast_path_raw_norm = best_raw_norm;
             return fallback;
         }
