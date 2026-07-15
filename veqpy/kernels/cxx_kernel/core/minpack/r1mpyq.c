@@ -126,4 +126,3 @@ void __cminpack_func__(r1mpyq_pair)(int n, real *q, int
 /*     last card of subroutine r1mpyq. */
 
 } /* r1mpyq_pair_ */
-

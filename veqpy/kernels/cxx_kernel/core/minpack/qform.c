@@ -113,6 +113,3 @@ void __cminpack_func__(qform)(int m, int n, real *q, int
 /*     last card of subroutine qform. */
 
 } /* qform_ */
-
-
-

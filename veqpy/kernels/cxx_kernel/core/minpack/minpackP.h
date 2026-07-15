@@ -60,4 +60,3 @@
 #define FALSE_ (0)
 
 #endif /* !__MINPACKP_H__ */
-

@@ -128,9 +128,21 @@ jobs:
           ).prepare(dry_run=True)
           if not prepared.dry_run or prepared.prepared or prepared.backend != "cxx":
               raise SystemExit(f"unexpected Cxx dry-run result: {prepared!r}")
-          expected_sources = {"CMakeLists.txt", "bindings.cpp", "kernel_runtime.h"}
+          expected_sources = {
+              "CMakeLists.txt",
+              "bindings.cpp",
+              "kernel_runtime.h",
+              "minpack/CopyrightMINPACK.txt",
+              "minpack/dogleg.c",
+              "minpack/inline_lm.h",
+              "minpack/inline_powell.h",
+          }
           cxx_core = files("veqpy.kernels.cxx_kernel") / "core"
-          missing = sorted(name for name in expected_sources if not (cxx_core / name).is_file())
+          missing = sorted(
+              name
+              for name in expected_sources
+              if not cxx_core.joinpath(*name.split("/")).is_file()
+          )
           if missing:
               raise SystemExit(f"Cxx core package data missing from wheel: {missing}")
           source_file_count = prepared.artifact.metadata["build_identity"]["cxx_source_digest"][

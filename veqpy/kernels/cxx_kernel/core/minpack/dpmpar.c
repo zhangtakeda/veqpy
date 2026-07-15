@@ -187,7 +187,3 @@ real __cminpack_func__(dpmpar)(int i)
 #undef maxmag
 #undef minmag
 #undef dmach
-
-
-
-

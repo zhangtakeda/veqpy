@@ -248,11 +248,16 @@ VEQPy is associated with the companion manuscript **[Zhang2026]**. Related VEQ-f
 ## Acknowledgements
 
 - [**MINPACK source code**][minpack]: algorithm and implementation reference for
-  the Powell hybrid and Levenberg-Marquardt solvers; distributed under the
+  VEQPy's highly specialized, topology-parameterized Powell hybrid and
+  Levenberg-Marquardt solvers; distributed under the
   [MINPACK license][minpack-license] (University of Chicago, 1999).
 
+  Required acknowledgement: “This product includes software developed by the
+  University of Chicago, as Operator of Argonne National Laboratory.”
+
 - [**CMinpack v1.3.11 source code**][cminpack]: C translation used as a
-  source-level reference for the Cxx implementations; distributed under the
+  source-level reference and for MINPACK-derived numerical primitives compiled
+  into the Cxx implementations; distributed under the
   [MINPACK license][minpack-license].
 
 ---

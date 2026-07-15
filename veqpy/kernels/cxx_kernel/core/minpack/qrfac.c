@@ -37,7 +37,7 @@ void __cminpack_func__(qrfac_apply_qt)(int m, int n, real *a, int
         /* set all columns free */
         memset(jpvt, 0, sizeof(int)*n);
     }
-    
+
     /* query optimal size of work */
     lwork = -1;
     if (pivot) {
@@ -49,20 +49,20 @@ void __cminpack_func__(qrfac_apply_qt)(int m, int n, real *a, int
         lwork = (int)tau[0];
         assert( lwork >= 1 && lwork >= n );
     }
-    
+
     assert( info == 0 );
-    
+
     /* alloc work area */
     work = (real *)malloc(sizeof(real)*lwork);
     assert(work != NULL);
-    
+
     /* set acnorm first (from the doc of qrfac, acnorm may point to the same area as rdiag) */
     if (acnorm != rdiag) {
         for (j = 0; j < n; ++j) {
             acnorm[j] = __cminpack_func__(enorm)(m, &a[j * lda]);
         }
     }
-    
+
     /* QR decomposition */
     if (pivot) {
         __cminpack_lapack__(geqp3_)(&m_,&n_,a,&lda_,jpvt,tau,work,&lwork,&info);
@@ -70,13 +70,13 @@ void __cminpack_func__(qrfac_apply_qt)(int m, int n, real *a, int
         __cminpack_lapack__(geqrf_)(&m_,&n_,a,&lda_,tau,work,&lwork,&info);
     }
     assert(info == 0);
-    
+
     /* set rdiag, before the diagonal is replaced */
     memset(rdiag, 0, sizeof(real)*n);
     for(i=0 ; i<n ; ++i) {
         rdiag[i] = a[i*lda+i];
     }
-    
+
     /* modify lower trinagular part to look like qrfac's output */
     for(i=0 ; i<ltau ; ++i) {
         k = i*lda+i;
@@ -113,7 +113,7 @@ void __cminpack_func__(qrfac_apply_qt)(int m, int n, real *a, int
             }
         }
     }
-    
+
     free(work);
     if (pivot) {
         /* convert back jpvt to ipvt */

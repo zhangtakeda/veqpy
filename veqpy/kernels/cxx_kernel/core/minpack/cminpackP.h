@@ -68,5 +68,3 @@ void __cminpack_lapack__(geqrf_)(
 #include "minpackP.h"
 
 #endif /* !__CMINPACKP_H__ */
-
-

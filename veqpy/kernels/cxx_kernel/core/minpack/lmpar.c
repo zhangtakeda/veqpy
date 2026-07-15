@@ -10,7 +10,7 @@
 __cminpack_attr__
 void __cminpack_func__(lmpar_unit)(int n, real *r, int ldr,
 	const int *ipvt, const real *qtb, real delta,
-	real *par, real *x, real *sdiag, real *wa1, 
+	real *par, real *x, real *sdiag, real *wa1,
 	real *wa2)
 {
     /* Initialized data */

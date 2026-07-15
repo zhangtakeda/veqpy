@@ -357,7 +357,7 @@ inline int lm_finite_difference(
 
 /*     check the input parameters for errors. */
 
-    if (n <= 0 || m < n || ldfjac < m || ftol < 0. || xtol < 0. || 
+    if (n <= 0 || m < n || ldfjac < m || ftol < 0. || xtol < 0. ||
 	    gtol < 0. || maxfev <= 0 || factor <= 0.) {
 	goto TERMINATE;
     }
@@ -632,7 +632,7 @@ inline int lm_with_jacobian(
     int iflag;
     real delta = 0.;
     real ratio;
-    real fnorm, gnorm, pnorm, xnorm = 0., fnorm1, actred, dirder, 
+    real fnorm, gnorm, pnorm, xnorm = 0., fnorm1, actred, dirder,
 	    epsmch, prered;
     int info;
 

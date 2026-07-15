@@ -233,6 +233,3 @@ void __cminpack_func__(r1updt)(int m, int n, real *s, int
 /*     last card of subroutine r1updt. */
 
 } /* __minpack_func__(r1updt) */
-
-
-

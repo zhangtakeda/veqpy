@@ -10,8 +10,8 @@
 /* Table of constant values */
 
 __cminpack_attr__
-void __cminpack_func__(dogleg)(int n, const real *r, int lr, 
-	const real *diag, const real *qtb, real delta, real *x, 
+void __cminpack_func__(dogleg)(int n, const real *r, int lr,
+	const real *diag, const real *qtb, real delta, real *x,
 	real *wa1, real *wa2)
 {
     /* System generated locals */
@@ -216,6 +216,3 @@ void __cminpack_func__(dogleg)(int n, const real *r, int lr,
 /*     last card of subroutine dogleg. */
 
 } /* dogleg_ */
-
-
-
