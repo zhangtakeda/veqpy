@@ -8,6 +8,7 @@
 #include "tensor.h"
 #include <array>
 #include <cstddef>
+#include <span>
 
 namespace residual::detail
 {
@@ -57,16 +58,18 @@ namespace residual::detail
             update_fused(source_runtime, geometry_runtime);
         }
 
-        constexpr PackedVector pack(double a, double R0, double B0) noexcept
+        constexpr void pack_into(std::span<double, Shape::x_size> out, double a, double R0, double B0) noexcept
         {
-            PackedVector out{uninitialized};
-            pack_profile<0, 0>(out, a, R0, B0);
-            return out;
+            pack_profile<0, 0>(out, a, R0, B0, nullptr);
         }
 
-        constexpr void pack_into(PackedVector& out, double a, double R0, double B0) noexcept
+        constexpr void pack_scaled_into(std::span<double, Shape::x_size> out,
+                                        double                           a,
+                                        double                           R0,
+                                        double                           B0,
+                                        const double*                    output_scale) noexcept
         {
-            pack_profile<0, 0>(out, a, R0, B0);
+            pack_profile<0, 0>(out, a, R0, B0, output_scale);
         }
 
     private:
@@ -128,23 +131,31 @@ namespace residual::detail
         }
 
         template <size_t ProfileId, size_t ActiveIndex>
-        constexpr void pack_profile(PackedVector& out, double a, double R0, double B0) noexcept
+        constexpr void pack_profile(std::span<double, Shape::x_size> out,
+                                    double                           a,
+                                    double                           R0,
+                                    double                           B0,
+                                    const double*                    output_scale) noexcept
         {
             if constexpr (ProfileId < Shape::profile_count)
             {
                 constexpr profiles::ProfileSlot slot = Shape::slot_for_profile_id(ProfileId);
                 if constexpr (slot.optimized())
                 {
-                    pack_one<ProfileId, ActiveIndex, slot.coefficient_count>(out, a, R0, B0);
-                    pack_profile<ProfileId + 1, ActiveIndex + 1>(out, a, R0, B0);
+                    pack_one<ProfileId, ActiveIndex, slot.coefficient_count>(out, a, R0, B0, output_scale);
+                    pack_profile<ProfileId + 1, ActiveIndex + 1>(out, a, R0, B0, output_scale);
                 }
                 else
-                    pack_profile<ProfileId + 1, ActiveIndex>(out, a, R0, B0);
+                    pack_profile<ProfileId + 1, ActiveIndex>(out, a, R0, B0, output_scale);
             }
         }
 
         template <size_t ProfileId, size_t ActiveIndex, size_t Count>
-        constexpr void pack_one(PackedVector& out, double a, double R0, double B0) noexcept
+        constexpr void pack_one(std::span<double, Shape::x_size> out,
+                                double                           a,
+                                double                           R0,
+                                double                           B0,
+                                const double*                    output_scale) noexcept
         {
             constexpr size_t code         = block_code<ProfileId>();
             constexpr size_t radial_power = block_radial_power<ProfileId>();
@@ -152,42 +163,57 @@ namespace residual::detail
             if constexpr (code == block_h)
             {
                 project_scaled<Count, ProfileId, ActiveIndex>(
-                    out, GridType::y, unit_weights(), unit_weights(), a * base_scale());
+                    out, GridType::y, unit_weights(), unit_weights(), a * base_scale(), output_scale);
             }
             else if constexpr (code == block_v)
             {
                 project_scaled<Count, ProfileId, ActiveIndex>(
-                    out, GridType::y, unit_weights(), unit_weights(), a * base_scale());
+                    out, GridType::y, unit_weights(), unit_weights(), a * base_scale(), output_scale);
             }
             else if constexpr (code == block_kappa)
             {
                 project_scaled<Count, ProfileId, ActiveIndex>(
-                    out, rho_power<1>(), GridType::y, unit_weights(), -a * base_scale());
+                    out, rho_power<1>(), GridType::y, unit_weights(), -a * base_scale(), output_scale);
             }
             else if constexpr (code == block_c0)
             {
                 project_scaled<Count, ProfileId, ActiveIndex>(
-                    out, rho_power<1>(), GridType::y, unit_weights(), -a * base_scale());
+                    out, rho_power<1>(), GridType::y, unit_weights(), -a * base_scale(), output_scale);
             }
             else if constexpr (code == block_c)
             {
                 project_scaled<Count, ProfileId, ActiveIndex>(
-                    out, rho_power<radial_power + 1>(), GridType::y, unit_weights(), -a * base_scale());
+                    out,
+                    rho_power<radial_power + 1>(),
+                    GridType::y,
+                    unit_weights(),
+                    -a * base_scale(),
+                    output_scale);
             }
             else if constexpr (code == block_s)
             {
                 project_scaled<Count, ProfileId, ActiveIndex>(
-                    out, rho_power<radial_power + 1>(), GridType::y, unit_weights(), -a * base_scale());
+                    out,
+                    rho_power<radial_power + 1>(),
+                    GridType::y,
+                    unit_weights(),
+                    -a * base_scale(),
+                    output_scale);
             }
             else if constexpr (code == block_psin)
             {
                 project_scaled<Count, ProfileId, ActiveIndex>(
-                    out, rho_power<2>(), GridType::y, unit_weights(), base_scale());
+                    out, rho_power<2>(), GridType::y, unit_weights(), base_scale(), output_scale);
             }
             else if constexpr (code == block_F)
             {
                 project_scaled<Count, ProfileId, ActiveIndex>(
-                    out, GridType::y, GridType::y, unit_weights(), base_scale() * (R0 * B0) * (R0 * B0));
+                    out,
+                    GridType::y,
+                    GridType::y,
+                    unit_weights(),
+                    base_scale() * (R0 * B0) * (R0 * B0),
+                    output_scale);
             }
         }
 
@@ -278,11 +304,12 @@ namespace residual::detail
                   typename WeightA,
                   typename WeightB,
                   typename WeightC>
-        constexpr void project_scaled(PackedVector&  out,
-                                      const WeightA& weight_a,
-                                      const WeightB& weight_b,
-                                      const WeightC& weight_c,
-                                      double         scalar) const noexcept
+        constexpr void project_scaled(std::span<double, Shape::x_size> out,
+                                      const WeightA&                    weight_a,
+                                      const WeightB&                    weight_b,
+                                      const WeightC&                    weight_c,
+                                      double                            scalar,
+                                      const double*                     output_scale) const noexcept
         {
             for (size_t degree = 0; degree < Count; ++degree)
             {
@@ -292,7 +319,24 @@ namespace residual::detail
                     total += projection_basis(degree, i) * moments(ActiveIndex, i) * weight_a[i] * weight_b[i] *
                              weight_c[i] * GridType::weights[i];
                 }
-                out[static_cast<size_t>(Shape::coeff_index[ProfileId][degree])] = total * scalar;
+                const size_t output_index = static_cast<size_t>(Shape::coeff_index[ProfileId][degree]);
+                if (output_scale == nullptr)
+                    out[output_index] = total * scalar;
+#if defined(VEQPY_CXX_FP_MODE_RELAXED)
+                else
+                {
+                    // Preserve the raw residual rounding point under -ffast-math. Reassociation here can alter the
+                    // finite-difference LM trajectory even when the final scaled values remain within tolerance.
+                    const volatile double raw_value = total * scalar;
+                    out[output_index] = raw_value * output_scale[output_index];
+                }
+#else
+                else
+                {
+                    const double raw_value = total * scalar;
+                    out[output_index] = raw_value / output_scale[output_index];
+                }
+#endif
             }
         }
 

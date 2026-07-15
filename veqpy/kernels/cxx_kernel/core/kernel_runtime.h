@@ -296,23 +296,19 @@ namespace cxx_kernel_api
 #endif
             const auto   x = decode_z_to_x(std::span<const double, CompiledShape::x_size>{z, CompiledShape::x_size},
                                          context.input.x_scale);
-            PackedVector raw{uninitialized};
 #if defined(VEQPY_CXX_DETAILED_SOLVE_TIMING)
             const auto   kernel_started = std::chrono::steady_clock::now();
 #endif
-            context.op.evaluate(std::span<const double, CompiledShape::x_size>{x.data(), CompiledShape::x_size}, raw);
+            context.op.evaluate_scaled(
+                std::span<const double, CompiledShape::x_size>{x.data(), CompiledShape::x_size},
+                std::span<double, CompiledShape::x_size>{fvec, CompiledShape::x_size},
+#if defined(VEQPY_CXX_FP_MODE_RELAXED)
+                context.inverse_residual_scale.data());
+#else
+                context.input.residual_scale.data());
+#endif
 #if defined(VEQPY_CXX_DETAILED_SOLVE_TIMING)
             context.residual_kernel_ms += elapsed_ms_since(kernel_started);
-            const auto scale_started = std::chrono::steady_clock::now();
-#endif
-            for (size_t i = 0; i < CompiledShape::x_size; ++i)
-#if defined(VEQPY_CXX_FP_MODE_RELAXED)
-                fvec[i] = raw[i] * context.inverse_residual_scale[i];
-#else
-                fvec[i] = raw[i] / context.input.residual_scale[i];
-#endif
-#if defined(VEQPY_CXX_DETAILED_SOLVE_TIMING)
-            context.residual_scale_ms += elapsed_ms_since(scale_started);
             context.residual_callback_ms += elapsed_ms_since(callback_started);
 #endif
         }

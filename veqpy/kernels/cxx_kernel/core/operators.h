@@ -155,11 +155,12 @@ namespace operators::detail
             workspace.source_runtime.set_uniform_sources(source_span(setup.heat), source_span(setup.current));
         }
 
-        static constexpr void evaluate_with(const OperatorPlan&    plan,
-                                            const RuntimeScalars&   runtime_scalars,
-                                            OperatorWorkspace&     workspace,
-                                            std::span<const double, Shape::x_size> x,
-                                            PackedVector& out) noexcept
+        static constexpr void evaluate_impl(const OperatorPlan&                       plan,
+                                            const RuntimeScalars&                      runtime_scalars,
+                                            OperatorWorkspace&                        workspace,
+                                            std::span<const double, Shape::x_size>     x,
+                                            std::span<double, Shape::x_size>           out,
+                                            const double*                              output_scale) noexcept
         {
             workspace.profiles.refresh_active(x, plan.profile_params);
             workspace.geometry.update(runtime_scalars.a, runtime_scalars.R0, runtime_scalars.Z0, workspace.profiles);
@@ -304,12 +305,42 @@ namespace operators::detail
                 workspace.source_runtime.publish_source_target_root_fields();
 
             workspace.residual.update_compact(workspace.source_runtime, workspace.geometry);
-            workspace.residual.pack_into(out, runtime_scalars.a, runtime_scalars.R0, runtime_scalars.B0);
+            if (output_scale == nullptr)
+                workspace.residual.pack_into(out, runtime_scalars.a, runtime_scalars.R0, runtime_scalars.B0);
+            else
+                workspace.residual.pack_scaled_into(
+                    out, runtime_scalars.a, runtime_scalars.R0, runtime_scalars.B0, output_scale);
+        }
+
+        static constexpr void evaluate_with(const OperatorPlan&                       plan,
+                                            const RuntimeScalars&                      runtime_scalars,
+                                            OperatorWorkspace&                        workspace,
+                                            std::span<const double, Shape::x_size>     x,
+                                            PackedVector&                              out) noexcept
+        {
+            evaluate_impl(plan, runtime_scalars, workspace, x, out.span(), nullptr);
+        }
+
+        static constexpr void evaluate_scaled_with(const OperatorPlan&                   plan,
+                                                   const RuntimeScalars&                  runtime_scalars,
+                                                   OperatorWorkspace&                    workspace,
+                                                   std::span<const double, Shape::x_size> x,
+                                                   std::span<double, Shape::x_size>       out,
+                                                   const double*                          output_scale) noexcept
+        {
+            evaluate_impl(plan, runtime_scalars, workspace, x, out, output_scale);
         }
 
         constexpr void evaluate(std::span<const double, Shape::x_size> x, PackedVector& out) noexcept
         {
             evaluate_with(plan, runtime_scalars_, workspace, x, out);
+        }
+
+        constexpr void evaluate_scaled(std::span<const double, Shape::x_size> x,
+                                       std::span<double, Shape::x_size>       out,
+                                       const double*                          output_scale) noexcept
+        {
+            evaluate_scaled_with(plan, runtime_scalars_, workspace, x, out, output_scale);
         }
 
         OperatorPlan      plan{};
