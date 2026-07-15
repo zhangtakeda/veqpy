@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(cxx_kernel LANGUAGES CXX)
+project(cxx_kernel LANGUAGES C CXX)
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
@@ -500,7 +500,21 @@ endfunction()
 
 cxx_require_clang()
 
-set(VEQPY_CXX_COMMON_SOURCES nonlinear.cpp linalg.cpp)
+set(
+    VEQPY_CXX_COMMON_SOURCES
+    nonlinear.cpp
+    linalg.cpp
+    minpack/dogleg.c
+    minpack/dpmpar.c
+    minpack/enorm.c
+    minpack/fdjac1.c
+    minpack/hybrd.c
+    minpack/hybrj.c
+    minpack/qform.c
+    minpack/qrfac.c
+    minpack/r1mpyq.c
+    minpack/r1updt.c
+)
 
 function(cxx_configure_target target)
     target_include_directories(

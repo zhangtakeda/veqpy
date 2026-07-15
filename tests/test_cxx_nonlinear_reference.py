@@ -73,6 +73,21 @@ def nonlinear_reference_driver(tmp_path_factory: pytest.TempPathFactory) -> Path
         str(_cminpack_include()),
         str(DRIVER_SOURCE),
         str(CORE_DIR / "nonlinear.cpp"),
+        *(
+            str(CORE_DIR / "minpack" / source)
+            for source in (
+                "dogleg.c",
+                "dpmpar.c",
+                "enorm.c",
+                "fdjac1.c",
+                "hybrd.c",
+                "hybrj.c",
+                "qform.c",
+                "qrfac.c",
+                "r1mpyq.c",
+                "r1updt.c",
+            )
+        ),
         "-lcminpack",
         "-o",
         str(output),

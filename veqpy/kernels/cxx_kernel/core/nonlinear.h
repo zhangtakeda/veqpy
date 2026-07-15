@@ -3,6 +3,7 @@
 // Nonlinear solver adapters and finite-difference helpers for generated Cxx Kernel artifacts.
 
 #include "linalg.h"
+#include "minpack/cminpack.h"
 #include "tensor.h"
 #include <algorithm>
 #include <array>
@@ -687,7 +688,7 @@ namespace nonlinear::detail
             std::fill(diag.begin(), diag.end(), 1.0);
             int nfev = 0;
             int njev = 0;
-            info     = cminpack::hybrj(callback_with_jacobian,
+            info     = ::hybrj(callback_with_jacobian,
                                    this,
                                    cminpack_size,
                                    x,
@@ -717,7 +718,7 @@ namespace nonlinear::detail
         {
             std::fill(diag.begin(), diag.end(), 1.0);
             int nfev = 0;
-            info     = cminpack::hybrd(callback,
+            info     = ::hybrd(callback,
                                    this,
                                    cminpack_size,
                                    x,
