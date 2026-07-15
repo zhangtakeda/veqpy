@@ -124,6 +124,8 @@ def _measure_case(args: argparse.Namespace, case_key: str, config_label: str) ->
             recipe=recipe,
             warmup=args.warmup,
             repeat=args.repeat,
+            cache_root=args.cache_root,
+            source_dir=args.source_dir,
         )
         native_engine = engine_payload(native_measure)
         numba_engine = engine_payload(numba_measure)

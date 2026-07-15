@@ -1403,8 +1403,16 @@ def measure_kernel_case(
     recipe: KernelRecipe,
     warmup: int,
     repeat: int,
+    cache_root: Path | None = None,
+    source_dir: Path | None = None,
 ) -> dict[str, Any]:
-    kernel = Kernel(topology=case.topology, recipe=recipe, config=case.config)
+    kernel = Kernel(
+        topology=case.topology,
+        recipe=recipe,
+        config=case.config,
+        cache_root=cache_root,
+        source_dir=source_dir,
+    )
     try:
         for _ in range(max(0, int(warmup))):
             result = kernel.solve(case.boundary, case.source)

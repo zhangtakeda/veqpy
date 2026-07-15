@@ -85,7 +85,14 @@ def _scan_offsets(*, points: int, span: float) -> list[float]:
     return [float(lower + step * index) for index in range(points)]
 
 
-def _sequence_once(points, *, recipe: KernelRecipe, config: KernelConfig) -> dict[str, Any]:
+def _sequence_once(
+    points,
+    *,
+    recipe: KernelRecipe,
+    config: KernelConfig,
+    cache_root: Path | None = None,
+    source_dir: Path | None = None,
+) -> dict[str, Any]:
     started = time.perf_counter_ns()
     total_nfev = 0
     total_njev = 0
@@ -95,7 +102,13 @@ def _sequence_once(points, *, recipe: KernelRecipe, config: KernelConfig) -> dic
     point_success: list[bool] = []
     point_raw_norm: list[float] = []
     first = points[0]
-    kernel = Kernel(topology=first.topology, recipe=recipe, config=config)
+    kernel = Kernel(
+        topology=first.topology,
+        recipe=recipe,
+        config=config,
+        cache_root=cache_root,
+        source_dir=source_dir,
+    )
     try:
         for point in points:
             point = replace(point, config=config)
@@ -132,12 +145,27 @@ def _measure_policy_payload(
     policy: str,
     repeat: int,
     warmup: int,
+    cache_root: Path | None = None,
+    source_dir: Path | None = None,
 ) -> dict[str, Any]:
     config = _policy_config(base_config, policy)
     for _ in range(max(0, int(warmup))):
-        _sequence_once(points, recipe=recipe, config=config)
+        _sequence_once(
+            points,
+            recipe=recipe,
+            config=config,
+            cache_root=cache_root,
+            source_dir=source_dir,
+        )
     samples = [
-        _sequence_once(points, recipe=recipe, config=config) for _ in range(max(1, int(repeat)))
+        _sequence_once(
+            points,
+            recipe=recipe,
+            config=config,
+            cache_root=cache_root,
+            source_dir=source_dir,
+        )
+        for _ in range(max(1, int(repeat)))
     ]
     last = samples[-1]
     return {
@@ -196,6 +224,8 @@ def _measure_case(
             policy=policy,
             repeat=args.repeat,
             warmup=args.warmup,
+            cache_root=args.cache_root,
+            source_dir=args.source_dir,
         )
         for policy in policies
     }
