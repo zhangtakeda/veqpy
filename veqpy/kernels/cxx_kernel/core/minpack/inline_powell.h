@@ -220,7 +220,7 @@ inline int powell_finite_difference(
     real d1, d2;
 
     /* Local variables */
-    int i, j, l, jm1, iwa[1];
+    int i, j, l, iwa[1];
     real sum;
     int sing;
     int iter;
@@ -468,7 +468,7 @@ inline int powell_finite_difference(
             qtf[j] = fvec[j];
         }
         __cminpack_func__(qrfac_apply_qt)(n, n, &fjac[fjac_offset], ldfjac, FALSE_, iwa, 1,
-              &wa1[1], &wa2[1], &wa3[1], &qtf[1]);
+              &wa1[1], &wa2[1], &wa3[1], &qtf[1], &r[1], &sing);
 
 /*        on the first iteration, scale according to the norms of */
 /*        the columns of the initial jacobian. */
@@ -497,22 +497,6 @@ inline int powell_finite_difference(
 /*        form (q transpose)*fvec and store in qtf. */
 
 /*        copy the triangular factor of the qr factorization into r. */
-
-        sing = FALSE_;
-        for (j = 1; j <= n; ++j) {
-            l = j;
-            jm1 = j - 1;
-            if (jm1 >= 1) {
-                for (i = 1; i <= jm1; ++i) {
-                    r[l] = fjac[i + j * fjac_dim1];
-                    l = l + n - i;
-                }
-            }
-            r[l] = wa1[j];
-            if (wa1[j] == 0.) {
-                sing = TRUE_;
-            }
-        }
 
 /*        accumulate the orthogonal factor in fjac. */
 
@@ -747,7 +731,7 @@ inline int powell_with_jacobian(
     real d1, d2;
 
     /* Local variables */
-    int i, j, l, jm1, iwa[1];
+    int i, j, l, iwa[1];
     real sum;
     int sing;
     int iter;
@@ -975,7 +959,7 @@ inline int powell_with_jacobian(
             qtf[j] = fvec[j];
         }
         __cminpack_func__(qrfac_apply_qt)(n, n, &fjac[fjac_offset], ldfjac, FALSE_, iwa, 1,
-              &wa1[1], &wa2[1], &wa3[1], &qtf[1]);
+              &wa1[1], &wa2[1], &wa3[1], &qtf[1], &r[1], &sing);
 
 /*        on the first iteration, scale according to the norms of */
 /*        the columns of the initial jacobian. */
@@ -1004,22 +988,6 @@ inline int powell_with_jacobian(
 /*        form (q transpose)*fvec and store in qtf. */
 
 /*        copy the triangular factor of the qr factorization into r. */
-
-        sing = FALSE_;
-        for (j = 1; j <= n; ++j) {
-            l = j;
-            jm1 = j - 1;
-            if (jm1 >= 1) {
-                for (i = 1; i <= jm1; ++i) {
-                    r[l] = fjac[i + j * fjac_dim1];
-                    l = l + n - i;
-                }
-            }
-            r[l] = wa1[j];
-            if (wa1[j] == 0.) {
-                sing = TRUE_;
-            }
-        }
 
 /*        accumulate the orthogonal factor in fjac. */
 

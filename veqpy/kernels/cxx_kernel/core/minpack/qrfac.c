@@ -10,7 +10,7 @@
 __cminpack_attr__
 void __cminpack_func__(qrfac_apply_qt)(int m, int n, real *a, int
 	lda, int pivot, int *ipvt, int lipvt, real *rdiag,
-	 real *acnorm, real *wa, real *qtf)
+	 real *acnorm, real *wa, real *qtf, real *packed_r, int *singular)
 {
 #ifdef USE_LAPACK
     __CLPK_integer m_ = m;
@@ -97,6 +97,19 @@ void __cminpack_func__(qrfac_apply_qt)(int m, int n, real *a, int
             real transform = -sum / a[j + j * lda];
             for (i = j; i < m; ++i) {
                 qtf[i] += a[i + j * lda] * transform;
+            }
+        }
+    }
+    if (packed_r != 0) {
+        *singular = FALSE_;
+        for (j = 0; j < n; ++j) {
+            const int row_start = j * (2 * n - j + 1) / 2;
+            packed_r[row_start] = rdiag[j];
+            if (rdiag[j] == 0.) {
+                *singular = TRUE_;
+            }
+            for (k = j + 1; k < n; ++k) {
+                packed_r[row_start + k - j] = a[j + k * lda];
             }
         }
     }
@@ -229,6 +242,9 @@ void __cminpack_func__(qrfac_apply_qt)(int m, int n, real *a, int
 /*     reduce a to r with householder transformations. */
 
     minmn = min(m,n);
+    if (packed_r != 0) {
+        *singular = FALSE_;
+    }
     for (j = 0; j < minmn; ++j) {
 	if (pivot) {
 
@@ -306,9 +322,18 @@ void __cminpack_func__(qrfac_apply_qt)(int m, int n, real *a, int
             }
         }
 	rdiag[j] = -ajnorm;
+        if (packed_r != 0) {
+            const int row_start = j * (2 * n - j + 1) / 2;
+            packed_r[row_start] = rdiag[j];
+            if (rdiag[j] == 0.) {
+                *singular = TRUE_;
+            }
+            for (k = j + 1; k < n; ++k) {
+                packed_r[row_start + k - j] = a[j + k * lda];
+            }
+        }
     }
 
 /*     last card of subroutine qrfac. */
 #endif /* !USE_LAPACK */
 } /* qrfac_apply_qt_ */
-

@@ -397,7 +397,7 @@ inline int lm_finite_difference(
             qtf[i] = fvec[i];
         }
         __cminpack_func__(qrfac_apply_qt)(m, n, fjac, ldfjac, TRUE_, ipvt, n,
-              wa1, wa2, wa3, qtf);
+              wa1, wa2, wa3, qtf, nullptr, nullptr);
 
         if (iter == 1) {
 /*        on the first iteration, calculate the norm of the scaled x */
@@ -875,7 +875,7 @@ inline int lm_with_jacobian(
             qtf[i] = fvec[i];
         }
         __cminpack_func__(qrfac_apply_qt)(m, n, fjac, ldfjac, TRUE_, ipvt, n,
-              wa1, wa2, wa3, qtf);
+              wa1, wa2, wa3, qtf, nullptr, nullptr);
 
         if (iter == 1) {
 /*        on the first iteration, calculate the norm of the scaled x */
