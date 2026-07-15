@@ -24,7 +24,8 @@ void qrsolv(int n, double* r, int ldr, const int* ipvt, const double* diag,
 void qform(int m, int n, double* q, int ldq, double* wa);
 void r1updt(int m, int n, double* s, int ls, const double* u, double* v,
             double* w, int* sing);
-void r1mpyq(int m, int n, double* a, int lda, const double* v, const double* w);
+void r1mpyq_pair(int n, double* q, int ldq, double* qtf,
+                 const double* v, const double* w);
 void lmpar(int n, double* r, int ldr, const int* ipvt, const double* diag,
            const double* qtb, double delta, double* par, double* x,
            double* sdiag, double* wa1, double* wa2);

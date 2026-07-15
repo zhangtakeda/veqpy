@@ -696,8 +696,8 @@ inline int powell_finite_difference(
 /*           compute the qr factorization of the updated jacobian. */
 
             __cminpack_func__(r1updt)(n, n, &r[1], lr, &wa1[1], &wa2[1], &wa3[1], &sing);
-            __cminpack_func__(r1mpyq)(n, n, &fjac[fjac_offset], ldfjac, &wa2[1], &wa3[1]);
-            __cminpack_func__(r1mpyq)(1, n, &qtf[1], 1, &wa2[1], &wa3[1]);
+            __cminpack_func__(r1mpyq_pair)(
+                n, &fjac[fjac_offset], ldfjac, &qtf[1], &wa2[1], &wa3[1]);
 
 /*           end of the inner loop. */
 
@@ -1202,8 +1202,8 @@ inline int powell_with_jacobian(
 /*           compute the qr factorization of the updated jacobian. */
 
             __cminpack_func__(r1updt)(n, n, &r[1], lr, &wa1[1], &wa2[1], &wa3[1], &sing);
-            __cminpack_func__(r1mpyq)(n, n, &fjac[fjac_offset], ldfjac, &wa2[1], &wa3[1]);
-            __cminpack_func__(r1mpyq)(1, n, &qtf[1], 1, &wa2[1], &wa3[1]);
+            __cminpack_func__(r1mpyq_pair)(
+                n, &fjac[fjac_offset], ldfjac, &qtf[1], &wa2[1], &wa3[1]);
 
 /*           end of the inner loop. */
 
