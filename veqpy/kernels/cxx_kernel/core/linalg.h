@@ -964,9 +964,20 @@ namespace linalg::detail
                 }
 
                 if (k + 1 < N1)
-                    for (size_t column = k + 1; column < N1; ++column)
-                        for (size_t row = k + 1; row < N1; ++row)
-                            LU[row * N1 + column] -= LU[row * N1 + k] * LU[k * N1 + column];
+                {
+                    // DGETF2's rank-one update is independent across the
+                    // trailing entries.  Visit a destination row at a time:
+                    // both the pivot tail and the destination tail are then
+                    // contiguous in VEQPy's row-major fixed storage.
+                    const double* pivot_tail = LU + k * N1 + k + 1;
+                    for (size_t row = k + 1; row < N1; ++row)
+                    {
+                        const double multiplier = LU[row * N1 + k];
+                        double*      row_tail   = LU + row * N1 + k + 1;
+                        for (size_t column = k + 1; column < N1; ++column)
+                            row_tail[column - k - 1] -= multiplier * pivot_tail[column - k - 1];
+                    }
+                }
             }
         }
 
@@ -984,19 +995,31 @@ namespace linalg::detail
             }
 
             for (size_t i = 1; i < N1; ++i)
-                for (size_t j = 0; j < P; ++j)
-                    for (size_t k = 0; k < i; ++k)
-                        x[i * P + j] -= LU[i * N1 + k] * x[k * P + j];
+            {
+                const double* factor_row = LU + i * N1;
+                double*       rhs_row    = x + i * P;
+                for (size_t k = 0; k < i; ++k)
+                {
+                    const double  multiplier = factor_row[k];
+                    const double* solved_row = x + k * P;
+                    for (size_t j = 0; j < P; ++j)
+                        rhs_row[j] -= multiplier * solved_row[j];
+                }
+            }
 
             for (size_t i = N1; i-- > 0;)
             {
-                for (size_t j = 0; j < P; ++j)
+                const double* factor_row = LU + i * N1;
+                double*       rhs_row    = x + i * P;
+                for (size_t k = i + 1; k < N1; ++k)
                 {
-                    for (size_t k = i + 1; k < N1; ++k)
-                        x[i * P + j] -= LU[i * N1 + k] * x[k * P + j];
-
-                    x[i * P + j] /= LU[i * N1 + i];
+                    const double  multiplier = factor_row[k];
+                    const double* solved_row = x + k * P;
+                    for (size_t j = 0; j < P; ++j)
+                        rhs_row[j] -= multiplier * solved_row[j];
                 }
+                for (size_t j = 0; j < P; ++j)
+                    rhs_row[j] /= factor_row[i];
             }
         }
     };
