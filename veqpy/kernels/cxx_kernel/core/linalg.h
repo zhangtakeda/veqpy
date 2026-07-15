@@ -822,11 +822,18 @@ namespace linalg::detail
                     const size_t kp = static_cast<size_t>(-ipiv[k] - 1);
                     swap_rhs_rows(x, k + 1, kp, P);
                     for (size_t row = k + 2; row < N1; ++row)
+                    {
+                        const double  multiplier_k   = L[row * N1 + k];
+                        const double  multiplier_kp1 = L[row * N1 + (k + 1)];
+                        const double* rhs_k          = x + k * P;
+                        const double* rhs_kp1        = x + (k + 1) * P;
+                        double*       rhs_row        = x + row * P;
                         for (size_t rhs = 0; rhs < P; ++rhs)
-                            x[row * P + rhs] -= L[row * N1 + k] * x[k * P + rhs];
-                    for (size_t row = k + 2; row < N1; ++row)
-                        for (size_t rhs = 0; rhs < P; ++rhs)
-                            x[row * P + rhs] -= L[row * N1 + (k + 1)] * x[(k + 1) * P + rhs];
+                        {
+                            rhs_row[rhs] -= multiplier_k * rhs_k[rhs];
+                            rhs_row[rhs] -= multiplier_kp1 * rhs_kp1[rhs];
+                        }
+                    }
 
                     const double akm1k = L[(k + 1) * N1 + k];
                     const double akm1  = L[k * N1 + k] / akm1k;
@@ -848,9 +855,14 @@ namespace linalg::detail
                 const size_t k = remaining - 1;
                 if (ipiv[k] > 0)
                 {
-                    for (size_t rhs = 0; rhs < P; ++rhs)
-                        for (size_t row = k + 1; row < N1; ++row)
-                            x[k * P + rhs] -= L[row * N1 + k] * x[row * P + rhs];
+                    double* rhs_k = x + k * P;
+                    for (size_t row = k + 1; row < N1; ++row)
+                    {
+                        const double  multiplier = L[row * N1 + k];
+                        const double* rhs_row    = x + row * P;
+                        for (size_t rhs = 0; rhs < P; ++rhs)
+                            rhs_k[rhs] -= multiplier * rhs_row[rhs];
+                    }
                     const size_t kp = static_cast<size_t>(ipiv[k] - 1);
                     swap_rhs_rows(x, k, kp, P);
                     remaining = k;
@@ -858,12 +870,19 @@ namespace linalg::detail
                 else
                 {
                     const size_t km1 = k - 1;
-                    for (size_t rhs = 0; rhs < P; ++rhs)
-                        for (size_t row = k + 1; row < N1; ++row)
-                            x[k * P + rhs] -= L[row * N1 + k] * x[row * P + rhs];
-                    for (size_t rhs = 0; rhs < P; ++rhs)
-                        for (size_t row = k + 1; row < N1; ++row)
-                            x[km1 * P + rhs] -= L[row * N1 + km1] * x[row * P + rhs];
+                    double* rhs_k   = x + k * P;
+                    double* rhs_km1 = x + km1 * P;
+                    for (size_t row = k + 1; row < N1; ++row)
+                    {
+                        const double  multiplier_k   = L[row * N1 + k];
+                        const double  multiplier_km1 = L[row * N1 + km1];
+                        const double* rhs_row        = x + row * P;
+                        for (size_t rhs = 0; rhs < P; ++rhs)
+                        {
+                            rhs_k[rhs] -= multiplier_k * rhs_row[rhs];
+                            rhs_km1[rhs] -= multiplier_km1 * rhs_row[rhs];
+                        }
+                    }
                     const size_t kp = static_cast<size_t>(-ipiv[k] - 1);
                     swap_rhs_rows(x, k, kp, P);
                     remaining = km1;
@@ -921,25 +940,32 @@ namespace linalg::detail
 
             for (size_t i = 0; i < N1; ++i)
             {
-                for (size_t j = 0; j < P; ++j)
+                const double* factor_row = L + i * N1;
+                double*       rhs_row    = x + i * P;
+                for (size_t k = 0; k < i; ++k)
                 {
-                    for (size_t k = 0; k < i; ++k)
-                        x[i * P + j] -= L[i * N1 + k] * x[k * P + j];
-
-                    x[i * P + j] /= L[i * N1 + i];
+                    const double  multiplier = factor_row[k];
+                    const double* solved_row = x + k * P;
+                    for (size_t j = 0; j < P; ++j)
+                        rhs_row[j] -= multiplier * solved_row[j];
                 }
+                for (size_t j = 0; j < P; ++j)
+                    rhs_row[j] /= factor_row[i];
             }
 
             for (size_t ii = N1; ii > 0; --ii)
             {
                 const size_t i = ii - 1;
-                for (size_t j = 0; j < P; ++j)
+                double* rhs_row = x + i * P;
+                for (size_t k = i + 1; k < N1; ++k)
                 {
-                    for (size_t k = i + 1; k < N1; ++k)
-                        x[i * P + j] -= L[k * N1 + i] * x[k * P + j];
-
-                    x[i * P + j] /= L[i * N1 + i];
+                    const double  multiplier = L[k * N1 + i];
+                    const double* solved_row = x + k * P;
+                    for (size_t j = 0; j < P; ++j)
+                        rhs_row[j] -= multiplier * solved_row[j];
                 }
+                for (size_t j = 0; j < P; ++j)
+                    rhs_row[j] /= L[i * N1 + i];
             }
         }
     };
