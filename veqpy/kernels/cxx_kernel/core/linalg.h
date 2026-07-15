@@ -191,11 +191,23 @@ namespace linalg::detail
                         double dot = bidiagonal[index * Columns + column];
                         for (size_t row = index + 1; row < Rows; ++row)
                             dot += bidiagonal[row * Columns + index] * bidiagonal[row * Columns + column];
-                        dot *= tau_q[index];
-                        bidiagonal[index * Columns + column] -= dot;
-                        for (size_t row = index + 1; row < Rows; ++row)
-                            bidiagonal[row * Columns + column] -= bidiagonal[row * Columns + index] * dot;
+                        // tau_p[index + 1:] belongs to reflectors that have
+                        // not been formed yet.  Reuse it as the fixed work
+                        // tail, then update each destination row contiguously.
+                        tau_p[column] = dot * tau_q[index];
                     }
+                if (tau_q[index] != 0.0)
+                {
+                    for (size_t column = index + 1; column < Columns; ++column)
+                        bidiagonal[index * Columns + column] -= tau_p[column];
+                    for (size_t row = index + 1; row < Rows; ++row)
+                    {
+                        const double multiplier = bidiagonal[row * Columns + index];
+                        double*      row_tail   = bidiagonal + row * Columns + index + 1;
+                        for (size_t column = index + 1; column < Columns; ++column)
+                            row_tail[column - index - 1] -= multiplier * tau_p[column];
+                    }
+                }
 
                 const size_t right_count = Columns - index - 1;
                 double* right_tail = index + 2 < Columns ? bidiagonal + index * Columns + index + 2
@@ -1065,18 +1077,26 @@ namespace linalg::detail
             const double* Vt = Vt_mat.data();
             const double* S  = S_vec.data();
             constexpr size_t rank = std::min(N1, N2);
-            Matrix<double, N1, P> projected{tensor::uninitialized};
+            Matrix<double, N1, P> projected{};
             Matrix<double, N2, P> spectral{};
-            Matrix<double, N2, P> result{tensor::uninitialized};
+            Matrix<double, N2, P> result{};
 
-            for (size_t row = 0; row < N1; ++row)
-                for (size_t rhs = 0; rhs < P; ++rhs)
+            // U is stored by rows, whereas the pseudoinverse needs U^T x.
+            // Accumulating one source row at a time makes every U read
+            // contiguous while retaining the original source-row summation
+            // order for each projected component.
+            for (size_t source_row = 0; source_row < N1; ++source_row)
+            {
+                const double* u_row   = U + source_row * N1;
+                const double* rhs_row = x + source_row * P;
+                for (size_t projected_row = 0; projected_row < N1; ++projected_row)
                 {
-                    double value = 0.0;
-                    for (size_t column = 0; column < N1; ++column)
-                        value += U[column * N1 + row] * x[column * P + rhs];
-                    projected[row * P + rhs] = value;
+                    const double multiplier = u_row[projected_row];
+                    double*      output_row = projected.data() + projected_row * P;
+                    for (size_t rhs = 0; rhs < P; ++rhs)
+                        output_row[rhs] += multiplier * rhs_row[rhs];
                 }
+            }
 
             // Preserve the legacy VEQ pseudoinverse cutoff while removing
             // the CBLAS/DGESDD implementation that previously imposed it.
@@ -1085,14 +1105,21 @@ namespace linalg::detail
                     for (size_t rhs = 0; rhs < P; ++rhs)
                         spectral[index * P + rhs] = projected[index * P + rhs] / S[index];
 
-            for (size_t row = 0; row < N2; ++row)
-                for (size_t rhs = 0; rhs < P; ++rhs)
+            // Vt(source, :) is one contiguous row in storage and represents
+            // column `source` of V.  This row-wise accumulation computes
+            // V * spectral without striding through Vt's columns.
+            for (size_t source_row = 0; source_row < N2; ++source_row)
+            {
+                const double* vt_row       = Vt + source_row * N2;
+                const double* spectral_row = spectral.data() + source_row * P;
+                for (size_t result_row = 0; result_row < N2; ++result_row)
                 {
-                    double value = 0.0;
-                    for (size_t column = 0; column < N2; ++column)
-                        value += Vt[column * N2 + row] * spectral[column * P + rhs];
-                    result[row * P + rhs] = value;
+                    const double multiplier = vt_row[result_row];
+                    double*      output_row = result.data() + result_row * P;
+                    for (size_t rhs = 0; rhs < P; ++rhs)
+                        output_row[rhs] += multiplier * spectral_row[rhs];
                 }
+            }
             std::copy(result.data(), result.data() + result.count, x);
         }
     };
