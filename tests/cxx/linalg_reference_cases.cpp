@@ -37,6 +37,33 @@ namespace
         return maximum_error / std::max(maximum_value, std::numeric_limits<double>::min());
     }
 
+    template <std::size_t N>
+    double lower_relative_error(const double* got, const double* expected)
+    {
+        double maximum_error = 0.0;
+        double maximum_value = 0.0;
+        for (std::size_t row = 0; row < N; ++row)
+            for (std::size_t column = 0; column <= row; ++column)
+            {
+                maximum_error = std::max(maximum_error, std::abs(got[row * N + column] - expected[row * N + column]));
+                maximum_value = std::max(maximum_value, std::abs(expected[row * N + column]));
+            }
+        return maximum_error / std::max(maximum_value, std::numeric_limits<double>::min());
+    }
+
+    template <std::size_t Count>
+    double relative_error(const double* got, const double* expected)
+    {
+        double maximum_error = 0.0;
+        double maximum_value = 0.0;
+        for (std::size_t index = 0; index < Count; ++index)
+        {
+            maximum_error = std::max(maximum_error, std::abs(got[index] - expected[index]));
+            maximum_value = std::max(maximum_value, std::abs(expected[index]));
+        }
+        return maximum_error / std::max(maximum_value, std::numeric_limits<double>::min());
+    }
+
     constexpr double entry(std::size_t row, std::size_t column, std::size_t salt)
     {
         const auto value = (row * 37 + column * 17 + salt * 13 + 11) % 41;
@@ -257,6 +284,213 @@ namespace
         emit("householder", relative_error(internal, expected), relative_error(lapack, expected),
              relative_error(internal, lapack));
     }
+
+    void run_lu_subnormal_pivot()
+    {
+        constexpr std::size_t N = 2;
+        Mat<N, N> matrix{tensor::uninitialized};
+        matrix(0, 0) = 1.0e-310;
+        matrix(0, 1) = 1.0;
+        matrix(1, 0) = 1.0e-311;
+        matrix(1, 1) = 1.0;
+
+        linalg::Context<linalg::Doolittle, N, N> context;
+        context.factorize_from(matrix.data());
+
+        std::array<double, N * N> factor{};
+        std::array<lapack_int, N> pivots{};
+        std::copy(matrix.data(), matrix.data() + matrix.count, factor.data());
+        const lapack_int info = LAPACKE_dgetf2(
+            LAPACK_ROW_MAJOR, static_cast<lapack_int>(N), static_cast<lapack_int>(N), factor.data(),
+            static_cast<lapack_int>(N), pivots.data());
+        if (info < 0)
+            std::abort();
+
+        double pivot_error = 0.0;
+        for (std::size_t index = 0; index < N; ++index)
+            pivot_error = std::max(pivot_error, std::abs(static_cast<double>(context.pivot_vec[index] + 1 - pivots[index])));
+        // The bundled LAPACKE build reports the same pivot/info but flushes
+        // its subnormal DGETF2 update on this host.  Check the source-kernel
+        // branch directly: DGETF2 divides here rather than forming an
+        // overflowing reciprocal.
+        emit("doolittle_subnormal", std::abs(static_cast<double>(context.info - info)),
+             std::abs(context.LU_mat(1, 0) - 0.1), pivot_error);
+    }
+
+    void run_cholesky_lower_storage()
+    {
+        constexpr std::size_t N = 3;
+        Mat<N, N> matrix{tensor::uninitialized};
+        matrix(0, 0) = 4.0;
+        matrix(0, 1) = -7.0;
+        matrix(0, 2) = 19.0;
+        matrix(1, 0) = 1.0;
+        matrix(1, 1) = 3.0;
+        matrix(1, 2) = -13.0;
+        matrix(2, 0) = -2.0;
+        matrix(2, 1) = 0.5;
+        matrix(2, 2) = 5.0;
+
+        linalg::Context<linalg::Cholesky, N, N> context;
+        context.factorize_from(matrix.data());
+
+        std::array<double, N * N> factor{};
+        std::copy(matrix.data(), matrix.data() + matrix.count, factor.data());
+        const lapack_int info = LAPACKE_dpotrf(
+            LAPACK_ROW_MAJOR, 'L', static_cast<lapack_int>(N), factor.data(), static_cast<lapack_int>(N));
+        if (info < 0)
+            std::abort();
+
+        emit("cholesky_lower_storage", std::abs(static_cast<double>(context.info - info)),
+             lower_relative_error<N>(context.LLT_mat.data(), factor.data()), 0.0);
+    }
+
+    void run_cholesky_non_positive()
+    {
+        constexpr std::size_t N = 2;
+        Mat<N, N> matrix{tensor::uninitialized};
+        matrix(0, 0) = 1.0;
+        matrix(0, 1) = 5.0;
+        matrix(1, 0) = 0.0;
+        matrix(1, 1) = -1.0;
+
+        linalg::Context<linalg::Cholesky, N, N> context;
+        context.factorize_from(matrix.data());
+
+        std::array<double, N * N> factor{};
+        std::copy(matrix.data(), matrix.data() + matrix.count, factor.data());
+        const lapack_int info = LAPACKE_dpotrf(
+            LAPACK_ROW_MAJOR, 'L', static_cast<lapack_int>(N), factor.data(), static_cast<lapack_int>(N));
+        if (info < 0)
+            std::abort();
+
+        emit("cholesky_non_positive", std::abs(static_cast<double>(context.info - info)),
+             lower_relative_error<N>(context.LLT_mat.data(), factor.data()), 0.0);
+    }
+
+    void run_bunch_kaufman_two_by_two()
+    {
+        constexpr std::size_t N = 4;
+        constexpr std::size_t P = 1;
+        Mat<N, N> matrix{tensor::uninitialized};
+        Mat<N, P> expected{tensor::uninitialized};
+        Mat<N, P> rhs{tensor::uninitialized};
+        matrix(0, 0) = 0.0;
+        matrix(0, 1) = 1.0;
+        matrix(0, 2) = 0.0;
+        matrix(0, 3) = 0.0;
+        matrix(1, 0) = 1.0;
+        matrix(1, 1) = 0.0;
+        matrix(1, 2) = 0.125;
+        matrix(1, 3) = 0.0;
+        matrix(2, 0) = 0.0;
+        matrix(2, 1) = 0.125;
+        matrix(2, 2) = 2.0;
+        matrix(2, 3) = 0.25;
+        matrix(3, 0) = 0.0;
+        matrix(3, 1) = 0.0;
+        matrix(3, 2) = 0.25;
+        matrix(3, 3) = 3.0;
+        for (std::size_t row = 0; row < N; ++row)
+            expected(row, 0) = 0.25 + 0.125 * static_cast<double>(row);
+        form_rhs(matrix, expected, rhs);
+
+        linalg::Context<linalg::BunchKaufman, N, N> context;
+        context.factorize_from(matrix.data());
+        Mat<N, P> internal{tensor::uninitialized};
+        std::copy(rhs.data(), rhs.data() + rhs.count, internal.data());
+        context.template substitute_inplace<P>(internal.data());
+
+        std::array<double, N * N> factor{};
+        std::array<lapack_int, N> pivots{};
+        Mat<N, P> lapack{tensor::uninitialized};
+        std::copy(matrix.data(), matrix.data() + matrix.count, factor.data());
+        std::copy(rhs.data(), rhs.data() + rhs.count, lapack.data());
+        const lapack_int factor_info = LAPACKE_dsytrf(
+            LAPACK_ROW_MAJOR, 'L', static_cast<lapack_int>(N), factor.data(), static_cast<lapack_int>(N), pivots.data());
+        const lapack_int solve_info = LAPACKE_dsytrs(
+            LAPACK_ROW_MAJOR, 'L', static_cast<lapack_int>(N), static_cast<lapack_int>(P), factor.data(),
+            static_cast<lapack_int>(N), pivots.data(), lapack.data(), static_cast<lapack_int>(P));
+        if (factor_info != 0 || solve_info != 0)
+            std::abort();
+
+        double pivot_error = 0.0;
+        for (std::size_t index = 0; index < N; ++index)
+            pivot_error = std::max(pivot_error, std::abs(static_cast<double>(context.pivot_vec[index] - pivots[index])));
+        emit("bunch_kaufman_two_by_two", relative_error(internal, expected),
+             lower_relative_error<N>(context.LDLT_mat.data(), factor.data()), pivot_error);
+    }
+
+    void run_bunch_kaufman_one_by_one_swap()
+    {
+        constexpr std::size_t N = 3;
+        constexpr std::size_t P = 1;
+        Mat<N, N> matrix{tensor::uninitialized};
+        Mat<N, P> expected{tensor::uninitialized};
+        Mat<N, P> rhs{tensor::uninitialized};
+        matrix(0, 0) = 0.1;
+        matrix(0, 1) = 0.5;
+        matrix(0, 2) = 2.0;
+        matrix(1, 0) = 0.5;
+        matrix(1, 1) = 1.0;
+        matrix(1, 2) = 0.125;
+        matrix(2, 0) = 2.0;
+        matrix(2, 1) = 0.125;
+        matrix(2, 2) = 5.0;
+        for (std::size_t row = 0; row < N; ++row)
+            expected(row, 0) = 0.2 + 0.1 * static_cast<double>(row);
+        form_rhs(matrix, expected, rhs);
+
+        linalg::Context<linalg::BunchKaufman, N, N> context;
+        context.factorize_from(matrix.data());
+        Mat<N, P> internal{tensor::uninitialized};
+        std::copy(rhs.data(), rhs.data() + rhs.count, internal.data());
+        context.template substitute_inplace<P>(internal.data());
+
+        std::array<double, N * N> factor{};
+        std::array<lapack_int, N> pivots{};
+        Mat<N, P> lapack{tensor::uninitialized};
+        std::copy(matrix.data(), matrix.data() + matrix.count, factor.data());
+        std::copy(rhs.data(), rhs.data() + rhs.count, lapack.data());
+        const lapack_int factor_info = LAPACKE_dsytrf(
+            LAPACK_ROW_MAJOR, 'L', static_cast<lapack_int>(N), factor.data(), static_cast<lapack_int>(N), pivots.data());
+        const lapack_int solve_info = LAPACKE_dsytrs(
+            LAPACK_ROW_MAJOR, 'L', static_cast<lapack_int>(N), static_cast<lapack_int>(P), factor.data(),
+            static_cast<lapack_int>(N), pivots.data(), lapack.data(), static_cast<lapack_int>(P));
+        if (factor_info != 0 || solve_info != 0)
+            std::abort();
+
+        double pivot_error = 0.0;
+        for (std::size_t index = 0; index < N; ++index)
+            pivot_error = std::max(pivot_error, std::abs(static_cast<double>(context.pivot_vec[index] - pivots[index])));
+        emit("bunch_kaufman_one_by_one_swap", relative_error(internal, expected),
+             lower_relative_error<N>(context.LDLT_mat.data(), factor.data()), pivot_error);
+    }
+
+    void run_householder_subnormal_reflector()
+    {
+        constexpr std::size_t M = 3;
+        constexpr std::size_t N = 1;
+        Mat<M, N> matrix{tensor::uninitialized};
+        matrix(0, 0) = 1.0e-310;
+        matrix(1, 0) = 2.0e-310;
+        matrix(2, 0) = -1.0e-310;
+
+        linalg::Context<linalg::Householder, M, N> context;
+        context.factorize_from(matrix.data());
+
+        std::array<double, M * N> factor{};
+        std::array<double, N> tau{};
+        std::copy(matrix.data(), matrix.data() + matrix.count, factor.data());
+        const lapack_int info = LAPACKE_dgeqrf(
+            LAPACK_ROW_MAJOR, static_cast<lapack_int>(M), static_cast<lapack_int>(N), factor.data(),
+            static_cast<lapack_int>(N), tau.data());
+        if (info != 0)
+            std::abort();
+
+        emit("householder_subnormal", std::abs(static_cast<double>(context.info - info)),
+             relative_error<M * N>(context.QR_mat.data(), factor.data()), relative_error<N>(context.tau_vec.data(), tau.data()));
+    }
 } // namespace
 
 int main()
@@ -278,5 +512,11 @@ int main()
     run_householder<32, 16, 2>();
     run_householder<64, 32, 1>();
     run_householder<128, 64, 2>();
+    run_lu_subnormal_pivot();
+    run_cholesky_lower_storage();
+    run_cholesky_non_positive();
+    run_bunch_kaufman_two_by_two();
+    run_bunch_kaufman_one_by_one_swap();
+    run_householder_subnormal_reflector();
     return 0;
 }

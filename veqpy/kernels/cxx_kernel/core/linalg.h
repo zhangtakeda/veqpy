@@ -6,8 +6,11 @@
 #include "tensor.h"
 #include <algorithm>
 #include <cassert>
+#include <bit>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
+#include <limits>
 #include <type_traits>
 
 namespace linalg::detail
@@ -35,6 +38,112 @@ namespace linalg::detail
     inline constexpr size_t householder_lapack_min_size   = 48 * 48;
 
     inline constexpr double linear_tolerance = 1.0e-10;
+
+    // Fixed-size, row-major adaptations of the LAPACK unblocked kernels use
+    // their exact-zero/safe-scaling semantics.  linear_tolerance remains for
+    // the unrelated Thomas helper below.
+    inline constexpr double lapack_safe_min = std::numeric_limits<double>::min();
+    // DLAMCH('E') is the unit roundoff used by DLARFG (half the C++
+    // numeric_limits epsilon on IEEE-754 binary64).
+    inline constexpr double lapack_unit_roundoff = std::numeric_limits<double>::epsilon() * 0.5;
+    inline constexpr double larfg_safe_min       = lapack_safe_min / lapack_unit_roundoff;
+
+    constexpr bool is_nan(double value) noexcept
+    {
+        constexpr std::uint64_t exponent_mask = 0x7ff0'0000'0000'0000ULL;
+        constexpr std::uint64_t fraction_mask = 0x000f'ffff'ffff'ffffULL;
+        const auto bits = std::bit_cast<std::uint64_t>(value);
+        return (bits & exponent_mask) == exponent_mask && (bits & fraction_mask) != 0;
+    }
+
+    constexpr bool is_negative(double value) noexcept
+    {
+        return (std::bit_cast<std::uint64_t>(value) & 0x8000'0000'0000'0000ULL) != 0;
+    }
+
+    constexpr double stable_norm(const double* values, size_t count, size_t stride = 1)
+    {
+        double scale = 0.0;
+        double ssq   = 1.0;
+        for (size_t index = 0; index < count; ++index)
+        {
+            const double absolute = math::abs(values[index * stride]);
+            if (!math::is_finite(absolute))
+                return absolute;
+            if (absolute == 0.0)
+                continue;
+            if (scale < absolute)
+            {
+                const double ratio = scale / absolute;
+                ssq                = 1.0 + ssq * ratio * ratio;
+                scale              = absolute;
+            }
+            else
+            {
+                const double ratio = absolute / scale;
+                ssq += ratio * ratio;
+            }
+        }
+        return scale == 0.0 ? 0.0 : scale * sqrt(ssq);
+    }
+
+    constexpr double signed_magnitude(double magnitude, double sign_source) noexcept
+    {
+        return is_negative(sign_source) ? -magnitude : magnitude;
+    }
+
+    constexpr void swap_rhs_rows(double* values, size_t lhs, size_t rhs, size_t columns)
+    {
+        if (lhs == rhs)
+            return;
+        for (size_t column = 0; column < columns; ++column)
+            std::swap(values[lhs * columns + column], values[rhs * columns + column]);
+    }
+
+    // Row-major, fixed-storage adaptation of DLARFG.  Keeping this helper
+    // scalar and constexpr lets the compiler unroll the known tail length
+    // without changing LAPACK's underflow-avoidance and sign rules.
+    constexpr void larfg(size_t count, double& alpha, double* tail, size_t stride, double& tau)
+    {
+        if (count <= 1)
+        {
+            tau = 0.0;
+            return;
+        }
+
+        double tail_norm = stable_norm(tail, count - 1, stride);
+        if (tail_norm == 0.0)
+        {
+            tau = 0.0;
+            return;
+        }
+
+        double beta = -signed_magnitude(math::hypot(alpha, tail_norm), alpha);
+        size_t scale_count = 0;
+        if (math::abs(beta) < larfg_safe_min)
+        {
+            const double reciprocal_safe_min = 1.0 / larfg_safe_min;
+            do
+            {
+                ++scale_count;
+                for (size_t index = 0; index < count - 1; ++index)
+                    tail[index * stride] *= reciprocal_safe_min;
+                beta *= reciprocal_safe_min;
+                alpha *= reciprocal_safe_min;
+            } while (math::abs(beta) < larfg_safe_min && scale_count < 20);
+
+            tail_norm = stable_norm(tail, count - 1, stride);
+            beta      = -signed_magnitude(math::hypot(alpha, tail_norm), alpha);
+        }
+
+        tau = (beta - alpha) / beta;
+        const double reciprocal_alpha_minus_beta = 1.0 / (alpha - beta);
+        for (size_t index = 0; index < count - 1; ++index)
+            tail[index * stride] *= reciprocal_alpha_minus_beta;
+        for (size_t index = 0; index < scale_count; ++index)
+            beta *= larfg_safe_min;
+        alpha = beta;
+    }
 
     struct BunchKaufman
     {
@@ -223,15 +332,18 @@ namespace linalg::detail
     {
         static_assert(N1 == N2, "BunchKaufman only supports square matrices");
 
-        static constexpr double alpha = 0.6403882032;
+        // (1 + sqrt(17)) / 8, the Bunch--Kaufman threshold in DSYTF2.
+        static constexpr double alpha = 0.6403882032022076;
 
         Matrix<double, N1, N1> LDLT_mat{tensor::uninitialized};
         Vector<int, N1>        pivot_vec{tensor::uninitialized};
+        int                     info{0};
 
         constexpr void factorize_from(const double* A)
         {
             double* L    = LDLT_mat.data();
             int*    ipiv = pivot_vec.data();
+            info         = 0;
             std::copy(A, A + N1 * N1, L);
 
             if constexpr (runtime_lapack_enabled && N1 * N1 >= bunch_kaufman_lapack_min_size)
@@ -243,78 +355,129 @@ namespace linalg::detail
                 }
             }
 
+            // DSYTF2('L') translated to row-major fixed storage.  It only
+            // reads and overwrites the lower triangle, exactly like LAPACK;
+            // the full Matrix remains solely a convenient fixed-size owner.
             for (size_t k = 0; k < N1;)
             {
-                size_t p            = k;
-                double max_off_diag = 0.0;
-                for (size_t i = k + 1; i < N1; ++i)
+                size_t kstep = 1;
+                size_t kp    = k;
+                const double absakk = math::abs(L[k * N1 + k]);
+
+                size_t imax   = k;
+                double colmax = 0.0;
+                if (k + 1 < N1)
                 {
-                    if (std::abs(L[i * N1 + k]) > max_off_diag)
+                    for (size_t row = k + 1; row < N1; ++row)
                     {
-                        max_off_diag = std::abs(L[i * N1 + k]);
-                        p            = i;
+                        const double absolute = math::abs(L[row * N1 + k]);
+                        if (absolute > colmax)
+                        {
+                            colmax = absolute;
+                            imax   = row;
+                        }
                     }
                 }
 
-                if (std::abs(L[k * N1 + k]) >= alpha * max_off_diag)
+                const bool singular_column = math::max(absakk, colmax) == 0.0 || is_nan(absakk);
+                if (singular_column)
                 {
-                    ipiv[k] = static_cast<int>(k);
-
-                    double dk = L[k * N1 + k];
-                    if (std::abs(dk) > linear_tolerance)
-                        for (size_t i = k + 1; i < N1; ++i)
-                            L[i * N1 + k] /= dk;
-
-                    for (size_t i = k + 1; i < N1; ++i)
-                    {
-                        double lik = L[i * N1 + k];
-                        for (size_t j = k + 1; j <= i; ++j)
-                            L[i * N1 + j] -= lik * L[j * N1 + k] * dk;
-                    }
-
-                    k++;
+                    if (info == 0)
+                        info = static_cast<int>(k + 1);
+                }
+                else if (absakk >= alpha * colmax)
+                {
+                    kp = k;
                 }
                 else
                 {
-                    if (p != k + 1)
+                    double rowmax = 0.0;
+                    for (size_t column = k; column < imax; ++column)
                     {
-                        for (size_t i = 0; i < N1; ++i)
-                            std::swap(L[p * N1 + i], L[(k + 1) * N1 + i]);
-
-                        for (size_t i = 0; i < N1; ++i)
-                            std::swap(L[i * N1 + p], L[i * N1 + (k + 1)]);
+                        const double absolute = math::abs(L[imax * N1 + column]);
+                        if (absolute > rowmax)
+                            rowmax = absolute;
                     }
 
-                    ipiv[k]     = static_cast<int>(p);
-                    ipiv[k + 1] = static_cast<int>(p);
-
-                    double d11 = L[k * N1 + k];
-                    double d21 = L[(k + 1) * N1 + k];
-                    double d22 = L[(k + 1) * N1 + (k + 1)];
-
-                    double det = d11 * d22 - d21 * d21;
-                    assert(std::abs(det) >= linear_tolerance);
-                    double inv_d11 = d22 / det;
-                    double inv_d21 = -d21 / det;
-                    double inv_d22 = d11 / det;
-
-                    for (size_t i = k + 2; i < N1; ++i)
+                    for (size_t row = imax + 1; row < N1; ++row)
                     {
-                        double lik        = L[i * N1 + k];
-                        double lik1       = L[i * N1 + k + 1];
-                        L[i * N1 + k]     = (lik * inv_d11 + lik1 * inv_d21);
-                        L[i * N1 + k + 1] = (lik * inv_d21 + lik1 * inv_d22);
+                        const double absolute = math::abs(L[row * N1 + imax]);
+                        if (absolute > rowmax)
+                            rowmax = absolute;
                     }
 
-                    for (size_t i = k + 2; i < N1; ++i)
-                        for (size_t j = k + 2; j <= i; ++j)
-                            L[i * N1 + j] -=
-                                (L[i * N1 + k] * L[j * N1 + k] * d11 +
-                                 (L[i * N1 + k] * L[j * N1 + k + 1] + L[i * N1 + k + 1] * L[j * N1 + k]) * d21 +
-                                 L[i * N1 + k + 1] * L[j * N1 + k + 1] * d22);
-
-                    k += 2;
+                    if (absakk >= alpha * colmax * (colmax / rowmax))
+                    {
+                        kp = k;
+                    }
+                    else if (math::abs(L[imax * N1 + imax]) >= alpha * rowmax)
+                    {
+                        kp = imax;
+                    }
+                    else
+                    {
+                        kp    = imax;
+                        kstep = 2;
+                    }
                 }
+
+                if (!singular_column)
+                {
+                    const size_t kk = k + kstep - 1;
+                    if (kp != kk)
+                    {
+                        for (size_t row = kp + 1; row < N1; ++row)
+                            std::swap(L[row * N1 + kk], L[row * N1 + kp]);
+                        for (size_t row = kk + 1; row < kp; ++row)
+                            std::swap(L[row * N1 + kk], L[kp * N1 + row]);
+                        std::swap(L[kk * N1 + kk], L[kp * N1 + kp]);
+                        if (kstep == 2)
+                            std::swap(L[(k + 1) * N1 + k], L[kp * N1 + k]);
+                    }
+
+                    if (kstep == 1)
+                    {
+                        if (k + 1 < N1)
+                        {
+                            const double d11 = 1.0 / L[k * N1 + k];
+                            for (size_t column = k + 1; column < N1; ++column)
+                                for (size_t row = column; row < N1; ++row)
+                                    L[row * N1 + column] -= L[row * N1 + k] * L[column * N1 + k] * d11;
+                            for (size_t row = k + 1; row < N1; ++row)
+                                L[row * N1 + k] *= d11;
+                        }
+                    }
+                    else if (k + 2 < N1)
+                    {
+                        double d21 = L[(k + 1) * N1 + k];
+                        const double d11 = L[(k + 1) * N1 + (k + 1)] / d21;
+                        const double d22 = L[k * N1 + k] / d21;
+                        const double scale = 1.0 / (d11 * d22 - 1.0);
+                        d21 = scale / d21;
+
+                        for (size_t column = k + 2; column < N1; ++column)
+                        {
+                            const double wk = d21 * (d11 * L[column * N1 + k] - L[column * N1 + (k + 1)]);
+                            const double wkp1 =
+                                d21 * (d22 * L[column * N1 + (k + 1)] - L[column * N1 + k]);
+                            for (size_t row = column; row < N1; ++row)
+                                L[row * N1 + column] -=
+                                    L[row * N1 + k] * wk + L[row * N1 + (k + 1)] * wkp1;
+                            L[column * N1 + k]       = wk;
+                            L[column * N1 + (k + 1)] = wkp1;
+                        }
+                    }
+                }
+
+                if (kstep == 1)
+                    ipiv[k] = static_cast<int>(kp + 1);
+                else
+                {
+                    ipiv[k]     = -static_cast<int>(kp + 1);
+                    ipiv[k + 1] = -static_cast<int>(kp + 1);
+                }
+
+                k += kstep;
             }
         }
 
@@ -333,83 +496,72 @@ namespace linalg::detail
                 }
             }
 
+            // DSYTRS('L'), sharing LAPACK's one-based signed IPIV encoding
+            // with the runtime path.  Positive entries denote 1x1 blocks;
+            // equal negative entries denote a 2x2 block.
             for (size_t k = 0; k < N1;)
             {
-                if (ipiv[k] == static_cast<int>(k))
+                if (ipiv[k] > 0)
                 {
-                    for (size_t j = 0; j < P; ++j)
-                        for (size_t i = k + 1; i < N1; ++i)
-                            x[i * P + j] -= L[i * N1 + k] * x[k * P + j];
-                    k++;
+                    const size_t kp = static_cast<size_t>(ipiv[k] - 1);
+                    swap_rhs_rows(x, k, kp, P);
+                    for (size_t row = k + 1; row < N1; ++row)
+                        for (size_t rhs = 0; rhs < P; ++rhs)
+                            x[row * P + rhs] -= L[row * N1 + k] * x[k * P + rhs];
+                    for (size_t rhs = 0; rhs < P; ++rhs)
+                        x[k * P + rhs] /= L[k * N1 + k];
+                    ++k;
                 }
                 else
                 {
-                    size_t p = static_cast<size_t>(ipiv[k]);
-                    if (p != k + 1)
-                        for (size_t j = 0; j < P; ++j)
-                            std::swap(x[(k + 1) * P + j], x[p * P + j]);
+                    const size_t kp = static_cast<size_t>(-ipiv[k] - 1);
+                    swap_rhs_rows(x, k + 1, kp, P);
+                    for (size_t row = k + 2; row < N1; ++row)
+                        for (size_t rhs = 0; rhs < P; ++rhs)
+                            x[row * P + rhs] -= L[row * N1 + k] * x[k * P + rhs];
+                    for (size_t row = k + 2; row < N1; ++row)
+                        for (size_t rhs = 0; rhs < P; ++rhs)
+                            x[row * P + rhs] -= L[row * N1 + (k + 1)] * x[(k + 1) * P + rhs];
 
-                    for (size_t j = 0; j < P; ++j)
-                        for (size_t i = k + 2; i < N1; ++i)
-                            x[i * P + j] -= L[i * N1 + k] * x[k * P + j] + L[i * N1 + k + 1] * x[(k + 1) * P + j];
+                    const double akm1k = L[(k + 1) * N1 + k];
+                    const double akm1  = L[k * N1 + k] / akm1k;
+                    const double ak    = L[(k + 1) * N1 + (k + 1)] / akm1k;
+                    const double denom = akm1 * ak - 1.0;
+                    for (size_t rhs = 0; rhs < P; ++rhs)
+                    {
+                        const double bkm1 = x[k * P + rhs] / akm1k;
+                        const double bk   = x[(k + 1) * P + rhs] / akm1k;
+                        x[k * P + rhs]       = (ak * bkm1 - bk) / denom;
+                        x[(k + 1) * P + rhs] = (akm1 * bk - bkm1) / denom;
+                    }
                     k += 2;
                 }
             }
 
-            for (size_t k = N1; k > 0;)
+            for (size_t remaining = N1; remaining > 0;)
             {
-                --k;
-                if (ipiv[k] == static_cast<int>(k))
+                const size_t k = remaining - 1;
+                if (ipiv[k] > 0)
                 {
-                    double dk = L[k * N1 + k];
-                    for (size_t j = 0; j < P; ++j)
-                        x[k * P + j] /= dk;
+                    for (size_t rhs = 0; rhs < P; ++rhs)
+                        for (size_t row = k + 1; row < N1; ++row)
+                            x[k * P + rhs] -= L[row * N1 + k] * x[row * P + rhs];
+                    const size_t kp = static_cast<size_t>(ipiv[k] - 1);
+                    swap_rhs_rows(x, k, kp, P);
+                    remaining = k;
                 }
                 else
                 {
-                    assert(k > 0);
                     const size_t km1 = k - 1;
-                    double       d11 = L[km1 * N1 + km1];
-                    double       d21 = L[k * N1 + km1];
-                    double       d22 = L[k * N1 + k];
-                    double       det = d11 * d22 - d21 * d21;
-                    assert(std::abs(det) >= linear_tolerance);
-                    for (size_t j = 0; j < P; ++j)
-                    {
-                        double y1      = x[km1 * P + j];
-                        double y2      = x[k * P + j];
-                        x[km1 * P + j] = (y1 * d22 - y2 * d21) / det;
-                        x[k * P + j]   = (y2 * d11 - y1 * d21) / det;
-                    }
-                    k = km1;
-                }
-            }
-
-            for (size_t k = N1; k > 0;)
-            {
-                --k;
-                if (ipiv[k] == static_cast<int>(k))
-                {
-                    for (size_t j = 0; j < P; ++j)
-                        for (size_t i = k + 1; i < N1; ++i)
-                            x[k * P + j] -= L[i * N1 + k] * x[i * P + j];
-                }
-                else
-                {
-                    assert(k > 0);
-                    const size_t km1 = k - 1;
-                    for (size_t j = 0; j < P; ++j)
-                        for (size_t i = k + 1; i < N1; ++i)
-                        {
-                            x[k * P + j] -= L[i * N1 + k] * x[i * P + j];
-                            x[km1 * P + j] -= L[i * N1 + km1] * x[i * P + j];
-                        }
-
-                    size_t p = static_cast<size_t>(ipiv[k]);
-                    if (p != k)
-                        for (size_t j = 0; j < P; ++j)
-                            std::swap(x[k * P + j], x[p * P + j]);
-                    k = km1;
+                    for (size_t rhs = 0; rhs < P; ++rhs)
+                        for (size_t row = k + 1; row < N1; ++row)
+                            x[k * P + rhs] -= L[row * N1 + k] * x[row * P + rhs];
+                    for (size_t rhs = 0; rhs < P; ++rhs)
+                        for (size_t row = k + 1; row < N1; ++row)
+                            x[km1 * P + rhs] -= L[row * N1 + km1] * x[row * P + rhs];
+                    const size_t kp = static_cast<size_t>(-ipiv[k] - 1);
+                    swap_rhs_rows(x, k, kp, P);
+                    remaining = km1;
                 }
             }
         }
@@ -421,10 +573,12 @@ namespace linalg::detail
         static_assert(N1 == N2, "cholesky only supports square matrices");
 
         Matrix<double, N1, N1> LLT_mat{tensor::uninitialized};
+        int                    info{0};
 
         constexpr void factorize_from(const double* A)
         {
             double* L = LLT_mat.data();
+            info      = 0;
             std::copy(A, A + N1 * N1, L);
 
             if constexpr (runtime_lapack_enabled && N1 * N1 >= cholesky_lapack_min_size)
@@ -436,29 +590,31 @@ namespace linalg::detail
                 }
             }
 
-            for (size_t i = 0; i < N1; ++i)
-                for (size_t j = i + 1; j < N1; ++j)
-                    assert(std::abs(L[i * N1 + j] - L[j * N1 + i]) <= linear_tolerance);
-
-            for (size_t i = 0; i < N1; ++i)
+            // DPOTF2('L') consumes and overwrites only the lower triangle;
+            // it deliberately does not validate or symmetrize the upper one.
+            for (size_t j = 0; j < N1; ++j)
             {
-                for (size_t j = 0; j < i; ++j)
-                {
-                    double sum = 0.0;
-                    for (size_t k = 0; k < j; ++k)
-                        sum += L[i * N1 + k] * L[j * N1 + k];
+                double ajj = L[j * N1 + j];
+                for (size_t k = 0; k < j; ++k)
+                    ajj -= L[j * N1 + k] * L[j * N1 + k];
 
-                    L[i * N1 + j] = (L[i * N1 + j] - sum) / L[j * N1 + j];
+                if (ajj <= 0.0 || is_nan(ajj))
+                {
+                    L[j * N1 + j] = ajj;
+                    info            = static_cast<int>(j + 1);
+                    return;
                 }
 
-                double sum = 0.0;
-                for (size_t k = 0; k < i; ++k)
-                    sum += L[i * N1 + k] * L[i * N1 + k];
-
-                double diag_val = L[i * N1 + i] - sum;
-                assert(diag_val > linear_tolerance);
-
-                L[i * N1 + i] = sqrt(diag_val);
+                ajj              = sqrt(ajj);
+                L[j * N1 + j]    = ajj;
+                const double inv = 1.0 / ajj;
+                for (size_t row = j + 1; row < N1; ++row)
+                {
+                    double value = L[row * N1 + j];
+                    for (size_t k = 0; k < j; ++k)
+                        value -= L[row * N1 + k] * L[j * N1 + k];
+                    L[row * N1 + j] = value * inv;
+                }
             }
         }
 
@@ -508,11 +664,13 @@ namespace linalg::detail
 
         Matrix<double, N1, N1> LU_mat{tensor::uninitialized};
         Vector<int, N1>        pivot_vec{tensor::uninitialized};
+        int                     info{0};
 
         constexpr void factorize_from(const double* A)
         {
             double* LU   = LU_mat.data();
             int*    ipiv = pivot_vec.data();
+            info         = 0;
             std::copy(A, A + N1 * N1, LU);
 
             if constexpr (runtime_lapack_enabled && N1 * N1 >= doolittle_lapack_min_size)
@@ -524,14 +682,18 @@ namespace linalg::detail
                 }
             }
 
-            for (size_t k = 0; k < N1 - 1; ++k)
+            // DGETF2 with a row-major storage interpretation.  At fixed
+            // dimensions the loops are compile-time bounded, while pivots,
+            // safe-min scaling, and the singular-info convention stay the
+            // same as the LAPACK reference kernel.
+            for (size_t k = 0; k < N1; ++k)
             {
                 size_t pivot_row = k;
-                double max_norm  = std::abs(LU[k * N1 + k]);
+                double max_norm  = math::abs(LU[k * N1 + k]);
 
                 for (size_t i = k + 1; i < N1; ++i)
                 {
-                    double curr_norm = std::abs(LU[i * N1 + k]);
+                    const double curr_norm = math::abs(LU[i * N1 + k]);
                     if (curr_norm > max_norm)
                     {
                         max_norm  = curr_norm;
@@ -540,21 +702,37 @@ namespace linalg::detail
                 }
 
                 ipiv[k] = static_cast<int>(pivot_row);
-                if (pivot_row != k)
-                    std::swap_ranges(LU + k * N1, LU + (k + 1) * N1, LU + pivot_row * N1);
-
-                for (size_t i = k + 1; i < N1; ++i)
+                if (LU[pivot_row * N1 + k] != 0.0)
                 {
-                    assert(std::abs(LU[k * N1 + k]) >= linear_tolerance);
+                    if (pivot_row != k)
+                        std::swap_ranges(LU + k * N1, LU + (k + 1) * N1, LU + pivot_row * N1);
 
-                    double multiplier = LU[i * N1 + k] / LU[k * N1 + k];
-                    LU[i * N1 + k]    = multiplier;
-                    for (size_t j = k + 1; j < N1; ++j)
-                        LU[i * N1 + j] -= multiplier * LU[k * N1 + j];
+                    if (k + 1 < N1)
+                    {
+                        const double pivot = LU[k * N1 + k];
+                        if (math::abs(pivot) >= lapack_safe_min)
+                        {
+                            const double reciprocal_pivot = 1.0 / pivot;
+                            for (size_t row = k + 1; row < N1; ++row)
+                                LU[row * N1 + k] *= reciprocal_pivot;
+                        }
+                        else
+                        {
+                            for (size_t row = k + 1; row < N1; ++row)
+                                LU[row * N1 + k] /= pivot;
+                        }
+                    }
                 }
-            }
+                else if (info == 0)
+                {
+                    info = static_cast<int>(k + 1);
+                }
 
-            ipiv[N1 - 1] = N1 - 1;
+                if (k + 1 < N1)
+                    for (size_t column = k + 1; column < N1; ++column)
+                        for (size_t row = k + 1; row < N1; ++row)
+                            LU[row * N1 + column] -= LU[row * N1 + k] * LU[k * N1 + column];
+            }
         }
 
         template <size_t P = 1>
@@ -572,11 +750,11 @@ namespace linalg::detail
                 }
             }
 
-            for (size_t k = 0; k < N1 - 1; ++k)
+            for (size_t k = 0; k < N1; ++k)
             {
-                int pivot_row = ipiv[k];
+                const int pivot_row = ipiv[k];
                 if (pivot_row != static_cast<int>(k))
-                    std::swap_ranges(x + k * P, x + (k + 1) * P, x + static_cast<size_t>(pivot_row) * P);
+                    swap_rhs_rows(x, k, static_cast<size_t>(pivot_row), P);
             }
 
             for (size_t i = 1; i < N1; ++i)
@@ -635,11 +813,13 @@ namespace linalg::detail
 
         Matrix<double, N1, N2> QR_mat{tensor::uninitialized};
         Vector<double, N2>     tau_vec{tensor::uninitialized};
+        int                     info{0};
 
         constexpr void factorize_from(const double* A)
         {
             double* QR  = QR_mat.data();
             double* tau = tau_vec.data();
+            info        = 0;
             std::copy(A, A + N1 * N2, QR);
 
             if constexpr (runtime_lapack_enabled && N1 * N2 >= householder_lapack_min_size)
@@ -651,41 +831,27 @@ namespace linalg::detail
                 }
             }
 
+            // DGEQR2: the compact WY-free representation is already the
+            // natural fixed-array form, so only DLARFG/DLARF's scalar logic
+            // is needed here.
             for (size_t k = 0; k < N2; ++k)
             {
-                double norm2 = 0.0;
-                for (size_t i = k; i < N1; ++i)
-                    norm2 += QR[i * N2 + k] * QR[i * N2 + k];
+                double* tail = k + 1 < N1 ? QR + (k + 1) * N2 + k : QR + k * N2 + k;
+                larfg(N1 - k, QR[k * N2 + k], tail, N2, tau[k]);
 
-                double norm = sqrt(norm2);
-                if (norm < linear_tolerance)
+                if (k + 1 < N2 && tau[k] != 0.0)
                 {
-                    assert(norm >= linear_tolerance);
-                    tau[k] = 0.0;
-                    continue;
-                }
+                    for (size_t column = k + 1; column < N2; ++column)
+                    {
+                        double dot = QR[k * N2 + column];
+                        for (size_t row = k + 1; row < N1; ++row)
+                            dot += QR[row * N2 + k] * QR[row * N2 + column];
 
-                double akk  = QR[k * N2 + k];
-                double sign = (akk >= 0.0) ? 1.0 : -1.0;
-                double u1   = akk + sign * norm;
-
-                tau[k] = u1 * u1 / (norm2 + std::abs(akk * norm));
-
-                double inv_u1 = 1.0 / u1;
-                for (size_t i = k + 1; i < N1; ++i)
-                    QR[i * N2 + k] *= inv_u1;
-
-                QR[k * N2 + k] = -sign * norm;
-
-                for (size_t j = k + 1; j < N2; ++j)
-                {
-                    double vTA_j = QR[k * N2 + j];
-                    for (size_t i = k + 1; i < N1; ++i)
-                        vTA_j += QR[i * N2 + k] * QR[i * N2 + j];
-
-                    QR[k * N2 + j] -= tau[k] * vTA_j;
-                    for (size_t i = k + 1; i < N1; ++i)
-                        QR[i * N2 + j] -= tau[k] * QR[i * N2 + k] * vTA_j;
+                        dot *= tau[k];
+                        QR[k * N2 + column] -= dot;
+                        for (size_t row = k + 1; row < N1; ++row)
+                            QR[row * N2 + column] -= QR[row * N2 + k] * dot;
+                    }
                 }
             }
         }
@@ -707,7 +873,7 @@ namespace linalg::detail
 
             for (size_t k = 0; k < N2; ++k)
             {
-                if (std::abs(tau[k]) < linear_tolerance)
+                if (tau[k] == 0.0)
                     continue;
 
                 for (size_t j = 0; j < P; ++j)
@@ -716,9 +882,10 @@ namespace linalg::detail
                     for (size_t i = k + 1; i < N1; ++i)
                         vTx_j += QR[i * N2 + k] * x[i * P + j];
 
-                    x[k * P + j] -= tau[k] * vTx_j;
+                    vTx_j *= tau[k];
+                    x[k * P + j] -= vTx_j;
                     for (size_t i = k + 1; i < N1; ++i)
-                        x[i * P + j] -= tau[k] * QR[i * N2 + k] * vTx_j;
+                        x[i * P + j] -= QR[i * N2 + k] * vTx_j;
                 }
             }
 
@@ -730,10 +897,7 @@ namespace linalg::detail
                     for (size_t k = i; k < N2; ++k)
                         sum -= QR[(i - 1) * N2 + k] * x[k * P + j];
 
-                    if (std::abs(QR[(i - 1) * N2 + (i - 1)]) < linear_tolerance)
-                        x[(i - 1) * P + j] = 0.0;
-                    else
-                        x[(i - 1) * P + j] = sum / QR[(i - 1) * N2 + (i - 1)];
+                    x[(i - 1) * P + j] = sum / QR[(i - 1) * N2 + (i - 1)];
                 }
             }
         }
