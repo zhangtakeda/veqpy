@@ -48,7 +48,6 @@ def linalg_reference_driver(tmp_path_factory: pytest.TempPathFactory) -> Path:
         compiler,
         "-std=c++20",
         "-O2",
-        "-DVEQPY_CXX_FORCE_INTERNAL_LINALG=1",
         "-I",
         str(CORE_DIR),
         "-isystem",

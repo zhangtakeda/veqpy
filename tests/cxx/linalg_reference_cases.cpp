@@ -1,8 +1,7 @@
 // Differential cases for the fixed-size VEQ linalg policies.
 //
-// The driver intentionally forces the in-tree templates and compares their
-// factorization + solve result with the row-major LAPACKE entry points used by
-// the legacy runtime path.  The matrices are deterministic and well
+// The driver compares the in-tree fixed-size templates with row-major LAPACKE
+// reference entry points.  The matrices are deterministic and well
 // conditioned, so a mismatch identifies an algorithmic-semantic regression
 // rather than a conditioning accident.
 
