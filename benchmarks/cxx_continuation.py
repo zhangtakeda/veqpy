@@ -224,8 +224,8 @@ def _measure_case(
             policy=policy,
             repeat=args.repeat,
             warmup=args.warmup,
-            cache_root=args.cache_root,
-            source_dir=args.source_dir,
+            cache_root=getattr(args, "cache_root", None),
+            source_dir=getattr(args, "source_dir", CORE_DIR),
         )
         for policy in policies
     }
