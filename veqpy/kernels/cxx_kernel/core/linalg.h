@@ -186,26 +186,39 @@ namespace linalg::detail
             if (index + 1 < Columns)
             {
                 if (tau_q[index] != 0.0)
-                    for (size_t column = index + 1; column < Columns; ++column)
+                {
+                    const size_t trailing = Columns - index - 1;
+                    // tau_p[index + 1:] belongs to reflectors that have not
+                    // been formed yet.  Reuse it as the fixed work tail and
+                    // accumulate v^T A a source row at a time, so both the
+                    // work vector and every matrix tail are contiguous.
+                    double*       work_tail    = tau_p + index + 1;
+                    const double* leading_tail = bidiagonal + index * Columns + index + 1;
+                    for (size_t offset = 0; offset < trailing; ++offset)
+                        work_tail[offset] = leading_tail[offset];
+                    for (size_t row = index + 1; row < Rows; ++row)
                     {
-                        double dot = bidiagonal[index * Columns + column];
-                        for (size_t row = index + 1; row < Rows; ++row)
-                            dot += bidiagonal[row * Columns + index] * bidiagonal[row * Columns + column];
-                        // tau_p[index + 1:] belongs to reflectors that have
-                        // not been formed yet.  Reuse it as the fixed work
-                        // tail, then update each destination row contiguously.
-                        tau_p[column] = dot * tau_q[index];
+                        const double  multiplier = bidiagonal[row * Columns + index];
+                        const double* source_tail = bidiagonal + row * Columns + index + 1;
+                        for (size_t offset = 0; offset < trailing; ++offset)
+                            work_tail[offset] += multiplier * source_tail[offset];
                     }
+                    for (size_t offset = 0; offset < trailing; ++offset)
+                        work_tail[offset] *= tau_q[index];
+                }
                 if (tau_q[index] != 0.0)
                 {
-                    for (size_t column = index + 1; column < Columns; ++column)
-                        bidiagonal[index * Columns + column] -= tau_p[column];
+                    const size_t trailing = Columns - index - 1;
+                    double*      work_tail = tau_p + index + 1;
+                    double*      leading_tail = bidiagonal + index * Columns + index + 1;
+                    for (size_t offset = 0; offset < trailing; ++offset)
+                        leading_tail[offset] -= work_tail[offset];
                     for (size_t row = index + 1; row < Rows; ++row)
                     {
                         const double multiplier = bidiagonal[row * Columns + index];
                         double*      row_tail   = bidiagonal + row * Columns + index + 1;
-                        for (size_t column = index + 1; column < Columns; ++column)
-                            row_tail[column - index - 1] -= multiplier * tau_p[column];
+                        for (size_t offset = 0; offset < trailing; ++offset)
+                            row_tail[offset] -= multiplier * work_tail[offset];
                     }
                 }
 
@@ -1154,24 +1167,29 @@ namespace linalg::detail
                     // The reflector vector remains a column (and therefore
                     // has an unavoidable stride), but the trailing block is
                     // read and written through contiguous row tails.
-                    for (size_t column = k + 1; column < N2; ++column)
+                    const size_t trailing = N2 - k - 1;
+                    double*      work_tail = tau + k + 1;
+                    double*      leading_tail = QR + k * N2 + k + 1;
+                    for (size_t offset = 0; offset < trailing; ++offset)
+                        work_tail[offset] = leading_tail[offset];
+                    for (size_t row = k + 1; row < N1; ++row)
                     {
-                        double dot = QR[k * N2 + column];
-                        for (size_t row = k + 1; row < N1; ++row)
-                            dot += QR[row * N2 + k] * QR[row * N2 + column];
-                        // tau[k + 1:] has not been formed yet, so reuse the
-                        // fixed context storage as this iteration's work
-                        // tail instead of materializing another stack array.
-                        tau[column] = dot * tau[k];
+                        const double  multiplier = QR[row * N2 + k];
+                        const double* source_tail = QR + row * N2 + k + 1;
+                        for (size_t offset = 0; offset < trailing; ++offset)
+                            work_tail[offset] += multiplier * source_tail[offset];
                     }
-                    for (size_t column = k + 1; column < N2; ++column)
-                        QR[k * N2 + column] -= tau[column];
+                    for (size_t offset = 0; offset < trailing; ++offset)
+                    {
+                        work_tail[offset] *= tau[k];
+                        leading_tail[offset] -= work_tail[offset];
+                    }
                     for (size_t row = k + 1; row < N1; ++row)
                     {
                         const double multiplier = QR[row * N2 + k];
                         double*      row_tail   = QR + row * N2 + k + 1;
-                        for (size_t column = k + 1; column < N2; ++column)
-                            row_tail[column - k - 1] -= multiplier * tau[column];
+                        for (size_t offset = 0; offset < trailing; ++offset)
+                            row_tail[offset] -= multiplier * work_tail[offset];
                     }
                 }
             }
