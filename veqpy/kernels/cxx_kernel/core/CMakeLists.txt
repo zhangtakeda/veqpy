@@ -501,10 +501,7 @@ set(
     minpack/dogleg.c
     minpack/dpmpar.c
     minpack/enorm.c
-    minpack/fdjac1.c
     minpack/fdjac2.c
-    minpack/hybrd.c
-    minpack/hybrj.c
     minpack/lmder.c
     minpack/lmdif.c
     minpack/lmpar.c

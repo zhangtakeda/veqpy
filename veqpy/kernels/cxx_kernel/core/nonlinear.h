@@ -3,7 +3,7 @@
 // Nonlinear solver adapters and finite-difference helpers for generated Cxx Kernel artifacts.
 
 #include "linalg.h"
-#include "minpack/cminpack.h"
+#include "minpack/inline_powell.h"
 #include "tensor.h"
 #include <algorithm>
 #include <array>
@@ -581,8 +581,30 @@ namespace nonlinear::detail
             std::fill(diag.begin(), diag.end(), 1.0);
             int nfev = 0;
             int njev = 0;
-            info     = ::hybrj(callback_with_jacobian,
-                                   this,
+            auto evaluate = [this](const double* values,
+                                   double* residual,
+                                   double* jacobian_values,
+                                   int     leading_dimension,
+                                   int     flag) {
+                if (flag == 1)
+                {
+                    if (max_evaluations > 0 && evaluations >= max_evaluations)
+                        return -1;
+                    functor(values, residual);
+                    ++evaluations;
+                }
+                else if (flag == 2)
+                {
+                    evaluate_jacobian<Functor, equations, variables>(functor, values, jacobian.data());
+                    ++jacobian_evaluations;
+                    for (size_t row = 0; row < equations; ++row)
+                        for (size_t col = 0; col < variables; ++col)
+                            jacobian_values[row + static_cast<size_t>(leading_dimension) * col] =
+                                jacobian[row * variables + col];
+                }
+                return 0;
+            };
+            info     = minpack_inline::powell_with_jacobian(evaluate,
                                    cminpack_size,
                                    x,
                                    fvec.data(),
@@ -611,8 +633,17 @@ namespace nonlinear::detail
         {
             std::fill(diag.begin(), diag.end(), 1.0);
             int nfev = 0;
-            info     = ::hybrd(callback,
-                                   this,
+            auto evaluate = [this](const double* values, double* residual, int flag) {
+                if (flag > 0)
+                {
+                    if (max_evaluations > 0 && evaluations >= max_evaluations)
+                        return -1;
+                    functor(values, residual);
+                    ++evaluations;
+                }
+                return 0;
+            };
+            info     = minpack_inline::powell_finite_difference(evaluate,
                                    cminpack_size,
                                    x,
                                    fvec.data(),
@@ -638,40 +669,6 @@ namespace nonlinear::detail
             evaluations = nfev;
         }
 
-        static int callback(void* data, int, const double* x, double* fvec, int iflag)
-        {
-            auto& self = *static_cast<Context*>(data);
-            if (iflag > 0)
-            {
-                if (self.max_evaluations > 0 && self.evaluations >= self.max_evaluations)
-                    return -1;
-                self.functor(x, fvec);
-                ++self.evaluations;
-            }
-            return 0;
-        }
-
-        static int
-        callback_with_jacobian(void* data, int, const double* x, double* fvec, double* fjac, int ldfjac, int iflag)
-        {
-            auto& self = *static_cast<Context*>(data);
-            if (iflag == 1)
-            {
-                if (self.max_evaluations > 0 && self.evaluations >= self.max_evaluations)
-                    return -1;
-                self.functor(x, fvec);
-                ++self.evaluations;
-            }
-            else if (iflag == 2)
-            {
-                evaluate_jacobian<Functor, equations, variables>(self.functor, x, self.jacobian.data());
-                ++self.jacobian_evaluations;
-                for (size_t row = 0; row < equations; ++row)
-                    for (size_t col = 0; col < variables; ++col)
-                        fjac[row + static_cast<size_t>(ldfjac) * col] = self.jacobian[row * variables + col];
-            }
-            return 0;
-        }
     };
 
     template <typename Functor>
