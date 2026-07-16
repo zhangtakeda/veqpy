@@ -19,6 +19,8 @@ def test_minpack_attribution_and_wheel_inputs_are_retained() -> None:
     with (REPO_ROOT / "pyproject.toml").open("rb") as stream:
         package_data = tomllib.load(stream)["tool"]["setuptools"]["package-data"]
 
+    assert "## References" in readme
+    assert "## Acknowledgements" not in readme
     assert MINPACK_ACKNOWLEDGEMENT in " ".join(readme.split())
     assert MINPACK_ACKNOWLEDGEMENT in " ".join(license_text.split())
     assert "https://netlib.org/minpack/" in readme

@@ -43,12 +43,12 @@ namespace
 #else
     static_assert(!linalg::detail::uses_runtime_lapack<linalg::Doolittle, 127, 127>);
     static_assert(linalg::detail::uses_runtime_lapack<linalg::Doolittle, 128, 128>);
-    static_assert(!linalg::detail::uses_runtime_lapack<linalg::BunchKaufman, 79, 79>);
-    static_assert(linalg::detail::uses_runtime_lapack<linalg::BunchKaufman, 80, 80>);
-    static_assert(!linalg::detail::uses_runtime_lapack<linalg::Cholesky, 128, 128>);
-    static_assert(linalg::detail::uses_runtime_lapack<linalg::Cholesky, 129, 129>);
-    static_assert(!linalg::detail::uses_runtime_lapack<linalg::Householder, 128, 64>);
-    static_assert(linalg::detail::uses_runtime_lapack<linalg::Householder, 129, 64>);
+    static_assert(!linalg::detail::uses_runtime_lapack<linalg::BunchKaufman, 63, 63>);
+    static_assert(linalg::detail::uses_runtime_lapack<linalg::BunchKaufman, 64, 64>);
+    static_assert(!linalg::detail::uses_runtime_lapack<linalg::Cholesky, 127, 127>);
+    static_assert(linalg::detail::uses_runtime_lapack<linalg::Cholesky, 128, 128>);
+    static_assert(!linalg::detail::uses_runtime_lapack<linalg::Householder, 127, 64>);
+    static_assert(linalg::detail::uses_runtime_lapack<linalg::Householder, 128, 64>);
     static_assert(!linalg::detail::uses_runtime_lapack<linalg::GolubReinsch, 63, 32>);
     static_assert(linalg::detail::uses_runtime_lapack<linalg::GolubReinsch, 64, 32>);
 #endif

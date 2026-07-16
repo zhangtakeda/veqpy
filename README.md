@@ -222,7 +222,7 @@ User-facing architecture notes:
 Low-level base/math design notes for `Reactive`, `Serial`, `Registry`, interpolation,
 quadrature, and calculus now live in the corresponding source module headers.
 
-## Paper and Reproducibility Resources
+## References
 
 VEQPy is associated with the companion manuscript **[Zhang2026]**. Related VEQ-family and representation papers include:
 
@@ -244,25 +244,24 @@ VEQPy is associated with the companion manuscript **[Zhang2026]**. Related VEQ-f
   > "Investigation of Toroidal Rotation Effects on Spherical Torus Equilibria using
   > the Fast Spectral Solver VEQ-R", arXiv:2602.11422, 2026._
 
-## Acknowledgements
+### Code references
 
-- [**MINPACK source code**][minpack]: algorithm and implementation reference for
-  VEQPy's highly specialized, topology-parameterized Powell hybrid and
+- [**MINPACK source code**][minpack]: source-level algorithm reference for
+  VEQPy's hand-written, topology-parameterized Powell hybrid and
   Levenberg-Marquardt solvers; distributed under the
   [MINPACK license][minpack-license] (University of Chicago, 1999).
-
-  Required acknowledgement: “This product includes software developed by the
-  University of Chicago, as Operator of Argonne National Laboratory.”
+  License notice: “This product includes software developed by the University
+  of Chicago, as Operator of Argonne National Laboratory.”
 
 - [**CMinpack v1.3.11 source code**][cminpack]: C translation used as a
   source-level reference and for MINPACK-derived numerical primitives compiled
   into the Cxx implementations; distributed under the
   [MINPACK license][minpack-license].
 
-- [**Reference LAPACK 3.12.1 source code**][lapack]: algorithm and
-  implementation reference for VEQPy's fixed-array Golub--Reinsch SVD and
-  unblocked dense linear-algebra kernels; distributed under the
-  [LAPACK license][lapack-license] (BSD-3-Clause).
+- [**Reference LAPACK 3.12.1 source code**][lapack]: source-level algorithm
+  reference for VEQPy's fixed-array Golub--Reinsch SVD and dense kernels; its
+  LAPACKE interface also supplies the blocked high-order runtime path;
+  distributed under the [LAPACK license][lapack-license] (BSD-3-Clause).
 
 ---
 

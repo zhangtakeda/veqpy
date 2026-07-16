@@ -540,12 +540,12 @@ namespace linalg::detail
     // The VEQ artifact dimensions are template arguments.  These predicates
     // are therefore folded at build time: a small artifact contains only the
     // fixed-storage kernel, while a larger one calls the blocked LAPACKE path
-    // at runtime.  Cholesky and QR remain faster through the supported order
-    // 128, so their handoff is deliberately just beyond that envelope.
+    // at runtime.  Each handoff remains a policy-level tuning constant rather
+    // than a dynamic dimension branch.
     inline constexpr size_t doolittle_lapack_min_order     = 128;
-    inline constexpr size_t bunch_kaufman_lapack_min_order = 80;
-    inline constexpr size_t cholesky_lapack_min_order      = 129;
-    inline constexpr size_t householder_lapack_min_order   = 129;
+    inline constexpr size_t bunch_kaufman_lapack_min_order = 64;
+    inline constexpr size_t cholesky_lapack_min_order      = 128;
+    inline constexpr size_t householder_lapack_min_order   = 128;
     inline constexpr size_t golub_reinsch_lapack_min_order = 64;
 
     template <typename Policy, size_t N1, size_t N2>
