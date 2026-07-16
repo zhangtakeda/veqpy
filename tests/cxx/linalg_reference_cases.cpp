@@ -40,6 +40,7 @@ namespace
 #if defined(VEQPY_CXX_FORCE_INTERNAL_LINALG)
     static_assert(!linalg::detail::uses_runtime_lapack<linalg::Doolittle, 128, 128>);
     static_assert(!linalg::detail::uses_runtime_lapack<linalg::GolubReinsch, 128, 64>);
+    static_assert(!linalg::detail::uses_runtime_lapack<linalg::Thomas, 3, 1024 * 128>);
 #else
     static_assert(!linalg::detail::uses_runtime_lapack<linalg::Doolittle, 127, 127>);
     static_assert(linalg::detail::uses_runtime_lapack<linalg::Doolittle, 128, 128>);
@@ -51,6 +52,8 @@ namespace
     static_assert(linalg::detail::uses_runtime_lapack<linalg::Householder, 128, 64>);
     static_assert(!linalg::detail::uses_runtime_lapack<linalg::GolubReinsch, 63, 32>);
     static_assert(linalg::detail::uses_runtime_lapack<linalg::GolubReinsch, 64, 32>);
+    static_assert(!linalg::detail::uses_runtime_lapack<linalg::Thomas, 3, 1024 * 128 - 1>);
+    static_assert(linalg::detail::uses_runtime_lapack<linalg::Thomas, 3, 1024 * 128>);
 #endif
 
     template <std::size_t Rows, std::size_t Cols>

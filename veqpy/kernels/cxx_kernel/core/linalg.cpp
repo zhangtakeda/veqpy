@@ -93,4 +93,16 @@ namespace linalg::detail
 
         cblas_dgemm(CblasRowMajor, CblasTrans, CblasNoTrans, n, nrhs, n, 1.0, vt, n, work, nrhs, 0.0, b, nrhs);
     }
+
+    int Thomas::lapack_factorize_inplace(int n, int kl, int ku, double* ab, int ldab, int* ipiv)
+    {
+        return LAPACKE_dgbtrf(LAPACK_COL_MAJOR, n, n, kl, ku, ab, ldab, ipiv);
+    }
+
+    void Thomas::lapack_substitute_inplace(
+        int n, int kl, int ku, int nrhs, const double* ab, int ldab, const int* ipiv, double* b, int ldb)
+    {
+        const int info = LAPACKE_dgbtrs(LAPACK_COL_MAJOR, 'N', n, kl, ku, nrhs, ab, ldab, ipiv, b, ldb);
+        assert(info == 0);
+    }
 } // namespace linalg::detail

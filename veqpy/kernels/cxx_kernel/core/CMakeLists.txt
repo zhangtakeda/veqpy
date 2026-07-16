@@ -419,7 +419,6 @@ function(cxx_enable_kernel_optimizations target)
                 $<${release_like}:-mprefer-vector-width=256>
                 $<${release_like}:-fstrict-aliasing>
                 $<${release_like}:-fomit-frame-pointer>
-                $<${release_like}:-funroll-loops>
                 $<${release_like}:-fvectorize>
                 $<${release_like}:-fslp-vectorize>
                 $<${release_like}:-ffunction-sections>

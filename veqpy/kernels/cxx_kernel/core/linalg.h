@@ -535,6 +535,10 @@ namespace linalg::detail
     {
         template <size_t Bandwidth, size_t N>
         struct Context;
+
+    private:
+        static int lapack_factorize_inplace(int, int, int, double*, int, int*);
+        static void lapack_substitute_inplace(int, int, int, int, const double*, int, const int*, double*, int);
     };
 
     // The VEQ artifact dimensions are template arguments.  These predicates
@@ -547,6 +551,10 @@ namespace linalg::detail
     inline constexpr size_t cholesky_lapack_min_order      = 128;
     inline constexpr size_t householder_lapack_min_order   = 128;
     inline constexpr size_t golub_reinsch_lapack_min_order = 64;
+    // Thomas remains constexpr for every realistic VEQ grid.  This deliberately
+    // remote handoff preserves a standard LAPACKE route for pathological future
+    // band systems without creating a second small-N implementation policy.
+    inline constexpr size_t thomas_lapack_min_order = 1024 * 128;
 
     template <typename Policy, size_t N1, size_t N2>
     inline constexpr bool uses_runtime_lapack = runtime_lapack_enabled && []
@@ -561,6 +569,8 @@ namespace linalg::detail
             return N1 >= householder_lapack_min_order;
         else if constexpr (std::is_same_v<Policy, GolubReinsch>)
             return std::max(N1, N2) >= golub_reinsch_lapack_min_order;
+        else if constexpr (std::is_same_v<Policy, Thomas>)
+            return N2 >= thomas_lapack_min_order;
         else
             return false;
     }();
@@ -1445,8 +1455,15 @@ namespace linalg::detail
         static_assert(N >= Bandwidth, "Thomas matrix must have at least Bandwidth rows");
 
         static constexpr size_t radius = Bandwidth / 2;
+        static constexpr size_t lapack_ldab = 3 * radius + 1;
 
         Matrix<double, Bandwidth, N> LU_mat{tensor::uninitialized};
+        // Physical column-major storage for DGBTRF: Matrix<N, ldab> is laid
+        // out as ab[band_row + column * ldab].  It is unused by every current
+        // VEQ grid, where the constexpr Thomas path remains selected.
+        Matrix<double, N, lapack_ldab> lapack_ab{tensor::uninitialized};
+        Vector<int, N>                 lapack_ipiv{tensor::uninitialized};
+        int                            info = 0;
 
         static constexpr bool in_band(size_t row, size_t col) noexcept
         {
@@ -1470,6 +1487,31 @@ namespace linalg::detail
 
         constexpr void factorize_from(const Matrix<double, Bandwidth, N>& matrix)
         {
+            if constexpr (uses_runtime_lapack<Thomas, Bandwidth, N>)
+            {
+                if (!std::is_constant_evaluated())
+                {
+                    std::fill(lapack_ab.data(), lapack_ab.data() + lapack_ab.count, 0.0);
+                    for (size_t column = 0; column < N; ++column)
+                    {
+                        const size_t row_start = column > radius ? column - radius : 0;
+                        const size_t row_stop  = std::min(N, column + radius + 1);
+                        for (size_t row = row_start; row < row_stop; ++row)
+                            lapack_ab[column * lapack_ldab + 2 * radius + row - column] =
+                                matrix[band_index(row, column) * N + column];
+                    }
+                    info = lapack_factorize_inplace(static_cast<int>(N),
+                                                     static_cast<int>(radius),
+                                                     static_cast<int>(radius),
+                                                     lapack_ab.data(),
+                                                     static_cast<int>(lapack_ldab),
+                                                     lapack_ipiv.data());
+                    assert(info == 0);
+                    return;
+                }
+            }
+
+            info = 0;
             std::copy(matrix.data(), matrix.data() + matrix.count, LU_mat.data());
 
             for (size_t pivot = 0; pivot + 1 < N; ++pivot)
@@ -1497,6 +1539,32 @@ namespace linalg::detail
         template <size_t P = 1>
         constexpr void substitute_inplace(double* x) const
         {
+            if constexpr (uses_runtime_lapack<Thomas, Bandwidth, N>)
+            {
+                if (!std::is_constant_evaluated())
+                {
+                    Matrix<double, P, N> rhs_col_major{tensor::uninitialized};
+                    for (size_t row = 0; row < N; ++row)
+                        for (size_t rhs = 0; rhs < P; ++rhs)
+                            rhs_col_major[rhs * N + row] = x[row * P + rhs];
+
+                    lapack_substitute_inplace(static_cast<int>(N),
+                                               static_cast<int>(radius),
+                                               static_cast<int>(radius),
+                                               static_cast<int>(P),
+                                               lapack_ab.data(),
+                                               static_cast<int>(lapack_ldab),
+                                               lapack_ipiv.data(),
+                                               rhs_col_major.data(),
+                                               static_cast<int>(N));
+
+                    for (size_t row = 0; row < N; ++row)
+                        for (size_t rhs = 0; rhs < P; ++rhs)
+                            x[row * P + rhs] = rhs_col_major[rhs * N + row];
+                    return;
+                }
+            }
+
             const auto& LU = LU_mat;
 
             for (size_t row = 0; row < N; ++row)
