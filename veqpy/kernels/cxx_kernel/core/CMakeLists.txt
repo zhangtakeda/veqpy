@@ -11,6 +11,7 @@ option(VEQPY_CXX_ENABLE_STRICT_CONVERSIONS "Reject implicit narrowing and signed
 option(VEQPY_CXX_ENABLE_NATIVE_OPTIMIZATIONS "Enable native CPU and loop optimization flags" ON)
 option(VEQPY_CXX_ENABLE_THIN_LTO "Enable clang ThinLTO and lld for optimized builds" ON)
 option(VEQPY_CXX_ANALYSIS_BUILD "Build with source-correlated optimization diagnostics" OFF)
+option(VEQPY_CXX_FORCE_OPENBLAS_SINGLE_THREAD "Force OpenBLAS to one runtime thread inside Cxx backend targets" ON)
 option(VEQPY_CXX_ENABLE_PYTHON_BINDINGS "Build the nanobind Python extension for the Cxx backend" ON)
 set(VEQPY_CXX_FP_MODE "RELAXED" CACHE STRING "Floating-point mode: STRICT, FMA, or RELAXED")
 set_property(CACHE VEQPY_CXX_FP_MODE PROPERTY STRINGS STRICT FMA RELAXED)
@@ -287,6 +288,25 @@ function(cxx_link_dependencies target)
     find_package(gcem CONFIG REQUIRED)
     target_link_libraries("${target}" PRIVATE gcem)
 
+    # Large fixed dense systems use the corresponding blocked LAPACKE kernels;
+    # the header keeps a constexpr-only escape hatch for tests and callers that
+    # deliberately opt out of this runtime route.
+    find_path(LAPACKE_INCLUDE_DIR NAMES lapacke.h REQUIRED)
+    find_library(LAPACKE_LIBRARY NAMES lapacke REQUIRED)
+    find_library(LAPACK_LIBRARY NAMES lapack REQUIRED)
+    find_library(BLAS_LIBRARY NAMES openblas REQUIRED)
+    target_include_directories("${target}" PRIVATE "${LAPACKE_INCLUDE_DIR}")
+    target_link_libraries(
+        "${target}"
+        PRIVATE
+            "${LAPACKE_LIBRARY}"
+            "${LAPACK_LIBRARY}"
+            "${BLAS_LIBRARY}"
+    )
+
+    if(VEQPY_CXX_FORCE_OPENBLAS_SINGLE_THREAD)
+        target_compile_definitions("${target}" PRIVATE VEQPY_CXX_FORCE_OPENBLAS_SINGLE_THREAD=1)
+    endif()
 endfunction()
 
 function(cxx_find_enzyme out_var)
@@ -480,6 +500,7 @@ cxx_require_clang()
 
 set(
     VEQPY_CXX_COMMON_SOURCES
+    linalg.cpp
     minpack/dogleg.c
     minpack/dpmpar.c
     minpack/enorm.c

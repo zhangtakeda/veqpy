@@ -23,6 +23,16 @@ namespace linalg::detail
     template <typename Policy, size_t N1, size_t N2>
     using Context = typename Policy::template Context<N1, N2>;
 
+    // Keep a fully constexpr, fixed-storage route for tests and for callers
+    // that require constant evaluation.  Normal generated kernels select the
+    // blocked LAPACKE routines only once their fixed order reaches the
+    // measured crossover for that policy.
+#if defined(VEQPY_CXX_FORCE_INTERNAL_LINALG)
+    inline constexpr bool runtime_lapack_enabled = false;
+#else
+    inline constexpr bool runtime_lapack_enabled = true;
+#endif
+
     inline constexpr double linear_tolerance = 1.0e-10;
 
     // Fixed-size, row-major adaptations of the LAPACK unblocked kernels use
@@ -474,30 +484,51 @@ namespace linalg::detail
     {
         template <size_t N1, size_t N2>
         struct Context;
+
+    private:
+        static int  lapack_factorize_inplace(int, double*, int, int*);
+        static void lapack_substitute_inplace(int, int, const double*, int, const int*, double*, int);
     };
 
     struct Cholesky
     {
         template <size_t N1, size_t N2>
         struct Context;
+
+    private:
+        static int  lapack_factorize_inplace(int, double*, int);
+        static void lapack_substitute_inplace(int, int, const double*, int, double*, int);
     };
 
     struct Doolittle
     {
         template <size_t N1, size_t N2>
         struct Context;
+
+    private:
+        static int  lapack_factorize_inplace(int, int, double*, int, int*);
+        static void lapack_substitute_inplace(int, int, const double*, int, const int*, double*, int);
     };
 
     struct GolubReinsch
     {
         template <size_t N1, size_t N2>
         struct Context;
+
+    private:
+        static int lapack_factorize_inplace(int, int, const double*, double*, double*, double*, double*);
+        static void
+        lapack_substitute_inplace(int, int, const double*, const double*, const double*, double*, int, double*);
     };
 
     struct Householder
     {
         template <size_t N1, size_t N2>
         struct Context;
+
+    private:
+        static int  lapack_factorize_inplace(int, int, double*, int, double*);
+        static void lapack_substitute_inplace(int, int, int, const double*, int, const double*, double*, int);
     };
 
     struct Thomas
@@ -505,6 +536,34 @@ namespace linalg::detail
         template <size_t Bandwidth, size_t N>
         struct Context;
     };
+
+    // The VEQ artifact dimensions are template arguments.  These predicates
+    // are therefore folded at build time: a small artifact contains only the
+    // fixed-storage kernel, while a larger one calls the blocked LAPACKE path
+    // at runtime.  Cholesky and QR remain faster through the supported order
+    // 128, so their handoff is deliberately just beyond that envelope.
+    inline constexpr size_t doolittle_lapack_min_order     = 128;
+    inline constexpr size_t bunch_kaufman_lapack_min_order = 80;
+    inline constexpr size_t cholesky_lapack_min_order      = 129;
+    inline constexpr size_t householder_lapack_min_order   = 129;
+    inline constexpr size_t golub_reinsch_lapack_min_order = 64;
+
+    template <typename Policy, size_t N1, size_t N2>
+    inline constexpr bool uses_runtime_lapack = runtime_lapack_enabled && []
+    {
+        if constexpr (std::is_same_v<Policy, Doolittle>)
+            return N1 >= doolittle_lapack_min_order;
+        else if constexpr (std::is_same_v<Policy, BunchKaufman>)
+            return N1 >= bunch_kaufman_lapack_min_order;
+        else if constexpr (std::is_same_v<Policy, Cholesky>)
+            return N1 >= cholesky_lapack_min_order;
+        else if constexpr (std::is_same_v<Policy, Householder>)
+            return N1 >= householder_lapack_min_order;
+        else if constexpr (std::is_same_v<Policy, GolubReinsch>)
+            return std::max(N1, N2) >= golub_reinsch_lapack_min_order;
+        else
+            return false;
+    }();
 
     template <typename Policy = Doolittle, size_t N1, size_t N2>
     constexpr Context<Policy, N1, N2>& factorize_into(Context<Policy, N1, N2>&              context,
@@ -650,6 +709,15 @@ namespace linalg::detail
             int*    ipiv = pivot_vec.data();
             info         = 0;
             std::copy(A, A + N1 * N1, L);
+
+            if constexpr (uses_runtime_lapack<BunchKaufman, N1, N2>)
+            {
+                if (!std::is_constant_evaluated())
+                {
+                    info = lapack_factorize_inplace(N1, L, N1, ipiv);
+                    return;
+                }
+            }
 
             // DSYTF2('L') translated to row-major fixed storage.  It only
             // reads and overwrites the lower triangle, exactly like LAPACK;
@@ -801,6 +869,15 @@ namespace linalg::detail
             const double* L    = LDLT_mat.data();
             const int*    ipiv = pivot_vec.data();
 
+            if constexpr (uses_runtime_lapack<BunchKaufman, N1, N2>)
+            {
+                if (!std::is_constant_evaluated())
+                {
+                    lapack_substitute_inplace(N1, P, L, N1, ipiv, x, P);
+                    return;
+                }
+            }
+
             // DSYTRS('L'), sharing LAPACK's one-based signed IPIV encoding
             // with the runtime path.  Positive entries denote 1x1 blocks;
             // equal negative entries denote a 2x2 block.
@@ -905,6 +982,15 @@ namespace linalg::detail
             info      = 0;
             std::copy(A, A + N1 * N1, L);
 
+            if constexpr (uses_runtime_lapack<Cholesky, N1, N2>)
+            {
+                if (!std::is_constant_evaluated())
+                {
+                    info = lapack_factorize_inplace(N1, L, N1);
+                    return;
+                }
+            }
+
             // DPOTF2('L') consumes and overwrites only the lower triangle;
             // it deliberately does not validate or symmetrize the upper one.
             for (size_t j = 0; j < N1; ++j)
@@ -937,6 +1023,15 @@ namespace linalg::detail
         constexpr void substitute_inplace(double* x) const
         {
             const double* L = LLT_mat.data();
+
+            if constexpr (uses_runtime_lapack<Cholesky, N1, N2>)
+            {
+                if (!std::is_constant_evaluated())
+                {
+                    lapack_substitute_inplace(N1, P, L, N1, x, P);
+                    return;
+                }
+            }
 
             for (size_t i = 0; i < N1; ++i)
             {
@@ -985,6 +1080,15 @@ namespace linalg::detail
             int*    ipiv = pivot_vec.data();
             info         = 0;
             std::copy(A, A + N1 * N1, LU);
+
+            if constexpr (uses_runtime_lapack<Doolittle, N1, N2>)
+            {
+                if (!std::is_constant_evaluated())
+                {
+                    info = lapack_factorize_inplace(N1, N1, LU, N1, ipiv);
+                    return;
+                }
+            }
 
             // DGETF2 with a row-major storage interpretation.  At fixed
             // dimensions the loops are compile-time bounded, while pivots,
@@ -1068,6 +1172,15 @@ namespace linalg::detail
             const double* LU   = LU_mat.data();
             const int*    ipiv = pivot_vec.data();
 
+            if constexpr (uses_runtime_lapack<Doolittle, N1, N2>)
+            {
+                if (!std::is_constant_evaluated())
+                {
+                    lapack_substitute_inplace(N1, P, LU, N1, ipiv, x, P);
+                    return;
+                }
+            }
+
             for (size_t k = 0; k < N1; ++k)
             {
                 const int pivot_row = ipiv[k];
@@ -1118,6 +1231,17 @@ namespace linalg::detail
             double* U  = U_mat.data();
             double* Vt = Vt_mat.data();
             double* S  = S_vec.data();
+
+            if constexpr (uses_runtime_lapack<GolubReinsch, N1, N2>)
+            {
+                if (!std::is_constant_evaluated())
+                {
+                    Matrix<double, N1, N2> work{tensor::uninitialized};
+                    info = lapack_factorize_inplace(N1, N2, A, work.data(), U, S, Vt);
+                    return;
+                }
+            }
+
             info       = golub_reinsch_factorize<N1, N2>(A, U, S, Vt);
         }
 
@@ -1128,6 +1252,17 @@ namespace linalg::detail
             const double* Vt = Vt_mat.data();
             const double* S  = S_vec.data();
             constexpr size_t rank = std::min(N1, N2);
+
+            if constexpr (uses_runtime_lapack<GolubReinsch, N1, N2>)
+            {
+                if (!std::is_constant_evaluated())
+                {
+                    Matrix<double, std::max(N1, N2), P> work{tensor::uninitialized};
+                    lapack_substitute_inplace(N1, N2, U, S, Vt, x, P, work.data());
+                    return;
+                }
+            }
+
             Matrix<double, N1, P> projected{};
             Matrix<double, N2, P> spectral{};
             Matrix<double, N2, P> result{};
@@ -1191,6 +1326,15 @@ namespace linalg::detail
             info        = 0;
             std::copy(A, A + N1 * N2, QR);
 
+            if constexpr (uses_runtime_lapack<Householder, N1, N2>)
+            {
+                if (!std::is_constant_evaluated())
+                {
+                    info = lapack_factorize_inplace(N1, N2, QR, N2, tau);
+                    return;
+                }
+            }
+
             // DGEQR2: the compact WY-free representation is already the
             // natural fixed-array form, so only DLARFG/DLARF's scalar logic
             // is needed here.
@@ -1238,6 +1382,15 @@ namespace linalg::detail
         {
             const double* QR  = QR_mat.data();
             const double* tau = tau_vec.data();
+
+            if constexpr (uses_runtime_lapack<Householder, N1, N2>)
+            {
+                if (!std::is_constant_evaluated())
+                {
+                    lapack_substitute_inplace(N1, N2, P, QR, N2, tau, x, P);
+                    return;
+                }
+            }
 
             for (size_t k = 0; k < N2; ++k)
             {

@@ -25,7 +25,7 @@ def _gcem_include() -> Path:
     pytest.skip("GCEM headers are unavailable")
 
 
-def test_fixed_size_linalg_compiles_and_runs_without_blas_or_lapack(
+def test_forced_fixed_size_linalg_compiles_and_runs_without_blas_or_lapack(
     tmp_path: Path,
 ) -> None:
     compiler = shutil.which("clang++")
@@ -38,6 +38,7 @@ def test_fixed_size_linalg_compiles_and_runs_without_blas_or_lapack(
             compiler,
             "-std=c++20",
             "-O2",
+            "-DVEQPY_CXX_FORCE_INTERNAL_LINALG=1",
             "-I",
             str(CORE_DIR),
             "-isystem",

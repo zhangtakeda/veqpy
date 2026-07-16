@@ -94,7 +94,7 @@ VEQPy is a single public package. `veqpy.model` owns model-layer objects,
 private Numba/Cxx backends, and `veqpy.api` provides thin function-style
 entrypoints. The native C++ backend is optional for normal
 Python/Numba use and requires a local C++20 toolchain and native libraries such
-as CMake 3.24+, `clang++`, nanobind, and GCEM.
+as CMake 3.24+, `clang++`, nanobind, GCEM, LAPACKE/LAPACK, and OpenBLAS.
 
 All commands below use `.venv` explicitly; activating the environment is optional.
 
