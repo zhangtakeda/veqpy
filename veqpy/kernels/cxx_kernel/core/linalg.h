@@ -551,10 +551,10 @@ namespace linalg::detail
     inline constexpr size_t cholesky_lapack_min_order      = 128;
     inline constexpr size_t householder_lapack_min_order   = 128;
     inline constexpr size_t golub_reinsch_lapack_min_order = 64;
-    // Thomas remains constexpr for every realistic VEQ grid.  This deliberately
-    // remote handoff preserves a standard LAPACKE route for pathological future
-    // band systems without creating a second small-N implementation policy.
-    inline constexpr size_t thomas_lapack_min_order = 1024 * 128;
+    // Thomas remains constexpr for every realistic VEQ grid.  The fixed 8096
+    // handoff preserves a standard LAPACKE route for larger future band systems
+    // without creating a second small-N implementation policy.
+    inline constexpr size_t thomas_lapack_min_order = 8096;
 
     template <typename Policy, size_t N1, size_t N2>
     inline constexpr bool uses_runtime_lapack = runtime_lapack_enabled && []

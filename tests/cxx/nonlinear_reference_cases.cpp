@@ -66,8 +66,8 @@ namespace
 
     struct RemoteCminpackResidual
     {
-        static constexpr std::size_t equations = 1024 * 128;
-        static constexpr std::size_t variables = 1024 * 128;
+        static constexpr std::size_t equations = 8096;
+        static constexpr std::size_t variables = 8096;
     };
 
     template <typename Policy, typename Functor>
@@ -97,7 +97,7 @@ namespace
     }
 } // namespace
 
-static_assert(nonlinear::detail::cminpack_fallback_min_dimension == 1024 * 128);
+static_assert(nonlinear::detail::cminpack_fallback_min_dimension == 8096);
 static_assert(!nonlinear::detail::uses_standard_cminpack_v<nonlinear::Powell, RosenbrockResidual>);
 static_assert(!nonlinear::detail::uses_standard_cminpack_v<nonlinear::LevenbergMarquardt, RosenbrockResidual>);
 static_assert(nonlinear::detail::uses_standard_cminpack_v<nonlinear::Powell, RemoteCminpackResidual>);

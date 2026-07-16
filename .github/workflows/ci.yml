@@ -41,7 +41,10 @@ jobs:
           sudo apt-get install --no-install-recommends -y \
             clang-18 \
             cmake \
-            git
+            git \
+            libcminpack-dev \
+            liblapacke-dev \
+            libopenblas-dev
           git clone --depth 1 --branch v1.18.0 https://github.com/kthohr/gcem.git "${RUNNER_TEMP}/gcem"
           cmake -S "${RUNNER_TEMP}/gcem" -B "${RUNNER_TEMP}/gcem-build" \
             -DCMAKE_INSTALL_PREFIX="${HOME}/opt/gcem-install"

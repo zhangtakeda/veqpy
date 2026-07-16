@@ -116,10 +116,10 @@ namespace nonlinear::detail
     };
 
     // Generated VEQ artifacts stay on the fixed-size, VEQ-specialized path.
-    // This deliberately remote handoff keeps the standard CMINPACK driver
-    // available without putting a runtime size test in a generated kernel.
+    // This fixed handoff keeps the standard CMINPACK driver available without
+    // putting a runtime size test in a generated kernel.
 #ifndef VEQPY_CXX_CMINPACK_FALLBACK_MIN_DIMENSION
-#define VEQPY_CXX_CMINPACK_FALLBACK_MIN_DIMENSION (1024 * 128)
+#define VEQPY_CXX_CMINPACK_FALLBACK_MIN_DIMENSION 8096
 #endif
     inline constexpr size_t cminpack_fallback_min_dimension =
         static_cast<size_t>(VEQPY_CXX_CMINPACK_FALLBACK_MIN_DIMENSION);
