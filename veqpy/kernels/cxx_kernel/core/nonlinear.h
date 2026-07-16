@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <memory>
 #include <new>
+#include <limits>
 #include <span>
 #include <stdexcept>
 #include <type_traits>
@@ -113,6 +114,129 @@ namespace nonlinear::detail
         template <typename Functor>
         struct Context;
     };
+
+    // Generated VEQ artifacts stay on the fixed-size, VEQ-specialized path.
+    // This deliberately remote handoff keeps the standard CMINPACK driver
+    // available without putting a runtime size test in a generated kernel.
+#ifndef VEQPY_CXX_CMINPACK_FALLBACK_MIN_DIMENSION
+#define VEQPY_CXX_CMINPACK_FALLBACK_MIN_DIMENSION (1024 * 128)
+#endif
+    inline constexpr size_t cminpack_fallback_min_dimension =
+        static_cast<size_t>(VEQPY_CXX_CMINPACK_FALLBACK_MIN_DIMENSION);
+
+    template <typename Policy, typename Functor>
+    inline constexpr bool uses_standard_cminpack_v =
+        (std::is_same_v<Policy, Powell> || std::is_same_v<Policy, LevenbergMarquardt>) &&
+        Functor::variables >= cminpack_fallback_min_dimension;
+
+    // Keep the system CMINPACK header out of this header: the specialized
+    // primitives intentionally retain a private, prefixed CMINPACK subset.
+    // nonlinear.cpp includes the system header and forwards these calls.
+    namespace standard_cminpack
+    {
+        using FuncNN = int (*)(void*, int, const double*, double*, int);
+        using FuncDerNN = int (*)(void*, int, const double*, double*, double*, int, int);
+        using FuncMN = int (*)(void*, int, int, const double*, double*, int);
+        using FuncDerMN = int (*)(void*, int, int, const double*, double*, double*, int, int);
+
+        int hybrd(FuncNN callback,
+                  void* data,
+                  int n,
+                  double* x,
+                  double* fvec,
+                  double xtol,
+                  int max_evaluations,
+                  int ml,
+                  int mu,
+                  double epsfcn,
+                  double* diag,
+                  int mode,
+                  double factor,
+                  int nprint,
+                  int* nfev,
+                  double* fjac,
+                  int ldfjac,
+                  double* r,
+                  int lr,
+                  double* qtf,
+                  double* wa1,
+                  double* wa2,
+                  double* wa3,
+                  double* wa4);
+
+        int hybrj(FuncDerNN callback,
+                  void* data,
+                  int n,
+                  double* x,
+                  double* fvec,
+                  double* fjac,
+                  int ldfjac,
+                  double xtol,
+                  int max_evaluations,
+                  double* diag,
+                  int mode,
+                  double factor,
+                  int nprint,
+                  int* nfev,
+                  int* njev,
+                  double* r,
+                  int lr,
+                  double* qtf,
+                  double* wa1,
+                  double* wa2,
+                  double* wa3,
+                  double* wa4);
+
+        int lmdif(FuncMN callback,
+                  void* data,
+                  int m,
+                  int n,
+                  double* x,
+                  double* fvec,
+                  double ftol,
+                  double xtol,
+                  double gtol,
+                  int max_evaluations,
+                  double epsfcn,
+                  double* diag,
+                  int mode,
+                  double factor,
+                  int nprint,
+                  int* nfev,
+                  double* fjac,
+                  int ldfjac,
+                  int* ipvt,
+                  double* qtf,
+                  double* wa1,
+                  double* wa2,
+                  double* wa3,
+                  double* wa4);
+
+        int lmder(FuncDerMN callback,
+                  void* data,
+                  int m,
+                  int n,
+                  double* x,
+                  double* fvec,
+                  double* fjac,
+                  int ldfjac,
+                  double ftol,
+                  double xtol,
+                  double gtol,
+                  int max_evaluations,
+                  double* diag,
+                  int mode,
+                  double factor,
+                  int nprint,
+                  int* nfev,
+                  int* njev,
+                  int* ipvt,
+                  double* qtf,
+                  double* wa1,
+                  double* wa2,
+                  double* wa3,
+                  double* wa4);
+    } // namespace standard_cminpack
 
     template <typename Functor>
     inline constexpr bool has_jacobian_v =
@@ -528,6 +652,9 @@ namespace nonlinear::detail
         static constexpr size_t variables = Functor::variables;
         static_assert(equations == variables, "Powell hybrid requires a square residual");
         static constexpr size_t lr_size = variables * (variables + 1) / 2;
+        static constexpr bool cminpack_dimensions_supported =
+            variables <= static_cast<size_t>(std::numeric_limits<int>::max()) &&
+            lr_size <= static_cast<size_t>(std::numeric_limits<int>::max());
 
         Functor           functor;
         std::span<double> fvec;
@@ -567,14 +694,141 @@ namespace nonlinear::detail
         {
             evaluations          = 0;
             jacobian_evaluations = 0;
-            if constexpr (has_jacobian_v<Functor>)
+            if constexpr (uses_standard_cminpack_v<Powell, Functor>)
             {
-                run_jacobian_backend(x);
+                static_assert(cminpack_dimensions_supported,
+                              "standard CMINPACK cannot represent this Powell workspace");
+                if constexpr (has_jacobian_v<Functor>)
+                    run_standard_jacobian_backend(x);
+                else
+                    run_standard_finite_difference_backend(x);
             }
             else
             {
-                run_finite_difference_backend(x);
+                if constexpr (has_jacobian_v<Functor>)
+                    run_jacobian_backend(x);
+                else
+                    run_finite_difference_backend(x);
             }
+        }
+
+        static constexpr int cminpack_dimension() noexcept { return static_cast<int>(variables); }
+
+        static int standard_finite_difference_callback(void* data,
+                                                       int n,
+                                                       const double* values,
+                                                       double* residual,
+                                                       int flag)
+        {
+            auto& context = *static_cast<Context*>(data);
+            if (n != cminpack_dimension())
+                return -1;
+            if (flag > 0)
+            {
+                if (context.max_evaluations > 0 && context.evaluations >= context.max_evaluations)
+                    return -1;
+                context.functor(values, residual);
+                ++context.evaluations;
+            }
+            return 0;
+        }
+
+        static int standard_jacobian_callback(void* data,
+                                              int n,
+                                              const double* values,
+                                              double* residual,
+                                              double* jacobian_values,
+                                              int leading_dimension,
+                                              int flag)
+        {
+            auto& context = *static_cast<Context*>(data);
+            if (n != cminpack_dimension() || leading_dimension < n)
+                return -1;
+            if (flag == 1)
+            {
+                if (context.max_evaluations > 0 && context.evaluations >= context.max_evaluations)
+                    return -1;
+                context.functor(values, residual);
+                ++context.evaluations;
+            }
+            else if (flag == 2)
+            {
+                if constexpr (has_column_major_jacobian_v<Functor>)
+                {
+                    context.functor.jacobian_column_major(values, jacobian_values, leading_dimension);
+                }
+                else
+                {
+                    evaluate_jacobian<Functor, equations, variables>(
+                        context.functor, values, context.jacobian.data());
+                    for (size_t row = 0; row < equations; ++row)
+                        for (size_t col = 0; col < variables; ++col)
+                            jacobian_values[row + static_cast<size_t>(leading_dimension) * col] =
+                                context.jacobian[row * variables + col];
+                }
+                ++context.jacobian_evaluations;
+            }
+            return 0;
+        }
+
+        void run_standard_jacobian_backend(double* x)
+        {
+            int nfev = 0;
+            int njev = 0;
+            info = standard_cminpack::hybrj(&Context::standard_jacobian_callback,
+                                             this,
+                                             cminpack_dimension(),
+                                             x,
+                                             fvec.data(),
+                                             fjac.data(),
+                                             cminpack_dimension(),
+                                             tolerance,
+                                             max_evaluations,
+                                             diag.data(),
+                                             1,
+                                             initial_step_bound,
+                                             0,
+                                             &nfev,
+                                             &njev,
+                                             r.data(),
+                                             static_cast<int>(lr_size),
+                                             qtf.data(),
+                                             wa1.data(),
+                                             wa2.data(),
+                                             wa3.data(),
+                                             wa4.data());
+            evaluations          = nfev;
+            jacobian_evaluations = njev;
+        }
+
+        void run_standard_finite_difference_backend(double* x)
+        {
+            int nfev = 0;
+            info = standard_cminpack::hybrd(&Context::standard_finite_difference_callback,
+                                             this,
+                                             cminpack_dimension(),
+                                             x,
+                                             fvec.data(),
+                                             tolerance,
+                                             max_evaluations,
+                                             cminpack_dimension() - 1,
+                                             cminpack_dimension() - 1,
+                                             finite_difference_step,
+                                             diag.data(),
+                                             1,
+                                             initial_step_bound,
+                                             0,
+                                             &nfev,
+                                             fjac.data(),
+                                             cminpack_dimension(),
+                                             r.data(),
+                                             static_cast<int>(lr_size),
+                                             qtf.data(),
+                                             wa1.data(),
+                                             wa2.data(),
+                                             wa3.data(),
+                                             wa4.data());
+            evaluations = nfev;
         }
 
         void run_jacobian_backend(double* x)
@@ -679,11 +933,15 @@ namespace nonlinear::detail
         static constexpr size_t equations = Functor::equations;
         static constexpr size_t variables = Functor::variables;
         static_assert(equations == variables, "VEQPy LM specialization requires a square residual");
+        static constexpr bool cminpack_dimensions_supported =
+            equations <= static_cast<size_t>(std::numeric_limits<int>::max()) &&
+            variables <= static_cast<size_t>(std::numeric_limits<int>::max());
 
         Functor           functor;
         std::span<double> fvec;
         std::span<double> fjac;
         std::span<double> jacobian;
+        std::span<double> diag;
         std::span<int>    ipvt;
         std::span<double> qtf;
         std::span<double> wa1;
@@ -703,6 +961,7 @@ namespace nonlinear::detail
               fvec(workspace.template take<double>(equations)),
               fjac(workspace.template take<double>(equations * variables)),
               jacobian(take_jacobian_workspace(workspace)),
+              diag(workspace.template take<double>(variables)),
               ipvt(workspace.template take<int>(variables)),
               qtf(workspace.template take<double>(variables)),
               wa1(workspace.template take<double>(variables)),
@@ -716,14 +975,147 @@ namespace nonlinear::detail
         {
             evaluations          = 0;
             jacobian_evaluations = 0;
-            if constexpr (has_jacobian_v<Functor>)
+            if constexpr (uses_standard_cminpack_v<LevenbergMarquardt, Functor>)
             {
-                run_jacobian_backend(x);
+                static_assert(cminpack_dimensions_supported,
+                              "standard CMINPACK cannot represent this LM workspace");
+                if constexpr (has_jacobian_v<Functor>)
+                    run_standard_jacobian_backend(x);
+                else
+                    run_standard_finite_difference_backend(x);
             }
             else
             {
-                run_finite_difference_backend(x);
+                if constexpr (has_jacobian_v<Functor>)
+                    run_jacobian_backend(x);
+                else
+                    run_finite_difference_backend(x);
             }
+        }
+
+        static constexpr int cminpack_dimension() noexcept { return static_cast<int>(variables); }
+
+        static int standard_finite_difference_callback(void* data,
+                                                       int m,
+                                                       int n,
+                                                       const double* values,
+                                                       double* residual,
+                                                       int flag)
+        {
+            auto& context = *static_cast<Context*>(data);
+            if (m != cminpack_dimension() || n != cminpack_dimension())
+                return -1;
+            if (flag > 0)
+            {
+                if (context.max_evaluations > 0 && context.evaluations >= context.max_evaluations)
+                    return -1;
+                context.functor(values, residual);
+                ++context.evaluations;
+            }
+            return 0;
+        }
+
+        static int standard_jacobian_callback(void* data,
+                                              int m,
+                                              int n,
+                                              const double* values,
+                                              double* residual,
+                                              double* jacobian_values,
+                                              int leading_dimension,
+                                              int flag)
+        {
+            auto& context = *static_cast<Context*>(data);
+            if (m != cminpack_dimension() || n != cminpack_dimension() || leading_dimension < m)
+                return -1;
+            if (flag == 1)
+            {
+                if (context.max_evaluations > 0 && context.evaluations >= context.max_evaluations)
+                    return -1;
+                context.functor(values, residual);
+                ++context.evaluations;
+            }
+            else if (flag == 2)
+            {
+                if constexpr (has_column_major_jacobian_v<Functor>)
+                {
+                    context.functor.jacobian_column_major(values, jacobian_values, leading_dimension);
+                }
+                else
+                {
+                    evaluate_jacobian<Functor, equations, variables>(
+                        context.functor, values, context.jacobian.data());
+                    for (size_t row = 0; row < equations; ++row)
+                        for (size_t col = 0; col < variables; ++col)
+                            jacobian_values[row + static_cast<size_t>(leading_dimension) * col] =
+                                context.jacobian[row * variables + col];
+                }
+                ++context.jacobian_evaluations;
+            }
+            return 0;
+        }
+
+        void run_standard_jacobian_backend(double* x)
+        {
+            std::fill(diag.begin(), diag.end(), 1.0);
+            int nfev = 0;
+            int njev = 0;
+            info = standard_cminpack::lmder(&Context::standard_jacobian_callback,
+                                             this,
+                                             cminpack_dimension(),
+                                             cminpack_dimension(),
+                                             x,
+                                             fvec.data(),
+                                             fjac.data(),
+                                             cminpack_dimension(),
+                                             tolerance,
+                                             tolerance,
+                                             tolerance,
+                                             max_evaluations,
+                                             diag.data(),
+                                             2,
+                                             initial_step_bound,
+                                             0,
+                                             &nfev,
+                                             &njev,
+                                             ipvt.data(),
+                                             qtf.data(),
+                                             wa1.data(),
+                                             wa2.data(),
+                                             wa3.data(),
+                                             wa4.data());
+            evaluations          = nfev;
+            jacobian_evaluations = njev;
+        }
+
+        void run_standard_finite_difference_backend(double* x)
+        {
+            std::fill(diag.begin(), diag.end(), 1.0);
+            int nfev = 0;
+            info = standard_cminpack::lmdif(&Context::standard_finite_difference_callback,
+                                             this,
+                                             cminpack_dimension(),
+                                             cminpack_dimension(),
+                                             x,
+                                             fvec.data(),
+                                             tolerance,
+                                             tolerance,
+                                             tolerance,
+                                             max_evaluations,
+                                             finite_difference_step,
+                                             diag.data(),
+                                             2,
+                                             initial_step_bound,
+                                             0,
+                                             &nfev,
+                                             fjac.data(),
+                                             cminpack_dimension(),
+                                             ipvt.data(),
+                                             qtf.data(),
+                                             wa1.data(),
+                                             wa2.data(),
+                                             wa3.data(),
+                                             wa4.data());
+            evaluations = nfev;
         }
 
         void run_jacobian_backend(double* x)
