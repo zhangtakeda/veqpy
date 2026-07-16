@@ -37,8 +37,9 @@ Benchmark entry points use backend names directly:
 - `benchmarks/cxx_boundary_fitters.py`: raw-boundary `qr`/`gnqr`/`least-square`
   fitter timing and diff matrix across Numba and Cxx.
 
-The native backend needs a C++20 toolchain plus CMake, nanobind, and GCEM.
-Its Powell hybrid and Levenberg-Marquardt
-solvers compile the bundled MINPACK-derived implementation into each native
-artifact; no system CMINPACK installation is required. Normal Numba usage does
-not require compiling native artifacts.
+The native backend needs a C++20 toolchain plus CMake, nanobind, GCEM,
+CMINPACK, LAPACKE/LAPACK, and OpenBLAS. Its Powell hybrid and
+Levenberg-Marquardt solvers compile the bundled MINPACK-derived primitives into
+each native artifact; a deliberately remote compile-time threshold retains the
+standard CMINPACK drivers as a fallback. Normal Numba usage does not require
+compiling native artifacts.

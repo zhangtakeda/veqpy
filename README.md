@@ -94,7 +94,8 @@ VEQPy is a single public package. `veqpy.model` owns model-layer objects,
 private Numba/Cxx backends, and `veqpy.api` provides thin function-style
 entrypoints. The native C++ backend is optional for normal
 Python/Numba use and requires a local C++20 toolchain and native libraries such
-as CMake 3.24+, `clang++`, nanobind, GCEM, LAPACKE/LAPACK, and OpenBLAS.
+as CMake 3.24+, `clang++`, nanobind, GCEM, CMINPACK, LAPACKE/LAPACK, and
+OpenBLAS.
 
 All commands below use `.venv` explicitly; activating the environment is optional.
 
@@ -244,25 +245,6 @@ VEQPy is associated with the companion manuscript **[Zhang2026]**. Related VEQ-f
   > "Investigation of Toroidal Rotation Effects on Spherical Torus Equilibria using
   > the Fast Spectral Solver VEQ-R", arXiv:2602.11422, 2026._
 
-### Code references
-
-- [**MINPACK source code**][minpack]: source-level algorithm reference for
-  VEQPy's hand-written, topology-parameterized Powell hybrid and
-  Levenberg-Marquardt solvers; distributed under the
-  [MINPACK license][minpack-license] (University of Chicago, 1999).
-  License notice: “This product includes software developed by the University
-  of Chicago, as Operator of Argonne National Laboratory.”
-
-- [**CMinpack v1.3.11 source code**][cminpack]: C translation used as a
-  source-level reference and for MINPACK-derived numerical primitives compiled
-  into the Cxx implementations; distributed under the
-  [MINPACK license][minpack-license].
-
-- [**Reference LAPACK 3.12.1 source code**][lapack]: source-level algorithm
-  reference for VEQPy's fixed-array Golub--Reinsch SVD and dense kernels; its
-  LAPACKE interface also supplies the blocked high-order runtime path;
-  distributed under the [LAPACK license][lapack-license] (BSD-3-Clause).
-
 ---
 
 <p>
@@ -297,8 +279,3 @@ VEQPy is associated with the companion manuscript **[Zhang2026]**. Related VEQ-f
 [veq-arxiv]: https://arxiv.org/abs/2606.11821
 [veq-min-parameters-arxiv]: https://arxiv.org/abs/2601.02942
 [veqr-arxiv]: https://arxiv.org/abs/2602.11422
-[minpack]: https://netlib.org/minpack/
-[cminpack]: https://github.com/devernay/cminpack/tree/v1.3.11
-[minpack-license]: veqpy/kernels/cxx_kernel/core/minpack/CopyrightMINPACK.txt
-[lapack]: https://github.com/Reference-LAPACK/lapack/tree/v3.12.1
-[lapack-license]: veqpy/kernels/cxx_kernel/core/lapack/CopyrightLAPACK.txt
