@@ -68,9 +68,11 @@ namespaces = false
     "core/*.h",
     "core/*.in",
     "core/CMakeLists.txt",
+    "core/THIRD_PARTY_NOTICES",
     "core/minpack/*.c",
     "core/minpack/*.h",
     "core/minpack/*.txt",
+    "core/lapack/*.txt",
 ]
 
 [tool.ruff]

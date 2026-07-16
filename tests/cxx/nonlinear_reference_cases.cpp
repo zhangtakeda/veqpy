@@ -64,6 +64,12 @@ namespace
         }
     };
 
+    struct RemoteCminpackResidual
+    {
+        static constexpr std::size_t equations = 8096;
+        static constexpr std::size_t variables = 8096;
+    };
+
     template <typename Policy, typename Functor>
     void run_case(std::string_view                         name,
                   const Functor&                           functor,
@@ -90,6 +96,13 @@ namespace
         std::cout << ' ' << norm << '\n';
     }
 } // namespace
+
+static_assert(nonlinear::detail::cminpack_fallback_min_dimension == 8096);
+static_assert(!nonlinear::detail::uses_standard_cminpack_v<nonlinear::Powell, RosenbrockResidual>);
+static_assert(!nonlinear::detail::uses_standard_cminpack_v<nonlinear::LevenbergMarquardt, RosenbrockResidual>);
+static_assert(nonlinear::detail::uses_standard_cminpack_v<nonlinear::Powell, RemoteCminpackResidual>);
+static_assert(
+    nonlinear::detail::uses_standard_cminpack_v<nonlinear::LevenbergMarquardt, RemoteCminpackResidual>);
 
 int main()
 {

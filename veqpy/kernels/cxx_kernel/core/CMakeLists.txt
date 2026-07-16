@@ -288,6 +288,17 @@ function(cxx_link_dependencies target)
     find_package(gcem CONFIG REQUIRED)
     target_link_libraries("${target}" PRIVATE gcem)
 
+    # Fixed-size Powell/LM implementations are the normal generated-kernel
+    # path.  The system CMINPACK drivers remain linked for the deliberately
+    # remote compile-time fallback policy.
+    find_path(CMINPACK_INCLUDE_DIR NAMES cminpack.h PATH_SUFFIXES cminpack-1 REQUIRED)
+    find_library(CMINPACK_LIBRARY NAMES cminpack REQUIRED)
+    target_include_directories("${target}" PRIVATE "${CMINPACK_INCLUDE_DIR}")
+    target_link_libraries("${target}" PRIVATE "${CMINPACK_LIBRARY}")
+
+    # Large fixed dense systems use the corresponding blocked LAPACKE kernels;
+    # the header keeps a constexpr-only escape hatch for tests and callers that
+    # deliberately opt out of this runtime route.
     find_path(LAPACKE_INCLUDE_DIR NAMES lapacke.h REQUIRED)
     find_library(LAPACKE_LIBRARY NAMES lapacke REQUIRED)
     find_library(LAPACK_LIBRARY NAMES lapack REQUIRED)
@@ -416,7 +427,6 @@ function(cxx_enable_kernel_optimizations target)
                 $<${release_like}:-mprefer-vector-width=256>
                 $<${release_like}:-fstrict-aliasing>
                 $<${release_like}:-fomit-frame-pointer>
-                $<${release_like}:-funroll-loops>
                 $<${release_like}:-fvectorize>
                 $<${release_like}:-fslp-vectorize>
                 $<${release_like}:-ffunction-sections>
@@ -498,6 +508,7 @@ cxx_require_clang()
 set(
     VEQPY_CXX_COMMON_SOURCES
     linalg.cpp
+    nonlinear.cpp
     minpack/dogleg.c
     minpack/dpmpar.c
     minpack/enorm.c

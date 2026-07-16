@@ -1,11 +1,13 @@
-// BLAS/LAPACK-backed dense linear-algebra implementations for generated Cxx Kernel artifacts.
+// Runtime bridges to LAPACKE's blocked dense kernels.
 
 #include "linalg.h"
+#include <algorithm>
+#include <cassert>
 #include <cblas.h>
 #include <lapacke.h>
 
 static_assert(sizeof(lapack_int) == sizeof(int),
-              "lapack_int size mismatch, set lapack_threshold to a very large value");
+              "lapack_int size mismatch; disable runtime LAPACKE dispatch for this ABI");
 
 [[maybe_unused]] const bool blas_runtime_configured = []
 {
@@ -17,87 +19,90 @@ static_assert(sizeof(lapack_int) == sizeof(int),
 
 namespace linalg::detail
 {
-    void Doolittle::lapack_factorize_inplace(int m, int n, double* a, int lda, int* ipiv)
+    int Doolittle::lapack_factorize_inplace(int m, int n, double* a, int lda, int* ipiv)
     {
-        [[maybe_unused]] int info = LAPACKE_dgetrf(LAPACK_ROW_MAJOR, m, n, a, lda, ipiv);
-        assert(info == 0);
+        return LAPACKE_dgetrf(LAPACK_ROW_MAJOR, m, n, a, lda, ipiv);
     }
 
     void
     Doolittle::lapack_substitute_inplace(int n, int nrhs, const double* a, int lda, const int* ipiv, double* b, int ldb)
     {
-        [[maybe_unused]] int info = LAPACKE_dgetrs(LAPACK_ROW_MAJOR, 'N', n, nrhs, a, lda, ipiv, b, ldb);
+        const int info = LAPACKE_dgetrs(LAPACK_ROW_MAJOR, 'N', n, nrhs, a, lda, ipiv, b, ldb);
         assert(info == 0);
     }
 
-    void Cholesky::lapack_factorize_inplace(int n, double* a, int lda)
+    int Cholesky::lapack_factorize_inplace(int n, double* a, int lda)
     {
-        [[maybe_unused]] int info = LAPACKE_dpotrf(LAPACK_ROW_MAJOR, 'L', n, a, lda);
-        assert(info == 0);
+        return LAPACKE_dpotrf(LAPACK_ROW_MAJOR, 'L', n, a, lda);
     }
 
     void Cholesky::lapack_substitute_inplace(int n, int nrhs, const double* a, int lda, double* b, int ldb)
     {
-        [[maybe_unused]] int info = LAPACKE_dpotrs(LAPACK_ROW_MAJOR, 'L', n, nrhs, a, lda, b, ldb);
+        const int info = LAPACKE_dpotrs(LAPACK_ROW_MAJOR, 'L', n, nrhs, a, lda, b, ldb);
         assert(info == 0);
     }
 
-    void BunchKaufman::lapack_factorize_inplace(int n, double* a, int lda, int* ipiv)
+    int BunchKaufman::lapack_factorize_inplace(int n, double* a, int lda, int* ipiv)
     {
-        [[maybe_unused]] int info = LAPACKE_dsytrf(LAPACK_ROW_MAJOR, 'L', n, a, lda, ipiv);
-        assert(info == 0);
+        return LAPACKE_dsytrf(LAPACK_ROW_MAJOR, 'L', n, a, lda, ipiv);
     }
 
     void BunchKaufman::lapack_substitute_inplace(
         int n, int nrhs, const double* a, int lda, const int* ipiv, double* b, int ldb)
     {
-        [[maybe_unused]] int info = LAPACKE_dsytrs(LAPACK_ROW_MAJOR, 'L', n, nrhs, a, lda, ipiv, b, ldb);
+        const int info = LAPACKE_dsytrs(LAPACK_ROW_MAJOR, 'L', n, nrhs, a, lda, ipiv, b, ldb);
         assert(info == 0);
     }
 
-    void Householder::lapack_factorize_inplace(int m, int n, double* a, int lda, double* tau)
+    int Householder::lapack_factorize_inplace(int m, int n, double* a, int lda, double* tau)
     {
-        [[maybe_unused]] int info = LAPACKE_dgeqrf(LAPACK_ROW_MAJOR, m, n, a, lda, tau);
-        assert(info == 0);
+        return LAPACKE_dgeqrf(LAPACK_ROW_MAJOR, m, n, a, lda, tau);
     }
 
     void Householder::lapack_substitute_inplace(
         int m, int n, int nrhs, const double* a, int lda, const double* tau, double* c, int ldc)
     {
-        [[maybe_unused]] int info = LAPACKE_dormqr(LAPACK_ROW_MAJOR, 'L', 'T', m, nrhs, n, a, lda, tau, c, ldc);
-        assert(info == 0);
+        const int reflector_info = LAPACKE_dormqr(LAPACK_ROW_MAJOR, 'L', 'T', m, nrhs, n, a, lda, tau, c, ldc);
+        assert(reflector_info == 0);
 
         cblas_dtrsm(CblasRowMajor, CblasLeft, CblasUpper, CblasNoTrans, CblasNonUnit, n, nrhs, 1.0, a, lda, c, ldc);
     }
 
-    void GolubReinsch::lapack_factorize_inplace(int m, int n, const double* a, double* u, double* s, double* vt)
+    int GolubReinsch::lapack_factorize_inplace(
+        int m, int n, const double* source, double* work, double* u, double* s, double* vt)
     {
-        double* buffer = new double[static_cast<std::size_t>(m * n)];
-        std::copy(a, a + m * n, buffer);
-        [[maybe_unused]] int info = LAPACKE_dgesdd(LAPACK_ROW_MAJOR, 'A', m, n, buffer, n, s, u, m, vt, n);
-        delete[] buffer;
-        assert(info == 0);
+        std::copy(source, source + m * n, work);
+        return LAPACKE_dgesdd(LAPACK_ROW_MAJOR, 'A', m, n, work, n, s, u, m, vt, n);
     }
 
     void GolubReinsch::lapack_substitute_inplace(
-        int m, int n, const double* u, const double* s, const double* vt, double* b, int nrhs)
+        int m, int n, const double* u, const double* s, const double* vt, double* b, int nrhs, double* work)
     {
-        double* buffer = new double[static_cast<std::size_t>(std::max(m, n) * nrhs)];
-        cblas_dgemm(CblasRowMajor, CblasTrans, CblasNoTrans, m, nrhs, m, 1.0, u, m, b, nrhs, 0.0, buffer, nrhs);
+        cblas_dgemm(CblasRowMajor, CblasTrans, CblasNoTrans, m, nrhs, m, 1.0, u, m, b, nrhs, 0.0, work, nrhs);
 
-        int rank = std::min(m, n);
+        const int rank = std::min(m, n);
         for (int i = 0; i < rank; ++i)
         {
-            double sinv = (s[i] > 1e-12) ? 1.0 / s[i] : 0.0;
-            for (int p = 0; p < nrhs; ++p)
-                buffer[i * nrhs + p] *= sinv;
+            const double inverse = s[i] > 1.0e-12 ? 1.0 / s[i] : 0.0;
+            for (int rhs = 0; rhs < nrhs; ++rhs)
+                work[i * nrhs + rhs] *= inverse;
         }
 
         if (n > rank)
-            std::fill(buffer + rank * nrhs, buffer + n * nrhs, 0.0);
+            std::fill(work + rank * nrhs, work + n * nrhs, 0.0);
 
-        cblas_dgemm(CblasRowMajor, CblasTrans, CblasNoTrans, n, nrhs, n, 1.0, vt, n, buffer, nrhs, 0.0, b, nrhs);
+        cblas_dgemm(CblasRowMajor, CblasTrans, CblasNoTrans, n, nrhs, n, 1.0, vt, n, work, nrhs, 0.0, b, nrhs);
+    }
 
-        delete[] buffer;
+    int Thomas::lapack_factorize_inplace(int n, int kl, int ku, double* ab, int ldab, int* ipiv)
+    {
+        return LAPACKE_dgbtrf(LAPACK_COL_MAJOR, n, n, kl, ku, ab, ldab, ipiv);
+    }
+
+    void Thomas::lapack_substitute_inplace(
+        int n, int kl, int ku, int nrhs, const double* ab, int ldab, const int* ipiv, double* b, int ldb)
+    {
+        const int info = LAPACKE_dgbtrs(LAPACK_COL_MAJOR, 'N', n, kl, ku, nrhs, ab, ldab, ipiv, b, ldb);
+        assert(info == 0);
     }
 } // namespace linalg::detail
