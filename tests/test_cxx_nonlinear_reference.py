@@ -12,7 +12,7 @@ CORE_DIR = REPO_ROOT / "veqpy" / "kernels" / "cxx_kernel" / "core"
 DRIVER_SOURCE = REPO_ROOT / "tests" / "cxx" / "nonlinear_reference_cases.cpp"
 FASTMATH_FINITE_SOURCE = REPO_ROOT / "tests" / "cxx" / "fastmath_finite_cases.cpp"
 
-EXPECTED_CMINPACK_1_3_6 = {
+EXPECTED_INLINE_MINPACK_REFERENCE = {
     "powell_fd_rosenbrock": (1, 27, 0, (1.0, 1.0, 0.0)),
     "powell_jac_rosenbrock": (1, 23, 2, (1.0, 1.0, 0.0)),
     "lm_fd_rosenbrock": (2, 54, 0, (1.0, 1.0, 0.0)),
@@ -131,11 +131,13 @@ def _records(driver: Path) -> dict[str, tuple[int, int, int, tuple[float, ...]]]
     return records
 
 
-def test_cminpack_reference_cases_are_deterministic(nonlinear_reference_driver: Path) -> None:
+def test_inline_minpack_reference_cases_are_deterministic(
+    nonlinear_reference_driver: Path,
+) -> None:
     first = _records(nonlinear_reference_driver)
     second = _records(nonlinear_reference_driver)
     assert second == first
-    assert first == EXPECTED_CMINPACK_1_3_6
+    assert first == EXPECTED_INLINE_MINPACK_REFERENCE
 
 
 @pytest.mark.parametrize(

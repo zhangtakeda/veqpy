@@ -1294,8 +1294,8 @@ namespace linalg::detail
                 }
             }
 
-            // Preserve the legacy VEQ pseudoinverse cutoff while removing
-            // the CBLAS/DGESDD implementation that previously imposed it.
+            // Apply VEQ's fixed pseudoinverse rank cutoff to discard
+            // numerically null singular modes.
             for (size_t index = 0; index < rank; ++index)
                 if (S[index] > 1.0e-12)
                     for (size_t rhs = 0; rhs < P; ++rhs)

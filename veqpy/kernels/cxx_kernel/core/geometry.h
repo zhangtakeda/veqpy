@@ -43,8 +43,7 @@ namespace geometry::detail
         static constexpr size_t radial_nodes = GridType::radial_nodes;
         static constexpr size_t theta_rows   = GridType::theta_rows;
 
-        // Store [rho][field][theta]: theta stays contiguous while field starts no longer
-        // alias at the default 4096 B plane stride.
+        // Store [rho][field][theta] so residual loops traverse contiguous theta rows.
         using SurfaceSlab = Tensor<double, radial_nodes, surface_field_count, theta_rows>;
         using RadialSlab  = Matrix<double, radial_field_count, radial_nodes>;
 

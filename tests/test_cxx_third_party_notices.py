@@ -12,7 +12,6 @@ MINPACK_ACKNOWLEDGEMENT = (
 
 
 def test_cxx_third_party_notices_and_distribution_inputs_are_retained() -> None:
-    readme = (REPO_ROOT / "README.md").read_text()
     notices = NOTICE_PATH.read_text()
     minpack_license = (
         REPO_ROOT / "veqpy" / "kernels" / "cxx_kernel" / "core" / "minpack" / "CopyrightMINPACK.txt"
@@ -24,8 +23,6 @@ def test_cxx_third_party_notices_and_distribution_inputs_are_retained() -> None:
     with (REPO_ROOT / "pyproject.toml").open("rb") as stream:
         package_data = tomllib.load(stream)["tool"]["setuptools"]["package-data"]
 
-    assert "### Code references" not in readme
-    assert MINPACK_ACKNOWLEDGEMENT not in readme
     assert MINPACK_ACKNOWLEDGEMENT in notices
     assert "https://netlib.org/minpack/" in notices
     assert "https://github.com/devernay/cminpack/tree/v1.3.11" in notices

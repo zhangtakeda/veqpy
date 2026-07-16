@@ -400,12 +400,6 @@ def build_uniform_source_interpolation_matrix(
     return matrix
 
 
-def build_uniform_not_a_knot_spline_coefficients(values: np.ndarray) -> np.ndarray:
-    """Compatibility helper for historical not-a-knot source interpolation."""
-
-    return _build_uniform_not_a_knot_spline_coefficients(values)
-
-
 @uniform_source_interpolation_generator(SOURCE_INTERP_BARYCENTRIC)
 def barycentric_source_interpolation_coefficients(values: np.ndarray) -> np.ndarray:
     """Build local barycentric-style coefficients for uniform source samples."""
