@@ -99,25 +99,23 @@ namespace residual::detail
                     const size_t geometry_base = geometry_radial_base + j;
                     const double sin_tb_ij =
                         geometry_surface[geometry_base + geometry::surface_sin_tb * geometry_row_stride];
-                    const double R_ij   = geometry_surface[geometry_base + geometry::surface_R * geometry_row_stride];
+                    const double R2_ij = geometry_surface[geometry_base + geometry::surface_R2 * geometry_row_stride];
                     const double R_t_ij = geometry_surface[geometry_base + geometry::surface_R_t * geometry_row_stride];
                     const double Z_t_ij = geometry_surface[geometry_base + geometry::surface_Z_t * geometry_row_stride];
                     const double inv_J =
                         geometry_surface[geometry_base + geometry::surface_inv_J * geometry_row_stride];
                     const double JdivR_ij =
                         geometry_surface[geometry_base + geometry::surface_JdivR * geometry_row_stride];
-                    const double grtdivJR_t_ij =
-                        geometry_surface[geometry_base + geometry::surface_grtdivJR_t * geometry_row_stride];
+                    const double G2_r_ij =
+                        geometry_surface[geometry_base + geometry::surface_G2_r * geometry_row_stride];
                     const double gttdivJR_ij =
                         geometry_surface[geometry_base + geometry::surface_gttdivJR * geometry_row_stride];
-                    const double gttdivJR_r_ij =
-                        geometry_surface[geometry_base + geometry::surface_gttdivJR_r * geometry_row_stride];
 
                     const double psin_R = -Z_t_ij * inv_J * psin_r_i;
                     const double psin_Z = R_t_ij * inv_J * psin_r_i;
 
-                    const double G1n            = JdivR_ij * (FFn_psin_i + R_ij * R_ij * Pn_psin_i);
-                    const double G2n            = gttdivJR_ij * psin_rr_i + (gttdivJR_r_ij - grtdivJR_t_ij) * psin_r_i;
+                    const double G1n            = JdivR_ij * (FFn_psin_i + R2_ij * Pn_psin_i);
+                    const double G2n            = gttdivJR_ij * psin_rr_i + G2_r_ij * psin_r_i;
                     const double G_ij           = alpha1 * G1n + alpha2 * G2n;
                     const double Gpsin_R        = G_ij * psin_R;
                     const double Gpsin_Z        = G_ij * psin_Z;

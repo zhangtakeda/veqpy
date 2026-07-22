@@ -16,15 +16,14 @@ namespace geometry::detail
     inline constexpr double pi      = 3.141592653589793238462643383279502884;
 
     inline constexpr size_t surface_sin_tb      = 0;
-    inline constexpr size_t surface_R           = 1;
+    inline constexpr size_t surface_R2          = 1;
     inline constexpr size_t surface_R_t         = 2;
     inline constexpr size_t surface_Z_t         = 3;
     inline constexpr size_t surface_inv_J       = 4;
     inline constexpr size_t surface_JdivR       = 5;
-    inline constexpr size_t surface_grtdivJR_t  = 6;
+    inline constexpr size_t surface_G2_r        = 6;
     inline constexpr size_t surface_gttdivJR    = 7;
-    inline constexpr size_t surface_gttdivJR_r  = 8;
-    inline constexpr size_t surface_field_count = 9;
+    inline constexpr size_t surface_field_count = 8;
 
     inline constexpr size_t radial_S_r         = 0;
     inline constexpr size_t radial_V_r         = 1;
@@ -123,16 +122,13 @@ namespace geometry::detail
                 double sum_JdivR      = 0.0;
                 double* const surface_radial_base = surface_data + i * surface_radial_stride;
                 double* const surface_sin_tb_row = surface_radial_base + surface_sin_tb * surface_row_stride;
-                double* const surface_R_row = surface_radial_base + surface_R * surface_row_stride;
+                double* const surface_R2_row = surface_radial_base + surface_R2 * surface_row_stride;
                 double* const surface_R_t_row = surface_radial_base + surface_R_t * surface_row_stride;
                 double* const surface_Z_t_row = surface_radial_base + surface_Z_t * surface_row_stride;
                 double* const surface_inv_J_row = surface_radial_base + surface_inv_J * surface_row_stride;
                 double* const surface_JdivR_row = surface_radial_base + surface_JdivR * surface_row_stride;
-                double* const surface_grtdivJR_t_row =
-                    surface_radial_base + surface_grtdivJR_t * surface_row_stride;
+                double* const surface_G2_r_row = surface_radial_base + surface_G2_r * surface_row_stride;
                 double* const surface_gttdivJR_row = surface_radial_base + surface_gttdivJR * surface_row_stride;
-                double* const surface_gttdivJR_r_row =
-                    surface_radial_base + surface_gttdivJR_r * surface_row_stride;
 
                 alignas(tensor::detail::simd_alignment) std::array<double, theta_rows> tb_values;
                 alignas(tensor::detail::simd_alignment) std::array<double, theta_rows> tb_r_values;
@@ -262,16 +258,16 @@ namespace geometry::detail
                     const double grtdivJR_t_ij = (grt_t_ij - grt_ij * JR_t_ij * inv_JR) * inv_JR;
                     const double gttdivJR_ij   = gtt_ij * inv_JR;
                     const double gttdivJR_r_ij = gtt_r_ij * inv_JR - gtt_ij * JR_r_ij * inv_JR * inv_JR;
+                    const double G2_r_ij       = gttdivJR_r_ij - grtdivJR_t_ij;
 
                     surface_sin_tb_row[j]     = sin_tb_ij;
-                    surface_R_row[j]          = R_ij;
+                    surface_R2_row[j]         = R_ij * R_ij;
                     surface_R_t_row[j]        = R_t_ij;
                     surface_Z_t_row[j]        = Z_t_ij;
                     surface_inv_J_row[j]      = inv_J_ij;
                     surface_JdivR_row[j]      = JdivR_ij;
-                    surface_grtdivJR_t_row[j] = grtdivJR_t_ij;
+                    surface_G2_r_row[j]       = G2_r_ij;
                     surface_gttdivJR_row[j]   = gttdivJR_ij;
-                    surface_gttdivJR_r_row[j] = gttdivJR_r_ij;
 
                     sum_J += J_ij;
                     sum_JR += JR_ij;
@@ -303,12 +299,11 @@ namespace geometry
     using detail::radial_S_r;
     using detail::radial_V_r;
     using detail::surface_field_count;
-    using detail::surface_grtdivJR_t;
+    using detail::surface_G2_r;
     using detail::surface_gttdivJR;
-    using detail::surface_gttdivJR_r;
     using detail::surface_inv_J;
     using detail::surface_JdivR;
-    using detail::surface_R;
+    using detail::surface_R2;
     using detail::surface_R_t;
     using detail::surface_sin_tb;
     using detail::surface_Z_t;
