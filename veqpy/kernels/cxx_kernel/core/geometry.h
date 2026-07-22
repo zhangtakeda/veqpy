@@ -49,11 +49,15 @@ namespace geometry::detail
 
         SurfaceSlab surface_fields{};
         RadialSlab  radial_fields{};
+        double      cached_a  = 0.0;
+        double      cached_R0 = 0.0;
+        bool        geometry_parameters_valid = false;
 
         constexpr void clear() noexcept
         {
             surface_fields.clear();
             radial_fields.clear();
+            geometry_parameters_valid = false;
         }
 
         constexpr double& surface_field(size_t row, size_t radial_node, size_t theta_node) noexcept
@@ -88,6 +92,13 @@ namespace geometry::detail
                           "geometry/profile harmonics must match");
 
             (void)Z0;
+
+            const bool geometry_parameters_changed = !geometry_parameters_valid || a != cached_a || R0 != cached_R0;
+            if (!runtime_profiles.geometry_changed() && !geometry_parameters_changed)
+                return;
+            cached_a                  = a;
+            cached_R0                 = R0;
+            geometry_parameters_valid = true;
 
             double* const surface_data = surface_fields.aligned_data();
             constexpr size_t surface_row_stride    = theta_rows;

@@ -386,13 +386,29 @@ namespace profiles
             return out;
         }
 
-        static constexpr auto profile_L          = make_profile_L();
-        static constexpr auto active_profile_ids = make_active_profile_ids();
-        static constexpr auto active_lengths     = make_active_lengths();
-        static constexpr auto active_c_orders    = make_active_c_orders();
-        static constexpr auto active_s_orders    = make_active_s_orders();
-        static constexpr auto coeff_index        = make_coeff_index();
-        static constexpr auto order_offsets      = make_order_offsets();
+        static consteval auto make_coefficient_profile_ids()
+        {
+            std::array<size_t, x_size> out{};
+            const auto                 indices = make_coeff_index();
+            for (size_t profile_id = 0; profile_id < profile_count; ++profile_id)
+            {
+                const ProfileSlot slot = slot_for_profile_id(profile_id);
+                if (!slot.optimized())
+                    continue;
+                for (size_t degree = 0; degree < slot.coefficient_count; ++degree)
+                    out[static_cast<size_t>(indices[profile_id][degree])] = profile_id;
+            }
+            return out;
+        }
+
+        static constexpr auto profile_L                   = make_profile_L();
+        static constexpr auto active_profile_ids          = make_active_profile_ids();
+        static constexpr auto active_lengths              = make_active_lengths();
+        static constexpr auto active_c_orders             = make_active_c_orders();
+        static constexpr auto active_s_orders             = make_active_s_orders();
+        static constexpr auto coeff_index                 = make_coeff_index();
+        static constexpr auto order_offsets               = make_order_offsets();
+        static constexpr auto coefficient_profile_ids     = make_coefficient_profile_ids();
     };
 } // namespace profiles
 
@@ -948,8 +964,12 @@ namespace profiles
         PhaseBaseSlab                          boundary_phase_base{};
         std::array<size_t, family_field_count> boundary_c_orders{};
         std::array<size_t, family_field_count> boundary_s_orders{};
+        std::array<double, Shape::x_size>              active_coefficients{};
         size_t                                 boundary_c_order_count = 0;
         size_t                                 boundary_s_order_count = 0;
+        bool                                   active_coefficients_valid = false;
+        bool                                   geometry_coefficients_changed = true;
+        bool                                   boundary_coefficients_changed = true;
 
         constexpr void clear() noexcept
         {
@@ -961,6 +981,9 @@ namespace profiles
             boundary_phase_base.clear();
             boundary_c_order_count = 0;
             boundary_s_order_count = 0;
+            active_coefficients_valid = false;
+            geometry_coefficients_changed = true;
+            boundary_coefficients_changed = true;
         }
 
         constexpr double& profile_field(size_t profile_id, size_t node, size_t component) noexcept
@@ -1020,6 +1043,8 @@ namespace profiles
             return boundary_phase_base(node, component, theta_node);
         }
 
+        constexpr bool geometry_changed() const noexcept { return geometry_coefficients_changed; }
+
         constexpr void refresh_fixed(const ProfileRuntimeParams<Shape>& params) noexcept
         {
             refresh_fixed_profile<0>(params);
@@ -1030,13 +1055,22 @@ namespace profiles
         constexpr void refresh_active(std::span<const double, Shape::x_size> x,
                                       const ProfileRuntimeParams<Shape>&     params) noexcept
         {
-            refresh_h_active(x);
-            refresh_v_active(x);
-            refresh_kappa_active(x, params);
-            refresh_psin_active(x);
-            refresh_F_active(x, params);
-            refresh_c_active<0>(x, params);
-            refresh_s_active<1>(x, params);
+            const auto changed_profiles = refresh_active_coefficients(x);
+            if (changed_profiles[Shape::h_profile_id])
+                refresh_h_active(x);
+            if (changed_profiles[Shape::v_profile_id])
+                refresh_v_active(x);
+            if (changed_profiles[Shape::kappa_profile_id])
+                refresh_kappa_active(x, params);
+            if (changed_profiles[Shape::psin_profile_id])
+                refresh_psin_active(x);
+            if (changed_profiles[Shape::F_profile_id])
+                refresh_F_active(x, params);
+            if (boundary_coefficients_changed)
+            {
+                refresh_c_active<0>(x, params, changed_profiles);
+                refresh_s_active<1>(x, params, changed_profiles);
+            }
         }
 
         constexpr void load_fixed_from(const RuntimeProfiles& fixed_profiles) noexcept
@@ -1045,9 +1079,41 @@ namespace profiles
             copy_boundary_base_from(fixed_profiles);
             c_family_fields.clear();
             s_family_fields.clear();
+            active_coefficients_valid = false;
+            geometry_coefficients_changed = true;
+            boundary_coefficients_changed = true;
         }
 
     private:
+        using ChangedProfiles = std::array<bool, Shape::profile_count>;
+
+        constexpr ChangedProfiles refresh_active_coefficients(std::span<const double, Shape::x_size> x) noexcept
+        {
+            ChangedProfiles changed_profiles{};
+            if (!active_coefficients_valid)
+                changed_profiles.fill(true);
+
+            for (size_t i = 0; i < Shape::x_size; ++i)
+            {
+                const double value = x[i];
+                if (value != active_coefficients[i])
+                    changed_profiles[Shape::coefficient_profile_ids[i]] = true;
+                active_coefficients[i] = value;
+            }
+
+            bool geometry_changed = false;
+            bool boundary_changed = false;
+            for (size_t profile_id = 0; profile_id < Shape::psin_profile_id; ++profile_id)
+                geometry_changed |= changed_profiles[profile_id];
+            for (size_t profile_id = Shape::c0_profile_id; profile_id < Shape::psin_profile_id; ++profile_id)
+                boundary_changed |= changed_profiles[profile_id];
+
+            active_coefficients_valid       = true;
+            geometry_coefficients_changed   = geometry_changed;
+            boundary_coefficients_changed   = boundary_changed;
+            return changed_profiles;
+        }
+
         template <size_t ProfileId>
         constexpr std::span<double, radial_nodes * 3> profile_span() noexcept
         {
@@ -1370,7 +1436,8 @@ namespace profiles
 
         template <size_t Order>
         constexpr void refresh_c_active(std::span<const double, Shape::x_size> x,
-                                        const ProfileRuntimeParams<Shape>&     params) noexcept
+                                        const ProfileRuntimeParams<Shape>&     params,
+                                        const ChangedProfiles&                 changed_profiles) noexcept
         {
             if constexpr (Order < evaluator::c_family_size)
             {
@@ -1378,22 +1445,26 @@ namespace profiles
                 {
                     constexpr size_t profile_id = Shape::template c_profile_id<Order>();
                     constexpr size_t count      = evaluator::template c_count<Order>();
-                    const auto       coeffs     = coefficients_from_x<profile_id, count>(x);
-                    evaluator::template update_c<Order>(c_family_span<Order>(),
-                                                        coeffs,
-                                                        GridType::T,
-                                                        GridType::T_r,
-                                                        GridType::T_rr,
-                                                        GridType::rhos,
-                                                        0.0);
+                    if (changed_profiles[profile_id])
+                    {
+                        const auto coeffs = coefficients_from_x<profile_id, count>(x);
+                        evaluator::template update_c<Order>(c_family_span<Order>(),
+                                                            coeffs,
+                                                            GridType::T,
+                                                            GridType::T_r,
+                                                            GridType::T_rr,
+                                                            GridType::rhos,
+                                                            0.0);
+                    }
                 }
-                refresh_c_active<Order + 1>(x, params);
+                refresh_c_active<Order + 1>(x, params, changed_profiles);
             }
         }
 
         template <size_t Order>
         constexpr void refresh_s_active(std::span<const double, Shape::x_size> x,
-                                        const ProfileRuntimeParams<Shape>&     params) noexcept
+                                        const ProfileRuntimeParams<Shape>&     params,
+                                        const ChangedProfiles&                 changed_profiles) noexcept
         {
             if constexpr (Order <= evaluator::s_family_size)
             {
@@ -1401,16 +1472,19 @@ namespace profiles
                 {
                     constexpr size_t profile_id = Shape::template s_profile_id<Order>();
                     constexpr size_t count      = evaluator::template s_count<Order>();
-                    const auto       coeffs     = coefficients_from_x<profile_id, count>(x);
-                    evaluator::template update_s<Order>(s_family_span<Order>(),
-                                                        coeffs,
-                                                        GridType::T,
-                                                        GridType::T_r,
-                                                        GridType::T_rr,
-                                                        GridType::rhos,
-                                                        0.0);
+                    if (changed_profiles[profile_id])
+                    {
+                        const auto coeffs = coefficients_from_x<profile_id, count>(x);
+                        evaluator::template update_s<Order>(s_family_span<Order>(),
+                                                            coeffs,
+                                                            GridType::T,
+                                                            GridType::T_r,
+                                                            GridType::T_rr,
+                                                            GridType::rhos,
+                                                            0.0);
+                    }
                 }
-                refresh_s_active<Order + 1>(x, params);
+                refresh_s_active<Order + 1>(x, params, changed_profiles);
             }
         }
     };
