@@ -935,7 +935,10 @@ namespace profiles
 
         using ProfileSlab   = Tensor<double, profile_field_count, radial_nodes, 3>;
         using FamilySlab    = Tensor<double, family_field_count, radial_nodes, 3>;
-        using PhaseBaseSlab = Tensor<double, radial_nodes, GridType::theta_rows, phase_component_count>;
+        // Geometry consumes one phase component across consecutive theta nodes.  Keep theta as the unit-stride
+        // dimension so the hot geometry loop can use aligned vector loads instead of transposing the former AoS
+        // [theta][component] layout on every residual evaluation.
+        using PhaseBaseSlab = Tensor<double, radial_nodes, phase_component_count, GridType::theta_rows>;
 
         ProfileSlab                            profile_fields{};
         FamilySlab                             c_family_fields{};
@@ -1014,7 +1017,7 @@ namespace profiles
 
         constexpr double boundary_phase_base_field(size_t node, size_t theta_node, size_t component) const noexcept
         {
-            return boundary_phase_base(node, theta_node, component);
+            return boundary_phase_base(node, component, theta_node);
         }
 
         constexpr void refresh_fixed(const ProfileRuntimeParams<Shape>& params) noexcept
@@ -1137,11 +1140,7 @@ namespace profiles
                             fixed_profiles.s_family_base_fields(order, node, component);
                     }
 
-            for (size_t node = 0; node < radial_nodes; ++node)
-                for (size_t theta_node = 0; theta_node < GridType::theta_rows; ++theta_node)
-                    for (size_t component = 0; component < phase_component_count; ++component)
-                        boundary_phase_base(node, theta_node, component) =
-                            fixed_profiles.boundary_phase_base(node, theta_node, component);
+            boundary_phase_base = fixed_profiles.boundary_phase_base;
         }
 
         static constexpr size_t fourier_power_runtime(size_t order) noexcept
@@ -1275,12 +1274,12 @@ namespace profiles
                         tb_tt -= s_i * k2_sin_kt;
                     }
 
-                    boundary_phase_base(node, theta_node, phase_tb)    = tb;
-                    boundary_phase_base(node, theta_node, phase_tb_r)  = tb_r;
-                    boundary_phase_base(node, theta_node, phase_tb_t)  = tb_t;
-                    boundary_phase_base(node, theta_node, phase_tb_rr) = tb_rr;
-                    boundary_phase_base(node, theta_node, phase_tb_rt) = tb_rt;
-                    boundary_phase_base(node, theta_node, phase_tb_tt) = tb_tt;
+                    boundary_phase_base(node, phase_tb, theta_node)    = tb;
+                    boundary_phase_base(node, phase_tb_r, theta_node)  = tb_r;
+                    boundary_phase_base(node, phase_tb_t, theta_node)  = tb_t;
+                    boundary_phase_base(node, phase_tb_rr, theta_node) = tb_rr;
+                    boundary_phase_base(node, phase_tb_rt, theta_node) = tb_rt;
+                    boundary_phase_base(node, phase_tb_tt, theta_node) = tb_tt;
                 }
             }
         }
