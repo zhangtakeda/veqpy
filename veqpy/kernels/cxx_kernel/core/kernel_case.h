@@ -11,7 +11,7 @@
 
 
 #include "kernel_topology.h"
-#include "math.h"
+#include "veq_numeric.h"
 
 namespace cxx_kernel_api
 {

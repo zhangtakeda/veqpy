@@ -21,7 +21,7 @@ extern int enzyme_width;
 #endif
 
 #include "kernel_case.h"
-#include "math.h"
+#include "veq_numeric.h"
 #include "nonlinear.h"
 #include "tensor.h"
 

@@ -22,7 +22,7 @@
 #include "kernel_runtime.h"
 #include "kernel_topology.h"
 #include "linalg.h"
-#include "math.h"
+#include "veq_numeric.h"
 #include "tensor.h"
 
 namespace nb = nanobind;

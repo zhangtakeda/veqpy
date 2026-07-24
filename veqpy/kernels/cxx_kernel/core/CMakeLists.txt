@@ -432,12 +432,20 @@ function(cxx_enable_kernel_optimizations target)
                 $<${release_like}:-ffunction-sections>
                 $<${release_like}:-fdata-sections>
         )
-        target_link_options(
-            "${target}"
-            PRIVATE
-                $<${release_like}:-Wl,-O3>
-                $<${release_like}:-Wl,--gc-sections>
-        )
+        if(APPLE)
+            target_link_options(
+                "${target}"
+                PRIVATE
+                    $<${release_like}:-Wl,-dead_strip>
+            )
+        else()
+            target_link_options(
+                "${target}"
+                PRIVATE
+                    $<${release_like}:-Wl,-O3>
+                    $<${release_like}:-Wl,--gc-sections>
+            )
+        endif()
     endif()
 
     if(VEQPY_CXX_FP_MODE STREQUAL "STRICT")

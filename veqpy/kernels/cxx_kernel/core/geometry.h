@@ -2,7 +2,7 @@
 
 // Geometry field assembly for generated Cxx Kernel artifacts.
 
-#include "math.h"
+#include "veq_numeric.h"
 #include "tensor.h"
 #include <array>
 #include <cstddef>

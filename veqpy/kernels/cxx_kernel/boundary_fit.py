@@ -207,7 +207,7 @@ def _boundary_fit_source_digest(core_dir: Path) -> dict[str, Any]:
     retained = (
         "boundary_fit.h",
         "boundary_fit_bindings.cpp",
-        "math.h",
+        "veq_numeric.h",
         "tensor.h",
     )
     digest = hashlib.sha256()
@@ -352,12 +352,22 @@ target_compile_options(
         $<$<CONFIG:Release>:-fapprox-func>
         $<$<CONFIG:Release>:-flto=thin>
 )
-target_link_options(
-    veqpy_boundary_fit_ext
-    PRIVATE
-        $<$<CONFIG:Release>:-Wl,-O3>
-        $<$<CONFIG:Release>:-Wl,--gc-sections>
-        $<$<CONFIG:Release>:-flto=thin>
-        $<$<CONFIG:Release>:-fuse-ld=lld>
-)
+if(APPLE)
+    target_link_options(
+        veqpy_boundary_fit_ext
+        PRIVATE
+            $<$<CONFIG:Release>:-Wl,-dead_strip>
+            $<$<CONFIG:Release>:-flto=thin>
+            $<$<CONFIG:Release>:-fuse-ld=lld>
+    )
+else()
+    target_link_options(
+        veqpy_boundary_fit_ext
+        PRIVATE
+            $<$<CONFIG:Release>:-Wl,-O3>
+            $<$<CONFIG:Release>:-Wl,--gc-sections>
+            $<$<CONFIG:Release>:-flto=thin>
+            $<$<CONFIG:Release>:-fuse-ld=lld>
+    )
+endif()
 """

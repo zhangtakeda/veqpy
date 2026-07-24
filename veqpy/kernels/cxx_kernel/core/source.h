@@ -4,7 +4,7 @@
 
 #include "geometry.h"
 #include "linalg.h"
-#include "math.h"
+#include "veq_numeric.h"
 #include "tensor.h"
 #include "tensor_kernels.h"
 #include "tensor_layout.h"
