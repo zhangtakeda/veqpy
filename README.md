@@ -114,13 +114,23 @@ It writes `demo_init.png`, `demo_result.png`, and `demo_equilibrium.json` in the
 current directory. This branch keeps the public package, demo, benchmark helpers,
 and current Kernel architecture aligned.
 
+`demo_geqdsk.py` demonstrates the GEQDSK workflow with the bundled Solovev case.
+It reads the reference LCFS and source profiles, solves them with the Numba
+backend, writes `data/solovev-veqpy.geqdsk`, and creates a magnetic-surface and
+source-profile comparison figure. Both outputs are local generated artifacts and
+are intentionally excluded from Git and release archives.
+
+```bash
+.venv/bin/python demo_geqdsk.py
+```
+
 ## Development Checks
 
 Core local checks mirror the push/PR CI workflow.
 
 ```bash
-.venv/bin/python -m compileall -q veqpy tests benchmarks demo.py
-.venv/bin/ruff check veqpy tests benchmarks demo.py
+.venv/bin/python -m compileall -q veqpy tests benchmarks demo.py demo_geqdsk.py
+.venv/bin/ruff check veqpy tests benchmarks demo.py demo_geqdsk.py
 .venv/bin/python -m pytest
 ```
 
@@ -223,6 +233,8 @@ User-facing architecture notes:
   semantics, and warm continuation.
 - [`backends.md`][backends-doc]: Numba/Cxx backend responsibilities, cache
   behavior, and benchmark entry points.
+- [`release-1.3.0.md`][release-1.3.0]: 1.3.0 highlights, breaking changes, and
+  migration examples.
 
 Low-level base/math design notes for `Reactive`, `Serial`, `Registry`, interpolation,
 quadrature, and calculus now live in the corresponding source module headers.
@@ -278,6 +290,7 @@ VEQPy is associated with the companion manuscript **[Zhang2026]**. Related VEQ-f
 [tests]: tests/
 [architecture-doc]: docs/veqpy/architecture.md
 [model-doc]: docs/veqpy/model.md
+[release-1.3.0]: docs/veqpy/release-1.3.0.md
 [kernel-doc]: docs/veqpy/kernel.md
 [backends-doc]: docs/veqpy/backends.md
 [veq-arxiv]: https://arxiv.org/abs/2606.11821

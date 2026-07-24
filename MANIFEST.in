@@ -1,9 +1,9 @@
-include LICENSE README.md pyproject.toml demo.py
+include LICENSE README.md pyproject.toml demo.py demo_geqdsk.py
 include veqpy/kernels/cxx_kernel/core/THIRD_PARTY_NOTICES
 
 recursive-include veqpy/kernels/cxx_kernel/core CMakeLists.txt *.c *.cpp *.h *.in *.txt
 recursive-include docs *.md *.svg *.py
-recursive-include data *.geqdsk
+include data/CHEASE.geqdsk data/EFIT.geqdsk data/SOLOVEV.geqdsk
 recursive-include benchmarks *.py *.md
 recursive-include tests *.py
 
@@ -13,5 +13,6 @@ global-exclude *.py[cod]
 global-exclude __pycache__
 global-exclude .DS_Store
 exclude demo_equilibrium.json demo_init.png demo_result.png
+exclude data/solovev-veqpy.geqdsk data/solovev-veqpy-comparison.png
 exclude Zhang2026-VEQ.*
 exclude texput.fls

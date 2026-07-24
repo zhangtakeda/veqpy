@@ -56,10 +56,10 @@ jobs:
           python -m pip install -e ".[dev]"
 
       - name: Compile Python sources
-        run: python -m compileall -q veqpy tests benchmarks demo.py
+        run: python -m compileall -q veqpy tests benchmarks demo.py demo_geqdsk.py
 
       - name: Lint with Ruff
-        run: ruff check veqpy tests benchmarks demo.py
+        run: ruff check veqpy tests benchmarks demo.py demo_geqdsk.py
 
       - name: Run tests
         run: pytest
