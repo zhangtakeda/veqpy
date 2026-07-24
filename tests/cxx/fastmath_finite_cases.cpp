@@ -4,7 +4,7 @@
 #include <cstdlib>
 #include <iostream>
 
-#include "math.h"
+#include "veq_numeric.h"
 
 int main(int argc, char** argv)
 {

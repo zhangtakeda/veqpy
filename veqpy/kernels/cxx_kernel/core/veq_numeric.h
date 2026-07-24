@@ -49,9 +49,30 @@ namespace math::detail
 
     inline constexpr std::uint64_t double_exponent_mask = 0x7ff0'0000'0000'0000ULL;
 
+    constexpr std::uint64_t double_bits(double value) noexcept
+    {
+        if (std::is_constant_evaluated())
+            return std::bit_cast<std::uint64_t>(value);
+
+        // Volatile byte reads keep finite-math optimizers from folding this predicate to true.
+        const auto* bytes = reinterpret_cast<const volatile unsigned char*>(&value);
+        std::uint64_t bits = 0;
+        if constexpr (std::endian::native == std::endian::little)
+        {
+            for (unsigned i = 0; i < sizeof(double); ++i)
+                bits |= static_cast<std::uint64_t>(bytes[i]) << (8U * i);
+        }
+        else
+        {
+            for (unsigned i = 0; i < sizeof(double); ++i)
+                bits = (bits << 8U) | static_cast<std::uint64_t>(bytes[i]);
+        }
+        return bits;
+    }
+
     constexpr bool is_finite(double value) noexcept
     {
-        const auto bits = std::bit_cast<std::uint64_t>(value);
+        const auto bits = double_bits(value);
         return (bits & double_exponent_mask) != double_exponent_mask;
     }
 
