@@ -82,7 +82,16 @@ topology or switch to uniform psin samples.
 `KernelSource.p0` is the pressure at the LCFS in Pa; `Ip` and `beta` are the
 optional global constraints. The runtime reconstructs the complete pressure
 from `pprime` and `p0`; a beta constraint scales both pieces, including `p0`, by
-one common factor.
+one common factor. After route constraints have been applied, the source stage
+fixes the alpha gauge from `max(abs(mu0*p))` and inversely rescales `Pn` and
+`FFn`, preserving the physical Grad-Shafranov sources. Consequently
+`pprime=0, p0!=0` is a valid constant-pressure input, while a completely zero
+pressure remains rejected.
+
+Numba and Cxx consume the same canonical materialized tuple
+`(scaled_pprime, scaled_driver, scaled_p0, scaled_Ip, beta)`. Absolute `p`
+therefore remains a public input convenience implemented once by shared
+lowering; it is not a second backend-specific source mode.
 Route-dependent scaling and internal materialized source arrays are backend
 runtime details, not user-facing data fields.
 

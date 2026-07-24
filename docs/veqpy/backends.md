@@ -26,6 +26,15 @@ or under `VEQPY_KERNEL_CACHE` when that environment variable is set. The Cxx
 backend does not currently support `Kernel.variant(...)` or capacity-style
 `L_max` values larger than the active count requirement.
 
+Source lowering is shared before backend dispatch. Both runtimes receive one
+canonical pressure derivative plus its LCFS integration constant, one
+route-specific driver, and the selected global constraints. The native Cxx
+source runtime retains the common pressure multiplier, effective scaled LCFS
+pressure, and final alpha factors from its latest residual evaluation so
+backend-parity tests can inspect the physical state directly. This diagnostic
+surface remains a low-level Cxx implementation detail rather than a package-root
+API.
+
 Benchmark entry points use backend names directly:
 
 - `benchmarks/numba_routes.py`: Numba route matrix.
