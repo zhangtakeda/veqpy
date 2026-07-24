@@ -45,8 +45,9 @@ The recommended Kernel API is the package-root surface:
 | `KernelRecipe` | Backend and artifact/layout recipe. Users mainly set `backend`, `layout`, and Cxx build options. |
 | `KernelTopology` | Fixed route, grid, active-count, and capacity contract. It derives `x_size`, route codes, active profiles, and canonical `key`. |
 | `KernelBoundary` | Runtime boundary input. Users may pass parameterized `a/R0/Z0/B0/ka/c_offsets/s_offsets` values or raw `R_boundary/Z_boundary` points for explicit fitting. |
-| `KernelSource` | Runtime heat/current profile arrays plus physical constraints such as `Ip`, `beta`, and optional `case_name`. |
+| `KernelSource` | Runtime pressure-derivative/current profile arrays, LCFS pressure `p0`, physical constraints such as `Ip` and `beta`, and optional `case_name`. |
 | `KernelConfig` | Solver policy for one invocation: method, residual limits, evaluation budget, initial/continuation policy, and normalization mode. |
+| `KernelInitial` | Type contract for an explicit per-call packed state, named coefficient dictionary, or previous `SolveResult`; it overrides continuation. |
 | `SolveResult` | Snapshot returned by `solve()`, containing timing, convergence counters, residuals, packed solution `x`, and scaling data. |
 | `ParetoSample` | One verified Pareto topology sample with `counts`, `time`, `complexity`, `shape_error`, and its `SolveResult`. |
 | `ParetoResult` | Result returned by `pareto()`, containing the reference sample, evaluated samples, and frontier. |
@@ -71,7 +72,7 @@ The function-style helpers are short-lived wrappers:
 | `solve(boundary, source, ...)` | Solve one runtime case. |
 | `pareto(boundary, source, candidates=..., ...)` | Evaluate explicit reduced topology candidates against the active Numba capacity topology. |
 | `residual`, `residual_into`, `jvp`, `jvp_into`, `jacobian`, `jacobian_into` | Low-level numerical diagnostics for a supplied packed state. |
-| `build_equilibrium(x=None)` | Build a model `Equilibrium` from the latest or supplied packed state. |
+| `build_equilibrium(x=None, *, grid=None)` | Build a model `Equilibrium` from the latest or supplied packed state, optionally on a requested output grid. |
 | `clear()`, `close()`, `pinned()` | Manage handle state, backend resources, and optional CPU pinning context. |
 
 Implementation helper types are intentionally not package-level exports.

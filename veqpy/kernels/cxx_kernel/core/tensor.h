@@ -96,9 +96,12 @@ namespace tensor::detail
 
         constexpr const_iterator end() const noexcept { return values + count; }
 
-        constexpr std::span<T, count> span() noexcept { return {values, count}; }
+        constexpr std::span<T, count> span() noexcept { return std::span<T, count>{values, count}; }
 
-        constexpr std::span<const T, count> span() const noexcept { return {values, count}; }
+        constexpr std::span<const T, count> span() const noexcept
+        {
+            return std::span<const T, count>{values, count};
+        }
 
         constexpr reference operator[](size_type index) noexcept
         {

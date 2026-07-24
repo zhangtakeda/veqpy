@@ -20,6 +20,16 @@ def test_core_public_imports_are_available() -> None:
     assert model.Profile
     assert model.Geqdsk
     assert model.Equilibrium
+    assert veqpy.Reactive
+    assert veqpy.Registry
+    assert veqpy.Serial
+    assert veqpy.depends_on
+    assert veqpy.read_serializer
+    assert veqpy.write_serializer
+    assert veqpy.Grid
+    assert veqpy.Profile
+    assert veqpy.Geqdsk
+    assert veqpy.Equilibrium
     assert veqpy.Kernel
     assert veqpy.KernelRecipe
     assert veqpy.KernelTopology

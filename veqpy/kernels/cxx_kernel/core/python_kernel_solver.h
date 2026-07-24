@@ -22,6 +22,7 @@
 #include "kernel_runtime.h"
 #include "kernel_topology.h"
 #include "linalg.h"
+#include "veq_numeric.h"
 #include "tensor.h"
 
 namespace nb = nanobind;
@@ -91,10 +92,11 @@ namespace cxx_python
     using AlphaArrayView           = nb::ndarray<nb::numpy, const double, nb::shape<2>, nb::c_contig>;
     using RuntimeArrayView         = nb::ndarray<nb::numpy, const double, nb::ndim<1>, nb::c_contig>;
 
-    inline std::unique_ptr<SolveState> make_context(SolverKind solver)
+    inline std::unique_ptr<SolveState>
+    make_context(SolverKind solver, nonlinear::Workspace<CompiledShape::x_size>& workspace)
     {
         RuntimeCase input   = build_inline_case(0, 0, solver);
-        auto      context = std::make_unique<SolveState>(input);
+        auto      context = std::make_unique<SolveState>(input, workspace);
 
         context->raw_residual(std::span<const double, CompiledShape::x_size>{input.x0.data(), CompiledShape::x_size},
                               std::span<double, CompiledShape::x_size>{
@@ -108,6 +110,7 @@ namespace cxx_python
             CompiledShape::x_size,
         });
         context->input.residual_scale = build_residual_scale_for_context(*context, context->initial_raw);
+        context->refresh_inverse_residual_scale();
         for (size_t i = 0; i < CompiledShape::x_size; ++i)
             context->initial_scaled[i] = context->initial_raw[i] / context->input.residual_scale[i];
         context->initial_scaled_norm = norm2(std::span<const double, CompiledShape::x_size>{
@@ -160,8 +163,9 @@ namespace cxx_python
                                              double             ka,
                                              RuntimeArrayView   c_offsets,
                                              RuntimeArrayView   s_offsets,
-                                             RuntimeArrayView   scaled_heat,
-                                             RuntimeArrayView   scaled_current,
+                                             RuntimeArrayView   scaled_pprime,
+                                             RuntimeArrayView   scaled_driver,
+                                             double             scaled_p0,
                                              double             scaled_Ip,
                                              double             beta,
                                              int                method_code,
@@ -196,9 +200,10 @@ namespace cxx_python
         if constexpr (CompiledShape::M_max >= 1)
             input.s1_offset = input.s_offsets[1];
 
-        read_exact_runtime_array(scaled_heat, "scaled_heat", input.heat);
-        read_exact_runtime_array(scaled_current, "scaled_current", input.current);
+        read_exact_runtime_array(scaled_pprime, "scaled_pprime", input.pprime);
+        read_exact_runtime_array(scaled_driver, "scaled_driver", input.driver);
 
+        input.p0      = scaled_p0;
         input.Ip      = scaled_Ip;
         input.beta    = beta;
 
@@ -395,6 +400,7 @@ namespace cxx_python
             CompiledShape::x_size,
         });
         context.input.residual_scale = build_residual_scale_for_context(context, context.initial_raw);
+        context.refresh_inverse_residual_scale();
         for (size_t i = 0; i < CompiledShape::x_size; ++i)
             context.initial_scaled[i] = context.initial_raw[i] / context.input.residual_scale[i];
         context.initial_scaled_norm = norm2(std::span<const double, CompiledShape::x_size>{
@@ -562,11 +568,23 @@ namespace cxx_python
     {
     public:
         explicit NativeSolver(int solver_code = static_cast<int>(cxx_kernel_api::SolverMethodPowell))
-            : solver_(solver_kind_from_runtime_method_code(solver_code)), context_(make_context(solver_))
+            : solver_(solver_kind_from_runtime_method_code(solver_code)),
+              context_(make_context(solver_, nonlinear_workspace_))
         {
         }
 
         nb::dict metadata() const { return topology_metadata_dict(context_->input); }
+
+        nb::dict source_state() const
+        {
+            const auto& source_runtime = context_->op.workspace.source_runtime;
+            nb::dict    out;
+            out["alpha1"]              = source_runtime.alpha1;
+            out["alpha2"]              = source_runtime.alpha2;
+            out["scaled_effective_p0"] = source_runtime.scaled_effective_p0;
+            out["pressure_multiplier"] = source_runtime.pressure_multiplier;
+            return out;
+        }
 
         // Typed runtime setter used by the Python Kernel hot path.  The Python layer
         // normalizes arrays to 1D float64/C-contiguous views; this C++ boundary
@@ -579,8 +597,9 @@ namespace cxx_python
                                 double             ka,
                                 RuntimeArrayView   c_offsets,
                                 RuntimeArrayView   s_offsets,
-                                RuntimeArrayView   scaled_heat,
-                                RuntimeArrayView   scaled_current,
+                                RuntimeArrayView   scaled_pprime,
+                                RuntimeArrayView   scaled_driver,
+                                double             scaled_p0,
                                 double             scaled_Ip,
                                 double             beta,
                                 int                method_code,
@@ -606,8 +625,9 @@ namespace cxx_python
                                                            ka,
                                                            c_offsets,
                                                            s_offsets,
-                                                           scaled_heat,
-                                                           scaled_current,
+                                                           scaled_pprime,
+                                                           scaled_driver,
+                                                           scaled_p0,
                                                            scaled_Ip,
                                                            beta,
                                                            method_code,
@@ -645,6 +665,15 @@ namespace cxx_python
                 throw std::runtime_error("NativeSolver cannot adopt an unsuccessful solve result");
 
             context_->input.x0      = last_result_.x;
+            context_->input.x_scale = build_x_block_scale_vector<CompiledShape>(
+                context_->input.x0,
+                profile_params_for_case(context_->input));
+            refresh_initial_residual_scale(*context_);
+        }
+
+        void set_initial_state(PackedArrayView x0)
+        {
+            std::copy_n(x0.data(), CompiledShape::x_size, context_->input.x0.begin());
             context_->input.x_scale = build_x_block_scale_vector<CompiledShape>(
                 context_->input.x0,
                 profile_params_for_case(context_->input));
@@ -776,8 +805,9 @@ namespace cxx_python
             const RuntimeCase& now = context_->input;
             return old.a == now.a && old.R0 == now.R0 && old.Z0 == now.Z0 && old.B0 == now.B0 &&
                    old.ka == now.ka && old.c0_offset == now.c0_offset && old.s1_offset == now.s1_offset &&
+                   old.p0 == now.p0 &&
                    same_offsets(old.c_offsets, now.c_offsets) && same_offsets(old.s_offsets, now.s_offsets) &&
-                   same_array(old.heat, now.heat) && same_array(old.current, now.current);
+                   same_array(old.pprime, now.pprime) && same_array(old.driver, now.driver);
         }
 
         void fill_certified_result(SolveResult&                                   result,
@@ -823,7 +853,7 @@ namespace cxx_python
             if (!has_latest_solution_ || !context_->has_initial_residual)
                 return false;
             const double threshold = acceptance_threshold(context_->input);
-            if (!std::isfinite(context_->initial_raw_norm) || context_->initial_raw_norm > threshold)
+            if (!math::is_finite(context_->initial_raw_norm) || context_->initial_raw_norm > threshold)
                 return false;
 
             const std::string accepted_by =
@@ -853,7 +883,7 @@ namespace cxx_python
                 return false;
             for (size_t i = 0; i < CompiledShape::x_size; ++i)
             {
-                if (!std::isfinite(candidate[i]))
+                if (!math::is_finite(candidate[i]))
                     return false;
                 const double delta = std::abs(candidate[i] - latest_solution_[i]);
                 const double scale = std::max({std::abs(latest_solution_[i]), context_->input.x_scale[i], 1.0e-8});
@@ -882,9 +912,9 @@ namespace cxx_python
             ++certification_evals;
 
             const double raw_norm = norm2(std::span<const double, CompiledShape::x_size>{raw.data(), CompiledShape::x_size});
-            if (std::isfinite(raw_norm) && raw_norm < best_raw_norm)
+            if (math::is_finite(raw_norm) && raw_norm < best_raw_norm)
                 best_raw_norm = raw_norm;
-            if (!std::isfinite(raw_norm) || raw_norm > acceptance_threshold(context_->input))
+            if (!math::is_finite(raw_norm) || raw_norm > acceptance_threshold(context_->input))
                 return false;
 
             PackedVector scaled{uninitialized};
@@ -972,7 +1002,7 @@ namespace cxx_python
 
                 bool finite_step = true;
                 for (size_t i = 0; i < CompiledShape::x_size; ++i)
-                    finite_step = finite_step && std::isfinite(step[i]);
+                    finite_step = finite_step && math::is_finite(step[i]);
                 if (!finite_step)
                     return false;
 
@@ -989,7 +1019,7 @@ namespace cxx_python
                 ++certification_evals;
                 const double trial_norm =
                     norm2(std::span<const double, CompiledShape::x_size>{trial_raw.data(), CompiledShape::x_size});
-                if (!std::isfinite(trial_norm))
+                if (!math::is_finite(trial_norm))
                     return false;
 
                 if (trial_norm <= acceptance_threshold(context_->input))
@@ -1051,7 +1081,7 @@ namespace cxx_python
             fallback.fast_path   = continue_policy_name(context_->input.continue_policy_code);
             fallback.fallback_used = true;
             fallback.fallback_reason =
-                std::isfinite(best_raw_norm) ? "fast_path_raw_norm_above_threshold" : "fast_path_nonfinite_raw_norm";
+                math::is_finite(best_raw_norm) ? "fast_path_raw_norm_above_threshold" : "fast_path_nonfinite_raw_norm";
             fallback.fast_path_raw_norm = best_raw_norm;
             return fallback;
         }
@@ -1104,14 +1134,14 @@ namespace cxx_python
                     cold_policy_code = continue_policy;
                 }
             }
-            auto next_context = std::make_unique<SolveState>(next_input);
+            context_->reset_case(next_input);
             if (should_refine_cold)
-                refine_cold_initial_state(*next_context, cold_policy_code);
-            refresh_initial_residual_scale(*next_context);
-            context_ = std::move(next_context);
+                refine_cold_initial_state(*context_, cold_policy_code);
+            refresh_initial_residual_scale(*context_);
         }
 
         SolverKind                    solver_;
+        nonlinear::Workspace<CompiledShape::x_size> nonlinear_workspace_{};
         std::unique_ptr<SolveState> context_;
         SolveResult                   last_result_{};
         std::array<double, CompiledShape::x_size> older_solution_{};

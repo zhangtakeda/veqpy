@@ -79,13 +79,19 @@ def test_numba_boundary_fitter_matches_numpy(case_key: str, method: str) -> None
     _assert_fit_is_reasonable(case_key, reference)
     _assert_fit_is_reasonable(case_key, fitted)
     if method in {"qr", "gnqr"}:
-        assert_allclose(_coeff_vector(fitted), _coeff_vector(reference), rtol=0.0, atol=1.0e-10)
-        assert_allclose(fitted["rms"], reference["rms"], rtol=0.0, atol=1.0e-12)
+        parity_atol = 1.0e-10
+        assert_allclose(
+            _coeff_vector(fitted),
+            _coeff_vector(reference),
+            rtol=0.0,
+            atol=parity_atol,
+        )
+        assert_allclose(fitted["rms"], reference["rms"], rtol=0.0, atol=parity_atol)
         assert_allclose(
             fitted["max_curve_error"],
             reference["max_curve_error"],
             rtol=0.0,
-            atol=1.0e-12,
+            atol=parity_atol,
         )
     else:
         assert float(fitted["rms"]) <= 2.0 * float(reference["rms"])

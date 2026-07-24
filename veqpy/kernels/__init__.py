@@ -25,6 +25,7 @@ Design notes:
 
 from __future__ import annotations
 
+from .initial import KernelInitial
 from .kernel import Kernel
 from .pareto import ParetoResult, ParetoSample
 from .types import (
@@ -39,6 +40,7 @@ from .types import (
 
 __all__ = [
     "Kernel",
+    "KernelInitial",
     "KernelBoundary",
     "KernelConfig",
     "KernelRecipe",

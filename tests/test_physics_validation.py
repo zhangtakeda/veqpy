@@ -48,7 +48,7 @@ def test_numba_geqdsk_low_order_solution_has_physical_diagnostics(case_key: str)
     case = geqdsk_kernel_case(
         case_key,
         "Low",
-        route_spec=RouteBenchmarkSpec("PF", "psin", "uniform", "Ip"),
+        route_spec=RouteBenchmarkSpec("PF", "psin", "uniform", "ip"),
         signature=GEQDSK_ROUTE_PROFILE_SIGNATURE,
         method="powell",
         max_residual=1.0e-6,

@@ -17,6 +17,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from veqpy.kernels.abi.enums import SOURCE_DRIVER_BY_ROUTE
 from veqpy.kernels.abi.source_semantics import materialize_source_inputs
 from veqpy.numerics import (
     SOURCE_INTERP_DEFAULT,
@@ -37,8 +38,8 @@ class SourcePlan:
     """Describe the read-only source semantics and runner binding plan.
 
     This is the semantic layer: route, coordinate, node layout, interpolation
-    choice, plan-ready input arrays, and global constraints. ``scaled_heat``,
-    ``scaled_current``, and ``scaled_Ip`` are the arrays/scalars consumed by
+    choice, plan-ready input arrays, and global constraints. ``scaled_pprime``,
+    ``scaled_driver``, and ``scaled_Ip`` are the arrays/scalars consumed by
     layout binding after setup validation. Runtime ownership decisions are
     derived later in ``SourceExecutionABI``.
     """
@@ -49,8 +50,9 @@ class SourcePlan:
     nodes: str
     parameterization: str
     source_sample_count: int
-    scaled_heat: np.ndarray
-    scaled_current: np.ndarray
+    scaled_pprime: np.ndarray
+    scaled_driver: np.ndarray
+    scaled_p0: float
     scaled_Ip: float
     beta: float
     interpolation_kind: str
@@ -101,7 +103,7 @@ def build_source_plan(
     interpolation_kind: str = SOURCE_INTERP_DEFAULT,
 ) -> SourcePlan:
     """Build the immutable source plan for a runtime case."""
-    scaled_heat, scaled_current, scaled_Ip, beta = _scaled_source_inputs(case)
+    scaled_pprime, scaled_driver, scaled_p0, scaled_Ip, beta = _scaled_source_inputs(case)
     # Parameterization is route-specific.  For example PP/psin/uniform samples
     # on sqrt(psin) to bias resolution near the magnetic axis while all kernels
     # still exchange normalized psin/root fields internally.
@@ -116,9 +118,10 @@ def build_source_plan(
         coordinate=str(case.coordinate).lower(),
         nodes=str(case.nodes).lower(),
         parameterization=source_parameterization_for_route_key(route_key),
-        source_sample_count=int(scaled_heat.shape[0]),
-        scaled_heat=scaled_heat,
-        scaled_current=scaled_current,
+        source_sample_count=int(scaled_pprime.shape[0]),
+        scaled_pprime=scaled_pprime,
+        scaled_driver=scaled_driver,
+        scaled_p0=scaled_p0,
         scaled_Ip=scaled_Ip,
         beta=beta,
         interpolation_kind=(
@@ -131,20 +134,23 @@ def build_source_plan(
     )
 
 
-def _scaled_source_inputs(case: object) -> tuple[np.ndarray, np.ndarray, float, float]:
+def _scaled_source_inputs(case: object) -> tuple[np.ndarray, np.ndarray, float, float, float]:
+    route = str(case.route).upper()
+    driver_name = SOURCE_DRIVER_BY_ROUTE[route]
     materialized = materialize_source_inputs(
-        route=str(case.route).upper(),
+        route=route,
         coordinate=str(case.coordinate).lower(),
         nodes=str(case.nodes).lower(),
-        sample_count=int(np.asarray(case.heat_input, dtype=np.float64).size),
-        heat=case.heat_input,
-        current=case.current_input,
+        sample_count=int(np.asarray(case.pprime_input, dtype=np.float64).size),
+        pprime=case.pprime_input,
+        driver=case.driver_input,
+        p0=float(getattr(case, "p0", 0.0)),
         Ip=float(case.Ip),
         beta=float(case.beta),
-        heat_name="heat_input",
-        current_name="current_input",
+        pprime_name="pprime",
+        driver_name=driver_name,
         advice="Pass unnormalized runtime values; SourcePlan applies mu0 scaling once.",
-        grid_size=int(getattr(case, "Nr", np.asarray(case.heat_input, dtype=np.float64).size)),
+        grid_size=int(getattr(case, "Nr", np.asarray(case.pprime_input, dtype=np.float64).size)),
         quadrature=str(getattr(case, "quadrature", "legendre")),
         parameterization=source_parameterization_for_route_key(
             (
@@ -155,8 +161,9 @@ def _scaled_source_inputs(case: object) -> tuple[np.ndarray, np.ndarray, float, 
         ),
     )
     return (
-        materialized.scaled_heat,
-        materialized.scaled_current,
+        materialized.scaled_pprime,
+        materialized.scaled_driver,
+        materialized.scaled_p0,
         materialized.scaled_Ip,
         materialized.beta,
     )
@@ -210,18 +217,18 @@ def validate_source_plan_profile_support(
 
 def validate_source_inputs(case: object, nr: int) -> None:
     """Validate source input lengths for grid-owned and sampled routes."""
-    if case.heat_input.shape != case.current_input.shape:
+    if case.pprime_input.shape != case.driver_input.shape:
         raise ValueError(
-            "Expected heat_input/current_input to share a shape, "
-            f"got {case.heat_input.shape} and {case.current_input.shape}"
+            "Expected pprime_input/driver_input to share a shape, "
+            f"got {case.pprime_input.shape} and {case.driver_input.shape}"
         )
-    if case.nodes == "grid" and case.heat_input.shape[0] != nr:
+    if case.nodes == "grid" and case.pprime_input.shape[0] != nr:
         # Grid-node routes skip interpolation entirely, so source samples must
         # already match the operator radial grid.
         raise ValueError(
-            f"Expected grid inputs to have shape ({nr},), got {case.heat_input.shape}"
+            f"Expected grid inputs to have shape ({nr},), got {case.pprime_input.shape}"
         )
-    if case.heat_input.shape[0] < 1:
+    if case.pprime_input.shape[0] < 1:
         raise ValueError(
             f"Expected {case.coordinate}-coordinate inputs to contain at least one sample"
         )

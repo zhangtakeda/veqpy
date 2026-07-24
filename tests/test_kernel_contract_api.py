@@ -16,6 +16,7 @@ from veqpy import (
     KernelTopology,
 )
 from veqpy.api import build, fit
+from veqpy.kernels.abi.enums import SOURCE_DRIVER_BY_ROUTE
 from veqpy.kernels.abi.identity import recipe_identity_payload, topology_identity_payload
 from veqpy.kernels.abi.options import (
     RESIDUAL_NORMALIZATION_BALANCED,
@@ -45,7 +46,7 @@ def make_kernel_topology(**overrides: object) -> KernelTopology:
         "route": "pf",
         "coordinate": "PSIN",
         "nodes": "uniform",
-        "ip_constraint": True,
+        "constraint": "ip",
         "sample_count": 9,
     }
     params.update(overrides)
@@ -90,10 +91,10 @@ def pf_reference_profiles(psin: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 
 def tiny_kernel_source(*, case_name: str | None = None) -> KernelSource:
     psin = np.linspace(0.0, 1.0, 9, dtype=np.float64)
-    current_profile, scaled_heat = pf_reference_profiles(psin)
+    ffprime, scaled_pprime = pf_reference_profiles(psin)
     return KernelSource(
-        heat_profile=scaled_heat / MU0,
-        current_profile=current_profile,
+        pprime=scaled_pprime / MU0,
+        ffprime=ffprime,
         Ip=3.0e6,
         case_name=case_name,
     )
@@ -270,6 +271,7 @@ class RecordingSolver:
         self.x_size = x_size
         self.runtime_args: tuple[object, ...] | None = None
         self.runtime_calls: list[tuple[object, ...]] = []
+        self.initial_states: list[np.ndarray] = []
 
     def set_kernel_runtime(self, *args: object) -> None:
         self.runtime_args = args
@@ -279,6 +281,9 @@ class RecordingSolver:
         x = np.zeros(self.x_size, dtype=np.float64)
         alpha = np.zeros(2, dtype=np.float64)
         return (0.0, True, 1, 2, 3, 4, 5, 6, 7, 8.0, 9.0, x, x, x, alpha)
+
+    def set_initial_state(self, x0: np.ndarray) -> None:
+        self.initial_states.append(np.asarray(x0, dtype=np.float64).copy())
 
     def residual_var_into(self, out: np.ndarray, x: np.ndarray) -> None:
         out.fill(0.0)
@@ -294,19 +299,30 @@ class RecordingRegistry:
 
 def test_veqpy_root_exports_kernel_surface() -> None:
     assert veqpy.__all__ == [
+        "Reactive",
+        "Registry",
+        "Serial",
+        "depends_on",
+        "read_serializer",
+        "write_serializer",
+        "build",
+        "fit",
+        "pareto",
+        "solve",
         "Kernel",
         "KernelBoundary",
         "KernelConfig",
+        "KernelInitial",
         "KernelRecipe",
         "KernelSource",
         "KernelTopology",
         "ParetoResult",
         "ParetoSample",
         "SolveResult",
-        "build",
-        "fit",
-        "pareto",
-        "solve",
+        "Equilibrium",
+        "Geqdsk",
+        "Grid",
+        "Profile",
     ]
 
 
@@ -326,37 +342,105 @@ def test_kernel_topology_and_runtime_source_is_user_facing_contract() -> None:
     assert recipe_identity_payload(family_recipe)["preset"] == "release"
     assert topology.route == "PF"
     assert topology.coordinate == "psin"
-    assert topology.ip_constraint is True
+    assert topology.constraint == "ip"
+    assert topology.source_uses_ip_constraint is True
+    assert topology.source_uses_beta_constraint is False
     assert topology.sample_count == 9
     assert topology.x_size == 9
 
     assert kernel_source.case_name == "tiny"
     assert kernel_boundary.a == 0.5
-    assert_allclose(kernel_source.heat_profile, tiny_kernel_source().heat_profile)
+    assert_allclose(kernel_source.pprime, tiny_kernel_source().pprime)
+    assert kernel_source.driver_name == "ffprime"
+    assert_allclose(kernel_source.ffprime, tiny_kernel_source().ffprime)
     assert kernel_source.Ip == 3.0e6
-    assert_allclose(materialized_source.scaled_heat, tiny_kernel_source().heat_profile * MU0)
-    assert_allclose(materialized_source.scaled_current, tiny_kernel_source().current_profile)
+    assert_allclose(materialized_source.scaled_pprime, tiny_kernel_source().pprime * MU0)
+    assert_allclose(materialized_source.scaled_driver, tiny_kernel_source().ffprime)
     assert materialized_source.scaled_Ip == 3.0e6 * MU0
     assert kernel_boundary.c_offsets.flags.c_contiguous
     assert isinstance(kernel_boundary.s_offsets, tuple)
-    assert kernel_source.heat_profile.flags.c_contiguous
-    assert kernel_source.current_profile.flags.c_contiguous
+    assert kernel_source.pprime.flags.c_contiguous
+    assert kernel_source.ffprime is not None
+    assert kernel_source.ffprime.flags.c_contiguous
     assert not kernel_boundary.c_offsets.flags.writeable
     assert_allclose(kernel_boundary.s_offsets, [np.arcsin(0.2)])
     assert_allclose(kernel_boundary_s_offsets_with_s0(kernel_boundary), [0.0, np.arcsin(0.2)])
     assert not kernel_boundary_s_offsets_with_s0(kernel_boundary).flags.writeable
-    assert not kernel_source.heat_profile.flags.writeable
-    assert not kernel_source.current_profile.flags.writeable
+    assert not kernel_source.pprime.flags.writeable
+    assert not kernel_source.ffprime.flags.writeable
 
-    with pytest.raises(ValueError, match="heat_profile must be 1D"):
+    with pytest.raises(ValueError, match="pprime must be 1D"):
         KernelSource(
-            heat_profile=np.ones((2, 1), dtype=np.float64),
-            current_profile=np.ones(2, dtype=np.float64),
+            pprime=np.ones((2, 1), dtype=np.float64),
+            ffprime=np.ones(2, dtype=np.float64),
+        )
+
+
+def test_kernel_source_requires_one_explicit_route_driver() -> None:
+    pprime = np.ones(3, dtype=np.float64)
+    driver = np.ones(3, dtype=np.float64)
+
+    with pytest.raises(ValueError, match="requires exactly one route driver"):
+        KernelSource(pprime=pprime)
+    with pytest.raises(ValueError, match="got ffprime, q"):
+        KernelSource(pprime=pprime, ffprime=driver, q=driver)
+    with pytest.raises(TypeError, match="takes 1 positional argument"):
+        KernelSource(pprime, driver)  # type: ignore[misc]
+    with pytest.raises(TypeError, match="unexpected keyword argument 'heat_profile'"):
+        KernelSource(  # type: ignore[call-arg]
+            heat_profile=pprime,
+            current_profile=driver,
+        )
+
+    source = KernelSource(pprime=pprime, q=driver)
+    with pytest.raises(ValueError, match="route PF requires driver 'ffprime', got 'q'"):
+        materialize_kernel_source(
+            make_kernel_topology(
+                coordinate="rho",
+                psin_count=0,
+                sample_count=3,
+                constraint="none",
+            ),
+            source,
         )
 
 
 @pytest.mark.parametrize(
-    ("route", "current_profile", "expected_current"),
+    ("constraint", "expected_flags", "expected_code", "expected_label"),
+    [
+        ("none", (False, False), 0, "null"),
+        ("ip", (True, False), 1, "Ip"),
+        ("beta", (False, True), 2, "beta"),
+        ("both", (True, True), 3, "Ip_beta"),
+    ],
+)
+def test_kernel_topology_constraint_api_maps_to_internal_contract(
+    constraint: str,
+    expected_flags: tuple[bool, bool],
+    expected_code: int,
+    expected_label: str,
+) -> None:
+    topology = make_kernel_topology(route="PP", constraint=constraint)
+
+    assert topology.constraint == constraint
+    assert (
+        topology.source_uses_ip_constraint,
+        topology.source_uses_beta_constraint,
+    ) == expected_flags
+    assert topology.source_constraint_code == expected_code
+    assert topology.constraint_label == expected_label
+
+
+def test_kernel_topology_constraint_api_rejects_invalid_values() -> None:
+    with pytest.raises(ValueError, match="constraint must be one of ip, beta, both, none"):
+        make_kernel_topology(constraint="current")
+
+    with pytest.raises(ValueError, match="does not support constraint 'Ip_beta'"):
+        make_kernel_topology(route="PF", constraint="both")
+
+
+@pytest.mark.parametrize(
+    ("route", "driver", "expected_driver"),
     [
         ("PF", np.array([0.0, 0.75, 3.0], dtype=np.float64), np.array([0.0, 0.75, 3.0])),
         ("PP", np.array([0.0, 0.75, 3.0], dtype=np.float64), np.array([0.0, 0.75, 3.0])),
@@ -368,35 +452,35 @@ def test_kernel_topology_and_runtime_source_is_user_facing_contract() -> None:
 )
 def test_kernel_source_materialization_locks_route_scaling(
     route: str,
-    current_profile: np.ndarray,
-    expected_current: np.ndarray,
+    driver: np.ndarray,
+    expected_driver: np.ndarray,
 ) -> None:
     topology = make_kernel_topology(
         route=route,
         coordinate="rho",
         nodes="uniform",
         sample_count=3,
-        ip_constraint=False,
+        constraint="none",
         psin_count=0,
         F_count=1 if route == "PJ2" else 0,
         h_count=1,
         kappa_count=0,
         s_counts=(),
     )
-    heat_profile = np.array([0.0, 5.5e5, 1.4e6], dtype=np.float64)
+    pprime = np.array([0.0, 5.5e5, 1.4e6], dtype=np.float64)
     source = KernelSource(
-        heat_profile=heat_profile,
-        current_profile=current_profile,
+        pprime=pprime,
+        **{SOURCE_DRIVER_BY_ROUTE[route]: driver},
         Ip=3.0e6,
     )
 
     materialized = materialize_kernel_source(topology, source)
 
-    assert_allclose(materialized.scaled_heat, heat_profile * MU0)
-    assert_allclose(materialized.scaled_current, expected_current)
+    assert_allclose(materialized.scaled_pprime, pprime * MU0)
+    assert_allclose(materialized.scaled_driver, expected_driver)
     assert materialized.scaled_Ip == 3.0e6 * MU0
-    assert not materialized.scaled_heat.flags.writeable
-    assert not materialized.scaled_current.flags.writeable
+    assert not materialized.scaled_pprime.flags.writeable
+    assert not materialized.scaled_driver.flags.writeable
 
 
 def test_kernel_source_materialization_does_not_reject_profile_magnitude() -> None:
@@ -405,26 +489,25 @@ def test_kernel_source_materialization_does_not_reject_profile_magnitude() -> No
         coordinate="rho",
         nodes="uniform",
         sample_count=3,
-        ip_constraint=False,
-        beta_constraint=True,
+        constraint="beta",
         psin_count=0,
         F_count=0,
         h_count=1,
         kappa_count=0,
         s_counts=(),
     )
-    heat_profile = np.array([0.0, -2.0e12, 3.0e12], dtype=np.float64)
-    current_profile = np.array([0.0, -5.0e9, 6.0e9], dtype=np.float64)
+    pprime = np.array([0.0, -2.0e12, 3.0e12], dtype=np.float64)
+    psi_r = np.array([0.0, -5.0e9, 6.0e9], dtype=np.float64)
     source = KernelSource(
-        heat_profile=heat_profile,
-        current_profile=current_profile,
+        pprime=pprime,
+        psi_r=psi_r,
         beta=0.03,
     )
 
     materialized = materialize_kernel_source(topology, source)
 
-    assert_allclose(materialized.scaled_heat, heat_profile * MU0)
-    assert_allclose(materialized.scaled_current, current_profile)
+    assert_allclose(materialized.scaled_pprime, pprime * MU0)
+    assert_allclose(materialized.scaled_driver, psi_r)
     assert materialized.beta == 0.03
 
 
@@ -434,45 +517,45 @@ def test_kernel_source_materialization_repairs_irregular_axis_profiles() -> None
         coordinate="rho",
         nodes="uniform",
         sample_count=9,
-        ip_constraint=True,
+        constraint="ip",
         psin_count=0,
         h_count=1,
         kappa_count=0,
         s_counts=(),
     )
     rho = np.linspace(0.0, 1.0, topology.sample_count, dtype=np.float64)
-    heat_profile = rho * (1.0e6 + 0.4e6 * rho * rho)
-    current_profile = rho * (1.0 + 2.0 * rho * rho)
-    heat_profile[0] = 7.0e6
-    current_profile[0] = 9.0
+    pprime = rho * (1.0e6 + 0.4e6 * rho * rho)
+    ffprime = rho * (1.0 + 2.0 * rho * rho)
+    pprime[0] = 7.0e6
+    ffprime[0] = 9.0
     source = KernelSource(
-        heat_profile=heat_profile,
-        current_profile=current_profile,
+        pprime=pprime,
+        ffprime=ffprime,
         Ip=3.0e6,
     )
 
     with pytest.warns(RuntimeWarning, match="Adjusted source axis regularity"):
         materialized = materialize_kernel_source(topology, source)
 
-    assert materialized.scaled_heat[0] == pytest.approx(0.0)
-    assert materialized.scaled_current[0] == pytest.approx(0.0)
-    assert_allclose(materialized.scaled_heat[1:], heat_profile[1:] * MU0)
-    assert_allclose(materialized.scaled_current[1:], current_profile[1:])
+    assert materialized.scaled_pprime[0] == pytest.approx(0.0)
+    assert materialized.scaled_driver[0] == pytest.approx(0.0)
+    assert_allclose(materialized.scaled_pprime[1:], pprime[1:] * MU0)
+    assert_allclose(materialized.scaled_driver[1:], ffprime[1:])
 
 
 def test_kernel_source_materialization_errors_use_raw_field_names() -> None:
     topology = make_kernel_topology(coordinate="rho", psin_count=0, sample_count=3)
     source = KernelSource(
-        heat_profile=np.array([1.0e6, 1.1e6], dtype=np.float64),
-        current_profile=np.ones(2, dtype=np.float64),
+        pprime=np.array([1.0e6, 1.1e6], dtype=np.float64),
+        ffprime=np.ones(2, dtype=np.float64),
     )
-    with pytest.raises(ValueError, match="heat_profile and current_profile"):
+    with pytest.raises(ValueError, match="pprime and ffprime"):
         materialize_kernel_source(topology, source)
 
     rho = np.linspace(0.0, 1.0, 3, dtype=np.float64)
     prescaled_ip_source = KernelSource(
-        heat_profile=rho * (1.0e6 + 0.4e6 * rho * rho),
-        current_profile=rho * (1.0 + 2.0 * rho * rho),
+        pprime=rho * (1.0e6 + 0.4e6 * rho * rho),
+        ffprime=rho * (1.0 + 2.0 * rho * rho),
         Ip=3.0e6 * MU0,
     )
     with pytest.warns(RuntimeWarning, match="Pass raw case values"):
@@ -486,10 +569,10 @@ def test_kernel_runtime_case_must_match_topology_before_native() -> None:
     handle = Kernel(topology=topology, registry=RecordingRegistry(recorder))  # type: ignore[arg-type]
 
     bad_source_length = KernelSource(
-        heat_profile=np.ones(topology.sample_count - 1, dtype=np.float64),
-        current_profile=np.ones(topology.sample_count - 1, dtype=np.float64),
+        pprime=np.ones(topology.sample_count - 1, dtype=np.float64),
+        ffprime=np.ones(topology.sample_count - 1, dtype=np.float64),
     )
-    with pytest.raises(ValueError, match="case does not match kernel topology: heat_profile"):
+    with pytest.raises(ValueError, match="case does not match kernel topology: pprime"):
         handle.solve(
             tiny_kernel_boundary(),
             bad_source_length,
@@ -531,9 +614,10 @@ def test_kernel_runtime_case_must_match_topology_before_native() -> None:
     )
     assert recorder.runtime_args is not None
     assert recorder.runtime_args[0] == "override"
-    assert_allclose(recorder.runtime_args[8], tiny_kernel_source().heat_profile * MU0)
-    assert_allclose(recorder.runtime_args[9], tiny_kernel_source().current_profile)
-    assert recorder.runtime_args[10] == 3.0e6 * MU0
+    assert_allclose(recorder.runtime_args[8], tiny_kernel_source().pprime * MU0)
+    assert_allclose(recorder.runtime_args[9], tiny_kernel_source().ffprime)
+    assert recorder.runtime_args[10] == 0.0
+    assert recorder.runtime_args[11] == 3.0e6 * MU0
 
 
 def test_kernel_solve_uses_handle_default_config_with_per_call_overrides() -> None:
@@ -554,10 +638,10 @@ def test_kernel_solve_uses_handle_default_config_with_per_call_overrides() -> No
     handle.solve(tiny_kernel_boundary(), source=tiny_kernel_source(), case_name="default")
     assert recorder.runtime_args is not None
     assert recorder.runtime_args[0] == "default"
-    assert recorder.runtime_args[12] == SOLVER_METHOD_LEVENBERG_MARQUARDT
-    assert recorder.runtime_args[13] == default_config.max_residual
-    assert recorder.runtime_args[14] == default_config.max_evaluations
-    assert recorder.runtime_args[19] == RESIDUAL_NORMALIZATION_BALANCED
+    assert recorder.runtime_args[13] == SOLVER_METHOD_LEVENBERG_MARQUARDT
+    assert recorder.runtime_args[14] == default_config.max_residual
+    assert recorder.runtime_args[15] == default_config.max_evaluations
+    assert recorder.runtime_args[20] == RESIDUAL_NORMALIZATION_BALANCED
 
     handle.solve(
         tiny_kernel_boundary(),
@@ -566,9 +650,9 @@ def test_kernel_solve_uses_handle_default_config_with_per_call_overrides() -> No
         max_residual=3.0e-6,
         max_evaluations=None,
     )
-    assert recorder.runtime_args[12] == SOLVER_METHOD_POWELL
-    assert recorder.runtime_args[13] == 3.0e-6
-    assert recorder.runtime_args[14] == handle.x_size * handle.x_size
+    assert recorder.runtime_args[13] == SOLVER_METHOD_POWELL
+    assert recorder.runtime_args[14] == 3.0e-6
+    assert recorder.runtime_args[15] == handle.x_size * handle.x_size
     assert handle.config is default_config
     assert handle.config.method == "levenberg-marquardt"
     assert handle.config.max_evaluations == 123
@@ -580,9 +664,47 @@ def test_kernel_solve_uses_handle_default_config_with_per_call_overrides() -> No
         config=temporary_config,
         method="levenberg-marquardt",
     )
-    assert recorder.runtime_args[12] == SOLVER_METHOD_LEVENBERG_MARQUARDT
-    assert recorder.runtime_args[14] == 5
+    assert recorder.runtime_args[13] == SOLVER_METHOD_LEVENBERG_MARQUARDT
+    assert recorder.runtime_args[15] == 5
     assert temporary_config.method == "powell"
+
+
+@pytest.mark.parametrize(
+    ("layout", "expected"),
+    [
+        (
+            "degree",
+            [1.0, 3.0, 5.0, 7.0, 2.0, 4.0, 6.0, 8.0, 9.0],
+        ),
+        (
+            "family",
+            [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0],
+        ),
+    ],
+)
+def test_explicit_named_initial_state_overrides_native_continuation(
+    layout: str,
+    expected: list[float],
+) -> None:
+    topology = make_kernel_topology()
+    recorder = RecordingSolver(x_size=topology.x_size)
+    handle = Kernel(
+        topology=topology,
+        recipe=KernelRecipe(layout=layout),
+        config=KernelConfig(continuation="warm"),
+        registry=RecordingRegistry(recorder),  # type: ignore[arg-type]
+    )
+    coefficients = {
+        "h": [1.0, 2.0],
+        "k": [3.0, 4.0],
+        "s1": [5.0, 6.0],
+        "psin": [7.0, 8.0, 9.0],
+    }
+
+    handle.solve(tiny_kernel_boundary(), tiny_kernel_source(), x0=coefficients)
+
+    assert len(recorder.initial_states) == 1
+    assert_allclose(recorder.initial_states[0], expected)
 
 
 def test_kernel_build_equilibrium_uses_last_runtime_case() -> None:
@@ -690,8 +812,8 @@ def test_kernel_artifact_identity_excludes_runtime_case_and_solver_config(tmp_pa
     materialize_kernel_source(
         topology,
         KernelSource(
-            heat_profile=tiny_kernel_source().heat_profile * 1.1,
-            current_profile=tiny_kernel_source().current_profile,
+            pprime=tiny_kernel_source().pprime * 1.1,
+            ffprime=tiny_kernel_source().ffprime,
             Ip=4.0e6,
             case_name="two",
         ),
@@ -737,10 +859,37 @@ def test_kernel_python_build_and_solve_native_flow(tmp_path: Path) -> None:
         config=KernelConfig(method="powell", initial="cold"),
     )
     assert result.success is True
+    assert result.info > 0
+    assert result.nfev > 0
+    assert result.njev == 0
     assert result.x.shape == (handle.x_size,)
     assert result.raw.shape == (handle.x_size,)
     assert result.scaled.shape == (handle.x_size,)
     assert_allclose(handle.residual(result.x, kernel_boundary, kernel_source), result.raw)
+
+    explicit = handle.solve(
+        kernel_boundary,
+        kernel_source,
+        config=KernelConfig(method="powell", continuation="warm"),
+        x0=result,
+    )
+    assert explicit.success is True
+    assert explicit.x.shape == result.x.shape
+
+    for method in ("powell", "levenberg-marquardt", "newton-krylov", "newton-raphson"):
+        config = KernelConfig(method=method, initial="cold", continuation="cold")
+        first = handle.solve(kernel_boundary, kernel_source, config=config)
+        second = handle.solve(kernel_boundary, kernel_source, config=config)
+        assert first.success is True
+        assert second.success is True
+        assert first.info > 0
+        assert first.nfev > 0
+        assert second.info == first.info
+        assert second.nfev == first.nfev
+        assert second.njev == first.njev
+        assert_allclose(second.x, first.x, rtol=0.0, atol=0.0)
+        assert_allclose(second.raw, first.raw, rtol=0.0, atol=0.0)
+        assert_allclose(second.scaled, first.scaled, rtol=0.0, atol=0.0)
 
     residual_out = np.empty(handle.x_size, dtype=np.float64)
     handle.residual_into(residual_out, result.x, kernel_boundary, kernel_source)

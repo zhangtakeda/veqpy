@@ -4,7 +4,7 @@
 
 #include "geometry.h"
 #include "linalg.h"
-#include "math.h"
+#include "veq_numeric.h"
 #include "tensor.h"
 #include "tensor_kernels.h"
 #include "tensor_layout.h"
@@ -102,12 +102,12 @@ namespace source::detail
         using SourceVector = Vector<double, sample_count>;
         using RootFields   = Matrix<double, root_field_count, radial_nodes>;
 
-        SourceVector heat_input{};
-        SourceVector current_input{};
+        SourceVector pprime_input{};
+        SourceVector driver_input{};
         RadialVector source_psin_query{};
         RadialVector source_parameter_query{};
-        RadialVector materialized_heat_input{};
-        RadialVector materialized_current_input{};
+        RadialVector materialized_pprime_input{};
+        RadialVector materialized_driver_input{};
         RootFields   profile_root_fields{};
         RootFields   source_target_root_fields{};
         RadialVector active_F{};
@@ -116,35 +116,43 @@ namespace source::detail
         RadialVector Pn_psin{};
         double       alpha1 = 0.0;
         double       alpha2 = 0.0;
-        bool         pj2_psin_uniform_query_initialized = false;
+        double       scaled_effective_p0 = 0.0;
+        double       pressure_multiplier = 1.0;
+        bool         source_materialization_initialized = false;
 
-        constexpr void set_uniform_sources(std::span<const double, sample_count> heat,
-                                           std::span<const double, sample_count> current) noexcept
+        constexpr void set_uniform_sources(std::span<const double, sample_count> pprime,
+                                           std::span<const double, sample_count> driver) noexcept
         {
             for (size_t i = 0; i < sample_count; ++i)
             {
-                heat_input[i]    = heat[i];
-                current_input[i] = current[i];
+                pprime_input[i] = pprime[i];
+                driver_input[i] = driver[i];
             }
-            pj2_psin_uniform_query_initialized = false;
+            source_materialization_initialized = false;
         }
 
         constexpr void materialize_rho_uniform_sources() noexcept
         {
+            if (source_materialization_initialized)
+                return;
             for (size_t i = 0; i < radial_nodes; ++i)
                 source_parameter_query[i] = GridType::nodes[i];
             local_barycentric_interpolate_pair();
+            source_materialization_initialized = true;
         }
 
         constexpr void materialize_grid_sources() noexcept
         {
             static_assert(sample_count == radial_nodes, "grid source inputs must match radial node count");
 
+            if (source_materialization_initialized)
+                return;
             for (size_t i = 0; i < radial_nodes; ++i)
             {
-                materialized_heat_input[i]    = heat_input[i];
-                materialized_current_input[i] = current_input[i];
+                materialized_pprime_input[i] = pprime_input[i];
+                materialized_driver_input[i] = driver_input[i];
             }
+            source_materialization_initialized = true;
         }
 
         template <int SourceParameterizationCode = 0, typename ProfilesRuntime>
@@ -213,6 +221,7 @@ namespace source::detail
 
         template <int SourceConstraintCode, typename GeometryRuntime>
         constexpr void update_pf_rho(const GeometryRuntime& geometry,
+                                     double                 p0,
                                      double                 Ip,
                                      double                 beta,
                                      double                 B0,
@@ -268,12 +277,14 @@ namespace source::detail
             if constexpr (SourceConstraintCode == 0)
             {
                 alpha2                    = psi_square_sign * integral_prof;
-                alpha1                    = -dot(materialized_heat_input, GridType::weights) / integral_prof;
+                alpha1                    = -dot(materialized_pprime_input, GridType::weights) / integral_prof;
+                alpha1 = ensure_pressure_alpha1<true>(
+                    alpha1, p0, alpha2, psin_r);
                 const double source_scale = psi_square_sign / (alpha1 * alpha2);
                 for (size_t i = 0; i < radial_nodes; ++i)
                 {
-                    Pn_psin[i]  = materialized_heat_input[i] * source_scale / psin_r[i];
-                    FFn_psin[i] = materialized_current_input[i] * source_scale / psin_r[i];
+                    Pn_psin[i]  = materialized_pprime_input[i] * source_scale / psin_r[i];
+                    FFn_psin[i] = materialized_driver_input[i] * source_scale / psin_r[i];
                 }
                 regularize_ffn_psin(n_axis_fix);
                 (void)Ip;
@@ -293,10 +304,13 @@ namespace source::detail
             else
             {
                 RadialVector Pn_out{uninitialized};
-                compute_Pn_out(Pn_out, materialized_heat_input);
+                compute_Pn_out(Pn_out, materialized_pprime_input);
+                const double pressure_denominator =
+                    weighted_dot(Pn_out, geometry, geometry::radial_V_r) +
+                    p0 * dot_radial_moment(geometry, geometry::radial_V_r);
                 const double numerator =
                     0.5 * beta * B0 * B0 * dot_radial_moment(geometry, geometry::radial_V_r) /
-                    weighted_dot(Pn_out, geometry, geometry::radial_V_r);
+                    pressure_denominator;
                 alpha1 = signed_sqrt_ratio(numerator, c2);
                 (void)Ip;
             }
@@ -304,14 +318,15 @@ namespace source::detail
             alpha2 = c2 * alpha1;
             for (size_t i = 0; i < radial_nodes; ++i)
             {
-                Pn_psin[i]  = materialized_heat_input[i] * psi_square_sign / psin_r[i];
-                FFn_psin[i] = materialized_current_input[i] * psi_square_sign / psin_r[i];
+                Pn_psin[i]  = materialized_pprime_input[i] * psi_square_sign / psin_r[i];
+                FFn_psin[i] = materialized_driver_input[i] * psi_square_sign / psin_r[i];
             }
             regularize_ffn_psin(n_axis_fix);
         }
 
         template <int SourceConstraintCode, typename GeometryRuntime>
         constexpr void update_pf_psin_uniform(const GeometryRuntime& geometry,
+                                              double                 p0,
                                               double                 Ip,
                                               double                 beta,
                                               double                 B0,
@@ -365,14 +380,16 @@ namespace source::detail
 
                 RadialVector pressure_profile{uninitialized};
                 for (size_t i = 0; i < radial_nodes; ++i)
-                    pressure_profile[i] = materialized_heat_input[i] * psin_r[i];
+                    pressure_profile[i] = materialized_pprime_input[i] * psin_r[i];
                 alpha1 = -dot(pressure_profile, GridType::weights);
+                alpha1 = ensure_pressure_alpha1<false>(
+                    alpha1, p0, alpha2, psin_r);
 
                 const double inv_alpha1 = 1.0 / alpha1;
                 for (size_t i = 0; i < radial_nodes; ++i)
                 {
-                    Pn_psin[i]  = materialized_heat_input[i] * inv_alpha1;
-                    FFn_psin[i] = materialized_current_input[i] * inv_alpha1;
+                    Pn_psin[i]  = materialized_pprime_input[i] * inv_alpha1;
+                    FFn_psin[i] = materialized_driver_input[i] * inv_alpha1;
                 }
                 regularize_ffn_psin(n_axis_fix);
                 (void)Ip;
@@ -383,8 +400,8 @@ namespace source::detail
 
             for (size_t i = 0; i < radial_nodes; ++i)
             {
-                Pn_psin[i]  = materialized_heat_input[i];
-                FFn_psin[i] = materialized_current_input[i];
+                Pn_psin[i]  = materialized_pprime_input[i];
+                FFn_psin[i] = materialized_driver_input[i];
             }
             regularize_ffn_psin(n_axis_fix);
 
@@ -404,10 +421,13 @@ namespace source::detail
 
                 RadialVector Pn_out{uninitialized};
                 compute_Pn_out(Pn_out, Pn_r);
-                const double numerator =
-                    0.5 * beta * B0 * B0 * dot_radial_moment(geometry, geometry::radial_V_r) /
-                    weighted_dot(Pn_out, geometry, geometry::radial_V_r);
-                alpha1 = signed_sqrt_ratio(numerator, integral_prof);
+                alpha1 = solve_pf_psin_beta_alpha1(
+                    Pn_out,
+                    geometry,
+                    p0,
+                    integral_prof,
+                    0.5 * beta * B0 * B0 *
+                        dot_radial_moment(geometry, geometry::radial_V_r));
                 alpha2 = integral_prof * alpha1;
                 (void)Ip;
             }
@@ -415,89 +435,98 @@ namespace source::detail
 
         template <int SourceConstraintCode, typename GeometryRuntime>
         constexpr void update_pp_rho(const GeometryRuntime& geometry,
+                                     double                 p0,
                                      double                 Ip,
                                      double                 beta,
                                      double                 B0,
                                      size_t                 n_axis_fix) noexcept
         {
-            update_pp<SourceConstraintCode, true>(geometry, Ip, beta, B0, n_axis_fix);
+            update_pp<SourceConstraintCode, true>(geometry, p0, Ip, beta, B0, n_axis_fix);
         }
 
         template <int SourceConstraintCode, typename GeometryRuntime>
         constexpr void update_pp_psin(const GeometryRuntime& geometry,
+                                      double                 p0,
                                       double                 Ip,
                                       double                 beta,
                                       double                 B0,
                                       size_t                 n_axis_fix) noexcept
         {
-            update_pp<SourceConstraintCode, false>(geometry, Ip, beta, B0, n_axis_fix);
+            update_pp<SourceConstraintCode, false>(geometry, p0, Ip, beta, B0, n_axis_fix);
         }
 
         template <int SourceConstraintCode, typename GeometryRuntime>
         constexpr void update_pi_rho(const GeometryRuntime& geometry,
+                                     double                 p0,
                                      double                 Ip,
                                      double                 beta,
                                      double                 B0,
                                      size_t                 n_axis_fix) noexcept
         {
-            update_pi<SourceConstraintCode, true>(geometry, Ip, beta, B0, n_axis_fix);
+            update_pi<SourceConstraintCode, true>(geometry, p0, Ip, beta, B0, n_axis_fix);
         }
 
         template <int SourceConstraintCode, typename GeometryRuntime>
         constexpr void update_pi_psin(const GeometryRuntime& geometry,
+                                      double                 p0,
                                       double                 Ip,
                                       double                 beta,
                                       double                 B0,
                                       size_t                 n_axis_fix) noexcept
         {
-            update_pi<SourceConstraintCode, false>(geometry, Ip, beta, B0, n_axis_fix);
+            update_pi<SourceConstraintCode, false>(geometry, p0, Ip, beta, B0, n_axis_fix);
         }
 
         template <int SourceConstraintCode, typename GeometryRuntime>
         constexpr void update_pj1_rho(const GeometryRuntime& geometry,
+                                      double                 p0,
                                       double                 Ip,
                                       double                 beta,
                                       double                 B0,
                                       size_t                 n_axis_fix) noexcept
         {
-            update_pj1<SourceConstraintCode, true>(geometry, Ip, beta, B0, n_axis_fix);
+            update_pj1<SourceConstraintCode, true>(geometry, p0, Ip, beta, B0, n_axis_fix);
         }
 
         template <int SourceConstraintCode, typename GeometryRuntime>
         constexpr void update_pj1_psin(const GeometryRuntime& geometry,
+                                       double                 p0,
                                        double                 Ip,
                                        double                 beta,
                                        double                 B0,
                                        size_t                 n_axis_fix) noexcept
         {
-            update_pj1<SourceConstraintCode, false>(geometry, Ip, beta, B0, n_axis_fix);
+            update_pj1<SourceConstraintCode, false>(geometry, p0, Ip, beta, B0, n_axis_fix);
         }
 
         template <int SourceConstraintCode, typename GeometryRuntime>
         constexpr void update_pj2_rho(const GeometryRuntime& geometry,
                                       double                 R0,
+                                      double                 p0,
                                       double                 Ip,
                                       double                 beta,
                                       double                 B0,
                                       size_t                 n_axis_fix) noexcept
         {
-            update_pj2<SourceConstraintCode, true>(geometry, R0, Ip, beta, B0, n_axis_fix);
+            update_pj2<SourceConstraintCode, true>(geometry, R0, p0, Ip, beta, B0, n_axis_fix);
         }
 
         template <int SourceConstraintCode, typename GeometryRuntime>
         constexpr void update_pj2_psin(const GeometryRuntime& geometry,
                                        double                 R0,
+                                       double                 p0,
                                        double                 Ip,
                                        double                 beta,
                                        double                 B0,
                                        size_t                 n_axis_fix) noexcept
         {
-            update_pj2<SourceConstraintCode, false>(geometry, R0, Ip, beta, B0, n_axis_fix);
+            update_pj2<SourceConstraintCode, false>(geometry, R0, p0, Ip, beta, B0, n_axis_fix);
         }
 
         template <int SourceConstraintCode, typename GeometryRuntime>
         constexpr void update_pj2_psin_uniform_fixed_point(const GeometryRuntime& geometry,
                                                            double                 R0,
+                                                           double                 p0,
                                                            double                 Ip,
                                                            double                 beta,
                                                            double                 B0,
@@ -505,10 +534,10 @@ namespace source::detail
         {
             static_assert(GeometryRuntime::radial_nodes == radial_nodes, "source/geometry radial grids must match");
 
-            if (!pj2_psin_uniform_query_initialized)
+            if (!source_materialization_initialized)
             {
                 seed_psin_query_from_passive_psin_profile();
-                pj2_psin_uniform_query_initialized = true;
+                source_materialization_initialized = true;
             }
             for (size_t iter = 0; iter < pj2_psin_uniform_fixed_point_max_iter; ++iter)
             {
@@ -519,7 +548,7 @@ namespace source::detail
                 else
                     local_polynomial_interpolate_pair();
 
-                update_pj2_psin<SourceConstraintCode>(geometry, R0, Ip, beta, B0, n_axis_fix);
+                update_pj2_psin<SourceConstraintCode>(geometry, R0, p0, Ip, beta, B0, n_axis_fix);
                 if (update_fixed_point_psin_query())
                     break;
             }
@@ -531,23 +560,76 @@ namespace source::detail
         template <int SourceConstraintCode, typename GeometryRuntime>
         constexpr void update_pq_rho(const GeometryRuntime& geometry,
                                      double                 R0,
+                                     double                 p0,
                                      double                 Ip,
                                      double                 beta,
                                      double                 B0,
                                      size_t                 n_axis_fix) noexcept
         {
-            update_pq_rho_impl<SourceConstraintCode>(geometry, R0, Ip, beta, B0, n_axis_fix);
+            update_pq_rho_impl<SourceConstraintCode>(geometry, R0, p0, Ip, beta, B0, n_axis_fix);
         }
 
         template <int SourceConstraintCode, typename GeometryRuntime>
         constexpr void update_pq_psin(const GeometryRuntime& geometry,
                                       double                 R0,
+                                      double                 p0,
                                       double                 Ip,
                                       double                 beta,
                                       double                 B0,
                                       size_t                 n_axis_fix) noexcept
         {
-            update_pq_psin_impl<SourceConstraintCode>(geometry, R0, Ip, beta, B0, n_axis_fix);
+            update_pq_psin_impl<SourceConstraintCode>(geometry, R0, p0, Ip, beta, B0, n_axis_fix);
+        }
+
+        template <bool RhoCoordinate>
+        constexpr void finalize_pressure_normalization(double p0, bool has_beta) noexcept
+        {
+            const RadialVector psin_r = const_root_row<root_psin_r>();
+            double             numerator = 0.0;
+            double             denominator = 0.0;
+            for (size_t i = 0; i < radial_nodes; ++i)
+            {
+                const double raw = materialized_pprime_input[i];
+                denominator += raw * raw * GridType::weights[i];
+                const double realized =
+                    RhoCoordinate ? alpha1 * alpha2 * Pn_psin[i] * psin_r[i]
+                                  : alpha1 * Pn_psin[i];
+                numerator += realized * raw * GridType::weights[i];
+            }
+
+            pressure_multiplier = 1.0;
+            if (denominator > 1.0e-28)
+                pressure_multiplier = numerator / denominator;
+            else if (has_beta)
+                pressure_multiplier = RhoCoordinate ? alpha1 * alpha2 : alpha1;
+
+            RadialVector radial_pressure_gradient{uninitialized};
+            for (size_t i = 0; i < radial_nodes; ++i)
+            {
+                radial_pressure_gradient[i] =
+                    RhoCoordinate ? materialized_pprime_input[i]
+                                  : alpha2 * materialized_pprime_input[i] * psin_r[i];
+            }
+            RadialVector pressure{uninitialized};
+            compute_Pn_out(pressure, radial_pressure_gradient);
+            double pressure_scale = 0.0;
+            for (size_t i = 0; i < radial_nodes; ++i)
+            {
+                pressure[i] = pressure_multiplier * (pressure[i] + p0);
+                const double magnitude = math::abs(pressure[i]);
+                if (magnitude > pressure_scale)
+                    pressure_scale = magnitude;
+            }
+
+            const double normalized_alpha1 = pressure_scale / alpha2;
+            const double source_rescale = alpha1 / normalized_alpha1;
+            for (size_t i = 0; i < radial_nodes; ++i)
+            {
+                Pn_psin[i] *= source_rescale;
+                FFn_psin[i] *= source_rescale;
+            }
+            alpha1 = normalized_alpha1;
+            scaled_effective_p0 = pressure_multiplier * p0;
         }
 
         template <size_t Row>
@@ -568,158 +650,6 @@ namespace source::detail
 
             for (size_t i = 0; i < radial_nodes; ++i)
                 source_target_root_fields(Row, i) = values[i];
-        }
-
-        template <typename ProfilesRuntime>
-        constexpr void benchmark_copy_profile_psin_r(const ProfilesRuntime& runtime_profiles) noexcept
-        {
-            using Shape       = typename ProfilesRuntime::shape;
-            using ProfileGrid = typename ProfilesRuntime::grid;
-
-            static_assert(ProfileGrid::radial_nodes == radial_nodes, "source/profile radial grids must match");
-            static_assert(Shape::slot_for_profile_id(Shape::psin_profile_id).optimized(),
-                          "profile-owned psin materialization requires an active psin profile");
-
-            for (size_t i = 0; i < radial_nodes; ++i)
-                source_target_root_fields(root_psin_r, i) =
-                    runtime_profiles.profile_field(Shape::psin_profile_id, i, profile_radial);
-        }
-
-        constexpr void benchmark_regularize_psin_r(size_t n_axis_fix) noexcept { regularize_psin_r(n_axis_fix); }
-
-        constexpr void benchmark_D_psin_into_rr() noexcept
-        {
-            RadialVector psin_rr{uninitialized};
-            matvec_into(psin_rr, GridType::differentiator, const_root_row<root_psin_r>());
-            store_root_row<root_psin_rr>(psin_rr);
-        }
-
-        constexpr void benchmark_A_psin_into(RadialVector& out) const noexcept
-        {
-            matvec_into(out, GridType::accumulator, const_root_row<root_psin_r>());
-        }
-
-        constexpr void benchmark_DA_psin_into(RadialVector& psin_rr, RadialVector& integrated) const noexcept
-        {
-            multi_matvec_into(
-                psin_rr, integrated, GridType::differentiator, GridType::accumulator, const_root_row<root_psin_r>());
-        }
-
-        void benchmark_DA_psin_packed_into(RadialVector& psin_rr, RadialVector& integrated) const noexcept
-        {
-            radial_grid_multi_matvec_into<GridType>(psin_rr, integrated, const_root_row<root_psin_r>());
-        }
-
-        constexpr void benchmark_prepare_psin_queries() noexcept
-        {
-            for (size_t i = 0; i < radial_nodes; ++i)
-            {
-                const double psin_value   = source_target_root_fields(root_psin, i);
-                source_psin_query[i]      = psin_value;
-                source_parameter_query[i] = psin_value;
-            }
-        }
-
-        constexpr double benchmark_query_sink(size_t radial_node) const noexcept
-        {
-            return source_psin_query[radial_node] + source_parameter_query[radial_node];
-        }
-
-        constexpr double benchmark_root_field(size_t row, size_t radial_node) const noexcept
-        {
-            return source_target_root_fields(row, radial_node);
-        }
-
-        constexpr const double* benchmark_root_data() const noexcept { return source_target_root_fields.data(); }
-
-        constexpr const double* benchmark_profile_root_data() const noexcept { return profile_root_fields.data(); }
-
-        constexpr const double* benchmark_query_data() const noexcept { return source_psin_query.data(); }
-
-        constexpr void benchmark_store_psin_coordinate(const RadialVector& integrated) noexcept
-        {
-            const double offset = integrated[0];
-            const double scale  = integrated[radial_nodes - 1] - offset;
-            store_psin_coordinate(integrated, offset, scale);
-        }
-
-        constexpr void benchmark_copy_source_target_to_profile_root() noexcept { copy_source_target_to_profile_root(); }
-
-        constexpr void benchmark_interpolate_pair() noexcept { local_barycentric_interpolate_pair(); }
-
-        template <typename GeometryRuntime>
-        constexpr void benchmark_fill_pf_psin_integrand(RadialVector&          out,
-                                                        const GeometryRuntime& geometry) const noexcept
-        {
-            fill_pf_psin_integrand(out, geometry);
-        }
-
-        constexpr void benchmark_A_integrand_into(RadialVector& out, const RadialVector& integrand) const noexcept
-        {
-            radial_grid_accumulator_matvec_into<GridType>(out, integrand);
-        }
-
-        constexpr void benchmark_A_integrand_rowdot_into(RadialVector&       out,
-                                                         const RadialVector& integrand) const noexcept
-        {
-            matvec_into(out, GridType::accumulator, integrand);
-        }
-
-        template <typename GeometryRuntime>
-        constexpr double benchmark_normalize_psin_r_into(RadialVector&          out,
-                                                         const RadialVector&    integrated,
-                                                         const GeometryRuntime& geometry,
-                                                         size_t                 n_axis_fix) noexcept
-        {
-            out                          = integrated;
-            double psin_r_weighted_total = 0.0;
-            for (size_t i = 0; i < radial_nodes; ++i)
-            {
-                out[i] *= -1.0;
-                out[i] /= geometry.radial_field(geometry::radial_Kn, i);
-                psin_r_weighted_total += out[i] * GridType::weights[i];
-            }
-
-            if (psin_r_weighted_total < 0.0)
-                for (size_t i = 0; i < radial_nodes; ++i)
-                    out[i] *= -1.0;
-
-            store_root_row<root_psin_r>(out);
-            regularize_psin_r(n_axis_fix);
-            out = const_root_row<root_psin_r>();
-
-            const double integral_prof = dot(out, GridType::weights);
-            for (size_t i = 0; i < radial_nodes; ++i)
-                out[i] /= integral_prof;
-            store_root_row<root_psin_r>(out);
-            return integral_prof;
-        }
-
-        constexpr void benchmark_D_normalized_psin_into_rr(const RadialVector& psin_r) noexcept
-        {
-            RadialVector psin_rr{uninitialized};
-            matvec_into(psin_rr, GridType::differentiator, psin_r);
-            store_root_row<root_psin_rr>(psin_rr);
-        }
-
-        constexpr void benchmark_copy_materialized_sources() noexcept
-        {
-            for (size_t i = 0; i < radial_nodes; ++i)
-            {
-                Pn_psin[i]  = materialized_heat_input[i];
-                FFn_psin[i] = materialized_current_input[i];
-            }
-        }
-
-        constexpr void benchmark_regularize_ffn_psin(size_t n_axis_fix) noexcept { regularize_ffn_psin(n_axis_fix); }
-
-        template <typename GeometryRuntime>
-        constexpr void
-        benchmark_update_alpha_from_integral(const GeometryRuntime& geometry, double Ip, double integral_prof) noexcept
-        {
-            const double G1n_integral = g1n_psin_integral_from_radial_moments(geometry);
-            alpha1                    = -Ip / G1n_integral;
-            alpha2                    = integral_prof * alpha1;
         }
 
     private:
@@ -887,8 +817,8 @@ namespace source::detail
             {
                 for (size_t i = 0; i < radial_nodes; ++i)
                 {
-                    materialized_heat_input[i]    = heat_input[0];
-                    materialized_current_input[i] = current_input[0];
+                    materialized_pprime_input[i] = pprime_input[0];
+                    materialized_driver_input[i] = driver_input[0];
                 }
             }
             else
@@ -902,25 +832,25 @@ namespace source::detail
                     const double x_nearest = static_cast<double>(nearest) / denom_scale;
                     if (math::abs(q - x_nearest) <= 1.0e-14)
                     {
-                        materialized_heat_input[i]    = heat_input[nearest];
-                        materialized_current_input[i] = current_input[nearest];
+                        materialized_pprime_input[i] = pprime_input[nearest];
+                        materialized_driver_input[i] = driver_input[nearest];
                         continue;
                     }
 
-                    double denominator       = 0.0;
-                    double numerator_heat    = 0.0;
-                    double numerator_current = 0.0;
+                    double denominator      = 0.0;
+                    double numerator_pprime = 0.0;
+                    double numerator_driver = 0.0;
                     for (size_t local_j = 0; local_j < stencil_size; ++local_j)
                     {
                         const size_t j = start + local_j;
                         const double term =
                             SourceShape::barycentric_weights[local_j] / (q - static_cast<double>(j) / denom_scale);
                         denominator += term;
-                        numerator_heat += term * heat_input[j];
-                        numerator_current += term * current_input[j];
+                        numerator_pprime += term * pprime_input[j];
+                        numerator_driver += term * driver_input[j];
                     }
-                    materialized_heat_input[i]    = numerator_heat / denominator;
-                    materialized_current_input[i] = numerator_current / denominator;
+                    materialized_pprime_input[i] = numerator_pprime / denominator;
+                    materialized_driver_input[i] = numerator_driver / denominator;
                 }
             }
         }
@@ -931,8 +861,8 @@ namespace source::detail
             {
                 for (size_t i = 0; i < radial_nodes; ++i)
                 {
-                    materialized_heat_input[i]    = heat_input[0];
-                    materialized_current_input[i] = current_input[0];
+                    materialized_pprime_input[i] = pprime_input[0];
+                    materialized_driver_input[i] = driver_input[0];
                 }
             }
             else
@@ -953,10 +883,10 @@ namespace source::detail
                     {
                         t = q * interval_count - static_cast<double>(interval);
                     }
-                    materialized_heat_input[i] =
-                        evaluate_local_polynomial_value(heat_input, interval, t);
-                    materialized_current_input[i] =
-                        evaluate_local_polynomial_value(current_input, interval, t);
+                    materialized_pprime_input[i] =
+                        evaluate_local_polynomial_value(pprime_input, interval, t);
+                    materialized_driver_input[i] =
+                        evaluate_local_polynomial_value(driver_input, interval, t);
                 }
             }
         }
@@ -1091,8 +1021,8 @@ namespace source::detail
             const double* const radial_V_r = geometry_radial + geometry::radial_V_r * radial_nodes;
             for (size_t i = 0; i < radial_nodes; ++i)
             {
-                out[i] = materialized_current_input[i] * radial_Ln_r[i] +
-                         radial_V_r[i] * materialized_heat_input[i] * pressure_factor;
+                out[i] = materialized_driver_input[i] * radial_Ln_r[i] +
+                         radial_V_r[i] * materialized_pprime_input[i] * pressure_factor;
             }
         }
 
@@ -1107,8 +1037,8 @@ namespace source::detail
             for (size_t i = 0; i < radial_nodes; ++i)
             {
                 out[i] = radial_Kn[i] *
-                         (materialized_current_input[i] * radial_Ln_r[i] +
-                         radial_V_r[i] * materialized_heat_input[i] * pressure_factor);
+                         (materialized_driver_input[i] * radial_Ln_r[i] +
+                         radial_V_r[i] * materialized_pprime_input[i] * pressure_factor);
             }
         }
 
@@ -1210,8 +1140,8 @@ namespace source::detail
             for (size_t i = 0; i < radial_nodes; ++i)
             {
                 total += GridType::weights[i] * source_scale / psin_r[i] *
-                         (two_pi * radial_Ln_r[i] * materialized_current_input[i] +
-                          inv_two_pi * radial_V_r[i] * materialized_heat_input[i]);
+                         (two_pi * radial_Ln_r[i] * materialized_driver_input[i] +
+                          inv_two_pi * radial_V_r[i] * materialized_pprime_input[i]);
             }
             return total;
         }
@@ -1224,8 +1154,36 @@ namespace source::detail
                 out[i] -= offset;
         }
 
+        template <bool RhoCoordinate>
+        constexpr double ensure_pressure_alpha1(double              candidate,
+                                                double              p0,
+                                                double              flux_scale,
+                                                const RadialVector& psin_r) const noexcept
+        {
+            if (math::is_finite(candidate) && math::abs(candidate) > 1.0e-14)
+                return candidate;
+            RadialVector radial_pressure_gradient{uninitialized};
+            for (size_t i = 0; i < radial_nodes; ++i)
+            {
+                radial_pressure_gradient[i] =
+                    RhoCoordinate ? materialized_pprime_input[i]
+                                  : flux_scale * materialized_pprime_input[i] * psin_r[i];
+            }
+            RadialVector pressure{uninitialized};
+            compute_Pn_out(pressure, radial_pressure_gradient);
+            double pressure_scale = 0.0;
+            for (size_t i = 0; i < radial_nodes; ++i)
+            {
+                const double magnitude = math::abs(pressure[i] + p0);
+                if (magnitude > pressure_scale)
+                    pressure_scale = magnitude;
+            }
+            return pressure_scale / flux_scale;
+        }
+
         template <int SourceConstraintCode, bool RhoCoordinate, typename GeometryRuntime>
         constexpr void update_pp(const GeometryRuntime& geometry,
+                                 double                 p0,
                                  double                 Ip,
                                  double                 beta,
                                  double                 B0,
@@ -1240,17 +1198,17 @@ namespace source::detail
             if constexpr (SourceConstraintCode == 1 || SourceConstraintCode == 3)
             {
                 for (size_t i = 0; i < radial_nodes; ++i)
-                    psin_r[i] = materialized_current_input[i];
+                    psin_r[i] = materialized_driver_input[i];
                 alpha2 = Ip /
                          (2.0 * geometry::detail::pi *
                           geometry.radial_field(geometry::radial_Kn, radial_nodes - 1) * psin_r[radial_nodes - 1]);
             }
             else
             {
-                alpha2 = dot(materialized_current_input, GridType::weights);
+                alpha2 = dot(materialized_driver_input, GridType::weights);
                 const double inv_alpha2 = 1.0 / alpha2;
                 for (size_t i = 0; i < radial_nodes; ++i)
-                    psin_r[i] = materialized_current_input[i] * inv_alpha2;
+                    psin_r[i] = materialized_driver_input[i] * inv_alpha2;
                 (void)Ip;
             }
 
@@ -1273,39 +1231,49 @@ namespace source::detail
                 {
                     if constexpr (RhoCoordinate)
                     {
-                        Pn_psin[i] = materialized_heat_input[i] / psin_r[i];
-                        Pn_r[i]    = materialized_heat_input[i];
+                        Pn_psin[i] = materialized_pprime_input[i] / psin_r[i];
+                        Pn_r[i]    = materialized_pprime_input[i];
                     }
                     else
                     {
-                        Pn_psin[i] = materialized_heat_input[i];
-                        Pn_r[i]    = materialized_heat_input[i] * psin_r[i];
+                        Pn_psin[i] = materialized_pprime_input[i];
+                        Pn_r[i]    = materialized_pprime_input[i] * psin_r[i];
                     }
                 }
                 RadialVector Pn_out{uninitialized};
                 compute_Pn_out(Pn_out, Pn_r);
-                alpha1 = 0.5 * beta * B0 * B0 / alpha2 *
-                         dot_radial_moment(geometry, geometry::radial_V_r) /
-                         weighted_dot(Pn_out, geometry, geometry::radial_V_r);
+                const double volume =
+                    dot_radial_moment(geometry, geometry::radial_V_r);
+                const double relative =
+                    weighted_dot(Pn_out, geometry, geometry::radial_V_r);
+                const double pressure_denominator =
+                    RhoCoordinate ? alpha2 * (relative + p0 * volume)
+                                  : alpha2 * relative + p0 * volume;
+                alpha1 = 0.5 * beta * B0 * B0 * volume /
+                         pressure_denominator;
             }
             else
             {
                 if constexpr (RhoCoordinate)
                 {
-                    alpha1               = -dot(materialized_heat_input, GridType::weights) / alpha2;
+                    alpha1               = -dot(materialized_pprime_input, GridType::weights) / alpha2;
+                    alpha1 = ensure_pressure_alpha1<RhoCoordinate>(
+                        alpha1, p0, alpha2, psin_r);
                     const double scaling = 1.0 / (alpha1 * alpha2);
                     for (size_t i = 0; i < radial_nodes; ++i)
-                        Pn_psin[i] = materialized_heat_input[i] * scaling / psin_r[i];
+                        Pn_psin[i] = materialized_pprime_input[i] * scaling / psin_r[i];
                 }
                 else
                 {
                     double pressure_total = 0.0;
                     for (size_t i = 0; i < radial_nodes; ++i)
-                        pressure_total += materialized_heat_input[i] * psin_r[i] * alpha2 * GridType::weights[i];
+                        pressure_total += materialized_pprime_input[i] * psin_r[i] * alpha2 * GridType::weights[i];
                     alpha1 = -pressure_total / alpha2;
+                    alpha1 = ensure_pressure_alpha1<RhoCoordinate>(
+                        alpha1, p0, alpha2, psin_r);
                     const double inv_alpha1 = 1.0 / alpha1;
                     for (size_t i = 0; i < radial_nodes; ++i)
-                        Pn_psin[i] = materialized_heat_input[i] * inv_alpha1;
+                        Pn_psin[i] = materialized_pprime_input[i] * inv_alpha1;
                 }
                 (void)beta;
                 (void)B0;
@@ -1317,6 +1285,7 @@ namespace source::detail
 
         template <int SourceConstraintCode, bool RhoCoordinate, typename GeometryRuntime>
         constexpr void update_pi(const GeometryRuntime& geometry,
+                                 double                 p0,
                                  double                 Ip,
                                  double                 beta,
                                  double                 B0,
@@ -1330,14 +1299,14 @@ namespace source::detail
             RadialVector Itor{uninitialized};
             if constexpr (SourceConstraintCode == 1 || SourceConstraintCode == 3)
             {
-                const double source_scale = Ip / materialized_current_input[radial_nodes - 1];
+                const double source_scale = Ip / materialized_driver_input[radial_nodes - 1];
                 for (size_t i = 0; i < radial_nodes; ++i)
-                    Itor[i] = materialized_current_input[i] * source_scale;
+                    Itor[i] = materialized_driver_input[i] * source_scale;
             }
             else
             {
                 for (size_t i = 0; i < radial_nodes; ++i)
-                    Itor[i] = materialized_current_input[i];
+                    Itor[i] = materialized_driver_input[i];
                 (void)Ip;
             }
             floor_signed_current_primitive(Itor);
@@ -1375,39 +1344,49 @@ namespace source::detail
                 {
                     if constexpr (RhoCoordinate)
                     {
-                        Pn_psin[i] = materialized_heat_input[i] / psin_r[i];
-                        Pn_r[i]    = materialized_heat_input[i];
+                        Pn_psin[i] = materialized_pprime_input[i] / psin_r[i];
+                        Pn_r[i]    = materialized_pprime_input[i];
                     }
                     else
                     {
-                        Pn_psin[i] = materialized_heat_input[i];
-                        Pn_r[i]    = materialized_heat_input[i] * psin_r[i];
+                        Pn_psin[i] = materialized_pprime_input[i];
+                        Pn_r[i]    = materialized_pprime_input[i] * psin_r[i];
                     }
                 }
                 RadialVector Pn_out{uninitialized};
                 compute_Pn_out(Pn_out, Pn_r);
-                alpha1 = 0.5 * beta * B0 * B0 / alpha2 *
-                         dot_radial_moment(geometry, geometry::radial_V_r) /
-                         weighted_dot(Pn_out, geometry, geometry::radial_V_r);
+                const double volume =
+                    dot_radial_moment(geometry, geometry::radial_V_r);
+                const double relative =
+                    weighted_dot(Pn_out, geometry, geometry::radial_V_r);
+                const double pressure_denominator =
+                    RhoCoordinate ? alpha2 * (relative + p0 * volume)
+                                  : alpha2 * relative + p0 * volume;
+                alpha1 = 0.5 * beta * B0 * B0 * volume /
+                         pressure_denominator;
             }
             else
             {
                 if constexpr (RhoCoordinate)
                 {
-                    alpha1               = -dot(materialized_heat_input, GridType::weights) / alpha2;
+                    alpha1               = -dot(materialized_pprime_input, GridType::weights) / alpha2;
+                    alpha1 = ensure_pressure_alpha1<RhoCoordinate>(
+                        alpha1, p0, alpha2, psin_r);
                     const double scaling = 1.0 / (alpha1 * alpha2);
                     for (size_t i = 0; i < radial_nodes; ++i)
-                        Pn_psin[i] = materialized_heat_input[i] * scaling / psin_r[i];
+                        Pn_psin[i] = materialized_pprime_input[i] * scaling / psin_r[i];
                 }
                 else
                 {
                     double pressure_total = 0.0;
                     for (size_t i = 0; i < radial_nodes; ++i)
-                        pressure_total += materialized_heat_input[i] * psin_r[i] * alpha2 * GridType::weights[i];
+                        pressure_total += materialized_pprime_input[i] * psin_r[i] * alpha2 * GridType::weights[i];
                     alpha1 = -pressure_total / alpha2;
+                    alpha1 = ensure_pressure_alpha1<RhoCoordinate>(
+                        alpha1, p0, alpha2, psin_r);
                     const double inv_alpha1 = 1.0 / alpha1;
                     for (size_t i = 0; i < radial_nodes; ++i)
-                        Pn_psin[i] = materialized_heat_input[i] * inv_alpha1;
+                        Pn_psin[i] = materialized_pprime_input[i] * inv_alpha1;
                 }
                 (void)beta;
                 (void)B0;
@@ -1419,6 +1398,7 @@ namespace source::detail
 
         template <int SourceConstraintCode, bool RhoCoordinate, typename GeometryRuntime>
         constexpr void update_pj1(const GeometryRuntime& geometry,
+                                  double                 p0,
                                   double                 Ip,
                                   double                 beta,
                                   double                 B0,
@@ -1431,7 +1411,7 @@ namespace source::detail
 
             RadialVector integrand_j{uninitialized};
             for (size_t i = 0; i < radial_nodes; ++i)
-                integrand_j[i] = materialized_current_input[i] * geometry.radial_field(geometry::radial_S_r, i);
+                integrand_j[i] = materialized_driver_input[i] * geometry.radial_field(geometry::radial_S_r, i);
 
             RadialVector I_tor_prof{uninitialized};
             radial_grid_accumulator_matvec_into<GridType>(I_tor_prof, integrand_j);
@@ -1444,7 +1424,7 @@ namespace source::detail
                 for (size_t i = 0; i < radial_nodes; ++i)
                 {
                     I_tor[i] = I_tor_prof[i] * source_scale;
-                    jtor[i]  = materialized_current_input[i] * source_scale;
+                    jtor[i]  = materialized_driver_input[i] * source_scale;
                 }
             }
             else
@@ -1452,7 +1432,7 @@ namespace source::detail
                 for (size_t i = 0; i < radial_nodes; ++i)
                 {
                     I_tor[i] = I_tor_prof[i];
-                    jtor[i]  = materialized_current_input[i];
+                    jtor[i]  = materialized_driver_input[i];
                 }
                 (void)Ip;
             }
@@ -1489,39 +1469,49 @@ namespace source::detail
                 {
                     if constexpr (RhoCoordinate)
                     {
-                        Pn_psin[i] = materialized_heat_input[i] / psin_r[i];
-                        Pn_r[i]    = materialized_heat_input[i];
+                        Pn_psin[i] = materialized_pprime_input[i] / psin_r[i];
+                        Pn_r[i]    = materialized_pprime_input[i];
                     }
                     else
                     {
-                        Pn_psin[i] = materialized_heat_input[i];
-                        Pn_r[i]    = materialized_heat_input[i] * psin_r[i];
+                        Pn_psin[i] = materialized_pprime_input[i];
+                        Pn_r[i]    = materialized_pprime_input[i] * psin_r[i];
                     }
                 }
                 RadialVector Pn_out{uninitialized};
                 compute_Pn_out(Pn_out, Pn_r);
-                alpha1 = 0.5 * beta * B0 * B0 / alpha2 *
-                         dot_radial_moment(geometry, geometry::radial_V_r) /
-                         weighted_dot(Pn_out, geometry, geometry::radial_V_r);
+                const double volume =
+                    dot_radial_moment(geometry, geometry::radial_V_r);
+                const double relative =
+                    weighted_dot(Pn_out, geometry, geometry::radial_V_r);
+                const double pressure_denominator =
+                    RhoCoordinate ? alpha2 * (relative + p0 * volume)
+                                  : alpha2 * relative + p0 * volume;
+                alpha1 = 0.5 * beta * B0 * B0 * volume /
+                         pressure_denominator;
             }
             else
             {
                 if constexpr (RhoCoordinate)
                 {
-                    alpha1               = -dot(materialized_heat_input, GridType::weights) / alpha2;
+                    alpha1               = -dot(materialized_pprime_input, GridType::weights) / alpha2;
+                    alpha1 = ensure_pressure_alpha1<RhoCoordinate>(
+                        alpha1, p0, alpha2, psin_r);
                     const double scaling = 1.0 / (alpha1 * alpha2);
                     for (size_t i = 0; i < radial_nodes; ++i)
-                        Pn_psin[i] = materialized_heat_input[i] * scaling / psin_r[i];
+                        Pn_psin[i] = materialized_pprime_input[i] * scaling / psin_r[i];
                 }
                 else
                 {
                     double pressure_total = 0.0;
                     for (size_t i = 0; i < radial_nodes; ++i)
-                        pressure_total += materialized_heat_input[i] * psin_r[i] * alpha2 * GridType::weights[i];
+                        pressure_total += materialized_pprime_input[i] * psin_r[i] * alpha2 * GridType::weights[i];
                     alpha1 = -pressure_total / alpha2;
+                    alpha1 = ensure_pressure_alpha1<RhoCoordinate>(
+                        alpha1, p0, alpha2, psin_r);
                     const double inv_alpha1 = 1.0 / alpha1;
                     for (size_t i = 0; i < radial_nodes; ++i)
-                        Pn_psin[i] = materialized_heat_input[i] * inv_alpha1;
+                        Pn_psin[i] = materialized_pprime_input[i] * inv_alpha1;
                 }
                 (void)beta;
                 (void)B0;
@@ -1534,6 +1524,7 @@ namespace source::detail
         template <int SourceConstraintCode, bool RhoCoordinate, typename GeometryRuntime>
         constexpr void update_pj2(const GeometryRuntime& geometry,
                                   double                 R0,
+                                  double                 p0,
                                   double                 Ip,
                                   double                 beta,
                                   double                 B0,
@@ -1550,7 +1541,7 @@ namespace source::detail
             for (size_t i = 0; i < radial_nodes; ++i)
             {
                 integrand[i] = geometry.radial_field(geometry::radial_Ln_r, i) *
-                               materialized_current_input[i] / active_F[i];
+                               materialized_driver_input[i] / active_F[i];
             }
 
             RadialVector integral_val{uninitialized};
@@ -1601,36 +1592,46 @@ namespace source::detail
                 {
                     if constexpr (RhoCoordinate)
                     {
-                        Pn_psin[i] = materialized_heat_input[i] / psin_r[i];
-                        Pn_r[i]    = materialized_heat_input[i];
+                        Pn_psin[i] = materialized_pprime_input[i] / psin_r[i];
+                        Pn_r[i]    = materialized_pprime_input[i];
                     }
                     else
                     {
-                        Pn_psin[i] = materialized_heat_input[i];
-                        Pn_r[i]    = materialized_heat_input[i] * psin_r[i];
+                        Pn_psin[i] = materialized_pprime_input[i];
+                        Pn_r[i]    = materialized_pprime_input[i] * psin_r[i];
                     }
                 }
                 RadialVector Pn_out{uninitialized};
                 compute_Pn_out(Pn_out, Pn_r);
-                alpha1 = 0.5 * beta * B0 * B0 / alpha2 *
-                         dot_radial_moment(geometry, geometry::radial_V_r) /
-                         weighted_dot(Pn_out, geometry, geometry::radial_V_r);
+                const double volume =
+                    dot_radial_moment(geometry, geometry::radial_V_r);
+                const double relative =
+                    weighted_dot(Pn_out, geometry, geometry::radial_V_r);
+                const double pressure_denominator =
+                    RhoCoordinate ? alpha2 * (relative + p0 * volume)
+                                  : alpha2 * relative + p0 * volume;
+                alpha1 = 0.5 * beta * B0 * B0 * volume /
+                         pressure_denominator;
             }
             else
             {
                 if constexpr (RhoCoordinate)
                 {
-                    alpha1               = -dot(materialized_heat_input, GridType::weights) / alpha2;
+                    alpha1               = -dot(materialized_pprime_input, GridType::weights) / alpha2;
+                    alpha1 = ensure_pressure_alpha1<RhoCoordinate>(
+                        alpha1, p0, alpha2, psin_r);
                     const double scaling = 1.0 / (alpha1 * alpha2);
                     for (size_t i = 0; i < radial_nodes; ++i)
-                        Pn_psin[i] = materialized_heat_input[i] * scaling / psin_r[i];
+                        Pn_psin[i] = materialized_pprime_input[i] * scaling / psin_r[i];
                 }
                 else
                 {
-                    alpha1 = -weighted_dot(materialized_heat_input, psin_r, GridType::weights);
+                    alpha1 = -weighted_dot(materialized_pprime_input, psin_r, GridType::weights);
+                    alpha1 = ensure_pressure_alpha1<RhoCoordinate>(
+                        alpha1, p0, alpha2, psin_r);
                     const double inv_alpha1 = 1.0 / alpha1;
                     for (size_t i = 0; i < radial_nodes; ++i)
-                        Pn_psin[i] = materialized_heat_input[i] * inv_alpha1;
+                        Pn_psin[i] = materialized_pprime_input[i] * inv_alpha1;
                 }
                 (void)beta;
             }
@@ -1718,6 +1719,7 @@ namespace source::detail
                                                RadialVector&          trial_psin_r,
                                                RadialVector&          trial_Pn_r,
                                                RadialVector&          trial_Pn,
+                                               double                 p0,
                                                double                 beta_target) const noexcept
         {
             double trial_alpha2 = 0.0;
@@ -1739,13 +1741,16 @@ namespace source::detail
                 trial_psin_r[i] *= inv_alpha2;
                 if (!math::is_finite(trial_psin_r[i]) || trial_psin_r[i] <= 0.0)
                     return std::numeric_limits<double>::quiet_NaN();
-                trial_Pn_r[i] = materialized_heat_input[i] * trial_psin_r[i];
+                trial_Pn_r[i] = materialized_pprime_input[i] * trial_psin_r[i];
             }
             compute_Pn_out(trial_Pn, trial_Pn_r);
             const double beta_den = weighted_dot(trial_Pn, geometry, geometry::radial_V_r);
             if (!math::is_finite(beta_den))
                 return std::numeric_limits<double>::quiet_NaN();
-            return trial_alpha1 * trial_alpha2 * beta_den - beta_target;
+            return trial_alpha1 *
+                       (p0 * dot_radial_moment(geometry, geometry::radial_V_r) +
+                        trial_alpha2 * beta_den) -
+                   beta_target;
         }
 
         template <typename GeometryRuntime>
@@ -1753,6 +1758,7 @@ namespace source::detail
                                                    const RadialVector&    F0,
                                                    const RadialVector&    F1,
                                                    const RadialVector&    q_prof,
+                                                   double                 p0,
                                                    double                 beta_target) const noexcept
         {
             RadialVector trial_psin_r{uninitialized};
@@ -1761,14 +1767,15 @@ namespace source::detail
 
             constexpr double base = 0.0;
             const double     r_base =
-                pq_psin_beta_residual(geometry, base, F0, F1, q_prof, trial_psin_r, trial_Pn_r, trial_Pn, beta_target);
+                pq_psin_beta_residual(
+                    geometry, base, F0, F1, q_prof, trial_psin_r, trial_Pn_r, trial_Pn, p0, beta_target);
 
             for (size_t direction_index = 0; direction_index < 2; ++direction_index)
             {
                 const double direction = direction_index == 0 ? 1.0 : -1.0;
                 double upper  = direction;
                 double r_upper = pq_psin_beta_residual(
-                    geometry, upper, F0, F1, q_prof, trial_psin_r, trial_Pn_r, trial_Pn, beta_target);
+                    geometry, upper, F0, F1, q_prof, trial_psin_r, trial_Pn_r, trial_Pn, p0, beta_target);
                 for (size_t bracket_iter = 0; bracket_iter < 80; ++bracket_iter)
                 {
                     if (math::is_finite(r_base) && math::is_finite(r_upper) && r_base * r_upper <= 0.0)
@@ -1779,7 +1786,7 @@ namespace source::detail
                         {
                             const double mid = 0.5 * (lower + upper);
                             const double r_mid = pq_psin_beta_residual(
-                                geometry, mid, F0, F1, q_prof, trial_psin_r, trial_Pn_r, trial_Pn, beta_target);
+                                geometry, mid, F0, F1, q_prof, trial_psin_r, trial_Pn_r, trial_Pn, p0, beta_target);
                             if (!math::is_finite(r_mid))
                             {
                                 upper = mid;
@@ -1802,7 +1809,7 @@ namespace source::detail
                     }
                     upper *= 2.0;
                     r_upper = pq_psin_beta_residual(
-                        geometry, upper, F0, F1, q_prof, trial_psin_r, trial_Pn_r, trial_Pn, beta_target);
+                        geometry, upper, F0, F1, q_prof, trial_psin_r, trial_Pn_r, trial_Pn, p0, beta_target);
                 }
             }
             return std::numeric_limits<double>::quiet_NaN();
@@ -1811,6 +1818,7 @@ namespace source::detail
         template <int SourceConstraintCode, typename GeometryRuntime>
         constexpr void update_pq_rho_impl(const GeometryRuntime& geometry,
                                           double                 R0,
+                                          double                 p0,
                                           double                 Ip,
                                           double                 beta,
                                           double                 B0,
@@ -1831,14 +1839,14 @@ namespace source::detail
                     two_pi * edge_F / Ip *
                     geometry.radial_field(geometry::radial_Kn, radial_nodes - 1) *
                     geometry.radial_field(geometry::radial_Ln_r, radial_nodes - 1) /
-                    materialized_current_input[radial_nodes - 1];
+                    materialized_driver_input[radial_nodes - 1];
                 for (size_t i = 0; i < radial_nodes; ++i)
-                    q_prof[i] = materialized_current_input[i] * edge_scale;
+                    q_prof[i] = materialized_driver_input[i] * edge_scale;
             }
             else
             {
                 for (size_t i = 0; i < radial_nodes; ++i)
-                    q_prof[i] = materialized_current_input[i];
+                    q_prof[i] = materialized_driver_input[i];
                 (void)Ip;
             }
 
@@ -1857,8 +1865,10 @@ namespace source::detail
             if constexpr (SourceConstraintCode == 2 || SourceConstraintCode == 3)
             {
                 RadialVector Pn_out{uninitialized};
-                compute_Pn_out(Pn_out, materialized_heat_input);
-                const double beta_den_pre = weighted_dot(Pn_out, geometry, geometry::radial_V_r);
+                compute_Pn_out(Pn_out, materialized_pprime_input);
+                const double beta_den_pre =
+                    weighted_dot(Pn_out, geometry, geometry::radial_V_r) +
+                    p0 * dot_radial_moment(geometry, geometry::radial_V_r);
                 beta_C = 0.5 * beta * B0 * B0 *
                          dot_radial_moment(geometry, geometry::radial_V_r) / beta_den_pre;
                 pressure_scale = beta_C;
@@ -1879,7 +1889,7 @@ namespace source::detail
                 coeff_y[i] = 2.0 * W_r[i];
                 rhs[i] = -pressure_factor * pressure_scale *
                          geometry.radial_field(geometry::radial_V_r, i) *
-                         materialized_heat_input[i] * q_prof[i] /
+                         materialized_pprime_input[i] * q_prof[i] /
                          geometry.radial_field(geometry::radial_Ln_r, i);
             }
 
@@ -1915,14 +1925,16 @@ namespace source::detail
             {
                 alpha1 = beta_C / alpha2;
                 for (size_t i = 0; i < radial_nodes; ++i)
-                    Pn_psin[i] = materialized_heat_input[i] / psin_r[i];
+                    Pn_psin[i] = materialized_pprime_input[i] / psin_r[i];
             }
             else
             {
-                alpha1               = -dot(materialized_heat_input, GridType::weights) / alpha2;
+                alpha1               = -dot(materialized_pprime_input, GridType::weights) / alpha2;
+                alpha1 = ensure_pressure_alpha1<true>(
+                    alpha1, p0, alpha2, psin_r);
                 const double scaling = 1.0 / (alpha1 * alpha2);
                 for (size_t i = 0; i < radial_nodes; ++i)
-                    Pn_psin[i] = materialized_heat_input[i] * scaling / psin_r[i];
+                    Pn_psin[i] = materialized_pprime_input[i] * scaling / psin_r[i];
             }
 
             RadialVector Y_r{uninitialized};
@@ -1936,6 +1948,7 @@ namespace source::detail
         template <int SourceConstraintCode, typename GeometryRuntime>
         constexpr void update_pq_psin_impl(const GeometryRuntime& geometry,
                                            double                 R0,
+                                           double                 p0,
                                            double                 Ip,
                                            double                 beta,
                                            double                 B0,
@@ -1956,14 +1969,14 @@ namespace source::detail
                     two_pi * edge_F / Ip *
                     geometry.radial_field(geometry::radial_Kn, radial_nodes - 1) *
                     geometry.radial_field(geometry::radial_Ln_r, radial_nodes - 1) /
-                    materialized_current_input[radial_nodes - 1];
+                    materialized_driver_input[radial_nodes - 1];
                 for (size_t i = 0; i < radial_nodes; ++i)
-                    q_prof[i] = materialized_current_input[i] * edge_scale;
+                    q_prof[i] = materialized_driver_input[i] * edge_scale;
             }
             else
             {
                 for (size_t i = 0; i < radial_nodes; ++i)
-                    q_prof[i] = materialized_current_input[i];
+                    q_prof[i] = materialized_driver_input[i];
                 (void)Ip;
             }
 
@@ -1998,7 +2011,7 @@ namespace source::detail
                     F0_rhs[i] = 0.0;
                     F1_rhs[i] = -pressure_factor *
                                 geometry.radial_field(geometry::radial_V_r, i) *
-                                materialized_heat_input[i];
+                                materialized_pprime_input[i];
                 }
                 solve_pq_linear_system_two_rhs(
                     F_solved,
@@ -2013,11 +2026,12 @@ namespace source::detail
 
                 const double beta_target =
                     0.5 * beta * B0 * B0 * dot_radial_moment(geometry, geometry::radial_V_r);
-                alpha1 = solve_pq_psin_beta_alpha1(geometry, F_solved, F1, q_prof, beta_target);
+                alpha1 = solve_pq_psin_beta_alpha1(
+                    geometry, F_solved, F1, q_prof, p0, beta_target);
                 for (size_t i = 0; i < radial_nodes; ++i)
                 {
                     F_solved[i] += alpha1 * F1[i];
-                    Pn_psin[i] = materialized_heat_input[i];
+                    Pn_psin[i] = materialized_pprime_input[i];
                 }
             }
             else
@@ -2027,7 +2041,7 @@ namespace source::detail
                 {
                     rhs[i] = -pressure_factor *
                              geometry.radial_field(geometry::radial_V_r, i) *
-                             materialized_heat_input[i];
+                             materialized_pprime_input[i];
                 }
                 solve_pq_linear_system(
                     F_solved, GridType::differentiator, coeff_d, coeff_y, rhs, edge_F);
@@ -2058,10 +2072,12 @@ namespace source::detail
 
             if constexpr (SourceConstraintCode == 0 || SourceConstraintCode == 1)
             {
-                alpha1 = -weighted_dot(materialized_heat_input, psin_r, GridType::weights);
+                alpha1 = -weighted_dot(materialized_pprime_input, psin_r, GridType::weights);
+                alpha1 = ensure_pressure_alpha1<false>(
+                    alpha1, p0, alpha2, psin_r);
                 const double inv_alpha1 = 1.0 / alpha1;
                 for (size_t i = 0; i < radial_nodes; ++i)
-                    Pn_psin[i] = materialized_heat_input[i] * inv_alpha1;
+                    Pn_psin[i] = materialized_pprime_input[i] * inv_alpha1;
             }
 
             RadialVector F_r{uninitialized};
@@ -2112,6 +2128,31 @@ namespace source::detail
             if (ratio < 0.0)
                 return -math::sqrt(-ratio);
             return math::sqrt(ratio);
+        }
+
+        template <typename GeometryRuntime>
+        constexpr double solve_pf_psin_beta_alpha1(const RadialVector&    relative_pressure,
+                                                   const GeometryRuntime& geometry,
+                                                   double                 p0,
+                                                   double                 alpha2_per_alpha1,
+                                                   double                 beta_target) const noexcept
+        {
+            const double volume = dot_radial_moment(geometry, geometry::radial_V_r);
+            const double quadratic =
+                alpha2_per_alpha1 *
+                weighted_dot(relative_pressure, geometry, geometry::radial_V_r);
+            const double linear = p0 * volume;
+            if (math::abs(quadratic) <= 1.0e-14)
+                return beta_target / linear;
+            const double discriminant =
+                linear * linear + 4.0 * quadratic * beta_target;
+            const double root = math::sqrt(discriminant);
+            const double root_plus = (-linear + root) / (2.0 * quadratic);
+            const double root_minus = (-linear - root) / (2.0 * quadratic);
+            const double preferred = signed_sqrt_ratio(beta_target, quadratic);
+            if (preferred >= 0.0)
+                return root_plus >= 0.0 ? root_plus : root_minus;
+            return root_minus <= 0.0 ? root_minus : root_plus;
         }
 
         constexpr void regularize_ffn_psin(size_t n_axis_fix) noexcept

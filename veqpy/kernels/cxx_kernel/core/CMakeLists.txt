@@ -288,11 +288,17 @@ function(cxx_link_dependencies target)
     find_package(gcem CONFIG REQUIRED)
     target_link_libraries("${target}" PRIVATE gcem)
 
+    # Fixed-size Powell/LM implementations are the normal generated-kernel
+    # path.  The system CMINPACK drivers remain linked for the deliberately
+    # remote compile-time fallback policy.
     find_path(CMINPACK_INCLUDE_DIR NAMES cminpack.h PATH_SUFFIXES cminpack-1 REQUIRED)
     find_library(CMINPACK_LIBRARY NAMES cminpack REQUIRED)
     target_include_directories("${target}" PRIVATE "${CMINPACK_INCLUDE_DIR}")
     target_link_libraries("${target}" PRIVATE "${CMINPACK_LIBRARY}")
 
+    # Large fixed dense systems use the corresponding blocked LAPACKE kernels;
+    # the header keeps a constexpr-only escape hatch for tests and callers that
+    # deliberately opt out of this runtime route.
     find_path(LAPACKE_INCLUDE_DIR NAMES lapacke.h REQUIRED)
     find_library(LAPACKE_LIBRARY NAMES lapacke REQUIRED)
     find_library(LAPACK_LIBRARY NAMES lapack REQUIRED)
@@ -398,11 +404,6 @@ function(cxx_enable_strict_conversions target)
     )
 endfunction()
 
-function(cxx_link_json_dependency target)
-    find_package(nlohmann_json CONFIG REQUIRED)
-    target_link_libraries("${target}" PRIVATE nlohmann_json::nlohmann_json)
-endfunction()
-
 function(cxx_enable_constexpr_budget target)
     target_compile_options("${target}" PRIVATE "-fconstexpr-steps=${VEQPY_CXX_CONSTEXPR_STEPS}")
 endfunction()
@@ -426,18 +427,25 @@ function(cxx_enable_kernel_optimizations target)
                 $<${release_like}:-mprefer-vector-width=256>
                 $<${release_like}:-fstrict-aliasing>
                 $<${release_like}:-fomit-frame-pointer>
-                $<${release_like}:-funroll-loops>
                 $<${release_like}:-fvectorize>
                 $<${release_like}:-fslp-vectorize>
                 $<${release_like}:-ffunction-sections>
                 $<${release_like}:-fdata-sections>
         )
-        target_link_options(
-            "${target}"
-            PRIVATE
-                $<${release_like}:-Wl,-O3>
-                $<${release_like}:-Wl,--gc-sections>
-        )
+        if(APPLE)
+            target_link_options(
+                "${target}"
+                PRIVATE
+                    $<${release_like}:-Wl,-dead_strip>
+            )
+        else()
+            target_link_options(
+                "${target}"
+                PRIVATE
+                    $<${release_like}:-Wl,-O3>
+                    $<${release_like}:-Wl,--gc-sections>
+            )
+        endif()
     endif()
 
     if(VEQPY_CXX_FP_MODE STREQUAL "STRICT")
@@ -505,7 +513,24 @@ endfunction()
 
 cxx_require_clang()
 
-set(VEQPY_CXX_COMMON_SOURCES nonlinear.cpp linalg.cpp)
+set(
+    VEQPY_CXX_COMMON_SOURCES
+    linalg.cpp
+    nonlinear.cpp
+    minpack/dogleg.c
+    minpack/dpmpar.c
+    minpack/enorm.c
+    minpack/lmpar.c
+    minpack/qform.c
+    minpack/qrfac.c
+    minpack/r1mpyq.c
+    minpack/r1updt.c
+    minpack/qrsolv.c
+)
+set_source_files_properties(
+    ${VEQPY_CXX_COMMON_SOURCES}
+    PROPERTIES LANGUAGE CXX
+)
 
 function(cxx_configure_target target)
     target_include_directories(
@@ -527,63 +552,6 @@ function(cxx_configure_target target)
     cxx_enable_kernel_optimizations("${target}")
     cxx_link_dependencies("${target}")
 endfunction()
-
-find_package(Git QUIET)
-set(VEQPY_CXX_GIT_SHA "unknown")
-set(VEQPY_CXX_GIT_DIRTY 0)
-if(Git_FOUND)
-    execute_process(
-        COMMAND "${GIT_EXECUTABLE}" rev-parse --short=12 HEAD
-        WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
-        OUTPUT_VARIABLE VEQPY_CXX_GIT_SHA
-        ERROR_QUIET
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-    execute_process(
-        COMMAND "${GIT_EXECUTABLE}" status --short
-        WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
-        OUTPUT_VARIABLE VEQPY_CXX_GIT_STATUS
-        ERROR_QUIET
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-    if(NOT VEQPY_CXX_GIT_STATUS STREQUAL "")
-        set(VEQPY_CXX_GIT_DIRTY 1)
-    endif()
-endif()
-set(VEQPY_CXX_STAGE_NATIVE_OPTIMIZATIONS 0)
-if(VEQPY_CXX_ENABLE_NATIVE_OPTIMIZATIONS)
-    set(VEQPY_CXX_STAGE_NATIVE_OPTIMIZATIONS 1)
-endif()
-set(VEQPY_CXX_STAGE_THIN_LTO 0)
-if(VEQPY_CXX_ENABLE_THIN_LTO)
-    set(VEQPY_CXX_STAGE_THIN_LTO 1)
-endif()
-set(VEQPY_CXX_STAGE_ANALYSIS_BUILD 0)
-if(VEQPY_CXX_ANALYSIS_BUILD)
-    set(VEQPY_CXX_STAGE_ANALYSIS_BUILD 1)
-endif()
-set(VEQPY_CXX_STAGE_ENZYME 0)
-if(ENABLE_ENZYME)
-    set(VEQPY_CXX_STAGE_ENZYME 1)
-endif()
-
-add_executable(cxx_stage_benchmark stage_benchmark.cpp ${VEQPY_CXX_COMMON_SOURCES})
-cxx_configure_target(cxx_stage_benchmark)
-cxx_link_json_dependency(cxx_stage_benchmark)
-target_compile_definitions(
-    cxx_stage_benchmark
-    PRIVATE
-        VEQPY_CXX_STAGE_GIT_SHA="${VEQPY_CXX_GIT_SHA}"
-        VEQPY_CXX_STAGE_GIT_DIRTY=${VEQPY_CXX_GIT_DIRTY}
-        VEQPY_CXX_STAGE_CXX_COMPILER_ID="${CMAKE_CXX_COMPILER_ID}"
-        VEQPY_CXX_STAGE_CXX_COMPILER_VERSION="${CMAKE_CXX_COMPILER_VERSION}"
-        VEQPY_CXX_STAGE_BUILD_TYPE="${CMAKE_BUILD_TYPE}"
-        VEQPY_CXX_STAGE_FP_MODE="${VEQPY_CXX_FP_MODE}"
-        VEQPY_CXX_STAGE_NATIVE_OPTIMIZATIONS=${VEQPY_CXX_STAGE_NATIVE_OPTIMIZATIONS}
-        VEQPY_CXX_STAGE_THIN_LTO=${VEQPY_CXX_STAGE_THIN_LTO}
-        VEQPY_CXX_STAGE_ANALYSIS_BUILD=${VEQPY_CXX_STAGE_ANALYSIS_BUILD}
-        VEQPY_CXX_STAGE_ENZYME=${VEQPY_CXX_STAGE_ENZYME}
-)
 
 if(VEQPY_CXX_ENABLE_PYTHON_BINDINGS)
     if(NOT Python_EXECUTABLE AND EXISTS "${PROJECT_SOURCE_DIR}/../../.venv/bin/python")
@@ -660,20 +628,3 @@ if(VEQPY_CXX_ENABLE_PYTHON_BINDINGS)
     cxx_configure_target(cxx_ext)
     target_compile_definitions(cxx_ext PRIVATE "NB_DOMAIN=${VEQPY_CXX_NB_DOMAIN}")
 endif()
-
-enable_testing()
-add_test(
-    NAME cxx_stage_benchmark_smoke
-    COMMAND
-        cxx_stage_benchmark
-        --stage
-        all
-        --repeat
-        1
-        --warmup
-        1
-        --inner
-        1
-        --ring-size
-        2
-)

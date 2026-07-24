@@ -94,8 +94,8 @@ VEQPy is a single public package. `veqpy.model` owns model-layer objects,
 private Numba/Cxx backends, and `veqpy.api` provides thin function-style
 entrypoints. The native C++ backend is optional for normal
 Python/Numba use and requires a local C++20 toolchain and native libraries such
-as CMake 3.24+, `clang++`, nanobind, GCEM, nlohmann-json, CMINPACK,
-LAPACKE/LAPACK, and OpenBLAS.
+as CMake 3.24+, `clang++`, nanobind, GCEM, CMINPACK, LAPACKE/LAPACK, and
+OpenBLAS.
 
 All commands below use `.venv` explicitly; activating the environment is optional.
 
@@ -114,13 +114,23 @@ It writes `demo_init.png`, `demo_result.png`, and `demo_equilibrium.json` in the
 current directory. This branch keeps the public package, demo, benchmark helpers,
 and current Kernel architecture aligned.
 
+`demo_geqdsk.py` demonstrates the GEQDSK workflow with the bundled Solovev case.
+It reads the reference LCFS and source profiles, solves them with the Numba
+backend, writes `data/solovev-veqpy.geqdsk`, and creates a magnetic-surface and
+source-profile comparison figure. Both outputs are local generated artifacts and
+are intentionally excluded from Git and release archives.
+
+```bash
+.venv/bin/python demo_geqdsk.py
+```
+
 ## Development Checks
 
 Core local checks mirror the push/PR CI workflow.
 
 ```bash
-.venv/bin/python -m compileall -q veqpy tests benchmarks demo.py
-.venv/bin/ruff check veqpy tests benchmarks demo.py
+.venv/bin/python -m compileall -q veqpy tests benchmarks demo.py demo_geqdsk.py
+.venv/bin/ruff check veqpy tests benchmarks demo.py demo_geqdsk.py
 .venv/bin/python -m pytest
 ```
 
@@ -130,8 +140,8 @@ The Cxx backend is the native C++/nanobind kernel layer used for
 topology-specific shared-library kernels and Cxx-vs-Numba benchmarks.
 
 Representative Cxx-vs-Numba timing data from
-`benchmarks/cxx_geqdsk.py` is summarized below. The three benchmark
-families are GEQDSK-backed cases:
+`benchmarks/cxx_geqdsk.py` is summarized below. The three benchmark families
+are GEQDSK-backed cases:
 
 - `D-shaped`: `data/SOLOVEV.geqdsk`
 - `H-mode`: `data/CHEASE.geqdsk`
@@ -141,30 +151,34 @@ families are GEQDSK-backed cases:
 difference. Bold rows mark the representative High configuration for each GEQDSK
 family.
 
-| case(params)    |     Cxx (ms) |    Numba (ms) |    speedup | solution diff |
-| --------------- | -----------: | ------------: | ---------: | ------------: |
-| D-shaped(4)     |     0.246913 |      1.943412 |     7.871x |      1.17e-12 |
-| D-shaped(5)     |     0.233480 |      2.052858 |     8.792x |      3.14e-12 |
-| **D-shaped(9)** | **0.324843** |  **2.651577** | **8.163x** |  **8.04e-12** |
-| D-shaped(75)    |     1.525350 |      7.799670 |     5.113x |      1.48e-10 |
-| H-mode(27)      |     0.833330 |      5.856498 |     7.028x |      3.12e-11 |
-| H-mode(36)      |     1.030506 |      7.133881 |     6.923x |      2.75e-11 |
-| **H-mode(60)**  | **2.336699** | **14.254966** | **6.100x** |  **4.45e-08** |
-| H-mode(130)     |    12.946364 |     42.713799 |     3.299x |      2.55e-09 |
-| X-point(19)     |     0.486021 |      3.708758 |     7.631x |      1.55e-11 |
-| X-point(29)     |     0.683057 |      4.524502 |     6.624x |      3.92e-11 |
-| **X-point(94)** | **2.889962** | **11.066233** | **3.829x** |  **8.34e-11** |
-| X-point(130)    |     6.871710 |     22.346156 |     3.252x |      2.99e-10 |
+| case(params)    |     Cxx (ms) |    Numba (ms) |     speedup | solution diff |
+| --------------- | -----------: | ------------: | ----------: | ------------: |
+| D-shaped(4)     |     0.172940 |      1.911798 |     11.055x |      1.17e-12 |
+| D-shaped(5)     |     0.214899 |      2.136862 |      9.944x |      3.14e-12 |
+| **D-shaped(9)** | **0.229824** |  **2.547320** | **11.084x** |  **8.04e-12** |
+| D-shaped(75)    |     1.000413 |      7.288244 |      7.285x |      1.48e-10 |
+| H-mode(27)      |     0.707322 |      5.654250 |      7.994x |      3.12e-11 |
+| H-mode(36)      |     0.844900 |      7.095212 |      8.398x |      2.75e-11 |
+| **H-mode(60)**  | **1.705001** | **15.468430** |  **9.072x** |  **1.26e-08** |
+| H-mode(130)     |     8.265414 |     43.981732 |      5.321x |      1.29e-08 |
+| X-point(19)     |     0.374766 |      3.517772 |      9.387x |      1.55e-11 |
+| X-point(29)     |     0.549881 |      4.886525 |      8.887x |      3.92e-11 |
+| **X-point(94)** | **1.975305** | **11.051075** |  **5.595x** |  **8.39e-11** |
+| X-point(130)    |     4.267138 |     24.079790 |      5.643x |      2.99e-10 |
 
 The package-level Kernel API is intentionally semantic: users construct
-`KernelTopology` for the solve topology, including `ip_constraint` and
-`beta_constraint` boolean source constraints, then pass it explicitly as
+`KernelTopology` for the solve topology, including a source `constraint` of
+`"ip"`, `"beta"`, `"both"`, or `"none"`, then pass it explicitly as
 `Kernel(topology=topology)` or `build(topology=topology, ...)`.
 `KernelBoundary`/`KernelSource` carry runtime cases, `KernelConfig` carries the
 handle-level default solve policy, and `KernelRecipe` remains the shared backend
-recipe type. `KernelSource` stores raw user-facing `heat_profile`,
-`current_profile`, `Ip`, and `beta` values; the Kernel runtime materializes
-route-dependent `mu0` scaling before calling backend kernels. Sine-family Kernel
+recipe type. `KernelSource` stores exactly one raw pressure representation:
+either `p`, or `pprime` with an optional edge pressure `p0`. It also stores `Ip`
+and `beta` plus exactly one route-specific driver: `ffprime` (PF), `psi_r` (PP),
+`itor` (PI), `jtor` (PJ1), `jpara` (PJ2), or `q` (PQ). The selected driver must
+match `KernelTopology.route`; the Kernel runtime derives `pprime`/`p0` from `p`
+when needed and materializes route-dependent `mu0` scaling before calling
+backend kernels. Sine-family Kernel
 inputs are s1-started: `KernelTopology.s_counts=(n1, n2, ...)` and
 `KernelBoundary.s_offsets=(s1, s2, ...)`; backend runtime lowering adds the
 structural s0=0 slot. `KernelRecipe` selects `backend="numba"` for the direct
@@ -174,7 +188,9 @@ finite-difference JVP/Jacobian calls, and `build_equilibrium()`.
 `build(topology=..., recipe=None, config=None)` creates a reusable `Kernel` and
 caches that default policy on the handle; `Kernel.solve(...)` can use it as-is,
 replace it with a one-off `config=...`, or override individual fields such as
-`method=...` for one call.
+`method=...` for one call. An explicit `x0=` packed array, active-profile
+coefficient dictionary, or previous `SolveResult` overrides warm continuation
+and the configured cold initial-state policy.
 
 The current production boundary is narrow: route/topology planning covers the
 benchmark matrix, while native execution is gated by the Cxx native-support
@@ -217,11 +233,13 @@ User-facing architecture notes:
   semantics, and warm continuation.
 - [`backends.md`][backends-doc]: Numba/Cxx backend responsibilities, cache
   behavior, and benchmark entry points.
+- [`release-1.3.0.md`][release-1.3.0]: 1.3.0 highlights, breaking changes, and
+  migration examples.
 
 Low-level base/math design notes for `Reactive`, `Serial`, `Registry`, interpolation,
 quadrature, and calculus now live in the corresponding source module headers.
 
-## Paper and Reproducibility Resources
+## References
 
 VEQPy is associated with the companion manuscript **[Zhang2026]**. Related VEQ-family and representation papers include:
 
@@ -272,6 +290,7 @@ VEQPy is associated with the companion manuscript **[Zhang2026]**. Related VEQ-f
 [tests]: tests/
 [architecture-doc]: docs/veqpy/architecture.md
 [model-doc]: docs/veqpy/model.md
+[release-1.3.0]: docs/veqpy/release-1.3.0.md
 [kernel-doc]: docs/veqpy/kernel.md
 [backends-doc]: docs/veqpy/backends.md
 [veq-arxiv]: https://arxiv.org/abs/2606.11821

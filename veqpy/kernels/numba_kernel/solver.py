@@ -20,7 +20,7 @@ from veqpy.kernels.types import (
     KernelTopology,
     SolveResult,
 )
-from veqpy.model import Equilibrium
+from veqpy.model import Equilibrium, Grid
 
 from .residual_scale import make_residual_scale
 from .result import solve_result_from_runtime
@@ -190,8 +190,10 @@ class NumbaSolver:
         x: np.ndarray,
         boundary: KernelBoundary,
         source: KernelSource,
+        *,
+        grid: Grid | None = None,
     ) -> Equilibrium:
-        return self.runtime.build_equilibrium(x, boundary, source)
+        return self.runtime.build_equilibrium(x, boundary, source, grid=grid)
 
     def _residual_function(self, x_reference: np.ndarray, config: KernelConfig):
         if config.norm == "none":

@@ -3,7 +3,7 @@
 // Grid tables and radial/poloidal helper views for generated Cxx Kernel artifacts.
 
 #include "linalg.h"
-#include "math.h"
+#include "veq_numeric.h"
 #include "tensor.h"
 #include <algorithm>
 #include <array>

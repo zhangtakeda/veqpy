@@ -18,6 +18,7 @@ import numpy as np
 
 from veqpy.kernels.abi.source_semantics import MaterializedKernelSource, materialize_kernel_source
 from veqpy.kernels.boundary_materialization import materialize_kernel_boundary
+from veqpy.kernels.initial import KernelInitial, materialize_initial_state
 from veqpy.kernels.types import (
     KernelBoundary,
     KernelConfig,
@@ -41,7 +42,7 @@ from .solver import CxxSolver
 from .validation import validate_supported_for_cxx_backend
 
 if TYPE_CHECKING:
-    from veqpy.model import Equilibrium
+    from veqpy.model import Equilibrium, Grid
 
 
 class _CxxKernelImpl:
@@ -116,11 +117,14 @@ class _CxxKernelImpl:
         *,
         config: KernelConfig | None = None,
         case_name: str | None = None,
+        x0: KernelInitial | None = None,
         **config_overrides: Any,
     ) -> SolveResult:
         elapsed_started = perf_counter()
         kernel_config = self._runtime_config(config, config_overrides)
         solver = self._set_runtime(boundary, source, kernel_config, case_name=case_name)
+        if x0 is not None:
+            solver.set_initial_state(materialize_initial_state(x0, self.topology, self.recipe))
         preprocess_ms = (perf_counter() - elapsed_started) * 1000.0
         native_value = solver.solve_direct()
         postprocess_started = perf_counter()
@@ -220,7 +224,12 @@ class _CxxKernelImpl:
         self._set_runtime(boundary, source, self.config, case_name=None)
         self._cxx_solver().jacobian_into(matrix_out, packed_x)
 
-    def build_equilibrium(self, x: Any | None = None) -> Equilibrium:
+    def build_equilibrium(
+        self,
+        x: Any | None = None,
+        *,
+        grid: Grid | None = None,
+    ) -> Equilibrium:
         if self._last_boundary is None or self._last_source is None:
             raise RuntimeError("build_equilibrium requires a previous Kernel runtime case")
         if x is None:
@@ -232,7 +241,12 @@ class _CxxKernelImpl:
         from veqpy.kernels.numba_kernel.runtime import NumbaRuntime
 
         runtime = NumbaRuntime(self.topology)
-        return runtime.build_equilibrium(packed_x, self._last_boundary, self._last_source)
+        return runtime.build_equilibrium(
+            packed_x,
+            self._last_boundary,
+            self._last_source,
+            grid=grid,
+        )
 
     def clear(self) -> None:
         self.history.clear()
@@ -334,13 +348,7 @@ class _CxxKernelImpl:
             raise TypeError(f"source must be KernelSource, got {type(source).__name__}")
         if case_name is None:
             return source
-        return KernelSource(
-            heat_profile=source.heat_profile,
-            current_profile=source.current_profile,
-            Ip=source.Ip,
-            beta=source.beta,
-            case_name=case_name,
-        )
+        return replace(source, case_name=case_name)
 
     def _validate_runtime_case_adaptability(
         self,

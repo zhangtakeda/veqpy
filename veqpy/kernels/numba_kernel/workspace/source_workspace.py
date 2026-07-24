@@ -44,18 +44,19 @@ class SourceWorkspace:
 
     barycentric_weights: np.ndarray
     fixed_remap_matrix: np.ndarray
-    heat_spline_coeff: np.ndarray
-    current_spline_coeff: np.ndarray
+    pprime_spline_coeff: np.ndarray
+    driver_spline_coeff: np.ndarray
 
     psin_query: np.ndarray
     parameter_query: np.ndarray
-    materialized_heat_input: np.ndarray
-    materialized_current_input: np.ndarray
+    materialized_pprime_input: np.ndarray
+    materialized_driver_input: np.ndarray
     array_scratch: np.ndarray
     matrix_scratch: np.ndarray
 
     target_root_fields: np.ndarray
     alpha_state: np.ndarray
+    pressure_state: np.ndarray
 
     def __init__(self, *, nr: int, nt: int, source_execution: SourceExecutionABI) -> None:
         """Allocate source-stage runtime memory."""
@@ -65,8 +66,8 @@ class SourceWorkspace:
 
         self.barycentric_weights = np.empty(0, dtype=np.float64)
         self.fixed_remap_matrix = np.empty((0, 0), dtype=np.float64)
-        self.heat_spline_coeff = np.empty((0, 4), dtype=np.float64)
-        self.current_spline_coeff = np.empty((0, 4), dtype=np.float64)
+        self.pprime_spline_coeff = np.empty((0, 4), dtype=np.float64)
+        self.driver_spline_coeff = np.empty((0, 4), dtype=np.float64)
 
         self.psin_query = (
             np.empty(nr, dtype=np.float64) if needs_psin_query else np.empty(0, dtype=np.float64)
@@ -76,8 +77,8 @@ class SourceWorkspace:
             if source_execution.requires_source_parameter_query
             else self.psin_query
         )
-        self.materialized_heat_input = np.empty(nr, dtype=np.float64)
-        self.materialized_current_input = np.empty(nr, dtype=np.float64)
+        self.materialized_pprime_input = np.empty(nr, dtype=np.float64)
+        self.materialized_driver_input = np.empty(nr, dtype=np.float64)
         # The extra ``nr`` rows after the named scratch slots are reserved for
         # route-local dense systems such as strict PQ solves.
         self.array_scratch = np.empty((7 + nr, nr), dtype=np.float64)
@@ -89,3 +90,6 @@ class SourceWorkspace:
             else np.empty((3, 0), dtype=np.float64)
         )
         self.alpha_state = np.zeros(2, dtype=np.float64)
+        # [0] is the effective mu0*p0 after any beta scaling; [1] is the
+        # common pressure-profile multiplier applied to pprime and p0.
+        self.pressure_state = np.array([0.0, 1.0], dtype=np.float64)

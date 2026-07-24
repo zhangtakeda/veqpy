@@ -24,6 +24,7 @@ from veqpy.kernels import (
     ParetoResult,
     SolveResult,
 )
+from veqpy.kernels.initial import KernelInitial
 
 __all__ = ["build", "fit", "pareto", "solve"]
 
@@ -68,6 +69,7 @@ def solve(
     pin_cpu: bool | int | None = None,
     force: bool = False,
     case_name: str | None = None,
+    x0: KernelInitial | None = None,
     **config_overrides: Any,
 ) -> SolveResult:
     """Prepare a short-lived kernel, solve one case, and close its private workspace."""
@@ -83,7 +85,7 @@ def solve(
     )
     try:
         kernel.prepare(force=force, dry_run=False)
-        return kernel.solve(boundary, source, case_name=case_name, **config_overrides)
+        return kernel.solve(boundary, source, case_name=case_name, x0=x0, **config_overrides)
     finally:
         kernel.close()
 

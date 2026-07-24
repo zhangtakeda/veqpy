@@ -50,8 +50,7 @@ def build_kernel_variant_topology(
         route=current.route,
         coordinate=current.coordinate,
         nodes=current.nodes,
-        ip_constraint=current.ip_constraint,
-        beta_constraint=current.beta_constraint,
+        constraint=current.constraint,
         sample_count=current.sample_count,
         quadrature=current.quadrature,
         calculus=current.calculus,
@@ -104,4 +103,3 @@ def require_topology_counts_contained_by_capacity(
         f"required active counts do not fit L_max={capacity.L_max}, "
         f"M_max={capacity.M_max}, K_max={capacity.K_max}"
     )
-

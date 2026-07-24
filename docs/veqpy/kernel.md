@@ -13,7 +13,9 @@ limits. Active count fields determine the public packed vector size. `L_max`,
 minimal active-count requirement, but may not be smaller. `KernelBoundary` and
 `KernelSource` carry per-case physical inputs. `KernelConfig` carries nonlinear
 solve policy. `Kernel.solve(...)` returns a shared `SolveResult`, and
-`Kernel.build_equilibrium()` materializes the current `Equilibrium` snapshot.
+`Kernel.build_equilibrium(grid=...)` materializes the current `Equilibrium`
+snapshot directly on an optional output grid, avoiding a separate public
+`equilibrium.resample(grid)` step.
 For sine Fourier data, Kernel-level public inputs are s1-started:
 `KernelTopology.s_counts=(n1, n2, ...)` and `KernelBoundary.s_offsets=(s1, s2, ...)`.
 The runtime adds the structural s0=0 slot before backend calls.
@@ -41,8 +43,55 @@ equilibrium snapshot assembly, but those details are not separate public objects
 `KernelRecipe.backend` selects the backend implementation; user code continues
 to call the same `Kernel` methods.
 
-Public source inputs stay raw: `KernelSource.heat_profile`,
-`KernelSource.current_profile`, `KernelSource.Ip`, and `KernelSource.beta`.
+Public source inputs stay raw. Every `KernelSource` requires exactly one pressure
+representation:
+
+- `p=p`: absolute pressure samples; `p0` is derived and must not be supplied.
+- `pprime=pprime, p0=p0`: pressure-derivative samples plus the optional LCFS
+  pressure, which defaults to zero.
+
+It also requires exactly one driver selected by the topology route:
+
+| route | required driver |
+| --- | --- |
+| `PF` | `ffprime` |
+| `PP` | `psi_r` |
+| `PI` | `itor` |
+| `PJ1` | `jtor` |
+| `PJ2` | `jpara` |
+| `PQ` | `q` |
+
+For example, a PQ case can be constructed as either
+`KernelSource(p=p, q=q, beta=beta)` or
+`KernelSource(pprime=pprime, p0=p0, q=q, beta=beta)`. Supplying both pressure
+representations, neither pressure representation, more than one driver, no
+driver, or a driver that does not match `KernelTopology.route` is rejected
+before backend execution. The old generic
+`heat_profile`/`current_profile` keywords are not accepted.
+
+For uniform `p` samples, the final sample is the LCFS pressure and the
+differentiation matrix acts in the selected source coordinate. The PP
+`sqrt_psin` parameterization applies the chain rule without differentiating on
+an ill-conditioned squared node grid. For Legendre grid samples in `rho`, the
+runtime uses the grid differentiation matrix and interpolates `p` to `rho=1`
+because Gauss-Legendre nodes exclude the edge. `p` is intentionally rejected for
+`coordinate="psin", nodes="grid"`: those nodes are fixed in `rho`, while
+`psin(rho)` is part of the unknown equilibrium. Use explicit `pprime` for that
+topology or switch to uniform psin samples.
+
+`KernelSource.p0` is the pressure at the LCFS in Pa; `Ip` and `beta` are the
+optional global constraints. The runtime reconstructs the complete pressure
+from `pprime` and `p0`; a beta constraint scales both pieces, including `p0`, by
+one common factor. After route constraints have been applied, the source stage
+fixes the alpha gauge from `max(abs(mu0*p))` and inversely rescales `Pn` and
+`FFn`, preserving the physical Grad-Shafranov sources. Consequently
+`pprime=0, p0!=0` is a valid constant-pressure input, while a completely zero
+pressure remains rejected.
+
+Numba and Cxx consume the same canonical materialized tuple
+`(scaled_pprime, scaled_driver, scaled_p0, scaled_Ip, beta)`. Absolute `p`
+therefore remains a public input convenience implemented once by shared
+lowering; it is not a second backend-specific source mode.
 Route-dependent scaling and internal materialized source arrays are backend
 runtime details, not user-facing data fields.
 
@@ -71,6 +120,22 @@ Warm continuation is handle-local: after a solve, the next `Kernel.solve(...)`
 can reuse the previous solution when the continuation policy is warm. Use
 `kernel.clear()` to drop the stored result and history.
 
+An explicit `x0=` overrides both warm continuation and the configured cold
+initial-state policy. It may be a packed array-like, a previous `SolveResult`,
+or a complete dictionary of active profile coefficient arrays:
+
+```python
+result = kernel.solve(
+    boundary,
+    source,
+    x0={"h": h_coeff, "k": k_coeff, "s1": s1_coeff, "psin": psin_coeff},
+)
+```
+
+Named dictionaries are encoded according to `KernelRecipe.layout`; every active
+profile must be supplied and inactive or unknown names are rejected. Explicit
+states are per-call runtime data and do not enter native artifact identity.
+
 ## Topology Variants
 
 `Kernel.variant(...)` is for multi-topology count sweeps on Numba-backed
@@ -91,7 +156,7 @@ kernel.variant(
 
 Omitted arguments and explicit `None` inherit the current active count.
 `variant()` does not change fixed setup or capacity fields such as
-`Nr/Nt/route/coordinate/nodes/sample_count/ip_constraint/beta_constraint`,
+`Nr/Nt/route/coordinate/nodes/sample_count/constraint`,
 `quadrature`, `calculus`, `L_max`, `M_max`, or `K_max`. New counts must fit the
 current capacity limits: radial counts require `count <= L_max + 1`, cosine
 orders require `order <= M_max`, and sine orders use the public s1-started

@@ -77,6 +77,11 @@ class ThreadOwnedNativeSolver:
         solver = self._require_solver()
         return self._call_native(solver.metadata)
 
+    def source_state(self) -> Any:
+        self.check_thread()
+        solver = self._require_solver()
+        return self._call_native(solver.source_state)
+
     def set_kernel_runtime(self, *args: Any) -> None:
         self.check_thread()
         solver = self._require_solver()
@@ -96,6 +101,11 @@ class ThreadOwnedNativeSolver:
         self.check_thread()
         solver = self._require_solver()
         self._call_native(solver.adopt_last_solution_as_initial)
+
+    def set_initial_state(self, x0: Any) -> None:
+        self.check_thread()
+        solver = self._require_solver()
+        self._call_native(solver.set_initial_state, x0)
 
     def residual_var_into(self, out: Any, x: Any) -> None:
         self.check_thread()

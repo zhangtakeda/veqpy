@@ -15,7 +15,9 @@ from typing import Any
 import numpy as np
 from numpy.linalg import norm
 
+from veqpy.kernels.abi.enums import SOURCE_DRIVER_BY_ROUTE
 from veqpy.kernels.boundary_materialization import materialize_kernel_boundary
+from veqpy.kernels.initial import KernelInitial, materialize_initial_state
 from veqpy.kernels.pareto import (
     KernelParetoSignature,
     ParetoResult,
@@ -38,7 +40,7 @@ from veqpy.kernels.types import (
     SolveResult,
 )
 from veqpy.kernels.variant import build_kernel_variant_topology
-from veqpy.model import Equilibrium
+from veqpy.model import Equilibrium, Grid
 
 from .pareto_runtime import sample_r_surface
 from .solver import NumbaSolver
@@ -151,6 +153,7 @@ class _NumbaKernelImpl:
         *,
         config: KernelConfig | None = None,
         case_name: str | None = None,
+        x0: KernelInitial | None = None,
         **config_overrides: Any,
     ) -> SolveResult:
         elapsed_started = perf_counter()
@@ -159,13 +162,17 @@ class _NumbaKernelImpl:
         kernel_source = self._kernel_source(source, case_name=case_name)
         self._last_boundary = kernel_boundary
         self._last_source = kernel_source
-        x0 = self._warm_start_x(kernel_config)
+        initial_x = (
+            materialize_initial_state(x0, self.topology, self.recipe)
+            if x0 is not None
+            else self._warm_start_x(kernel_config)
+        )
         preprocess_ms = (perf_counter() - elapsed_started) * 1000.0
         result = self._solver.solve(
             kernel_boundary,
             kernel_source,
             kernel_config,
-            x0=x0,
+            x0=initial_x,
             preprocess_ms=preprocess_ms,
             elapsed_started=elapsed_started,
         )
@@ -401,7 +408,12 @@ class _NumbaKernelImpl:
         self._last_source = kernel_source
         _jacobian_into(matrix_out, packed_x, kernel_boundary, kernel_source, self._solver)
 
-    def build_equilibrium(self, x: Any | None = None) -> Equilibrium:
+    def build_equilibrium(
+        self,
+        x: Any | None = None,
+        *,
+        grid: Grid | None = None,
+    ) -> Equilibrium:
         if self._last_boundary is None or self._last_source is None:
             raise RuntimeError("build_equilibrium requires a previous Kernel runtime case")
         if x is None:
@@ -410,7 +422,12 @@ class _NumbaKernelImpl:
             packed_x = self.result.x
         else:
             packed_x = self._packed_input(x, "x")
-        return self._solver.build_equilibrium(packed_x, self._last_boundary, self._last_source)
+        return self._solver.build_equilibrium(
+            packed_x,
+            self._last_boundary,
+            self._last_source,
+            grid=grid,
+        )
 
     def clear(self) -> None:
         self.history.clear()
@@ -507,13 +524,7 @@ class _NumbaKernelImpl:
             raise TypeError(f"source must be KernelSource, got {type(source).__name__}")
         if case_name is None:
             return source
-        return KernelSource(
-            heat_profile=source.heat_profile,
-            current_profile=source.current_profile,
-            Ip=source.Ip,
-            beta=source.beta,
-            case_name=case_name,
-        )
+        return replace(source, case_name=case_name)
 
     def _packed_input(self, value: Any, name: str) -> np.ndarray:
         array = np.asarray(value, dtype=np.float64)
@@ -559,14 +570,14 @@ def _prepare_boundary(topology: KernelTopology) -> KernelBoundary:
 
 def _prepare_source(topology: KernelTopology) -> KernelSource:
     sample_count = int(topology.sample_count)
-    heat_profile = np.full(sample_count, 1.0e6, dtype=np.float64)
-    current_value = 1.0e6 if topology.route in {"PI", "PJ1", "PJ2"} else 1.0
-    current_profile = np.full(sample_count, current_value, dtype=np.float64)
+    pprime = np.full(sample_count, 1.0e6, dtype=np.float64)
+    driver_value = 1.0e6 if topology.route in {"PI", "PJ1", "PJ2"} else 1.0
+    driver = np.full(sample_count, driver_value, dtype=np.float64)
     return KernelSource(
-        heat_profile=heat_profile,
-        current_profile=current_profile,
+        pprime=pprime,
+        **{SOURCE_DRIVER_BY_ROUTE[topology.route]: driver},
         Ip=1.0e6,
-        beta=0.5 if topology.beta_constraint else np.nan,
+        beta=0.5 if topology.source_uses_beta_constraint else np.nan,
     )
 
 

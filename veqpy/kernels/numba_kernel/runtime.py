@@ -11,7 +11,11 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from veqpy.kernels.abi.source_semantics import materialize_kernel_source
+from veqpy.kernels.abi.source_semantics import (
+    MU0,
+    MaterializedKernelSource,
+    materialize_kernel_source,
+)
 from veqpy.kernels.numba_kernel.workspace.allocation import allocate_runtime_state
 from veqpy.kernels.numba_kernel.workspace.grid_workspace import GridWorkspace
 from veqpy.kernels.types import (
@@ -126,6 +130,9 @@ class KernelRuntimeCase:
     topology: KernelTopology
     boundary: KernelBoundary
     source: KernelSource
+    pprime_input: np.ndarray
+    driver_input: np.ndarray
+    p0: float
 
     @property
     def route(self) -> str:
@@ -170,15 +177,6 @@ class KernelRuntimeCase:
     @property
     def s_offsets(self) -> np.ndarray:
         return kernel_boundary_s_offsets_with_s0(self.boundary)
-
-    @property
-    def heat_input(self) -> np.ndarray:
-        return self.source.heat_profile
-
-    @property
-    def current_input(self) -> np.ndarray:
-        return self.source.current_profile
-
 
 class NumbaRuntime:
     """Topology-native residual runtime for the Numba backend."""
@@ -270,11 +268,23 @@ class NumbaRuntime:
         return self.profile_workspace.active_profile_blocks()
 
     def set_case(self, boundary: KernelBoundary, source: KernelSource) -> None:
-        case = KernelRuntimeCase(self.topology, boundary, source)
+        materialized = materialize_kernel_source(self.topology, source)
+        driver_scale = MU0 if self.topology.route in {"PI", "PJ1", "PJ2"} else 1.0
+        case = KernelRuntimeCase(
+            self.topology,
+            boundary,
+            source,
+            pprime_input=_readonly_runtime_profile(materialized.scaled_pprime / MU0),
+            driver_input=_readonly_runtime_profile(
+                materialized.scaled_driver / driver_scale
+            ),
+            p0=float(materialized.scaled_p0 / MU0),
+        )
         self.plan.source_plan = _build_kernel_source_plan(
             self.topology,
             source,
             source_interpolation_kind=self.source_interpolation_kind,
+            materialized=materialized,
         )
         self.plan.source_execution = backend_abi.build_source_execution_abi(
             source_plan=self.plan.source_plan,
@@ -344,6 +354,8 @@ class NumbaRuntime:
         x: np.ndarray,
         boundary: KernelBoundary,
         source: KernelSource,
+        *,
+        grid: Grid | None = None,
     ):
         self.set_case(boundary, source)
         x_eval = self.coerce_x(x)
@@ -373,8 +385,10 @@ class NumbaRuntime:
             Pn_psin=root_fields[4],
             psin_r=root_fields[1],
             psin_rr=root_fields[2],
+            p0=float(self.source_workspace.pressure_state[0] / MU0),
             alpha1=float(self.source_workspace.alpha_state[0]),
             alpha2=float(self.source_workspace.alpha_state[1]),
+            output_grid=grid,
         )
 
     def _refresh_runtime_state(self, case: KernelRuntimeCase) -> None:
@@ -583,8 +597,10 @@ def _build_kernel_source_plan(
     source: KernelSource,
     *,
     source_interpolation_kind: str,
+    materialized: MaterializedKernelSource | None = None,
 ) -> SourcePlan:
-    materialized = materialize_kernel_source(topology, source)
+    if materialized is None:
+        materialized = materialize_kernel_source(topology, source)
     source_route_spec = validate_route(topology.route, topology.coordinate, topology.nodes)
     return SourcePlan(
         route=topology.route,
@@ -592,9 +608,10 @@ def _build_kernel_source_plan(
         coordinate=topology.coordinate,
         nodes=topology.nodes,
         parameterization=topology.source_parameterization,
-        source_sample_count=int(materialized.scaled_heat.shape[0]),
-        scaled_heat=materialized.scaled_heat,
-        scaled_current=materialized.scaled_current,
+        source_sample_count=int(materialized.scaled_pprime.shape[0]),
+        scaled_pprime=materialized.scaled_pprime,
+        scaled_driver=materialized.scaled_driver,
+        scaled_p0=materialized.scaled_p0,
         scaled_Ip=materialized.scaled_Ip,
         beta=materialized.beta,
         interpolation_kind=_interpolation_kind_for(topology, source_interpolation_kind),
@@ -617,8 +634,9 @@ def _placeholder_source_plan(
         nodes=topology.nodes,
         parameterization=source_parameterization_for_route_key(topology.source_route_key),
         source_sample_count=samples,
-        scaled_heat=placeholder,
-        scaled_current=placeholder,
+        scaled_pprime=placeholder,
+        scaled_driver=placeholder,
+        scaled_p0=0.0,
         scaled_Ip=np.nan,
         beta=np.nan,
         interpolation_kind=_interpolation_kind_for(topology, source_interpolation_kind),
@@ -629,6 +647,12 @@ def _interpolation_kind_for(topology: KernelTopology, kind: str) -> str:
     if topology.nodes == "grid":
         return ""
     return normalize_source_interpolation_kind(kind)
+
+
+def _readonly_runtime_profile(value: np.ndarray) -> np.ndarray:
+    profile = np.ascontiguousarray(value, dtype=np.float64)
+    profile.setflags(write=False)
+    return profile
 
 
 def _build_kernel_residual_binding_layout(

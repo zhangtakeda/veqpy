@@ -90,6 +90,9 @@ class CxxSolver:
     def metadata(self) -> Any:
         return self._solver().metadata()
 
+    def source_state(self) -> Any:
+        return self._solver().source_state()
+
     def warmup(self, count: int = 1) -> None:
         self._solver().warmup(count)
 
@@ -101,6 +104,9 @@ class CxxSolver:
 
     def adopt_last_solution_as_initial(self) -> None:
         self._solver().adopt_last_solution_as_initial()
+
+    def set_initial_state(self, x0: Any) -> None:
+        self._solver().set_initial_state(x0)
 
     def residual_var_into(self, out: Any, x: Any) -> None:
         self._solver().residual_var_into(out, x)

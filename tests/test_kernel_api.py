@@ -10,6 +10,7 @@ from numpy.linalg import norm
 from numpy.testing import assert_allclose
 
 from veqpy import (
+    Grid,
     Kernel,
     KernelBoundary,
     KernelConfig,
@@ -17,6 +18,7 @@ from veqpy import (
     KernelSource,
     KernelTopology,
 )
+from veqpy.kernels.abi.enums import SOURCE_DRIVER_BY_ROUTE
 from veqpy.kernels.abi.source_semantics import materialize_kernel_source
 from veqpy.kernels.numba_kernel.residual_scale import make_residual_scale
 from veqpy.numerics import make_quadrature
@@ -45,7 +47,7 @@ def make_kernel_topology(**overrides: object) -> KernelTopology:
         "route": "PF",
         "coordinate": "psin",
         "nodes": "uniform",
-        "ip_constraint": True,
+        "constraint": "ip",
         "sample_count": 9,
     }
     params.update(overrides)
@@ -65,10 +67,10 @@ def tiny_kernel_boundary() -> KernelBoundary:
 
 def tiny_kernel_source() -> KernelSource:
     psin = np.linspace(0.0, 1.0, 9, dtype=np.float64)
-    current_profile, scaled_heat = pf_reference_profiles(psin)
+    ffprime, scaled_pprime = pf_reference_profiles(psin)
     return KernelSource(
-        heat_profile=scaled_heat / MU0,
-        current_profile=current_profile,
+        pprime=scaled_pprime / MU0,
+        ffprime=ffprime,
         Ip=3.0e6,
     )
 
@@ -87,7 +89,7 @@ def route_kernel_topology(route: str, coordinate: str, nodes: str) -> KernelTopo
         "route": route,
         "coordinate": coordinate,
         "nodes": nodes,
-        "ip_constraint": True,
+        "constraint": "ip",
         "sample_count": 8 if nodes == "grid" else 9,
     }
     if route == "PJ2":
@@ -112,24 +114,24 @@ def route_kernel_source(
         sample_count=sample_count,
         nr=nr,
     )
-    heat_profile = (
+    pprime = (
         rho * (1.0e6 + 0.4e6 * rho * rho) if coordinate == "rho" else 1.0e6 + 0.4e6 * rho * rho
     )
     if route == "PI":
-        current_profile = rho * rho * (1.0e6 + 2.0e6 * rho * rho)
+        driver = rho * rho * (1.0e6 + 2.0e6 * rho * rho)
     elif route in {"PJ1", "PJ2"}:
-        current_profile = 1.0e6 + 2.0e6 * rho * rho
+        driver = 1.0e6 + 2.0e6 * rho * rho
     elif route == "PP":
-        current_profile = rho * (1.0 + 2.0 * rho * rho)
+        driver = rho * (1.0 + 2.0 * rho * rho)
     elif route == "PF":
-        current_profile = (
+        driver = (
             rho * (1.0 + 2.0 * rho * rho) if coordinate == "rho" else 1.0 + 2.0 * rho * rho
         )
     else:
-        current_profile = 1.0 + 2.0 * rho * rho
+        driver = 1.0 + 2.0 * rho * rho
     return KernelSource(
-        heat_profile=heat_profile,
-        current_profile=current_profile,
+        pprime=pprime,
+        **{SOURCE_DRIVER_BY_ROUTE[route]: driver},
         Ip=3.0e6,
     )
 
@@ -270,17 +272,134 @@ def test_kernel_source_materialization_route_matrix(
     materialized = materialize_kernel_source(topology, source)
 
     assert topology.source_route_key == (route, coordinate, nodes)
-    assert materialized.scaled_heat.shape == (topology.sample_count,)
-    assert materialized.scaled_current.shape == (topology.sample_count,)
-    assert_allclose(materialized.scaled_heat, source.heat_profile * MU0)
+    assert materialized.scaled_pprime.shape == (topology.sample_count,)
+    assert materialized.scaled_driver.shape == (topology.sample_count,)
+    assert source.driver_name == SOURCE_DRIVER_BY_ROUTE[route]
+    assert_allclose(materialized.scaled_pprime, source.pprime * MU0)
     if route in {"PI", "PJ1", "PJ2"}:
-        assert_allclose(materialized.scaled_current, source.current_profile * MU0)
+        assert_allclose(materialized.scaled_driver, source.driver_profile * MU0)
     else:
-        assert_allclose(materialized.scaled_current, source.current_profile)
+        assert_allclose(materialized.scaled_driver, source.driver_profile)
     assert materialized.scaled_Ip == pytest.approx(source.Ip * MU0)
     assert_allclose([materialized.beta], [source.beta], equal_nan=True)
-    assert not materialized.scaled_heat.flags.writeable
-    assert not materialized.scaled_current.flags.writeable
+    assert not materialized.scaled_pprime.flags.writeable
+    assert not materialized.scaled_driver.flags.writeable
+
+
+def test_kernel_source_materializes_p0_and_rejects_zero_complete_pressure() -> None:
+    topology = make_kernel_topology(
+        route="PQ",
+        coordinate="rho",
+        nodes="grid",
+        constraint="none",
+        sample_count=8,
+        psin_count=0,
+    )
+    rho, _ = make_quadrature(topology.Nr, scheme=topology.quadrature)
+    q = 1.71 + 0.16 * rho * rho
+    pressure = 6408.706536
+
+    materialized = materialize_kernel_source(
+        topology,
+        KernelSource(
+            pprime=np.zeros(topology.Nr),
+            q=q,
+            p0=pressure,
+        ),
+    )
+
+    assert materialized.scaled_p0 == pytest.approx(MU0 * pressure)
+    with pytest.raises(ValueError, match="complete pressure profile is identically zero"):
+        materialize_kernel_source(
+            topology,
+            KernelSource(
+                pprime=np.zeros(topology.Nr),
+                q=q,
+            ),
+        )
+    with pytest.warns(RuntimeWarning, match="p0 must be finite"):
+        with pytest.raises(ValueError, match="p0 must be finite"):
+            materialize_kernel_source(
+                topology,
+                KernelSource(
+                    pprime=np.zeros(topology.Nr),
+                    q=q,
+                    p0=np.nan,
+                ),
+            )
+
+
+def _constant_pressure_pq_case(
+    *,
+    constraint: str,
+    beta: float = np.nan,
+) -> tuple[Kernel, KernelBoundary, KernelSource, np.ndarray]:
+    nr = 16
+    topology = make_kernel_topology(
+        h_count=1,
+        kappa_count=0,
+        psin_count=0,
+        c_counts=(),
+        s_counts=(1,),
+        Nr=nr,
+        Nt=16,
+        route="PQ",
+        coordinate="rho",
+        nodes="grid",
+        constraint=constraint,
+        sample_count=nr,
+    )
+    rho, _ = make_quadrature(nr, scheme=topology.quadrature)
+    kernel = numba_kernel(topology=topology)
+    boundary = KernelBoundary(
+        a=1.0,
+        R0=10.0,
+        Z0=0.0,
+        B0=3.0,
+        ka=1.0,
+        s_offsets=(0.0,),
+    )
+    source = KernelSource(
+        pprime=np.zeros(nr),
+        q=1.71 + 0.16 * rho * rho,
+        p0=6408.706536,
+        beta=beta,
+    )
+    return kernel, boundary, source, np.zeros(kernel.x_size)
+
+
+def test_pq_rho_constant_pressure_uses_full_p_for_alpha_normalization() -> None:
+    kernel, boundary, source, x = _constant_pressure_pq_case(constraint="none")
+
+    residual = kernel.residual(x, boundary, source)
+    equilibrium = kernel.build_equilibrium(x)
+
+    assert np.all(np.isfinite(residual))
+    assert_allclose(equilibrium.P, source.p0, rtol=0.0, atol=1.0e-12)
+    assert_allclose(equilibrium.P_r, 0.0, rtol=0.0, atol=1.0e-12)
+    assert equilibrium.p0 == pytest.approx(source.p0)
+    assert equilibrium.alpha1 * equilibrium.alpha2 == pytest.approx(MU0 * source.p0)
+    assert equilibrium.beta_t == pytest.approx(2.0 * MU0 * source.p0 / boundary.B0**2)
+    assert equilibrium.resample(Grid(Nr=24, Nt=24)).p0 == pytest.approx(source.p0)
+
+
+def test_beta_constraint_scales_constant_p0_as_the_pressure_profile() -> None:
+    beta = 0.02
+    kernel, boundary, source, x = _constant_pressure_pq_case(
+        constraint="beta",
+        beta=beta,
+    )
+
+    kernel.residual(x, boundary, source)
+    equilibrium = kernel.build_equilibrium(x)
+    expected_pressure = 0.5 * beta * boundary.B0**2 / MU0
+
+    assert_allclose(equilibrium.P, expected_pressure, rtol=2.0e-13, atol=1.0e-8)
+    assert equilibrium.p0 == pytest.approx(expected_pressure)
+    assert equilibrium.beta_t == pytest.approx(beta)
+    assert equilibrium.alpha1 * equilibrium.alpha2 == pytest.approx(
+        MU0 * expected_pressure
+    )
 
 
 @pytest.mark.parametrize(("route", "coordinate", "nodes"), ROUTE_PARITY_CASES)
@@ -324,6 +443,19 @@ def test_kernel_numba_backend_build_equilibrium_runtime_state_rules() -> None:
     kernel.residual(x, boundary, source)
     equilibrium = kernel.build_equilibrium(x)
     assert np.isfinite(equilibrium.Ip)
+
+    output_grid = Grid(Nr=11, Nt=12, quadrature_scheme="uniform")
+    direct = kernel.build_equilibrium(x, grid=output_grid)
+    expected = equilibrium.resample(output_grid)
+    assert direct.grid is output_grid
+    assert_allclose(direct.rho, output_grid.rho)
+    assert_allclose(direct.psin, expected.psin)
+    assert_allclose(direct.psin_r, expected.psin_r)
+    assert_allclose(direct.psin_rr, expected.psin_rr)
+    assert_allclose(direct.FFn_psin, expected.FFn_psin)
+    assert_allclose(direct.Pn_psin, expected.Pn_psin)
+    assert_allclose(direct.R, expected.R)
+    assert_allclose(direct.Z, expected.Z)
 
     with pytest.raises(RuntimeError, match="previous solve result"):
         kernel.build_equilibrium()
@@ -608,6 +740,51 @@ def test_kernel_numba_backend_warm_continuation_passes_previous_solution(
     assert second.nfev == first.nfev
     assert captured["x0"] is not None
     assert_allclose(captured["x0"], first.x)
+
+
+def test_kernel_numba_backend_explicit_initial_state_overrides_warm_continuation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    topology = make_kernel_topology()
+    kernel = numba_kernel(topology=topology)
+    boundary = tiny_kernel_boundary()
+    source = tiny_kernel_source()
+    first = kernel.solve(
+        boundary,
+        source,
+        config=KernelConfig(
+            method="levenberg-marquardt",
+            initial="cold-zeros",
+            norm="none",
+            max_evaluations=2,
+        ),
+    )
+    captured: dict[str, np.ndarray | None] = {}
+
+    def fake_solve(
+        boundary_arg: KernelBoundary,
+        source_arg: KernelSource,
+        config_arg: KernelConfig,
+        *,
+        x0: np.ndarray | None,
+        **kwargs: object,
+    ):
+        del boundary_arg, source_arg, config_arg, kwargs
+        captured["x0"] = None if x0 is None else x0.copy()
+        return first
+
+    monkeypatch.setattr(kernel._impl._solver, "solve", fake_solve)
+    explicit = np.linspace(-0.5, 0.5, topology.x_size)
+    kernel.solve(
+        boundary,
+        source,
+        config=KernelConfig(continuation="warm", norm="none", max_evaluations=2),
+        x0=explicit,
+    )
+
+    assert captured["x0"] is not None
+    assert_allclose(captured["x0"], explicit)
+    assert not np.array_equal(captured["x0"], first.x)
 
 
 def test_kernel_numba_backend_jvp_and_jacobian_match_native_finite_differences() -> None:

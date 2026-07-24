@@ -13,7 +13,7 @@ Notes:
 from __future__ import annotations
 
 from dataclasses import InitVar, dataclass, field, fields, replace
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 
@@ -22,9 +22,11 @@ from veqpy.kernels.abi.enums import (
     SOURCE_ACTIVE_FAMILY_CODES,
     SOURCE_CONSTRAINT_CODES_BY_FLAGS,
     SOURCE_CONSTRAINT_FLAG_ORDER,
+    SOURCE_CONSTRAINT_FLAGS_BY_NAME,
     SOURCE_CONSTRAINT_FLAGS_BY_ROUTE,
     SOURCE_CONSTRAINT_LABELS_BY_FLAGS,
     SOURCE_COORDINATE_CODES,
+    SOURCE_DRIVER_BY_ROUTE,
     SOURCE_NODES_CODES,
     SOURCE_PARAMETERIZATION_CODES,
     SOURCE_ROUTE_CODES,
@@ -392,8 +394,7 @@ class KernelTopology:
     route: str
     coordinate: str
     nodes: str
-    ip_constraint: bool = False
-    beta_constraint: bool = False
+    constraint: Literal["ip", "beta", "both", "none"] = "none"
     sample_count: int | None = None
     quadrature: str = "legendre"
     calculus: str = "spectral"
@@ -443,8 +444,8 @@ class KernelTopology:
         nodes = _normalize_token(self.nodes, "nodes").lower()
         if nodes not in SOURCE_NODES_CODES:
             raise TopologyError(f"unsupported source nodes {nodes!r}")
-        ip_constraint = _canonical_bool(self.ip_constraint, "ip_constraint")
-        beta_constraint = _canonical_bool(self.beta_constraint, "beta_constraint")
+        constraint = _normalize_source_constraint(self.constraint)
+        ip_constraint, beta_constraint = SOURCE_CONSTRAINT_FLAGS_BY_NAME[constraint]
         _validate_source_constraint(route, ip_constraint, beta_constraint)
         quadrature = _normalize_token(self.quadrature, "quadrature").lower()
         if quadrature != "legendre":
@@ -479,8 +480,7 @@ class KernelTopology:
             "route": route,
             "coordinate": coordinate,
             "nodes": nodes,
-            "ip_constraint": ip_constraint,
-            "beta_constraint": beta_constraint,
+            "constraint": constraint,
             "sample_count": sample_count,
             "quadrature": quadrature,
             "calculus": calculus,
@@ -514,30 +514,104 @@ class KernelTopology:
         object.__setattr__(self, "key", expected_key)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class KernelSource:
-    """Runtime source and physical constraints for one Kernel solve."""
+    """One pressure representation, one explicit route driver, and constraints.
 
-    heat_profile: np.ndarray | list[float] | tuple[float, ...]
-    current_profile: np.ndarray | list[float] | tuple[float, ...]
+    The driver keyword is selected by the topology route: ``ffprime`` for PF,
+    ``psi_r`` for PP, ``itor`` for PI, ``jtor`` for PJ1, ``jpara`` for PJ2,
+    and ``q`` for PQ. Pressure is supplied either as ``p`` or as ``pprime``
+    with an optional LCFS value ``p0``.
+    """
+
+    p: np.ndarray | list[float] | tuple[float, ...] | None = None
+    pprime: np.ndarray | list[float] | tuple[float, ...] | None = None
+    ffprime: np.ndarray | list[float] | tuple[float, ...] | None = None
+    psi_r: np.ndarray | list[float] | tuple[float, ...] | None = None
+    itor: np.ndarray | list[float] | tuple[float, ...] | None = None
+    jtor: np.ndarray | list[float] | tuple[float, ...] | None = None
+    jpara: np.ndarray | list[float] | tuple[float, ...] | None = None
+    q: np.ndarray | list[float] | tuple[float, ...] | None = None
+    p0: float | None = None
     Ip: float = np.nan
     beta: float = np.nan
     case_name: str | None = None
+    _pressure_name: str = field(init=False, repr=False)
+    _pressure_profile: np.ndarray = field(init=False, repr=False)
+    _driver_name: str = field(init=False, repr=False)
+    _driver_profile: np.ndarray = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        heat = _readonly_1d(self.heat_profile, "heat_profile")
-        current = _readonly_1d(self.current_profile, "current_profile")
-        if heat.shape != current.shape:
+        pressure_values = {
+            name: value
+            for name, value in (("p", self.p), ("pprime", self.pprime))
+            if value is not None
+        }
+        if len(pressure_values) != 1:
+            supplied = ", ".join(pressure_values) if pressure_values else "none"
             raise ValueError(
-                "heat_profile and current_profile must share the same shape, "
-                f"got {heat.shape} and {current.shape}"
+                "KernelSource requires exactly one pressure input (p or pprime); "
+                f"got {supplied}"
             )
-        object.__setattr__(self, "heat_profile", heat)
-        object.__setattr__(self, "current_profile", current)
+        pressure_name, pressure_value = next(iter(pressure_values.items()))
+        pressure = _readonly_1d(pressure_value, pressure_name)
+        if pressure_name == "p":
+            if self.p0 is not None:
+                raise ValueError("p0 is derived from p and cannot be supplied with p")
+            p0 = None
+        else:
+            p0 = 0.0 if self.p0 is None else float(self.p0)
+
+        driver_values = {
+            name: getattr(self, name)
+            for name in SOURCE_DRIVER_BY_ROUTE.values()
+            if getattr(self, name) is not None
+        }
+        if len(driver_values) != 1:
+            supplied = ", ".join(driver_values) if driver_values else "none"
+            choices = ", ".join(SOURCE_DRIVER_BY_ROUTE.values())
+            raise ValueError(
+                "KernelSource requires exactly one route driver "
+                f"({choices}); got {supplied}"
+            )
+        driver_name, driver_value = next(iter(driver_values.items()))
+        driver = _readonly_1d(driver_value, driver_name)
+        if pressure.shape != driver.shape:
+            raise ValueError(
+                f"{pressure_name} and {driver_name} must share the same shape, "
+                f"got {pressure.shape} and {driver.shape}"
+            )
+        object.__setattr__(self, pressure_name, pressure)
+        object.__setattr__(self, "_pressure_name", pressure_name)
+        object.__setattr__(self, "_pressure_profile", pressure)
+        object.__setattr__(self, driver_name, driver)
+        object.__setattr__(self, "_driver_name", driver_name)
+        object.__setattr__(self, "_driver_profile", driver)
+        object.__setattr__(self, "p0", p0)
         object.__setattr__(self, "Ip", float(self.Ip))
         object.__setattr__(self, "beta", float(self.beta))
         case_name = None if self.case_name is None else str(self.case_name)
         object.__setattr__(self, "case_name", case_name)
+
+    @property
+    def pressure_name(self) -> str:
+        """Canonical pressure keyword supplied by the caller."""
+        return self._pressure_name
+
+    @property
+    def pressure_profile(self) -> np.ndarray:
+        """Read-only samples selected by ``pressure_name``."""
+        return self._pressure_profile
+
+    @property
+    def driver_name(self) -> str:
+        """Canonical route-driver keyword supplied by the caller."""
+        return self._driver_name
+
+    @property
+    def driver_profile(self) -> np.ndarray:
+        """Read-only route-driver samples selected by ``driver_name``."""
+        return self._driver_profile
 
 
 @dataclass(frozen=True, slots=True)
@@ -671,6 +745,14 @@ def _validate_source_constraint(route: str, ip_constraint: bool, beta_constraint
     if flags not in SOURCE_CONSTRAINT_FLAGS_BY_ROUTE[route]:
         label = SOURCE_CONSTRAINT_LABELS_BY_FLAGS[flags]
         raise TopologyError(f"{route} source topology does not support constraint {label!r}")
+
+
+def _normalize_source_constraint(value: str) -> str:
+    normalized = _normalize_token(value, "constraint").lower()
+    if normalized in SOURCE_CONSTRAINT_FLAGS_BY_NAME:
+        return normalized
+    choices = ", ".join(SOURCE_CONSTRAINT_FLAGS_BY_NAME)
+    raise TopologyError(f"constraint must be one of {choices}")
 
 
 def _normalize_layout(value: str) -> str:

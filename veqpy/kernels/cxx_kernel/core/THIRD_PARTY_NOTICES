@@ -1,0 +1,30 @@
+VEQPy third-party notices
+
+MINPACK / CMinpack
+------------------
+VEQPy's Cxx backend contains MINPACK-derived numerical primitives and
+hand-written, VEQ-specialized Powell hybrid and Levenberg-Marquardt solvers
+that were written with MINPACK and CMinpack source code as algorithmic
+references. The system CMinpack driver is retained only for the remote
+compile-time fallback policy.
+
+Source references:
+  MINPACK:  https://netlib.org/minpack/
+  CMinpack: https://github.com/devernay/cminpack/tree/v1.3.11
+
+License: Minpack Copyright Notice (1999), University of Chicago. The complete
+license text is distributed with VEQPy at minpack/CopyrightMINPACK.txt.
+
+This product includes software developed by the University of Chicago, as Operator of Argonne National Laboratory.
+
+Reference LAPACK / LAPACKE
+--------------------------
+VEQPy's fixed-array dense linear-algebra routines were written with Reference
+LAPACK as an algorithmic reference. The LAPACKE interface supplies the blocked
+runtime fallback for high-order dense and banded systems.
+
+Source reference:
+  https://github.com/Reference-LAPACK/lapack/tree/v3.12.1
+
+License: BSD 3-Clause. The complete Reference LAPACK license text is
+distributed with VEQPy at lapack/CopyrightLAPACK.txt.

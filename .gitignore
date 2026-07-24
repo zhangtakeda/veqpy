@@ -51,9 +51,11 @@ AGENTS.md
 /tools/
 worklog/
 
-# Public input data is limited to GEQDSK files unless explicitly unignored.
+# Public input data is limited to the three reference GEQDSK files.
 data/*
-!data/*.geqdsk
+!data/CHEASE.geqdsk
+!data/EFIT.geqdsk
+!data/SOLOVEV.geqdsk
 !data/README.md
 
 # Test source is trackable; generated outputs stay local.

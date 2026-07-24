@@ -116,6 +116,8 @@ def _measure_row(args: argparse.Namespace, spec) -> dict[str, Any]:
             recipe=recipe,
             warmup=args.warmup,
             repeat=args.repeat,
+            cache_root=getattr(args, "cache_root", None),
+            source_dir=getattr(args, "source_dir", CORE_DIR),
         )
         native_engine = engine_payload(native_measure)
         numba_engine = engine_payload(numba_measure)

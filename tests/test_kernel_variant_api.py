@@ -27,7 +27,7 @@ def make_topology(**overrides: object) -> KernelTopology:
         "route": "PF",
         "coordinate": "psin",
         "nodes": "uniform",
-        "ip_constraint": True,
+        "constraint": "ip",
         "sample_count": 9,
     }
     params.update(overrides)
@@ -48,8 +48,8 @@ def tiny_boundary() -> KernelBoundary:
 def tiny_source() -> KernelSource:
     psin = np.linspace(0.0, 1.0, 9, dtype=np.float64)
     return KernelSource(
-        heat_profile=1.0e6 + 0.2e6 * psin,
-        current_profile=1.0 + 0.1 * psin,
+        pprime=1.0e6 + 0.2e6 * psin,
+        ffprime=1.0 + 0.1 * psin,
         Ip=3.0e6,
     )
 

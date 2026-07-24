@@ -2,7 +2,7 @@
 
 // Native boundary scatter-to-coefficient phase-QR fitter for benchmark comparison.
 
-#include "math.h"
+#include "veq_numeric.h"
 
 #include <algorithm>
 #include <cmath>

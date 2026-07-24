@@ -28,6 +28,7 @@ from veqpy import (  # noqa: E402
     KernelTopology,
     SolveResult,
 )
+from veqpy.kernels.abi.enums import SOURCE_DRIVER_BY_ROUTE  # noqa: E402
 from veqpy.kernels.boundary_materialization import materialize_kernel_boundary  # noqa: E402
 from veqpy.kernels.numba_kernel.packed_layout import (  # noqa: E402
     build_profile_index,
@@ -61,12 +62,12 @@ ROUTE_BENCHMARK_MODES = ("PF", "PP", "PI", "PJ1", "PJ2", "PQ")
 ROUTE_BENCHMARK_COORDINATES = ("rho", "psin")
 ROUTE_BENCHMARK_NODES = ("uniform", "grid")
 ROUTE_BENCHMARK_CONSTRAINTS = {
-    "PF": ("Ip", "beta", "null"),
-    "PP": ("Ip_beta", "Ip", "beta", "null"),
-    "PI": ("Ip_beta", "Ip", "beta", "null"),
-    "PJ1": ("Ip_beta", "Ip", "beta", "null"),
-    "PJ2": ("Ip_beta", "Ip", "beta", "null"),
-    "PQ": ("Ip_beta", "Ip", "beta", "null"),
+    "PF": ("ip", "beta", "none"),
+    "PP": ("both", "ip", "beta", "none"),
+    "PI": ("both", "ip", "beta", "none"),
+    "PJ1": ("both", "ip", "beta", "none"),
+    "PJ2": ("both", "ip", "beta", "none"),
+    "PQ": ("both", "ip", "beta", "none"),
 }
 DEFAULT_ROUTE_SCOPE = "ip-uniform"
 DEFAULT_ROUTE_SAMPLE_COUNT = 51
@@ -498,13 +499,13 @@ def format_float(value: float, *, precision: int = 6) -> str:
 
 def constraint_flags(label: str) -> tuple[bool, bool]:
     normalized = str(label)
-    if normalized == "null":
+    if normalized == "none":
         return False, False
-    if normalized == "Ip":
+    if normalized == "ip":
         return True, False
     if normalized == "beta":
         return False, True
-    if normalized == "Ip_beta":
+    if normalized == "both":
         return True, True
     raise ValueError(f"unknown source constraint {label!r}")
 
@@ -526,7 +527,7 @@ def iter_route_specs(
         for coordinate in ROUTE_BENCHMARK_COORDINATES:
             for nodes in node_choices:
                 for constraint in constraints:
-                    if scope == default_scope and constraint != "Ip":
+                    if scope == default_scope and constraint != "ip":
                         continue
                     specs.append(RouteBenchmarkSpec(mode, coordinate, nodes, constraint))
     return tuple(specs)
@@ -704,14 +705,14 @@ def synthetic_route_reference() -> RouteReference:
         route="PF",
         coordinate="rho",
         nodes="uniform",
-        ip_constraint=True,
+        constraint="ip",
         sample_count=DEFAULT_ROUTE_SAMPLE_COUNT,
         M_max=DEFAULT_ROUTE_M_MAX,
         K_max=DEFAULT_ROUTE_K_MAX,
     )
     source = KernelSource(
-        heat_profile=pn_r_src / MU0,
-        current_profile=ffn_r_src,
+        pprime=pn_r_src / MU0,
+        ffprime=ffn_r_src,
         Ip=3.0e6,
         beta=np.nan,
         case_name="synthetic-reference",
@@ -804,17 +805,22 @@ def build_route_mode_inputs(
 ) -> tuple[np.ndarray, np.ndarray]:
     pressure_keys = pressure_keys_for_coordinate(coordinate)
     if mode == "PF":
-        use_normalized = constraint in {"Ip", "beta"}
+        use_normalized = constraint in {"ip", "beta"}
         driver_keys = ("FFn_r", "FF_r") if coordinate == "rho" else ("FFn_psin", "FF_psi")
-        current_input = pick_ref_profile(ref, driver_keys[0], driver_keys[1], use_normalized)
-        heat_input = pick_ref_profile(ref, pressure_keys[0], pressure_keys[1], use_normalized)
-        return heat_input, current_input
+        driver_input = pick_ref_profile(ref, driver_keys[0], driver_keys[1], use_normalized)
+        pprime_input = pick_ref_profile(ref, pressure_keys[0], pressure_keys[1], use_normalized)
+        return pprime_input, driver_input
     if mode == "PP":
-        driver_normalized = constraint in {"Ip_beta", "Ip"}
-        pressure_normalized = constraint in {"Ip_beta", "beta"}
-        current_input = pick_ref_profile(ref, "psin_r", "psi_r", driver_normalized)
-        heat_input = pick_ref_profile(ref, pressure_keys[0], pressure_keys[1], pressure_normalized)
-        return heat_input, current_input
+        driver_normalized = constraint in {"both", "ip"}
+        pressure_normalized = constraint in {"both", "beta"}
+        driver_input = pick_ref_profile(ref, "psin_r", "psi_r", driver_normalized)
+        pprime_input = pick_ref_profile(
+            ref,
+            pressure_keys[0],
+            pressure_keys[1],
+            pressure_normalized,
+        )
+        return pprime_input, driver_input
 
     driver_domain, pressure_domain = constraint_route_domains(constraint)
     driver_keys = {
@@ -823,29 +829,29 @@ def build_route_mode_inputs(
         "PJ2": ("jpara", "jpara"),
         "PQ": ("qn", "q"),
     }[mode]
-    current_input = pick_ref_profile(
+    driver_input = pick_ref_profile(
         ref,
         driver_keys[0],
         driver_keys[1],
         driver_domain == "normalized",
     )
-    heat_input = pick_ref_profile(
+    pprime_input = pick_ref_profile(
         ref,
         pressure_keys[0],
         pressure_keys[1],
         pressure_domain == "normalized",
     )
-    return heat_input, current_input
+    return pprime_input, driver_input
 
 
 def constraint_route_domains(constraint: str) -> tuple[str, str]:
-    if constraint == "Ip_beta":
+    if constraint == "both":
         return "normalized", "normalized"
-    if constraint == "Ip":
+    if constraint == "ip":
         return "normalized", "physical"
     if constraint == "beta":
         return "physical", "normalized"
-    if constraint == "null":
+    if constraint == "none":
         return "physical", "physical"
     raise ValueError(f"unsupported constraint: {constraint!r}")
 
@@ -876,7 +882,7 @@ def source_profiles_for_route(
     sample_count: int,
 ) -> tuple[np.ndarray, np.ndarray]:
     reference = synthetic_route_reference()
-    heat_profile, current_profile = build_route_mode_inputs(
+    pprime, driver = build_route_mode_inputs(
         spec.mode,
         spec.coordinate,
         spec.constraint,
@@ -894,8 +900,8 @@ def source_profiles_for_route(
         target_axis = uniform_route_source_axis(spec, sample_count)
         source_axis = reference.rho_axis if spec.coordinate == "rho" else reference.psin_axis
     return (
-        profile_interp(source_axis, heat_profile, target_axis).astype(np.float64),
-        profile_interp(source_axis, current_profile, target_axis).astype(np.float64),
+        profile_interp(source_axis, pprime, target_axis).astype(np.float64),
+        profile_interp(source_axis, driver, target_axis).astype(np.float64),
     )
 
 
@@ -1081,14 +1087,14 @@ def source_profiles_from_geqdsk(
     geqdsk_axis = np.linspace(0.0, 1.0, max(int(geqdsk.P_psi.size), 2), dtype=np.float64)
     p_psi = _finite_or_default_profile(geqdsk.P_psi, geqdsk_axis.size, scale=1.0e6)
     ff_psi = _finite_or_default_profile(geqdsk.FF_psi, geqdsk_axis.size, scale=1.0)
-    heat_profile = np.interp(source_axis, geqdsk_axis, p_psi)
-    current_profile = np.interp(source_axis, geqdsk_axis, ff_psi)
+    pprime = np.interp(source_axis, geqdsk_axis, p_psi)
+    driver = np.interp(source_axis, geqdsk_axis, ff_psi)
     if coordinate == "rho":
-        heat_profile = heat_profile * (2.0 * np.maximum(axis, 1.0e-12))
-        current_profile = current_profile * (2.0 * np.maximum(axis, 1.0e-12))
+        pprime = pprime * (2.0 * np.maximum(axis, 1.0e-12))
+        driver = driver * (2.0 * np.maximum(axis, 1.0e-12))
     if route in {"PI", "PJ1", "PJ2"}:
-        current_profile = current_profile / MU0
-    return heat_profile.astype(np.float64), current_profile.astype(np.float64)
+        driver = driver / MU0
+    return pprime.astype(np.float64), driver.astype(np.float64)
 
 
 def _finite_or_default_profile(values: np.ndarray, size: int, *, scale: float) -> np.ndarray:
@@ -1113,8 +1119,8 @@ def route_kernel_case(
     norm: str = "fast",
 ) -> KernelCase:
     count = int(nr if spec.nodes == "grid" else (sample_count or DEFAULT_ROUTE_SAMPLE_COUNT))
-    ip_constraint, beta_constraint = constraint_flags(spec.constraint)
-    heat_profile, current_profile = source_profiles_for_route(
+    uses_ip, uses_beta = constraint_flags(spec.constraint)
+    pprime, driver = source_profiles_for_route(
         spec,
         nr=nr,
         nt=nt,
@@ -1138,18 +1144,17 @@ def route_kernel_case(
         route=spec.mode,
         coordinate=spec.coordinate,
         nodes=spec.nodes,
-        ip_constraint=ip_constraint,
-        beta_constraint=beta_constraint,
+        constraint=spec.constraint,
         sample_count=count,
         L_max=None,
         M_max=DEFAULT_ROUTE_M_MAX,
         K_max=DEFAULT_ROUTE_K_MAX,
     )
     source = KernelSource(
-        heat_profile=heat_profile,
-        current_profile=current_profile,
-        Ip=3.0e6 if ip_constraint else np.nan,
-        beta=0.02 if beta_constraint else np.nan,
+        pprime=pprime,
+        **{SOURCE_DRIVER_BY_ROUTE[spec.mode]: driver},
+        Ip=3.0e6 if uses_ip else np.nan,
+        beta=0.02 if uses_beta else np.nan,
         case_name=spec.case_name,
     )
     config = KernelConfig(
@@ -1181,7 +1186,7 @@ def geqdsk_kernel_case(
 ) -> KernelCase:
     geqdsk = Geqdsk(CASE_REFERENCE_GFILES[case_key] if geqdsk_path is None else geqdsk_path)
     boundary = geqdsk_boundary(case_key, geqdsk)
-    spec = route_spec or RouteBenchmarkSpec("PF", "psin", "uniform", "Ip")
+    spec = route_spec or RouteBenchmarkSpec("PF", "psin", "uniform", "ip")
     effective_signature = (
         dict(signature) if signature is not None else geqdsk_signature(case_key, config_label)
     )
@@ -1192,8 +1197,8 @@ def geqdsk_kernel_case(
     )
     c_order, s_order = kernel_boundary_shape_orders(boundary)
     m_max = max(c_order, s_order, 1)
-    ip_constraint, beta_constraint = constraint_flags(spec.constraint)
-    heat_profile, current_profile = source_profiles_from_geqdsk(
+    uses_ip, uses_beta = constraint_flags(spec.constraint)
+    pprime, driver = source_profiles_from_geqdsk(
         geqdsk,
         route=spec.mode,
         coordinate=spec.coordinate,
@@ -1212,18 +1217,17 @@ def geqdsk_kernel_case(
         route=spec.mode,
         coordinate=spec.coordinate,
         nodes=spec.nodes,
-        ip_constraint=ip_constraint,
-        beta_constraint=beta_constraint,
+        constraint=spec.constraint,
         sample_count=count,
         L_max=None,
         M_max=m_max,
         K_max=max(2, m_max),
     )
     source = KernelSource(
-        heat_profile=heat_profile,
-        current_profile=current_profile,
-        Ip=abs(float(geqdsk.Ip)) if ip_constraint else np.nan,
-        beta=0.02 if beta_constraint else np.nan,
+        pprime=pprime,
+        **{SOURCE_DRIVER_BY_ROUTE[spec.mode]: driver},
+        Ip=abs(float(geqdsk.Ip)) if uses_ip else np.nan,
+        beta=0.02 if uses_beta else np.nan,
         case_name=f"{case_key}-{config_label}-{spec.case_name}",
     )
     config = KernelConfig(
@@ -1301,9 +1305,9 @@ def route_topology_payload(
             "route_key": [topology.route, topology.coordinate, topology.nodes],
             "coordinate": topology.coordinate,
             "nodes": topology.nodes,
-            "constraint": topology.constraint_label,
-            "uses_Ip": bool(topology.ip_constraint),
-            "uses_beta": bool(topology.beta_constraint),
+            "constraint": topology.constraint,
+            "uses_Ip": bool(topology.source_uses_ip_constraint),
+            "uses_beta": bool(topology.source_uses_beta_constraint),
             "sample_count": int(topology.sample_count),
         },
         "layout": {"packed": recipe.layout},
@@ -1405,8 +1409,16 @@ def measure_kernel_case(
     recipe: KernelRecipe,
     warmup: int,
     repeat: int,
+    cache_root: Path | None = None,
+    source_dir: Path | None = None,
 ) -> dict[str, Any]:
-    kernel = Kernel(topology=case.topology, recipe=recipe, config=case.config)
+    kernel = Kernel(
+        topology=case.topology,
+        recipe=recipe,
+        config=case.config,
+        cache_root=cache_root,
+        source_dir=source_dir,
+    )
     try:
         for _ in range(max(0, int(warmup))):
             result = kernel.solve(case.boundary, case.source)
@@ -1480,7 +1492,7 @@ def row_payload(name: str, case: KernelCase, measure: dict[str, Any]) -> dict[st
         "route": case.topology.route,
         "coordinate": case.topology.coordinate,
         "nodes": case.topology.nodes,
-        "constraint": case.topology.constraint_label,
+        "constraint": case.topology.constraint,
         "x_size": case.topology.x_size,
         "median_ms": float(measure["median_ms"]),
         "nfev_median": float(measure["nfev_median"]),
@@ -1609,8 +1621,20 @@ def _updated_case(case: KernelCase, *, update: str, offset: float, index: int) -
     if update in {"source", "mixed"}:
         source = replace(
             source,
-            heat_profile=_scale_profile(source.heat_profile, offset, sign=1.0),
-            current_profile=_scale_profile(source.current_profile, offset, sign=-1.0),
+            **{
+                source.pressure_name: _scale_profile(
+                    source.pressure_profile,
+                    offset,
+                    sign=1.0,
+                )
+            },
+            **{
+                source.driver_name: _scale_profile(
+                    source.driver_profile,
+                    offset,
+                    sign=-1.0,
+                )
+            },
         )
     source = replace(source, case_name=f"{source.case_name or case.name}-{suffix}")
     return replace(case, name=f"{case.name}_{suffix}", boundary=boundary, source=source)

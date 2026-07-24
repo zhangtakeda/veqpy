@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from veqpy.model import Equilibrium, Profile
+from veqpy.model import Equilibrium, Grid, Profile
+from veqpy.model.equilibrium import _resample_equilibrium_root_fields
 
 from .packed_layout import decode_packed_blocks
 
@@ -21,7 +22,7 @@ def snapshot_equilibrium_from_kernel_runtime(
     R0: float,
     Z0: float,
     B0: float,
-    grid,
+    grid: Grid,
     profile_L: np.ndarray,
     coeff_index: np.ndarray,
     profile_names: tuple[str, ...],
@@ -37,8 +38,10 @@ def snapshot_equilibrium_from_kernel_runtime(
     Pn_psin: np.ndarray,
     psin_r: np.ndarray,
     psin_rr: np.ndarray,
+    p0: float,
     alpha1: float,
     alpha2: float,
+    output_grid: Grid | None = None,
 ) -> Equilibrium:
     """Materialize an ``Equilibrium`` directly from Kernel runtime state."""
 
@@ -58,6 +61,16 @@ def snapshot_equilibrium_from_kernel_runtime(
         profile_envelope_powers=profile_envelope_powers,
         profile_amplitude_powers=profile_amplitude_powers,
     )
+    if output_grid is not None:
+        psin, psin_r, psin_rr, FFn_psin, Pn_psin = _resample_equilibrium_root_fields(
+            source_grid=grid,
+            target_grid=output_grid,
+            psin=psin,
+            psin_r=psin_r,
+            FFn_psin=FFn_psin,
+            Pn_psin=Pn_psin,
+        )
+        grid = output_grid
     return Equilibrium(
         R0=float(R0),
         Z0=float(Z0),
@@ -70,6 +83,7 @@ def snapshot_equilibrium_from_kernel_runtime(
         Pn_psin=Pn_psin.copy(),
         psin_r=psin_r.copy(),
         psin_rr=psin_rr.copy(),
+        p0=float(p0),
         alpha1=float(alpha1),
         alpha2=float(alpha2),
     )

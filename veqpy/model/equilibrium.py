@@ -274,6 +274,7 @@ class Equilibrium(Reactive, Serial):
         "psin",
         "psin_r",
         "psin_rr",
+        "p0",
         "alpha1",
         "alpha2",
     }
@@ -292,6 +293,7 @@ class Equilibrium(Reactive, Serial):
         psin: np.ndarray,
         psin_r: np.ndarray,
         psin_rr: np.ndarray,
+        p0: float = 0.0,
         alpha1: float = 1.0,
         alpha2: float = 1.0,
     ) -> None:
@@ -313,6 +315,7 @@ class Equilibrium(Reactive, Serial):
         self.Pn_psin = _regularize_axis_linear_profile(Pn_psin, grid.rho, copy=True)
         self.psin_r = np.asarray(psin_r, dtype=np.float64)
         self.psin_rr = np.asarray(psin_rr, dtype=np.float64)
+        self.p0 = float(p0)
         self.alpha1 = alpha1
         self.alpha2 = alpha2
 
@@ -325,6 +328,7 @@ class Equilibrium(Reactive, Serial):
         tree.add(f"B0: {self.B0:.3f} [T]")
         tree.add(f"Ip: {float(self.Ip):.3e} [A]")
         tree.add(f"beta_t: {float(self.beta_t):.3e}")
+        tree.add(f"p0: {self.p0:.6e} [Pa]")
         tree.add(f"alpha1: {self.alpha1:.6f}")
         tree.add(f"alpha2: {self.alpha2:.6f}")
         return tree
@@ -355,6 +359,7 @@ class Equilibrium(Reactive, Serial):
             "Pn_psin": np.ndarray,
             "psin_r": np.ndarray,
             "psin_rr": np.ndarray,
+            "p0": float,
             "alpha1": float,
             "alpha2": float,
         }
@@ -379,6 +384,61 @@ class Equilibrium(Reactive, Serial):
     def sin_theta(self) -> np.ndarray:
         """First-harmonic sine table, ``sin(theta)``."""
         return self.grid.sin_mtheta[1]
+
+    @property
+    def h(self) -> np.ndarray:
+        """Normalized horizontal/Shafranov-shift profile on ``rho``."""
+        return _const_array(_shape_profile_fields(self.shape_profiles, "h", self.grid)[0])
+
+    @property
+    def v(self) -> np.ndarray:
+        """Normalized vertical-shift profile on ``rho``."""
+        return _const_array(_shape_profile_fields(self.shape_profiles, "v", self.grid)[0])
+
+    @property
+    def kappa(self) -> np.ndarray:
+        """Elongation profile; public name for shape profile ``k``."""
+        return _const_array(_shape_profile_fields(self.shape_profiles, "k", self.grid)[0])
+
+    @property
+    def Rc(self) -> np.ndarray:
+        """Flux-surface major-radius center in metres."""
+        return _const_array(self.R0 + self.a * self.h)
+
+    @property
+    def epsilon(self) -> np.ndarray:
+        """Local inverse aspect ratio ``a*rho/Rc``."""
+        return _const_array(self.a * self.rho / self.Rc)
+
+    @property
+    def ftrap(self) -> np.ndarray:
+        """Trapped-particle fraction from the full flux-surface magnetic field."""
+        R = self.R
+        J = self.surface_fields[4]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            bphi_squared = (self.F[:, None] / R) ** 2
+            bp_squared = (self.alpha2 * self.psin_r[:, None]) ** 2 * self.gttdivJR / (J * R)
+            magnetic_field = np.sqrt(bphi_squared + bp_squared)
+        weights = J * R
+        weight_sum = np.sum(weights, axis=1)
+        bmax = np.max(magnetic_field, axis=1)
+
+        def flux_surface_average(values: np.ndarray) -> np.ndarray:
+            return np.sum(values * weights, axis=1) / weight_sum
+
+        with np.errstate(divide="ignore", invalid="ignore"):
+            x = magnetic_field / bmax[:, None]
+            h = flux_surface_average(magnetic_field) / bmax
+            h2 = flux_surface_average(magnetic_field**2) / bmax**2
+            hf_integrand = (1.0 - np.sqrt(1.0 - x) * (1.0 + 0.5 * x)) / x**2
+            hf = flux_surface_average(hf_integrand)
+            ftu = 1.0 - h2 / h**2 * (1.0 - np.sqrt(1.0 - h) * (1.0 + 0.5 * h))
+            ftl = 1.0 - h2 * hf
+            trapped = 0.75 * ftu + 0.25 * ftl
+        trapped = _regularize_axis_linear_profile(trapped, self.rho, copy=True)
+        if np.any(~np.isfinite(trapped)):
+            raise ValueError("trapped-particle fraction contains non-finite values")
+        return _const_array(trapped)
 
     @property
     def _materialized_geometry(self) -> tuple[np.ndarray, np.ndarray]:
@@ -527,7 +587,8 @@ class Equilibrium(Reactive, Serial):
     def P(self) -> np.ndarray:
         """Physical pressure profile P."""
         P_int = self.grid.accumulate(self.P_r)
-        return P_int - P_int[-1]
+        edge_integral = float(self.grid.integrate(self.P_r))
+        return self.p0 + P_int - edge_integral
 
     @property
     def beta_t(self) -> np.ndarray:
@@ -844,32 +905,13 @@ def _build_resampled_equilibrium(
         K_max=source_grid.K_max,
     )
 
-    # Plot/export grids are often uniform even when the solve grid is spectral;
-    # interpolate root profiles in rho and recompute psin_rr on the target grid.
-    # The original shape profiles remain analytic Profile objects, so geometry
-    # is re-evaluated on the target grid instead of interpolating R/Z surfaces.
-    psin_r = _resample_profile_linear(
-        source_grid.rho,
-        np.asarray(equilibrium.psin_r, dtype=np.float64),
-        plot_grid.rho,
-        left=0.0,
-    )
-    psin = _resample_profile_linear(
-        source_grid.rho,
-        np.asarray(equilibrium.psin, dtype=np.float64),
-        plot_grid.rho,
-    )
-    FFn_psin = _resample_profile_linear(
-        source_grid.rho,
-        np.asarray(equilibrium.FFn_psin, dtype=np.float64),
-        plot_grid.rho,
-        right=0.0,
-    )
-    Pn_psin = _resample_profile_linear(
-        source_grid.rho,
-        np.asarray(equilibrium.Pn_psin, dtype=np.float64),
-        plot_grid.rho,
-        right=0.0,
+    psin, psin_r, psin_rr, FFn_psin, Pn_psin = _resample_equilibrium_root_fields(
+        source_grid=source_grid,
+        target_grid=plot_grid,
+        psin=equilibrium.psin,
+        psin_r=equilibrium.psin_r,
+        FFn_psin=equilibrium.FFn_psin,
+        Pn_psin=equilibrium.Pn_psin,
     )
 
     return Equilibrium(
@@ -883,9 +925,51 @@ def _build_resampled_equilibrium(
         FFn_psin=FFn_psin,
         Pn_psin=Pn_psin,
         psin_r=psin_r,
-        psin_rr=plot_grid.differentiate(psin_r),
+        psin_rr=psin_rr,
+        p0=equilibrium.p0,
         alpha1=equilibrium.alpha1,
         alpha2=equilibrium.alpha2,
+    )
+
+
+def _resample_equilibrium_root_fields(
+    *,
+    source_grid: Grid,
+    target_grid: Grid,
+    psin: np.ndarray,
+    psin_r: np.ndarray,
+    FFn_psin: np.ndarray,
+    Pn_psin: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Resample snapshot-owned radial fields without materializing geometry."""
+
+    source_rho = source_grid.rho
+    target_rho = target_grid.rho
+    psin_out = _resample_profile_linear(source_rho, psin, target_rho)
+    psin_r_out = _resample_profile_linear(
+        source_rho,
+        psin_r,
+        target_rho,
+        left=0.0,
+    )
+    FFn_out = _resample_profile_linear(
+        source_rho,
+        _regularize_axis_linear_profile(FFn_psin, source_rho, copy=True),
+        target_rho,
+        right=0.0,
+    )
+    Pn_out = _resample_profile_linear(
+        source_rho,
+        _regularize_axis_linear_profile(Pn_psin, source_rho, copy=True),
+        target_rho,
+        right=0.0,
+    )
+    return (
+        psin_out,
+        psin_r_out,
+        target_grid.differentiate(psin_r_out),
+        FFn_out,
+        Pn_out,
     )
 
 
@@ -1354,12 +1438,9 @@ def _update_model_geometry(
                 - rho_i * (cos_tb_ij * tb_r_ij * tb_r_ij + sin_tb_ij * tb_rr_ij)
             )
             R_rt_ij = -a * (
-                sin_tb_ij * tb_t_ij
-                + rho_i * (cos_tb_ij * tb_r_ij * tb_t_ij + sin_tb_ij * tb_rt_ij)
+                sin_tb_ij * tb_t_ij + rho_i * (cos_tb_ij * tb_r_ij * tb_t_ij + sin_tb_ij * tb_rt_ij)
             )
-            R_tt_ij = -a * rho_i * (
-                cos_tb_ij * tb_t_ij * tb_t_ij + sin_tb_ij * tb_tt_ij
-            )
+            R_tt_ij = -a * rho_i * (cos_tb_ij * tb_t_ij * tb_t_ij + sin_tb_ij * tb_tt_ij)
 
             Z_r_ij = a * (v_r_i - (k_i + rho_i * k_r_i) * sin_t)
             Z_t_ij = -a * rho_i * k_i * cos_t
@@ -1371,24 +1452,15 @@ def _update_model_geometry(
             if J_ij < 1.0e-6:
                 J_ij = 1.0e-6
 
-            J_r_ij = -(
-                R_rr_ij * Z_t_ij - R_rt_ij * Z_r_ij + R_r_ij * Z_rt_ij - R_t_ij * Z_rr_ij
-            )
-            J_t_ij = -(
-                R_rt_ij * Z_t_ij - R_tt_ij * Z_r_ij + R_r_ij * Z_tt_ij - R_t_ij * Z_rt_ij
-            )
+            J_r_ij = -(R_rr_ij * Z_t_ij - R_rt_ij * Z_r_ij + R_r_ij * Z_rt_ij - R_t_ij * Z_rr_ij)
+            J_t_ij = -(R_rt_ij * Z_t_ij - R_tt_ij * Z_r_ij + R_r_ij * Z_tt_ij - R_t_ij * Z_rt_ij)
             JR_ij = J_ij * R_ij
             JR_r_ij = J_r_ij * R_ij + J_ij * R_r_ij
             JR_t_ij = J_t_ij * R_ij + J_ij * R_t_ij
             JdivR_ij = J_ij / R_ij
 
             grt_ij = R_r_ij * R_t_ij + Z_r_ij * Z_t_ij
-            grt_t_ij = (
-                R_rt_ij * R_t_ij
-                + R_r_ij * R_tt_ij
-                + Z_rt_ij * Z_t_ij
-                + Z_r_ij * Z_tt_ij
-            )
+            grt_t_ij = R_rt_ij * R_t_ij + R_r_ij * R_tt_ij + Z_rt_ij * Z_t_ij + Z_r_ij * Z_tt_ij
             gtt_ij = R_t_ij * R_t_ij + Z_t_ij * Z_t_ij
             gtt_r_ij = 2.0 * (R_t_ij * R_rt_ij + Z_t_ij * Z_rt_ij)
             inv_JR = 1.0 / JR_ij

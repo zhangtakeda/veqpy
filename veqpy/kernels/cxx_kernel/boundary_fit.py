@@ -58,7 +58,6 @@ def fit_boundary_params_cxx(
     s_order: int,
     maxtol: float = 1.0e-2,
     method: str | None = "gnqr",
-    algorithm: str | None = None,
 ) -> dict[str, float | np.ndarray]:
     """Fit RZ boundary samples with the native boundary fitter."""
 
@@ -72,8 +71,6 @@ def fit_boundary_params_cxx(
     if maxtol <= 0.0:
         raise ValueError(f"maxtol must be positive, got {maxtol!r}")
 
-    if algorithm is not None:
-        method = _method_from_legacy_algorithm(algorithm)
     method = normalize_boundary_fit_method(method)
 
     native = _boundary_fit_module()
@@ -107,19 +104,6 @@ def fit_boundary_params_cxx(
             stacklevel=2,
         )
     return result
-
-
-def _method_from_legacy_algorithm(algorithm: str) -> str:
-    normalized = str(algorithm).strip().lower().replace("-", "_")
-    if normalized in {"weighted_qr", "qr"}:
-        return "qr"
-    if normalized in {"weighted_gnqr", "gnqr"}:
-        return "gnqr"
-    if normalized in {"least_square", "least_squares", "ls"}:
-        return "least-square"
-    if normalized == "phase_qr":
-        raise ValueError("legacy algorithm='phase_qr' is no longer a public boundary method")
-    raise ValueError(f"unsupported legacy boundary fit algorithm {algorithm!r}")
 
 
 @lru_cache(maxsize=1)
@@ -223,7 +207,7 @@ def _boundary_fit_source_digest(core_dir: Path) -> dict[str, Any]:
     retained = (
         "boundary_fit.h",
         "boundary_fit_bindings.cpp",
-        "math.h",
+        "veq_numeric.h",
         "tensor.h",
     )
     digest = hashlib.sha256()
@@ -368,12 +352,22 @@ target_compile_options(
         $<$<CONFIG:Release>:-fapprox-func>
         $<$<CONFIG:Release>:-flto=thin>
 )
-target_link_options(
-    veqpy_boundary_fit_ext
-    PRIVATE
-        $<$<CONFIG:Release>:-Wl,-O3>
-        $<$<CONFIG:Release>:-Wl,--gc-sections>
-        $<$<CONFIG:Release>:-flto=thin>
-        $<$<CONFIG:Release>:-fuse-ld=lld>
-)
+if(APPLE)
+    target_link_options(
+        veqpy_boundary_fit_ext
+        PRIVATE
+            $<$<CONFIG:Release>:-Wl,-dead_strip>
+            $<$<CONFIG:Release>:-flto=thin>
+            $<$<CONFIG:Release>:-fuse-ld=lld>
+    )
+else()
+    target_link_options(
+        veqpy_boundary_fit_ext
+        PRIVATE
+            $<$<CONFIG:Release>:-Wl,-O3>
+            $<$<CONFIG:Release>:-Wl,--gc-sections>
+            $<$<CONFIG:Release>:-flto=thin>
+            $<$<CONFIG:Release>:-fuse-ld=lld>
+    )
+endif()
 """

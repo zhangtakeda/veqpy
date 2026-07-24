@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from veqpy.kernels.initial import KernelInitial
 from veqpy.kernels.pareto import ParetoResult
 from veqpy.kernels.types import (
     KernelBoundary,
@@ -31,7 +32,7 @@ from veqpy.kernels.types import (
 from .dispatch import _make_kernel_impl
 
 if TYPE_CHECKING:
-    from veqpy.model import Equilibrium
+    from veqpy.model import Equilibrium, Grid
 
 
 class Kernel:
@@ -114,6 +115,7 @@ class Kernel:
         *,
         config: KernelConfig | None = None,
         case_name: str | None = None,
+        x0: KernelInitial | None = None,
         **config_overrides: Any,
     ) -> SolveResult:
         return self._impl.solve(
@@ -121,6 +123,7 @@ class Kernel:
             source,
             config=config,
             case_name=case_name,
+            x0=x0,
             **config_overrides,
         )
 
@@ -186,8 +189,14 @@ class Kernel:
     ) -> None:
         self._impl.jacobian_into(out, x, boundary, source)
 
-    def build_equilibrium(self, x: Any | None = None) -> Equilibrium:
-        return self._impl.build_equilibrium(x)
+    def build_equilibrium(
+        self,
+        x: Any | None = None,
+        *,
+        grid: Grid | None = None,
+    ) -> Equilibrium:
+        """Materialize the latest or supplied state on the requested output grid."""
+        return self._impl.build_equilibrium(x, grid=grid)
 
     def clear(self) -> None:
         self._impl.clear()

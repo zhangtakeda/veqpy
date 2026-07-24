@@ -81,7 +81,7 @@ def _native_engine_label(args: argparse.Namespace) -> str:
 
 
 def _measure_case(args: argparse.Namespace, case_key: str, config_label: str) -> dict[str, Any]:
-    route_spec = RouteBenchmarkSpec("PF", "psin", "uniform", "Ip")
+    route_spec = RouteBenchmarkSpec("PF", "psin", "uniform", "ip")
     signature = geqdsk_signature(case_key, config_label)
     case = geqdsk_kernel_case(
         case_key,
@@ -124,6 +124,8 @@ def _measure_case(args: argparse.Namespace, case_key: str, config_label: str) ->
             recipe=recipe,
             warmup=args.warmup,
             repeat=args.repeat,
+            cache_root=getattr(args, "cache_root", None),
+            source_dir=getattr(args, "source_dir", CORE_DIR),
         )
         native_engine = engine_payload(native_measure)
         numba_engine = engine_payload(numba_measure)

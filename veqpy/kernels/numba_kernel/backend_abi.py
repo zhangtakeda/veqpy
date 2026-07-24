@@ -257,10 +257,12 @@ class FusedSourceEvalABI:
     n_axis_fix: int
     radial_fields: np.ndarray
     surface_fields: np.ndarray
+    scaled_p0: float
     scaled_Ip: float
     beta: float
     array_scratch: np.ndarray
     matrix_scratch: np.ndarray
+    pressure_state: np.ndarray
     B0: float
 
 
@@ -274,16 +276,16 @@ class _ProfileOwnedPsinSourceABI:
     accumulator: np.ndarray
     source_psin_query: np.ndarray
     source_parameter_query: np.ndarray
-    heat_spline_coeff: np.ndarray
-    current_spline_coeff: np.ndarray
+    pprime_spline_coeff: np.ndarray
+    driver_spline_coeff: np.ndarray
     barycentric_weights: np.ndarray
     use_barycentric: bool
-    materialized_heat_input: np.ndarray
-    materialized_current_input: np.ndarray
+    materialized_pprime_input: np.ndarray
+    materialized_driver_input: np.ndarray
     psin_profile_fields: np.ndarray
     parameterization_code: int
-    scaled_heat: np.ndarray
-    scaled_current: np.ndarray
+    scaled_pprime: np.ndarray
+    scaled_driver: np.ndarray
 
 
 def build_fused_hot_runtime_abi(
@@ -388,10 +390,12 @@ def build_fused_source_eval_abi(
         n_axis_fix=n_axis_fix,
         radial_fields=geometry_workspace.radial_fields,
         surface_fields=geometry_workspace.surface_fields,
+        scaled_p0=float(source_plan.scaled_p0),
         scaled_Ip=float(source_plan.scaled_Ip),
         beta=float(source_plan.beta),
         array_scratch=source_workspace.array_scratch,
         matrix_scratch=source_workspace.matrix_scratch,
+        pressure_state=source_workspace.pressure_state,
         B0=B0,
     )
 
@@ -415,14 +419,14 @@ def build_profile_owned_psin_source_abi(
         accumulator=grid_workspace.accumulator,
         source_psin_query=source_workspace.psin_query,
         source_parameter_query=source_workspace.parameter_query,
-        heat_spline_coeff=source_workspace.heat_spline_coeff,
-        current_spline_coeff=source_workspace.current_spline_coeff,
+        pprime_spline_coeff=source_workspace.pprime_spline_coeff,
+        driver_spline_coeff=source_workspace.driver_spline_coeff,
         barycentric_weights=source_workspace.barycentric_weights,
         use_barycentric=bool(source_plan.uses_barycentric_interpolation),
-        materialized_heat_input=source_workspace.materialized_heat_input,
-        materialized_current_input=source_workspace.materialized_current_input,
+        materialized_pprime_input=source_workspace.materialized_pprime_input,
+        materialized_driver_input=source_workspace.materialized_driver_input,
         psin_profile_fields=profile_workspace.fields_for("psin"),
         parameterization_code=int(source_plan.parameterization_code),
-        scaled_heat=source_plan.scaled_heat,
-        scaled_current=source_plan.scaled_current,
+        scaled_pprime=source_plan.scaled_pprime,
+        scaled_driver=source_plan.scaled_driver,
     )

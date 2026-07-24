@@ -2,26 +2,25 @@
 Package: veqpy
 
 Role:
-- Expose the canonical public Kernel surface for VEQPy users.
-- Keep package-root imports focused on build/solve entrypoints and Kernel data types.
+- Expose VEQPy's canonical base, Kernel, and model surfaces from one package root.
 
 Public API:
-- Kernel and KernelRecipe.
+- Reactive, serialization, and registry infrastructure.
+- build, fit, pareto, and solve function-style entrypoints.
+- Kernel, KernelRecipe, and KernelInitial.
 - KernelTopology, KernelBoundary, KernelSource, and KernelConfig.
 - SolveResult, ParetoResult, and ParetoSample result records.
-- build, fit, pareto, and solve function-style entrypoints.
+- Grid, Profile, Geqdsk, and Equilibrium model objects.
 
 Dependencies:
 - veqpy.api for function-style entrypoints.
+- veqpy.base for shared reactive and serialization infrastructure.
 - veqpy.kernels for Kernel dispatch, public Kernel dataclasses, and errors.
+- veqpy.model for equilibrium data models.
 
 Downstream:
-- Examples, benchmarks, docs, and user code should import the public Kernel
-  contract from this package root when possible.
-
-Design notes:
-- Backend implementation classes remain private to veqpy.kernels.
-- Model objects are exported from veqpy.model rather than this root.
+- Examples, benchmarks, docs, and user code can import the public contract from
+  this package root.
 """
 
 from __future__ import annotations
@@ -31,10 +30,19 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 from veqpy.api import build, fit, pareto, solve
+from veqpy.base import (
+    Reactive,
+    Registry,
+    Serial,
+    depends_on,
+    read_serializer,
+    write_serializer,
+)
 from veqpy.kernels import (
     Kernel,
     KernelBoundary,
     KernelConfig,
+    KernelInitial,
     KernelRecipe,
     KernelSource,
     KernelTopology,
@@ -42,21 +50,38 @@ from veqpy.kernels import (
     ParetoSample,
     SolveResult,
 )
+from veqpy.model import (
+    Equilibrium,
+    Geqdsk,
+    Grid,
+    Profile,
+)
 
 __all__ = [
+    "Reactive",
+    "Registry",
+    "Serial",
+    "depends_on",
+    "read_serializer",
+    "write_serializer",
+    "build",
+    "fit",
+    "pareto",
+    "solve",
     "Kernel",
     "KernelBoundary",
     "KernelConfig",
+    "KernelInitial",
     "KernelRecipe",
     "KernelSource",
     "KernelTopology",
     "ParetoResult",
     "ParetoSample",
     "SolveResult",
-    "build",
-    "fit",
-    "pareto",
-    "solve",
+    "Equilibrium",
+    "Geqdsk",
+    "Grid",
+    "Profile",
 ]
 
 

@@ -4,11 +4,14 @@
 
 #include <algorithm>
 #include <array>
-#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <span>
 #include <stdexcept>
+
+#if defined(VEQPY_CXX_DETAILED_SOLVE_TIMING)
+    #include <chrono>
+#endif
 
 #ifdef ENABLE_ENZYME
     #include <enzyme/enzyme>
@@ -18,7 +21,7 @@ extern int enzyme_width;
 #endif
 
 #include "kernel_case.h"
-#include "math.h"
+#include "veq_numeric.h"
 #include "nonlinear.h"
 #include "tensor.h"
 
@@ -60,8 +63,8 @@ namespace cxx_kernel_api
             setup.profile_params = profile_params_for_case(input);
             for (size_t i = 0; i < CompiledSource::sample_count; ++i)
             {
-                setup.heat[i]    = input.heat[i];
-                setup.current[i] = input.current[i];
+                setup.pprime[i] = input.pprime[i];
+                setup.driver[i] = input.driver[i];
             }
             return setup;
         }
@@ -73,6 +76,7 @@ namespace cxx_kernel_api
             params.R0 = input.R0;
             params.Z0 = input.Z0;
             params.B0 = input.B0;
+            params.p0 = input.p0;
             params.Ip = input.Ip;
             params.beta = input.beta;
             return params;
@@ -89,6 +93,7 @@ namespace cxx_kernel_api
         {
             CompiledOperator op;
             RuntimeCase      input{};
+            std::array<double, CompiledShape::x_size> inverse_residual_scale{};
             PackedVector   initial_raw{uninitialized};
             PackedVector   initial_scaled{uninitialized};
             std::array<double, 2> initial_alpha{};
@@ -104,10 +109,27 @@ namespace cxx_kernel_api
             double         jacobian_callback_ms           = 0.0;
             double         jvp_callback_ms                = 0.0;
             double         linear_solve_ms                = 0.0;
+            nonlinear::Workspace<CompiledShape::x_size>& nonlinear_workspace;
 
-            explicit SolveState(const RuntimeCase& case_input)
-                : op(make_operator_for_case(case_input)), input(case_input)
+            SolveState(const RuntimeCase&                                case_input,
+                       nonlinear::Workspace<CompiledShape::x_size>& workspace)
+                : op(make_operator_for_case(case_input)), input(case_input), nonlinear_workspace(workspace)
             {
+                refresh_inverse_residual_scale();
+            }
+
+            void reset_case(const RuntimeCase& case_input) noexcept
+            {
+                input = case_input;
+                op.reprepare(setup_for_case(input));
+                op.set_runtime_scalars(runtime_scalars_for_case(input));
+                refresh_inverse_residual_scale();
+            }
+
+            void refresh_inverse_residual_scale() noexcept
+            {
+                for (size_t i = 0; i < CompiledShape::x_size; ++i)
+                    inverse_residual_scale[i] = 1.0 / input.residual_scale[i];
             }
 
             void reset_solve_counters() noexcept
@@ -270,19 +292,26 @@ namespace cxx_kernel_api
 
         void scaled_residual_z_no_count(SolveState& context, const double* z, double* fvec) noexcept
         {
+#if defined(VEQPY_CXX_DETAILED_SOLVE_TIMING)
             const auto   callback_started = std::chrono::steady_clock::now();
+#endif
             const auto   x = decode_z_to_x(std::span<const double, CompiledShape::x_size>{z, CompiledShape::x_size},
                                          context.input.x_scale);
-            PackedVector raw{uninitialized};
+#if defined(VEQPY_CXX_DETAILED_SOLVE_TIMING)
             const auto   kernel_started = std::chrono::steady_clock::now();
-            context.raw_residual(std::span<const double, CompiledShape::x_size>{x.data(), CompiledShape::x_size},
-                                 std::span<double, CompiledShape::x_size>{raw.data(), CompiledShape::x_size});
+#endif
+            context.op.evaluate_scaled(
+                std::span<const double, CompiledShape::x_size>{x.data(), CompiledShape::x_size},
+                std::span<double, CompiledShape::x_size>{fvec, CompiledShape::x_size},
+#if defined(VEQPY_CXX_FP_MODE_RELAXED)
+                context.inverse_residual_scale.data());
+#else
+                context.input.residual_scale.data());
+#endif
+#if defined(VEQPY_CXX_DETAILED_SOLVE_TIMING)
             context.residual_kernel_ms += elapsed_ms_since(kernel_started);
-            const auto scale_started = std::chrono::steady_clock::now();
-            for (size_t i = 0; i < CompiledShape::x_size; ++i)
-                fvec[i] = raw[i] / context.input.residual_scale[i];
-            context.residual_scale_ms += elapsed_ms_since(scale_started);
             context.residual_callback_ms += elapsed_ms_since(callback_started);
+#endif
         }
 
 #ifdef ENABLE_ENZYME
@@ -433,13 +462,28 @@ namespace cxx_kernel_api
             }
 
 #ifdef ENABLE_ENZYME
+            void jacobian_column_major(const double* z, double* jacobian, int leading_dimension) const
+            {
+#if defined(VEQPY_CXX_DETAILED_SOLVE_TIMING)
+                const auto started = std::chrono::steady_clock::now();
+#endif
+                fill_enzyme_jacobian_z(*context, z, jacobian, leading_dimension);
+#if defined(VEQPY_CXX_DETAILED_SOLVE_TIMING)
+                context->jacobian_callback_ms += elapsed_ms_since(started);
+#endif
+            }
+
             void jacobian(const double* z, double* jacobian) const
             {
                 constexpr size_t          n = CompiledShape::x_size;
                 std::array<double, n * n> column_major{};
+#if defined(VEQPY_CXX_DETAILED_SOLVE_TIMING)
                 const auto                started = std::chrono::steady_clock::now();
+#endif
                 fill_enzyme_jacobian_z(*context, z, column_major.data(), static_cast<int>(n));
+#if defined(VEQPY_CXX_DETAILED_SOLVE_TIMING)
                 context->jacobian_callback_ms += elapsed_ms_since(started);
+#endif
                 for (size_t row = 0; row < n; ++row)
                     for (size_t col = 0; col < n; ++col)
                         jacobian[row * n + col] = column_major[row + n * col];
@@ -447,9 +491,13 @@ namespace cxx_kernel_api
 
             void jvp(const double* z, const double* v, double* jv) const
             {
+#if defined(VEQPY_CXX_DETAILED_SOLVE_TIMING)
                 const auto started = std::chrono::steady_clock::now();
+#endif
                 fill_enzyme_jvp_z(*context, z, v, jv);
+#if defined(VEQPY_CXX_DETAILED_SOLVE_TIMING)
                 context->jvp_callback_ms += elapsed_ms_since(started);
+#endif
             }
 #endif
         };
@@ -491,10 +539,14 @@ namespace cxx_kernel_api
             result.solver_nfev = nfev;
             result.x         = decode_z_to_x(std::span<const double, CompiledShape::x_size>{z, CompiledShape::x_size},
                                      context.input.x_scale);
+#if defined(VEQPY_CXX_DETAILED_SOLVE_TIMING)
             const auto final_residual_started = std::chrono::steady_clock::now();
+#endif
             context.raw_residual(std::span<const double, CompiledShape::x_size>{result.x.data(), CompiledShape::x_size},
                                  std::span<double, CompiledShape::x_size>{result.raw.data(), CompiledShape::x_size});
+#if defined(VEQPY_CXX_DETAILED_SOLVE_TIMING)
             result.final_residual_ms = elapsed_ms_since(final_residual_started);
+#endif
             for (size_t i = 0; i < CompiledShape::x_size; ++i)
                 result.scaled[i] = result.raw[i] / context.input.residual_scale[i];
             result.raw_norm             = norm2(std::span<const double, CompiledShape::x_size>{
@@ -546,14 +598,6 @@ namespace cxx_kernel_api
                 solver_context.finite_difference_step = default_hybr_eps;
             if constexpr (requires { solver_context.initial_step_bound; })
                 solver_context.initial_step_bound = default_hybr_factor;
-            if constexpr (requires { solver_context.lower_bandwidth; })
-                solver_context.lower_bandwidth = static_cast<int>(CompiledShape::x_size) - 1;
-            if constexpr (requires { solver_context.upper_bandwidth; })
-                solver_context.upper_bandwidth = static_cast<int>(CompiledShape::x_size) - 1;
-            if constexpr (requires { solver_context.scale_mode; })
-                solver_context.scale_mode = default_hybr_mode;
-            if constexpr (requires { solver_context.print_interval; })
-                solver_context.print_interval = default_hybr_nprint;
         }
 
         template <typename SolverContext>
@@ -564,10 +608,6 @@ namespace cxx_kernel_api
                 solver_context.finite_difference_step = default_lm_eps;
             if constexpr (requires { solver_context.initial_step_bound; })
                 solver_context.initial_step_bound = default_lm_factor;
-            if constexpr (requires { solver_context.scale_mode; })
-                solver_context.scale_mode = default_lm_mode;
-            if constexpr (requires { solver_context.print_interval; })
-                solver_context.print_interval = default_lm_nprint;
         }
 
         template <typename Policy>
@@ -579,7 +619,7 @@ namespace cxx_kernel_api
             std::copy(encoded.begin(), encoded.end(), z.begin());
 
             ScaledResidualProblem problem{&context};
-            auto                  solver = nonlinear::make_solver<Policy>(problem);
+            auto                  solver = nonlinear::make_solver<Policy>(problem, context.nonlinear_workspace);
             configure_scaled_z_solver(solver.context, context.input);
 
             solver.optimize_inplace(z);
@@ -606,7 +646,8 @@ namespace cxx_kernel_api
             std::copy(encoded.begin(), encoded.end(), z.begin());
 
             ScaledResidualProblem problem{&context};
-            auto                  solver = nonlinear::make_solver<nonlinear::LevenbergMarquardt>(problem);
+            auto                  solver =
+                nonlinear::make_solver<nonlinear::LevenbergMarquardt>(problem, context.nonlinear_workspace);
             configure_levenberg_marquardt_solver(solver.context, context.input);
 
             solver.optimize_inplace(z);

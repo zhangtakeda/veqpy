@@ -8,6 +8,9 @@ NB_MODULE(cxx_ext, module)
         .def(nb::init<int>(),
              nb::arg("solver_code") = static_cast<int>(cxx_kernel_api::SolverMethodPowell))
         .def("metadata", &cxx_python::NativeSolver::metadata)
+        .def("source_state",
+             &cxx_python::NativeSolver::source_state,
+             "Return source scales and effective pressure state from the latest residual evaluation.")
         .def("set_kernel_runtime",
              &cxx_python::NativeSolver::set_kernel_runtime,
              nb::arg("case_name"),
@@ -18,8 +21,9 @@ NB_MODULE(cxx_ext, module)
              nb::arg("ka"),
              nb::arg("c_offsets"),
              nb::arg("s_offsets"),
-             nb::arg("scaled_heat"),
-             nb::arg("scaled_current"),
+             nb::arg("scaled_pprime"),
+             nb::arg("scaled_driver"),
+             nb::arg("scaled_p0"),
              nb::arg("scaled_Ip"),
              nb::arg("beta"),
              nb::arg("method_code"),
@@ -44,6 +48,10 @@ NB_MODULE(cxx_ext, module)
         .def("adopt_last_solution_as_initial",
              &cxx_python::NativeSolver::adopt_last_solution_as_initial,
              "Use the last accepted solve result as the current initial state.")
+        .def("set_initial_state",
+             &cxx_python::NativeSolver::set_initial_state,
+             nb::arg("x0"),
+             "Replace continuation and cold-policy state with an explicit packed initial state.")
         .def("residual_var_into",
              &cxx_python::NativeSolver::residual_var_into,
              nb::arg("out"),
