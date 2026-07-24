@@ -165,6 +165,7 @@ namespace cxx_python
                                              RuntimeArrayView   s_offsets,
                                              RuntimeArrayView   scaled_heat,
                                              RuntimeArrayView   scaled_current,
+                                             double             scaled_p0,
                                              double             scaled_Ip,
                                              double             beta,
                                              int                method_code,
@@ -202,6 +203,7 @@ namespace cxx_python
         read_exact_runtime_array(scaled_heat, "scaled_heat", input.heat);
         read_exact_runtime_array(scaled_current, "scaled_current", input.current);
 
+        input.p0      = scaled_p0;
         input.Ip      = scaled_Ip;
         input.beta    = beta;
 
@@ -586,6 +588,7 @@ namespace cxx_python
                                 RuntimeArrayView   s_offsets,
                                 RuntimeArrayView   scaled_heat,
                                 RuntimeArrayView   scaled_current,
+                                double             scaled_p0,
                                 double             scaled_Ip,
                                 double             beta,
                                 int                method_code,
@@ -613,6 +616,7 @@ namespace cxx_python
                                                            s_offsets,
                                                            scaled_heat,
                                                            scaled_current,
+                                                           scaled_p0,
                                                            scaled_Ip,
                                                            beta,
                                                            method_code,
@@ -790,6 +794,7 @@ namespace cxx_python
             const RuntimeCase& now = context_->input;
             return old.a == now.a && old.R0 == now.R0 && old.Z0 == now.Z0 && old.B0 == now.B0 &&
                    old.ka == now.ka && old.c0_offset == now.c0_offset && old.s1_offset == now.s1_offset &&
+                   old.p0 == now.p0 &&
                    same_offsets(old.c_offsets, now.c_offsets) && same_offsets(old.s_offsets, now.s_offsets) &&
                    same_array(old.heat, now.heat) && same_array(old.current, now.current);
         }

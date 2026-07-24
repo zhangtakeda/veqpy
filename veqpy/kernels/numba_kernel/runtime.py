@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from veqpy.kernels.abi.source_semantics import materialize_kernel_source
+from veqpy.kernels.abi.source_semantics import MU0, materialize_kernel_source
 from veqpy.kernels.numba_kernel.workspace.allocation import allocate_runtime_state
 from veqpy.kernels.numba_kernel.workspace.grid_workspace import GridWorkspace
 from veqpy.kernels.types import (
@@ -178,6 +178,10 @@ class KernelRuntimeCase:
     @property
     def current_input(self) -> np.ndarray:
         return self.source.current_profile
+
+    @property
+    def p0(self) -> float:
+        return self.source.p0
 
 
 class NumbaRuntime:
@@ -375,6 +379,7 @@ class NumbaRuntime:
             Pn_psin=root_fields[4],
             psin_r=root_fields[1],
             psin_rr=root_fields[2],
+            p0=float(self.source_workspace.pressure_state[0] / MU0),
             alpha1=float(self.source_workspace.alpha_state[0]),
             alpha2=float(self.source_workspace.alpha_state[1]),
             output_grid=grid,
@@ -598,6 +603,7 @@ def _build_kernel_source_plan(
         source_sample_count=int(materialized.scaled_heat.shape[0]),
         scaled_heat=materialized.scaled_heat,
         scaled_current=materialized.scaled_current,
+        scaled_p0=materialized.scaled_p0,
         scaled_Ip=materialized.scaled_Ip,
         beta=materialized.beta,
         interpolation_kind=_interpolation_kind_for(topology, source_interpolation_kind),
@@ -622,6 +628,7 @@ def _placeholder_source_plan(
         source_sample_count=samples,
         scaled_heat=placeholder,
         scaled_current=placeholder,
+        scaled_p0=0.0,
         scaled_Ip=np.nan,
         beta=np.nan,
         interpolation_kind=_interpolation_kind_for(topology, source_interpolation_kind),

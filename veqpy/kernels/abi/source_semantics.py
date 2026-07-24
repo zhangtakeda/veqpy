@@ -39,6 +39,7 @@ class MaterializedKernelSource:
 
     scaled_heat: np.ndarray
     scaled_current: np.ndarray
+    scaled_p0: float
     scaled_Ip: float
     beta: float
     case_name: str | None = None
@@ -46,6 +47,7 @@ class MaterializedKernelSource:
     def __post_init__(self) -> None:
         object.__setattr__(self, "scaled_heat", _readonly_array(self.scaled_heat))
         object.__setattr__(self, "scaled_current", _readonly_array(self.scaled_current))
+        object.__setattr__(self, "scaled_p0", float(self.scaled_p0))
         object.__setattr__(self, "scaled_Ip", float(self.scaled_Ip))
         object.__setattr__(self, "beta", float(self.beta))
         case_name = None if self.case_name is None else str(self.case_name)
@@ -75,6 +77,7 @@ def materialize_kernel_source(
         parameterization=topology.source_parameterization,
         heat=source.heat_profile,
         current=source.current_profile,
+        p0=source.p0,
         Ip=source.Ip,
         beta=source.beta,
         heat_name="heat_profile",
@@ -105,6 +108,7 @@ def materialize_source_inputs(
     sample_count: int,
     heat: np.ndarray,
     current: np.ndarray,
+    p0: float,
     Ip: float,
     beta: float,
     heat_name: str,
@@ -140,6 +144,14 @@ def materialize_source_inputs(
         current_name=current_name,
         fix_rho=float(fix_rho),
     )
+    scaled_p0 = _scale_pressure_offset_input(p0, name="p0", advice=advice)
+    if not np.any(regular_heat != 0.0) and scaled_p0 == 0.0:
+        raise ValueError(
+            "The complete pressure profile is identically zero: "
+            f"{heat_name} is all zero and p0 is zero. "
+            "A non-zero pressure profile is required until the current-based "
+            "alpha fallback is implemented."
+        )
     return MaterializedKernelSource(
         scaled_heat=_scale_pressure_like_input(regular_heat, name=heat_name, advice=advice),
         scaled_current=_scale_current_input(
@@ -148,6 +160,7 @@ def materialize_source_inputs(
             name=current_name,
             advice=advice,
         ),
+        scaled_p0=scaled_p0,
         scaled_Ip=_scale_physical_constraint(Ip, name="Ip", advice=advice),
         beta=beta,
         case_name=case_name,
@@ -315,6 +328,15 @@ def _scale_pressure_like_input(value: np.ndarray, *, name: str, advice: str) -> 
     array = np.asarray(value, dtype=np.float64)
     _validate_finite_profile(array, name=name, advice=advice)
     return _readonly_array(array * MU0)
+
+
+def _scale_pressure_offset_input(value: float, *, name: str, advice: str) -> float:
+    scalar = float(value)
+    if not np.isfinite(scalar):
+        message = f"Rejected setup input value: {name} must be finite. {advice}"
+        warnings.warn(message, RuntimeWarning, stacklevel=3)
+        raise ValueError(message)
+    return scalar * MU0
 
 
 def _scale_current_input(

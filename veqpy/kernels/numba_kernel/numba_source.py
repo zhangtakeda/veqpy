@@ -431,6 +431,236 @@ def _compute_Pn_out(
     return out_Pn
 
 
+@njit(cache=True, nogil=True)
+def _build_unscaled_pressure_profile(
+    out_pressure: np.ndarray,
+    radial_scratch: np.ndarray,
+    heat_input: np.ndarray,
+    coordinate_code: int,
+    scaled_p0: float,
+    alpha2: float,
+    psin_r: np.ndarray,
+    accumulator: np.ndarray,
+    weights: np.ndarray,
+) -> np.ndarray:
+    """Build mu0*p before the route-level common pressure multiplier."""
+    if coordinate_code == RHO_COORDINATE:
+        _compute_Pn_out(out_pressure, heat_input, accumulator, weights)
+    else:
+        product_into(radial_scratch, heat_input, psin_r)
+        _compute_Pn_out(out_pressure, radial_scratch, accumulator, weights)
+        out_pressure *= alpha2
+    out_pressure += scaled_p0
+    return out_pressure
+
+
+@njit(cache=True, nogil=True)
+def _pressure_alpha_fallback(
+    alpha1: float,
+    heat_input: np.ndarray,
+    coordinate_code: int,
+    scaled_p0: float,
+    alpha2: float,
+    psin_r: np.ndarray,
+    accumulator: np.ndarray,
+    weights: np.ndarray,
+    pressure_scratch: np.ndarray,
+    radial_scratch: np.ndarray,
+) -> float:
+    """Avoid the legacy integral-of-pprime zero when full p is non-zero."""
+    if np.isfinite(alpha1) and abs(alpha1) > 1.0e-14:
+        return alpha1
+    if not np.isfinite(alpha2) or abs(alpha2) <= 1.0e-14:
+        raise ValueError("Pressure normalization received invalid alpha2")
+    _build_unscaled_pressure_profile(
+        pressure_scratch,
+        radial_scratch,
+        heat_input,
+        coordinate_code,
+        scaled_p0,
+        alpha2,
+        psin_r,
+        accumulator,
+        weights,
+    )
+    pressure_scale = 0.0
+    for i in range(pressure_scratch.shape[0]):
+        value = abs(pressure_scratch[i])
+        if value > pressure_scale:
+            pressure_scale = value
+    if not np.isfinite(pressure_scale) or pressure_scale <= 1.0e-14:
+        raise ValueError("The complete pressure profile is identically zero")
+    return pressure_scale / alpha2
+
+
+@njit(cache=True, nogil=True)
+def _ensure_pressure_alpha1(
+    alpha1: float,
+    heat_input: np.ndarray,
+    coordinate_code: int,
+    scaled_p0: float,
+    alpha2: float,
+    psin_r: np.ndarray,
+    accumulator: np.ndarray,
+    weights: np.ndarray,
+    array_scratch: np.ndarray,
+) -> float:
+    return _pressure_alpha_fallback(
+        alpha1,
+        heat_input,
+        coordinate_code,
+        scaled_p0,
+        alpha2,
+        psin_r,
+        accumulator,
+        weights,
+        array_scratch[_SLOT_PQ_MATRIX],
+        array_scratch[_SLOT_PQ_MATRIX + 1],
+    )
+
+
+@njit(cache=True, nogil=True)
+def finalize_pressure_normalization(
+    out_FFn_psin: np.ndarray,
+    out_Pn_psin: np.ndarray,
+    heat_input: np.ndarray,
+    coordinate_code: int,
+    scaled_p0: float,
+    beta: float,
+    alpha1: float,
+    alpha2: float,
+    psin_r: np.ndarray,
+    accumulator: np.ndarray,
+    weights: np.ndarray,
+    pressure_scratch: np.ndarray,
+    radial_scratch: np.ndarray,
+    pressure_state: np.ndarray,
+) -> float:
+    """Normalize alpha1 with max(abs(mu0*p)) while preserving physical sources."""
+    if not np.isfinite(alpha1) or abs(alpha1) <= 1.0e-14:
+        raise ValueError("Pressure normalization received invalid provisional alpha1")
+    if not np.isfinite(alpha2) or abs(alpha2) <= 1.0e-14:
+        raise ValueError("Pressure normalization received invalid alpha2")
+
+    # Infer the common multiplier that the selected route applied to the raw
+    # pressure derivative. This covers unconstrained, Ip, beta, and Ip+beta
+    # branches without tying the normalization layer to route names.
+    numerator = 0.0
+    denominator = 0.0
+    for i in range(heat_input.shape[0]):
+        raw = heat_input[i]
+        denominator += raw * raw * weights[i]
+        if coordinate_code == RHO_COORDINATE:
+            realized = alpha1 * alpha2 * out_Pn_psin[i] * psin_r[i]
+        else:
+            realized = alpha1 * out_Pn_psin[i]
+        numerator += realized * raw * weights[i]
+    if denominator > 1.0e-28:
+        pressure_multiplier = numerator / denominator
+    elif np.isfinite(beta):
+        pressure_multiplier = (
+            alpha1 * alpha2 if coordinate_code == RHO_COORDINATE else alpha1
+        )
+    else:
+        # With pprime == 0, p0 is already an absolute pressure unless a beta
+        # branch explicitly selected a different multiplier before this helper.
+        pressure_multiplier = 1.0
+
+    if not np.isfinite(pressure_multiplier):
+        raise ValueError("Pressure normalization produced a non-finite pressure multiplier")
+    _build_unscaled_pressure_profile(
+        pressure_scratch,
+        radial_scratch,
+        heat_input,
+        coordinate_code,
+        scaled_p0,
+        alpha2,
+        psin_r,
+        accumulator,
+        weights,
+    )
+    pressure_scale = 0.0
+    for i in range(pressure_scratch.shape[0]):
+        pressure_scratch[i] *= pressure_multiplier
+        value = abs(pressure_scratch[i])
+        if value > pressure_scale:
+            pressure_scale = value
+    if not np.isfinite(pressure_scale) or pressure_scale <= 1.0e-14:
+        raise ValueError("The complete pressure profile is identically zero")
+
+    normalized_alpha1 = pressure_scale / alpha2
+    if not np.isfinite(normalized_alpha1) or abs(normalized_alpha1) <= 1.0e-14:
+        raise ValueError("Pressure normalization produced invalid alpha1")
+    source_rescale = alpha1 / normalized_alpha1
+    for i in range(out_Pn_psin.shape[0]):
+        out_Pn_psin[i] *= source_rescale
+        out_FFn_psin[i] *= source_rescale
+    pressure_state[0] = pressure_multiplier * scaled_p0
+    pressure_state[1] = pressure_multiplier
+    return normalized_alpha1
+
+
+@njit(cache=True, nogil=True)
+def _rho_beta_pressure_denominator(
+    relative_pressure: np.ndarray,
+    V_r: np.ndarray,
+    weights: np.ndarray,
+    scaled_p0: float,
+) -> float:
+    return weighted_dot(relative_pressure, V_r, weights) + scaled_p0 * dot(V_r, weights)
+
+
+@njit(cache=True, nogil=True)
+def _psin_beta_pressure_denominator(
+    relative_pressure: np.ndarray,
+    V_r: np.ndarray,
+    weights: np.ndarray,
+    scaled_p0: float,
+    alpha2: float,
+) -> float:
+    return (
+        alpha2 * weighted_dot(relative_pressure, V_r, weights)
+        + scaled_p0 * dot(V_r, weights)
+    )
+
+
+@njit(cache=True, nogil=True)
+def _solve_pf_psin_beta_alpha1(
+    relative_pressure: np.ndarray,
+    V_r: np.ndarray,
+    weights: np.ndarray,
+    scaled_p0: float,
+    alpha2_per_alpha1: float,
+    beta_target: float,
+) -> float:
+    # beta_target = alpha1*p0*V + alpha1**2*c2*<p_rel>.
+    quadratic = (
+        alpha2_per_alpha1 * weighted_dot(relative_pressure, V_r, weights)
+    )
+    linear = scaled_p0 * dot(V_r, weights)
+    if abs(quadratic) <= 1.0e-14:
+        if abs(linear) <= 1.0e-14:
+            raise ValueError("PF/psin beta constraint received zero complete pressure")
+        return beta_target / linear
+    discriminant = linear * linear + 4.0 * quadratic * beta_target
+    if not np.isfinite(discriminant) or discriminant < 0.0:
+        raise ValueError("PF/psin beta constraint has no real pressure scale")
+    root = np.sqrt(discriminant)
+    root_plus = (-linear + root) / (2.0 * quadratic)
+    root_minus = (-linear - root) / (2.0 * quadratic)
+    preferred = _signed_sqrt_ratio(
+        beta_target,
+        quadratic,
+    )
+    if preferred >= 0.0:
+        if root_plus >= 0.0:
+            return root_plus
+        return root_minus
+    if root_minus <= 0.0:
+        return root_minus
+    return root_plus
+
+
 @njit(cache=True, fastmath=True, nogil=True)
 def _fill_pf_rho_integrand(
     out: np.ndarray,
@@ -880,6 +1110,7 @@ def _pq_psin_beta_residual(
     trial_psin_r: np.ndarray,
     trial_Pn_r: np.ndarray,
     trial_Pn: np.ndarray,
+    scaled_p0: float,
     beta_target: float,
 ) -> float:
     n = F0.shape[0]
@@ -902,7 +1133,9 @@ def _pq_psin_beta_residual(
     beta_den = weighted_dot(trial_Pn, V_r, weights)
     if not np.isfinite(beta_den):
         return np.nan
-    return alpha1 * alpha2 * beta_den - beta_target
+    return alpha1 * (
+        scaled_p0 * dot(V_r, weights) + alpha2 * beta_den
+    ) - beta_target
 
 
 @njit(cache=True, nogil=True)
@@ -918,6 +1151,7 @@ def _solve_pq_psin_beta_alpha1(
     trial_psin_r: np.ndarray,
     trial_Pn_r: np.ndarray,
     trial_Pn: np.ndarray,
+    scaled_p0: float,
     beta_target: float,
 ) -> float:
     base = 0.0
@@ -934,6 +1168,7 @@ def _solve_pq_psin_beta_alpha1(
         trial_psin_r,
         trial_Pn_r,
         trial_Pn,
+        scaled_p0,
         beta_target,
     )
     if not np.isfinite(r_base):
@@ -954,6 +1189,7 @@ def _solve_pq_psin_beta_alpha1(
             trial_psin_r,
             trial_Pn_r,
             trial_Pn,
+            scaled_p0,
             beta_target,
         )
         for _ in range(80):
@@ -978,6 +1214,7 @@ def _solve_pq_psin_beta_alpha1(
                         trial_psin_r,
                         trial_Pn_r,
                         trial_Pn,
+                        scaled_p0,
                         beta_target,
                     )
                     if not np.isfinite(r_mid):
@@ -1006,6 +1243,7 @@ def _solve_pq_psin_beta_alpha1(
                 trial_psin_r,
                 trial_Pn_r,
                 trial_Pn,
+                scaled_p0,
                 beta_target,
             )
     raise ValueError("PQ/psin strict beta solve failed to bracket alpha1")
@@ -1193,6 +1431,7 @@ def _update_pf_from_rho_inputs_with_scratch(
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
     F_fields: np.ndarray,
+    scaled_p0: float,
     Ip: float,
     beta: float,
     array_scratch: np.ndarray,
@@ -1230,6 +1469,17 @@ def _update_pf_from_rho_inputs_with_scratch(
         # flux-direction gauge carried by alpha2, not to the solved shape.
         alpha2 = psi_square_sign * integral_prof
         alpha1 = -dot(heat_input, weights) / integral_prof
+        alpha1 = _ensure_pressure_alpha1(
+            alpha1,
+            heat_input,
+            coordinate_code,
+            scaled_p0,
+            alpha2,
+            out_psin_r,
+            accumulator,
+            weights,
+            array_scratch,
+        )
         source_scale = psi_square_sign / (alpha1 * alpha2)
         scaled_ratio_into(out_Pn_psin, heat_input, out_psin_r, source_scale)
         scaled_ratio_into(out_FFn_psin, current_input, out_psin_r, source_scale)
@@ -1250,7 +1500,15 @@ def _update_pf_from_rho_inputs_with_scratch(
     elif has_beta and (not has_Ip):
         scratch_aux = array_scratch[_SLOT_AUX0]
         _compute_Pn_out(scratch_aux, heat_input, accumulator, weights)
-        c1 = 0.5 * beta * B0**2 * dot(V_r, weights) / weighted_dot(scratch_aux, V_r, weights)
+        c1 = (
+            0.5
+            * beta
+            * B0**2
+            * dot(V_r, weights)
+            / _rho_beta_pressure_denominator(
+                scratch_aux, V_r, weights, scaled_p0
+            )
+        )
         alpha1 = _signed_sqrt_ratio(c1, c2)
     else:
         raise ValueError("PF does not support applying Ip and beta constraints simultaneously")
@@ -1280,6 +1538,7 @@ def _update_pf_from_psin_uniform_inputs_with_scratch(
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
     F_fields: np.ndarray,
+    scaled_p0: float,
     Ip: float,
     beta: float,
     array_scratch: np.ndarray,
@@ -1308,6 +1567,17 @@ def _update_pf_from_psin_uniform_inputs_with_scratch(
         pressure_profile = array_scratch[_SLOT_AUX0]
         product_into(pressure_profile, heat_input, out_psin_r)
         alpha1 = -dot(pressure_profile, weights)
+        alpha1 = _ensure_pressure_alpha1(
+            alpha1,
+            heat_input,
+            coordinate_code,
+            scaled_p0,
+            alpha2,
+            out_psin_r,
+            accumulator,
+            weights,
+            array_scratch,
+        )
         scale_into(out_Pn_psin, heat_input, 1.0 / alpha1)
         scale_into(out_FFn_psin, current_input, 1.0 / alpha1)
         _regularize_ffn_psin(out_FFn_psin, rho, n_axis_fix)
@@ -1330,8 +1600,14 @@ def _update_pf_from_psin_uniform_inputs_with_scratch(
         product_into(scratch_Pn_r, out_Pn_psin, out_psin_r)
         scratch_aux = array_scratch[_SLOT_AUX1]
         _compute_Pn_out(scratch_aux, scratch_Pn_r, accumulator, weights)
-        c1 = 0.5 * beta * B0**2 * dot(V_r, weights) / weighted_dot(scratch_aux, V_r, weights)
-        alpha1 = _signed_sqrt_ratio(c1, c2)
+        alpha1 = _solve_pf_psin_beta_alpha1(
+            scratch_aux,
+            V_r,
+            weights,
+            scaled_p0,
+            c2,
+            0.5 * beta * B0**2 * dot(V_r, weights),
+        )
     else:
         raise ValueError("PF does not support applying Ip and beta constraints simultaneously")
     alpha2 = c2 * alpha1
@@ -1357,6 +1633,7 @@ def _update_pf_from_psin_grid_inputs_with_scratch(
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
     F_fields: np.ndarray,
+    scaled_p0: float,
     Ip: float,
     beta: float,
     array_scratch: np.ndarray,
@@ -1385,6 +1662,17 @@ def _update_pf_from_psin_grid_inputs_with_scratch(
         pressure_profile = array_scratch[_SLOT_AUX0]
         product_into(pressure_profile, heat_input, out_psin_r)
         alpha1 = -dot(pressure_profile, weights)
+        alpha1 = _ensure_pressure_alpha1(
+            alpha1,
+            heat_input,
+            coordinate_code,
+            scaled_p0,
+            alpha2,
+            out_psin_r,
+            accumulator,
+            weights,
+            array_scratch,
+        )
         scale_into(out_Pn_psin, heat_input, 1.0 / alpha1)
         scale_into(out_FFn_psin, current_input, 1.0 / alpha1)
         _regularize_ffn_psin(out_FFn_psin, rho, n_axis_fix)
@@ -1407,8 +1695,14 @@ def _update_pf_from_psin_grid_inputs_with_scratch(
         product_into(scratch_Pn_r, out_Pn_psin, out_psin_r)
         scratch_aux = array_scratch[_SLOT_AUX1]
         _compute_Pn_out(scratch_aux, scratch_Pn_r, accumulator, weights)
-        c1 = 0.5 * beta * B0**2 * dot(V_r, weights) / weighted_dot(scratch_aux, V_r, weights)
-        alpha1 = _signed_sqrt_ratio(c1, c2)
+        alpha1 = _solve_pf_psin_beta_alpha1(
+            scratch_aux,
+            V_r,
+            weights,
+            scaled_p0,
+            c2,
+            0.5 * beta * B0**2 * dot(V_r, weights),
+        )
     else:
         raise ValueError("PF does not support applying Ip and beta constraints simultaneously")
     alpha2 = c2 * alpha1
@@ -1437,6 +1731,7 @@ def _update_pp_from_rho_inputs_with_scratch(
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
     F_fields: np.ndarray,
+    scaled_p0: float,
     Ip: float,
     beta: float,
     array_scratch: np.ndarray,
@@ -1471,14 +1766,29 @@ def _update_pp_from_rho_inputs_with_scratch(
             0.5
             * beta
             * B0**2
-            / alpha2
             * dot(V_r, weights)
-            / weighted_dot(scratch_aux, V_r, weights)
+            / (
+                alpha2
+                * _rho_beta_pressure_denominator(
+                    scratch_aux, V_r, weights, scaled_p0
+                )
+            )
         )
     else:
         scratch_Pr = array_scratch[_SLOT_Pr]
         copy_into(scratch_Pr, heat_input)
         alpha1 = -dot(scratch_Pr, weights) / alpha2
+        alpha1 = _ensure_pressure_alpha1(
+            alpha1,
+            heat_input,
+            coordinate_code,
+            scaled_p0,
+            alpha2,
+            out_psin_r,
+            accumulator,
+            weights,
+            array_scratch,
+        )
         scaled_ratio_into(out_Pn_psin, scratch_Pr, out_psin_r, 1.0 / (alpha1 * alpha2))
     _fill_pp_ffn_psin(
         out_FFn_psin,
@@ -1514,6 +1824,7 @@ def _update_pp_from_psin_uniform_inputs_with_scratch(
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
     F_fields: np.ndarray,
+    scaled_p0: float,
     Ip: float,
     beta: float,
     array_scratch: np.ndarray,
@@ -1545,14 +1856,26 @@ def _update_pp_from_psin_uniform_inputs_with_scratch(
             0.5
             * beta
             * B0**2
-            / alpha2
             * dot(V_r, weights)
-            / weighted_dot(scratch_aux, V_r, weights)
+            / _psin_beta_pressure_denominator(
+                scratch_aux, V_r, weights, scaled_p0, alpha2
+            )
         )
     else:
         scratch_Pr = array_scratch[_SLOT_Pr]
         scaled_product_into(scratch_Pr, heat_input, out_psin_r, alpha2)
         alpha1 = -dot(scratch_Pr, weights) / alpha2
+        alpha1 = _ensure_pressure_alpha1(
+            alpha1,
+            heat_input,
+            coordinate_code,
+            scaled_p0,
+            alpha2,
+            out_psin_r,
+            accumulator,
+            weights,
+            array_scratch,
+        )
         scaled_ratio_into(out_Pn_psin, scratch_Pr, out_psin_r, 1.0 / (alpha1 * alpha2))
     _fill_pp_ffn_psin(
         out_FFn_psin,
@@ -1588,6 +1911,7 @@ def _update_pp_from_psin_grid_inputs_with_scratch(
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
     F_fields: np.ndarray,
+    scaled_p0: float,
     Ip: float,
     beta: float,
     array_scratch: np.ndarray,
@@ -1619,14 +1943,26 @@ def _update_pp_from_psin_grid_inputs_with_scratch(
             0.5
             * beta
             * B0**2
-            / alpha2
             * dot(V_r, weights)
-            / weighted_dot(scratch_aux, V_r, weights)
+            / _psin_beta_pressure_denominator(
+                scratch_aux, V_r, weights, scaled_p0, alpha2
+            )
         )
     else:
         scratch_Pr = array_scratch[_SLOT_Pr]
         scaled_product_into(scratch_Pr, heat_input, out_psin_r, alpha2)
         alpha1 = -dot(scratch_Pr, weights) / alpha2
+        alpha1 = _ensure_pressure_alpha1(
+            alpha1,
+            heat_input,
+            coordinate_code,
+            scaled_p0,
+            alpha2,
+            out_psin_r,
+            accumulator,
+            weights,
+            array_scratch,
+        )
         scaled_ratio_into(out_Pn_psin, scratch_Pr, out_psin_r, 1.0 / (alpha1 * alpha2))
     _fill_pp_ffn_psin(
         out_FFn_psin,
@@ -1665,6 +2001,7 @@ def _update_pi_from_rho_inputs_with_scratch(
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
     F_fields: np.ndarray,
+    scaled_p0: float,
     Ip: float,
     beta: float,
     array_scratch: np.ndarray,
@@ -1706,14 +2043,29 @@ def _update_pi_from_rho_inputs_with_scratch(
             0.5
             * beta
             * B0**2
-            / alpha2
             * dot(V_r, weights)
-            / weighted_dot(scratch_aux, V_r, weights)
+            / (
+                alpha2
+                * _rho_beta_pressure_denominator(
+                    scratch_aux, V_r, weights, scaled_p0
+                )
+            )
         )
     else:
         scratch_Pr = array_scratch[_SLOT_Pr]
         copy_into(scratch_Pr, heat_input)
         alpha1 = -dot(scratch_Pr, weights) / alpha2
+        alpha1 = _ensure_pressure_alpha1(
+            alpha1,
+            heat_input,
+            coordinate_code,
+            scaled_p0,
+            alpha2,
+            out_psin_r,
+            accumulator,
+            weights,
+            array_scratch,
+        )
         scaled_ratio_into(out_Pn_psin, scratch_Pr, out_psin_r, 1.0 / (alpha1 * alpha2))
     _fill_pi_ffn_psin(out_FFn_psin, Itor_r, V_r, out_Pn_psin, Ln_r, 1.0 / (2.0 * np.pi * alpha1))
     _regularize_ffn_psin(out_FFn_psin, rho, n_axis_fix)
@@ -1739,6 +2091,7 @@ def _update_pi_from_psin_uniform_inputs_with_scratch(
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
     F_fields: np.ndarray,
+    scaled_p0: float,
     Ip: float,
     beta: float,
     array_scratch: np.ndarray,
@@ -1777,14 +2130,26 @@ def _update_pi_from_psin_uniform_inputs_with_scratch(
             0.5
             * beta
             * B0**2
-            / alpha2
             * dot(V_r, weights)
-            / weighted_dot(scratch_aux, V_r, weights)
+            / _psin_beta_pressure_denominator(
+                scratch_aux, V_r, weights, scaled_p0, alpha2
+            )
         )
     else:
         scratch_Pr = array_scratch[_SLOT_Pr]
         scaled_product_into(scratch_Pr, heat_input, out_psin_r, alpha2)
         alpha1 = -dot(scratch_Pr, weights) / alpha2
+        alpha1 = _ensure_pressure_alpha1(
+            alpha1,
+            heat_input,
+            coordinate_code,
+            scaled_p0,
+            alpha2,
+            out_psin_r,
+            accumulator,
+            weights,
+            array_scratch,
+        )
         scaled_ratio_into(out_Pn_psin, scratch_Pr, out_psin_r, 1.0 / (alpha1 * alpha2))
     _fill_pi_ffn_psin(out_FFn_psin, Itor_r, V_r, out_Pn_psin, Ln_r, 1.0 / (2.0 * np.pi * alpha1))
     _regularize_ffn_psin(out_FFn_psin, rho, n_axis_fix)
@@ -1810,6 +2175,7 @@ def _update_pi_from_psin_grid_inputs_with_scratch(
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
     F_fields: np.ndarray,
+    scaled_p0: float,
     Ip: float,
     beta: float,
     array_scratch: np.ndarray,
@@ -1848,14 +2214,26 @@ def _update_pi_from_psin_grid_inputs_with_scratch(
             0.5
             * beta
             * B0**2
-            / alpha2
             * dot(V_r, weights)
-            / weighted_dot(scratch_aux, V_r, weights)
+            / _psin_beta_pressure_denominator(
+                scratch_aux, V_r, weights, scaled_p0, alpha2
+            )
         )
     else:
         scratch_Pr = array_scratch[_SLOT_Pr]
         scaled_product_into(scratch_Pr, heat_input, out_psin_r, alpha2)
         alpha1 = -dot(scratch_Pr, weights) / alpha2
+        alpha1 = _ensure_pressure_alpha1(
+            alpha1,
+            heat_input,
+            coordinate_code,
+            scaled_p0,
+            alpha2,
+            out_psin_r,
+            accumulator,
+            weights,
+            array_scratch,
+        )
         scaled_ratio_into(out_Pn_psin, scratch_Pr, out_psin_r, 1.0 / (alpha1 * alpha2))
     _fill_pi_ffn_psin(out_FFn_psin, Itor_r, V_r, out_Pn_psin, Ln_r, 1.0 / (2.0 * np.pi * alpha1))
     _regularize_ffn_psin(out_FFn_psin, rho, n_axis_fix)
@@ -1884,6 +2262,7 @@ def _update_pj1_from_rho_inputs_with_scratch(
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
     F_fields: np.ndarray,
+    scaled_p0: float,
     Ip: float,
     beta: float,
     array_scratch: np.ndarray,
@@ -1930,14 +2309,29 @@ def _update_pj1_from_rho_inputs_with_scratch(
             0.5
             * beta
             * B0**2
-            / alpha2
             * dot(V_r, weights)
-            / weighted_dot(scratch_aux, V_r, weights)
+            / (
+                alpha2
+                * _rho_beta_pressure_denominator(
+                    scratch_aux, V_r, weights, scaled_p0
+                )
+            )
         )
     else:
         scratch_Pr = array_scratch[_SLOT_Pr]
         copy_into(scratch_Pr, heat_input)
         alpha1 = -dot(scratch_Pr, weights) / alpha2
+        alpha1 = _ensure_pressure_alpha1(
+            alpha1,
+            heat_input,
+            coordinate_code,
+            scaled_p0,
+            alpha2,
+            out_psin_r,
+            accumulator,
+            weights,
+            array_scratch,
+        )
         scaled_ratio_into(out_Pn_psin, scratch_Pr, out_psin_r, 1.0 / (alpha1 * alpha2))
     _fill_pj_ffn_psin(
         out_FFn_psin,
@@ -1972,6 +2366,7 @@ def _update_pj1_from_psin_uniform_inputs_with_scratch(
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
     F_fields: np.ndarray,
+    scaled_p0: float,
     Ip: float,
     beta: float,
     array_scratch: np.ndarray,
@@ -2016,14 +2411,26 @@ def _update_pj1_from_psin_uniform_inputs_with_scratch(
             0.5
             * beta
             * B0**2
-            / alpha2
             * dot(V_r, weights)
-            / weighted_dot(scratch_aux, V_r, weights)
+            / _psin_beta_pressure_denominator(
+                scratch_aux, V_r, weights, scaled_p0, alpha2
+            )
         )
     else:
         scratch_Pr = array_scratch[_SLOT_Pr]
         scaled_product_into(scratch_Pr, heat_input, out_psin_r, alpha2)
         alpha1 = -dot(scratch_Pr, weights) / alpha2
+        alpha1 = _ensure_pressure_alpha1(
+            alpha1,
+            heat_input,
+            coordinate_code,
+            scaled_p0,
+            alpha2,
+            out_psin_r,
+            accumulator,
+            weights,
+            array_scratch,
+        )
         scaled_ratio_into(out_Pn_psin, scratch_Pr, out_psin_r, 1.0 / (alpha1 * alpha2))
     _fill_pj_ffn_psin(
         out_FFn_psin,
@@ -2058,6 +2465,7 @@ def _update_pj1_from_psin_grid_inputs_with_scratch(
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
     F_fields: np.ndarray,
+    scaled_p0: float,
     Ip: float,
     beta: float,
     array_scratch: np.ndarray,
@@ -2102,14 +2510,26 @@ def _update_pj1_from_psin_grid_inputs_with_scratch(
             0.5
             * beta
             * B0**2
-            / alpha2
             * dot(V_r, weights)
-            / weighted_dot(scratch_aux, V_r, weights)
+            / _psin_beta_pressure_denominator(
+                scratch_aux, V_r, weights, scaled_p0, alpha2
+            )
         )
     else:
         scratch_Pr = array_scratch[_SLOT_Pr]
         scaled_product_into(scratch_Pr, heat_input, out_psin_r, alpha2)
         alpha1 = -dot(scratch_Pr, weights) / alpha2
+        alpha1 = _ensure_pressure_alpha1(
+            alpha1,
+            heat_input,
+            coordinate_code,
+            scaled_p0,
+            alpha2,
+            out_psin_r,
+            accumulator,
+            weights,
+            array_scratch,
+        )
         scaled_ratio_into(out_Pn_psin, scratch_Pr, out_psin_r, 1.0 / (alpha1 * alpha2))
     _fill_pj_ffn_psin(
         out_FFn_psin,
@@ -2144,6 +2564,7 @@ def _update_pj2_from_psin_uniform_inputs_with_scratch(
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
     F_fields: np.ndarray,
+    scaled_p0: float,
     Ip: float,
     beta: float,
     array_scratch: np.ndarray,
@@ -2186,17 +2607,25 @@ def _update_pj2_from_psin_uniform_inputs_with_scratch(
             0.5
             * beta
             * B0**2
-            / alpha2
             * dot(V_r, weights)
-            / weighted_dot(
-                scratch_aux,
-                V_r,
-                weights,
+            / _psin_beta_pressure_denominator(
+                scratch_aux, V_r, weights, scaled_p0, alpha2
             )
         )
         copy_into(out_Pn_psin, heat_input)
     else:
         alpha1 = -weighted_dot(heat_input, out_psin_r, weights)
+        alpha1 = _ensure_pressure_alpha1(
+            alpha1,
+            heat_input,
+            coordinate_code,
+            scaled_p0,
+            alpha2,
+            out_psin_r,
+            accumulator,
+            weights,
+            array_scratch,
+        )
         scaled_product_ratio_into(out_Pn_psin, heat_input, out_psin_r, out_psin_r, 1.0 / alpha1)
 
     product_into(out_FFn_psin, F, F_r)
@@ -2224,6 +2653,7 @@ def _update_pj2_from_psin_grid_inputs_with_scratch(
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
     F_fields: np.ndarray,
+    scaled_p0: float,
     Ip: float,
     beta: float,
     array_scratch: np.ndarray,
@@ -2264,17 +2694,25 @@ def _update_pj2_from_psin_grid_inputs_with_scratch(
             0.5
             * beta
             * B0**2
-            / alpha2
             * dot(V_r, weights)
-            / weighted_dot(
-                scratch_aux,
-                V_r,
-                weights,
+            / _psin_beta_pressure_denominator(
+                scratch_aux, V_r, weights, scaled_p0, alpha2
             )
         )
         copy_into(out_Pn_psin, heat_input)
     else:
         alpha1 = -weighted_dot(heat_input, out_psin_r, weights)
+        alpha1 = _ensure_pressure_alpha1(
+            alpha1,
+            heat_input,
+            coordinate_code,
+            scaled_p0,
+            alpha2,
+            out_psin_r,
+            accumulator,
+            weights,
+            array_scratch,
+        )
         scaled_product_ratio_into(out_Pn_psin, heat_input, out_psin_r, out_psin_r, 1.0 / alpha1)
 
     product_into(out_FFn_psin, F, F_r)
@@ -2305,6 +2743,7 @@ def _update_pj2_from_rho_inputs_with_scratch(
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
     F_fields: np.ndarray,
+    scaled_p0: float,
     Ip: float,
     beta: float,
     array_scratch: np.ndarray,
@@ -2346,14 +2785,29 @@ def _update_pj2_from_rho_inputs_with_scratch(
             0.5
             * beta
             * B0**2
-            / alpha2
             * dot(V_r, weights)
-            / weighted_dot(scratch_aux, V_r, weights)
+            / (
+                alpha2
+                * _rho_beta_pressure_denominator(
+                    scratch_aux, V_r, weights, scaled_p0
+                )
+            )
         )
     else:
         scratch_Pr = array_scratch[_SLOT_Pr]
         copy_into(scratch_Pr, heat_input)
         alpha1 = -dot(scratch_Pr, weights) / alpha2
+        alpha1 = _ensure_pressure_alpha1(
+            alpha1,
+            heat_input,
+            coordinate_code,
+            scaled_p0,
+            alpha2,
+            out_psin_r,
+            accumulator,
+            weights,
+            array_scratch,
+        )
         scaled_ratio_into(out_Pn_psin, scratch_Pr, out_psin_r, 1.0 / (alpha1 * alpha2))
     scaled_product_into(out_FFn_psin, F, F_r, 1.0 / (alpha1 * alpha2))
     scaled_ratio_into(out_FFn_psin, out_FFn_psin, out_psin_r, 1.0)
@@ -2380,6 +2834,7 @@ def _update_pq_from_psin_uniform_inputs_with_scratch(
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
     F_fields: np.ndarray,
+    scaled_p0: float,
     Ip: float,
     beta: float,
     array_scratch: np.ndarray,
@@ -2453,6 +2908,7 @@ def _update_pq_from_psin_uniform_inputs_with_scratch(
             out_psin_r,
             coeff_d,
             coeff_y,
+            scaled_p0,
             beta_target,
         )
         for i in range(n):
@@ -2481,6 +2937,17 @@ def _update_pq_from_psin_uniform_inputs_with_scratch(
 
     if not has_beta:
         alpha1 = -weighted_dot(heat_input, out_psin_r, weights)
+        alpha1 = _ensure_pressure_alpha1(
+            alpha1,
+            heat_input,
+            coordinate_code,
+            scaled_p0,
+            alpha2,
+            out_psin_r,
+            accumulator,
+            weights,
+            array_scratch,
+        )
         for i in range(n):
             out_Pn_psin[i] = heat_input[i] / alpha1
     _validate_pq_source_scalar(alpha1, 1)
@@ -2516,6 +2983,7 @@ def _update_pq_from_psin_grid_inputs_with_scratch(
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
     F_fields: np.ndarray,
+    scaled_p0: float,
     Ip: float,
     beta: float,
     array_scratch: np.ndarray,
@@ -2587,6 +3055,7 @@ def _update_pq_from_psin_grid_inputs_with_scratch(
             out_psin_r,
             coeff_d,
             coeff_y,
+            scaled_p0,
             beta_target,
         )
         for i in range(n):
@@ -2613,6 +3082,17 @@ def _update_pq_from_psin_grid_inputs_with_scratch(
 
     if not has_beta:
         alpha1 = -weighted_dot(heat_input, out_psin_r, weights)
+        alpha1 = _ensure_pressure_alpha1(
+            alpha1,
+            heat_input,
+            coordinate_code,
+            scaled_p0,
+            alpha2,
+            out_psin_r,
+            accumulator,
+            weights,
+            array_scratch,
+        )
         for i in range(n):
             out_Pn_psin[i] = heat_input[i] / alpha1
     _validate_pq_source_scalar(alpha1, 1)
@@ -2651,6 +3131,7 @@ def _update_pq_from_rho_inputs_with_scratch(
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
     F_fields: np.ndarray,
+    scaled_p0: float,
     Ip: float,
     beta: float,
     array_scratch: np.ndarray,
@@ -2684,7 +3165,9 @@ def _update_pq_from_rho_inputs_with_scratch(
     if has_beta:
         copy_into(rhs, heat_input)
         _compute_Pn_out(coeff_y, rhs, accumulator, weights)
-        beta_den_pre = weighted_dot(coeff_y, V_r, weights)
+        beta_den_pre = _rho_beta_pressure_denominator(
+            coeff_y, V_r, weights, scaled_p0
+        )
         if not np.isfinite(beta_den_pre) or abs(beta_den_pre) <= 1.0e-14:
             raise ValueError("PQ/rho strict beta solve produced invalid pressure integral")
         beta_C = 0.5 * beta * B0**2 * dot(V_r, weights) / beta_den_pre
@@ -2722,6 +3205,17 @@ def _update_pq_from_rho_inputs_with_scratch(
         alpha1 = beta_C / alpha2
     else:
         alpha1 = -dot(heat_input, weights) / alpha2
+        alpha1 = _ensure_pressure_alpha1(
+            alpha1,
+            heat_input,
+            coordinate_code,
+            scaled_p0,
+            alpha2,
+            out_psin_r,
+            accumulator,
+            weights,
+            array_scratch,
+        )
         for i in range(n):
             denom = alpha1 * alpha2 * out_psin_r[i]
             if abs(denom) <= 1.0e-14:

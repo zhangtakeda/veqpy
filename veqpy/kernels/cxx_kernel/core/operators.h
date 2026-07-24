@@ -37,6 +37,7 @@ namespace operators::detail
         double R0   = 1.0;
         double Z0   = 0.0;
         double B0   = 1.0;
+        double p0   = 0.0;
         double Ip   = 0.0;
         double beta = 0.0;
     };
@@ -191,6 +192,7 @@ namespace operators::detail
                 if constexpr (SourceCoordinateCode == source_coordinate_rho)
                     workspace.source_runtime.template update_pf_rho<SourceConstraintCode>(
                         workspace.geometry,
+                        runtime_scalars.p0,
                         runtime_scalars.Ip,
                         runtime_scalars.beta,
                         runtime_scalars.B0,
@@ -198,6 +200,7 @@ namespace operators::detail
                 else
                     workspace.source_runtime.template update_pf_psin_uniform<SourceConstraintCode>(
                         workspace.geometry,
+                        runtime_scalars.p0,
                         runtime_scalars.Ip,
                         runtime_scalars.beta,
                         runtime_scalars.B0,
@@ -208,6 +211,7 @@ namespace operators::detail
                 if constexpr (SourceCoordinateCode == source_coordinate_rho)
                     workspace.source_runtime.template update_pp_rho<SourceConstraintCode>(
                         workspace.geometry,
+                        runtime_scalars.p0,
                         runtime_scalars.Ip,
                         runtime_scalars.beta,
                         runtime_scalars.B0,
@@ -215,6 +219,7 @@ namespace operators::detail
                 else
                     workspace.source_runtime.template update_pp_psin<SourceConstraintCode>(
                         workspace.geometry,
+                        runtime_scalars.p0,
                         runtime_scalars.Ip,
                         runtime_scalars.beta,
                         runtime_scalars.B0,
@@ -225,6 +230,7 @@ namespace operators::detail
                 if constexpr (SourceCoordinateCode == source_coordinate_rho)
                     workspace.source_runtime.template update_pi_rho<SourceConstraintCode>(
                         workspace.geometry,
+                        runtime_scalars.p0,
                         runtime_scalars.Ip,
                         runtime_scalars.beta,
                         runtime_scalars.B0,
@@ -232,6 +238,7 @@ namespace operators::detail
                 else
                     workspace.source_runtime.template update_pi_psin<SourceConstraintCode>(
                         workspace.geometry,
+                        runtime_scalars.p0,
                         runtime_scalars.Ip,
                         runtime_scalars.beta,
                         runtime_scalars.B0,
@@ -242,6 +249,7 @@ namespace operators::detail
                 if constexpr (SourceCoordinateCode == source_coordinate_rho)
                     workspace.source_runtime.template update_pj1_rho<SourceConstraintCode>(
                         workspace.geometry,
+                        runtime_scalars.p0,
                         runtime_scalars.Ip,
                         runtime_scalars.beta,
                         runtime_scalars.B0,
@@ -249,6 +257,7 @@ namespace operators::detail
                 else
                     workspace.source_runtime.template update_pj1_psin<SourceConstraintCode>(
                         workspace.geometry,
+                        runtime_scalars.p0,
                         runtime_scalars.Ip,
                         runtime_scalars.beta,
                         runtime_scalars.B0,
@@ -260,6 +269,7 @@ namespace operators::detail
                     workspace.source_runtime.template update_pj2_rho<SourceConstraintCode>(
                         workspace.geometry,
                         runtime_scalars.R0,
+                        runtime_scalars.p0,
                         runtime_scalars.Ip,
                         runtime_scalars.beta,
                         runtime_scalars.B0,
@@ -268,6 +278,7 @@ namespace operators::detail
                     workspace.source_runtime.template update_pj2_psin_uniform_fixed_point<SourceConstraintCode>(
                         workspace.geometry,
                         runtime_scalars.R0,
+                        runtime_scalars.p0,
                         runtime_scalars.Ip,
                         runtime_scalars.beta,
                         runtime_scalars.B0,
@@ -276,6 +287,7 @@ namespace operators::detail
                     workspace.source_runtime.template update_pj2_psin<SourceConstraintCode>(
                         workspace.geometry,
                         runtime_scalars.R0,
+                        runtime_scalars.p0,
                         runtime_scalars.Ip,
                         runtime_scalars.beta,
                         runtime_scalars.B0,
@@ -287,6 +299,7 @@ namespace operators::detail
                     workspace.source_runtime.template update_pq_rho<SourceConstraintCode>(
                         workspace.geometry,
                         runtime_scalars.R0,
+                        runtime_scalars.p0,
                         runtime_scalars.Ip,
                         runtime_scalars.beta,
                         runtime_scalars.B0,
@@ -295,11 +308,18 @@ namespace operators::detail
                     workspace.source_runtime.template update_pq_psin<SourceConstraintCode>(
                         workspace.geometry,
                         runtime_scalars.R0,
+                        runtime_scalars.p0,
                         runtime_scalars.Ip,
                         runtime_scalars.beta,
                         runtime_scalars.B0,
                         plan.n_axis_fix);
             }
+
+            workspace.source_runtime.template finalize_pressure_normalization<
+                SourceCoordinateCode == source_coordinate_rho>(
+                runtime_scalars.p0,
+                SourceConstraintCode == source_constraint_beta ||
+                    SourceConstraintCode == source_constraint_ip_beta);
 
             if constexpr (SourceActiveFamilyCode == source_active_none || SourceActiveFamilyCode == source_active_F)
                 workspace.source_runtime.publish_source_target_root_fields();

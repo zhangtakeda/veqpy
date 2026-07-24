@@ -36,6 +36,7 @@ def source_runtime_args(source: MaterializedKernelSource) -> tuple[Any, ...]:
     return (
         source.scaled_heat,
         source.scaled_current,
+        source.scaled_p0,
         source.scaled_Ip,
         source.beta,
     )

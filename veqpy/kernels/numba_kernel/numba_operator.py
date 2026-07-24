@@ -43,6 +43,7 @@ from veqpy.kernels.numba_kernel.numba_source import (
     _update_fixed_point_psin_query_and_spline_uniform_inputs_impl,
     _update_fourier_family_fields_impl,
     _update_pj2_from_psin_uniform_inputs_with_scratch,
+    finalize_pressure_normalization,
     uniform_barycentric_weights,
 )
 from veqpy.kernels.numba_kernel.profile_stage import update_profiles_packed_bulk
@@ -199,6 +200,7 @@ def _run_pj2_psin_uniform_spline_with_scratch_impl(
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
     f_profile_fields: np.ndarray,
+    scaled_p0: float,
     Ip: float,
     beta: float,
     array_scratch: np.ndarray,
@@ -233,6 +235,7 @@ def _run_pj2_psin_uniform_spline_with_scratch_impl(
             radial_fields,
             surface_fields,
             f_profile_fields,
+            scaled_p0,
             Ip,
             beta,
             array_scratch,
@@ -276,6 +279,7 @@ def _run_pj2_psin_uniform_barycentric_with_scratch_impl(
     radial_fields: np.ndarray,
     surface_fields: np.ndarray,
     f_profile_fields: np.ndarray,
+    scaled_p0: float,
     Ip: float,
     beta: float,
     array_scratch: np.ndarray,
@@ -311,6 +315,7 @@ def _run_pj2_psin_uniform_barycentric_with_scratch_impl(
             radial_fields,
             surface_fields,
             f_profile_fields,
+            scaled_p0,
             Ip,
             beta,
             array_scratch,
@@ -661,6 +666,7 @@ def _bind_pj2_psin_uniform_residual_runner_core(
         kind=source_plan.interpolation_kind,
     )
     coordinate_code = int(source_plan.coordinate_code)
+    scaled_p0 = float(source_plan.scaled_p0)
     Ip = float(source_plan.scaled_Ip)
     beta = float(source_plan.beta)
     has_Ip = bool(np.isfinite(Ip))
@@ -711,6 +717,7 @@ def _bind_pj2_psin_uniform_residual_runner_core(
                 radial_fields,
                 surface_fields,
                 f_profile_fields,
+                scaled_p0,
                 Ip,
                 beta,
                 array_scratch,
@@ -742,11 +749,28 @@ def _bind_pj2_psin_uniform_residual_runner_core(
                 radial_fields,
                 surface_fields,
                 f_profile_fields,
+                scaled_p0,
                 Ip,
                 beta,
                 array_scratch,
                 matrix_scratch,
             )
+        alpha1 = finalize_pressure_normalization(
+            FFn_psin,
+            Pn_psin,
+            materialized_heat_input,
+            coordinate_code,
+            scaled_p0,
+            beta,
+            alpha1,
+            alpha2,
+            root_fields[1],
+            accumulator,
+            weights,
+            array_scratch[0],
+            array_scratch[1],
+            source_workspace.pressure_state,
+        )
         alpha_state[0] = alpha1
         alpha_state[1] = alpha2
         # The fixed-point source kernel publishes its last root_fields even when
@@ -776,7 +800,7 @@ def _bind_source_eval_runner_for_fused_backend(
         current_input: np.ndarray,
         R0: float,
     ) -> tuple[float, float]:
-        return source_eval_binding.source_kernel(
+        alpha1, alpha2 = source_eval_binding.source_kernel(
             out_root_fields,
             out_FFn_psin,
             out_Pn_psin,
@@ -793,10 +817,28 @@ def _bind_source_eval_runner_for_fused_backend(
             source_eval_binding.radial_fields,
             source_eval_binding.surface_fields,
             f_profile_fields,
+            source_eval_binding.scaled_p0,
             source_eval_binding.scaled_Ip,
             source_eval_binding.beta,
             source_eval_binding.array_scratch,
             source_eval_binding.matrix_scratch,
         )
+        alpha1 = finalize_pressure_normalization(
+            out_FFn_psin,
+            out_Pn_psin,
+            heat_input,
+            source_eval_binding.coordinate_code,
+            source_eval_binding.scaled_p0,
+            source_eval_binding.beta,
+            alpha1,
+            alpha2,
+            out_root_fields[1],
+            source_eval_binding.accumulator,
+            source_eval_binding.weights,
+            source_eval_binding.array_scratch[0],
+            source_eval_binding.array_scratch[1],
+            source_eval_binding.pressure_state,
+        )
+        return alpha1, alpha2
 
     return runner

@@ -519,6 +519,7 @@ class KernelSource:
 
     heat_profile: np.ndarray | list[float] | tuple[float, ...]
     current_profile: np.ndarray | list[float] | tuple[float, ...]
+    p0: float = 0.0
     Ip: float = np.nan
     beta: float = np.nan
     case_name: str | None = None
@@ -533,6 +534,7 @@ class KernelSource:
             )
         object.__setattr__(self, "heat_profile", heat)
         object.__setattr__(self, "current_profile", current)
+        object.__setattr__(self, "p0", float(self.p0))
         object.__setattr__(self, "Ip", float(self.Ip))
         object.__setattr__(self, "beta", float(self.beta))
         case_name = None if self.case_name is None else str(self.case_name)

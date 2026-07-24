@@ -526,6 +526,7 @@ class _NumbaKernelImpl:
         return KernelSource(
             heat_profile=source.heat_profile,
             current_profile=source.current_profile,
+            p0=source.p0,
             Ip=source.Ip,
             beta=source.beta,
             case_name=case_name,

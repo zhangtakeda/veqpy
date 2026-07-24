@@ -188,6 +188,7 @@ namespace cxx_kernel_api
             double                                         s1_offset = 0.52359877559829887308;
             std::array<double, CompiledShape::M_max + 1>     c_offsets{};
             std::array<double, CompiledShape::M_max + 1>     s_offsets{};
+            double                                         p0                       = 0.0;
             double                                         Ip                       = 3.7699111867885415;
             double                                         beta                     = std::numeric_limits<double>::quiet_NaN();
             double                                         max_residual             = default_max_residual;

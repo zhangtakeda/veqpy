@@ -39,6 +39,7 @@ topology to flat arrays; `Profile` remains on the model side for
 - discretization object: `grid`;
 - fixed-boundary and shape profiles: `shape_profiles`;
 - flux and source derivatives: `psin`, `psin_r`, `psin_rr`, `FFn_psin`, `Pn_psin`;
+- pressure integration constant at the LCFS: `p0`;
 - scaling coefficients: `alpha1`, `alpha2`.
 
 These fields are sufficient to reconstruct common physical quantities, but they do not store temporary buffers from the solver hot path. When the user reads properties such as `R`, `Z`, `F`, `P`, `q`, `Ip`, `beta_t`, `jtor`, `jpara`, `jphi`, `Psi`, or `Phi`, the object computes the required values by formula and lets `Reactive` maintain dependency consistency.

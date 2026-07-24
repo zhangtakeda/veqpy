@@ -56,6 +56,7 @@ class SourceWorkspace:
 
     target_root_fields: np.ndarray
     alpha_state: np.ndarray
+    pressure_state: np.ndarray
 
     def __init__(self, *, nr: int, nt: int, source_execution: SourceExecutionABI) -> None:
         """Allocate source-stage runtime memory."""
@@ -89,3 +90,6 @@ class SourceWorkspace:
             else np.empty((3, 0), dtype=np.float64)
         )
         self.alpha_state = np.zeros(2, dtype=np.float64)
+        # [0] is the effective mu0*p0 after any beta scaling; [1] is the
+        # common pressure-profile multiplier applied to pprime and p0.
+        self.pressure_state = np.array([0.0, 1.0], dtype=np.float64)

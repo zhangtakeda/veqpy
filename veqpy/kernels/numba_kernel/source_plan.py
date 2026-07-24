@@ -51,6 +51,7 @@ class SourcePlan:
     source_sample_count: int
     scaled_heat: np.ndarray
     scaled_current: np.ndarray
+    scaled_p0: float
     scaled_Ip: float
     beta: float
     interpolation_kind: str
@@ -101,7 +102,7 @@ def build_source_plan(
     interpolation_kind: str = SOURCE_INTERP_DEFAULT,
 ) -> SourcePlan:
     """Build the immutable source plan for a runtime case."""
-    scaled_heat, scaled_current, scaled_Ip, beta = _scaled_source_inputs(case)
+    scaled_heat, scaled_current, scaled_p0, scaled_Ip, beta = _scaled_source_inputs(case)
     # Parameterization is route-specific.  For example PP/psin/uniform samples
     # on sqrt(psin) to bias resolution near the magnetic axis while all kernels
     # still exchange normalized psin/root fields internally.
@@ -119,6 +120,7 @@ def build_source_plan(
         source_sample_count=int(scaled_heat.shape[0]),
         scaled_heat=scaled_heat,
         scaled_current=scaled_current,
+        scaled_p0=scaled_p0,
         scaled_Ip=scaled_Ip,
         beta=beta,
         interpolation_kind=(
@@ -131,7 +133,7 @@ def build_source_plan(
     )
 
 
-def _scaled_source_inputs(case: object) -> tuple[np.ndarray, np.ndarray, float, float]:
+def _scaled_source_inputs(case: object) -> tuple[np.ndarray, np.ndarray, float, float, float]:
     materialized = materialize_source_inputs(
         route=str(case.route).upper(),
         coordinate=str(case.coordinate).lower(),
@@ -139,6 +141,7 @@ def _scaled_source_inputs(case: object) -> tuple[np.ndarray, np.ndarray, float, 
         sample_count=int(np.asarray(case.heat_input, dtype=np.float64).size),
         heat=case.heat_input,
         current=case.current_input,
+        p0=float(getattr(case, "p0", 0.0)),
         Ip=float(case.Ip),
         beta=float(case.beta),
         heat_name="heat_input",
@@ -157,6 +160,7 @@ def _scaled_source_inputs(case: object) -> tuple[np.ndarray, np.ndarray, float, 
     return (
         materialized.scaled_heat,
         materialized.scaled_current,
+        materialized.scaled_p0,
         materialized.scaled_Ip,
         materialized.beta,
     )

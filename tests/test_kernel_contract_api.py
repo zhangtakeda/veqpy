@@ -583,7 +583,8 @@ def test_kernel_runtime_case_must_match_topology_before_native() -> None:
     assert recorder.runtime_args[0] == "override"
     assert_allclose(recorder.runtime_args[8], tiny_kernel_source().heat_profile * MU0)
     assert_allclose(recorder.runtime_args[9], tiny_kernel_source().current_profile)
-    assert recorder.runtime_args[10] == 3.0e6 * MU0
+    assert recorder.runtime_args[10] == 0.0
+    assert recorder.runtime_args[11] == 3.0e6 * MU0
 
 
 def test_kernel_solve_uses_handle_default_config_with_per_call_overrides() -> None:
@@ -604,10 +605,10 @@ def test_kernel_solve_uses_handle_default_config_with_per_call_overrides() -> No
     handle.solve(tiny_kernel_boundary(), source=tiny_kernel_source(), case_name="default")
     assert recorder.runtime_args is not None
     assert recorder.runtime_args[0] == "default"
-    assert recorder.runtime_args[12] == SOLVER_METHOD_LEVENBERG_MARQUARDT
-    assert recorder.runtime_args[13] == default_config.max_residual
-    assert recorder.runtime_args[14] == default_config.max_evaluations
-    assert recorder.runtime_args[19] == RESIDUAL_NORMALIZATION_BALANCED
+    assert recorder.runtime_args[13] == SOLVER_METHOD_LEVENBERG_MARQUARDT
+    assert recorder.runtime_args[14] == default_config.max_residual
+    assert recorder.runtime_args[15] == default_config.max_evaluations
+    assert recorder.runtime_args[20] == RESIDUAL_NORMALIZATION_BALANCED
 
     handle.solve(
         tiny_kernel_boundary(),
@@ -616,9 +617,9 @@ def test_kernel_solve_uses_handle_default_config_with_per_call_overrides() -> No
         max_residual=3.0e-6,
         max_evaluations=None,
     )
-    assert recorder.runtime_args[12] == SOLVER_METHOD_POWELL
-    assert recorder.runtime_args[13] == 3.0e-6
-    assert recorder.runtime_args[14] == handle.x_size * handle.x_size
+    assert recorder.runtime_args[13] == SOLVER_METHOD_POWELL
+    assert recorder.runtime_args[14] == 3.0e-6
+    assert recorder.runtime_args[15] == handle.x_size * handle.x_size
     assert handle.config is default_config
     assert handle.config.method == "levenberg-marquardt"
     assert handle.config.max_evaluations == 123
@@ -630,8 +631,8 @@ def test_kernel_solve_uses_handle_default_config_with_per_call_overrides() -> No
         config=temporary_config,
         method="levenberg-marquardt",
     )
-    assert recorder.runtime_args[12] == SOLVER_METHOD_LEVENBERG_MARQUARDT
-    assert recorder.runtime_args[14] == 5
+    assert recorder.runtime_args[13] == SOLVER_METHOD_LEVENBERG_MARQUARDT
+    assert recorder.runtime_args[15] == 5
     assert temporary_config.method == "powell"
 
 

@@ -257,10 +257,12 @@ class FusedSourceEvalABI:
     n_axis_fix: int
     radial_fields: np.ndarray
     surface_fields: np.ndarray
+    scaled_p0: float
     scaled_Ip: float
     beta: float
     array_scratch: np.ndarray
     matrix_scratch: np.ndarray
+    pressure_state: np.ndarray
     B0: float
 
 
@@ -388,10 +390,12 @@ def build_fused_source_eval_abi(
         n_axis_fix=n_axis_fix,
         radial_fields=geometry_workspace.radial_fields,
         surface_fields=geometry_workspace.surface_fields,
+        scaled_p0=float(source_plan.scaled_p0),
         scaled_Ip=float(source_plan.scaled_Ip),
         beta=float(source_plan.beta),
         array_scratch=source_workspace.array_scratch,
         matrix_scratch=source_workspace.matrix_scratch,
+        pressure_state=source_workspace.pressure_state,
         B0=B0,
     )
 

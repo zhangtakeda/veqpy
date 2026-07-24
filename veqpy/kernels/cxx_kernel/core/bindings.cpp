@@ -20,6 +20,7 @@ NB_MODULE(cxx_ext, module)
              nb::arg("s_offsets"),
              nb::arg("scaled_heat"),
              nb::arg("scaled_current"),
+             nb::arg("scaled_p0"),
              nb::arg("scaled_Ip"),
              nb::arg("beta"),
              nb::arg("method_code"),

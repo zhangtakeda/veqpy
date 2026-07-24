@@ -44,7 +44,10 @@ equilibrium snapshot assembly, but those details are not separate public objects
 to call the same `Kernel` methods.
 
 Public source inputs stay raw: `KernelSource.heat_profile`,
-`KernelSource.current_profile`, `KernelSource.Ip`, and `KernelSource.beta`.
+`KernelSource.current_profile`, `KernelSource.p0`, `KernelSource.Ip`, and
+`KernelSource.beta`. `p0` is the pressure at the LCFS (`rho=1`) in Pa. The
+runtime reconstructs the complete pressure from the derivative profile and
+`p0`; a beta constraint scales both pieces by one common factor.
 Route-dependent scaling and internal materialized source arrays are backend
 runtime details, not user-facing data fields.
 

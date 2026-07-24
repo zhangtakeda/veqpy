@@ -274,6 +274,7 @@ class Equilibrium(Reactive, Serial):
         "psin",
         "psin_r",
         "psin_rr",
+        "p0",
         "alpha1",
         "alpha2",
     }
@@ -292,6 +293,7 @@ class Equilibrium(Reactive, Serial):
         psin: np.ndarray,
         psin_r: np.ndarray,
         psin_rr: np.ndarray,
+        p0: float = 0.0,
         alpha1: float = 1.0,
         alpha2: float = 1.0,
     ) -> None:
@@ -313,6 +315,7 @@ class Equilibrium(Reactive, Serial):
         self.Pn_psin = _regularize_axis_linear_profile(Pn_psin, grid.rho, copy=True)
         self.psin_r = np.asarray(psin_r, dtype=np.float64)
         self.psin_rr = np.asarray(psin_rr, dtype=np.float64)
+        self.p0 = float(p0)
         self.alpha1 = alpha1
         self.alpha2 = alpha2
 
@@ -325,6 +328,7 @@ class Equilibrium(Reactive, Serial):
         tree.add(f"B0: {self.B0:.3f} [T]")
         tree.add(f"Ip: {float(self.Ip):.3e} [A]")
         tree.add(f"beta_t: {float(self.beta_t):.3e}")
+        tree.add(f"p0: {self.p0:.6e} [Pa]")
         tree.add(f"alpha1: {self.alpha1:.6f}")
         tree.add(f"alpha2: {self.alpha2:.6f}")
         return tree
@@ -355,6 +359,7 @@ class Equilibrium(Reactive, Serial):
             "Pn_psin": np.ndarray,
             "psin_r": np.ndarray,
             "psin_rr": np.ndarray,
+            "p0": float,
             "alpha1": float,
             "alpha2": float,
         }
@@ -582,7 +587,7 @@ class Equilibrium(Reactive, Serial):
     def P(self) -> np.ndarray:
         """Physical pressure profile P."""
         P_int = self.grid.accumulate(self.P_r)
-        return P_int - P_int[-1]
+        return self.p0 + P_int - P_int[-1]
 
     @property
     def beta_t(self) -> np.ndarray:
@@ -920,6 +925,7 @@ def _build_resampled_equilibrium(
         Pn_psin=Pn_psin,
         psin_r=psin_r,
         psin_rr=psin_rr,
+        p0=equilibrium.p0,
         alpha1=equilibrium.alpha1,
         alpha2=equilibrium.alpha2,
     )

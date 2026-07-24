@@ -45,7 +45,7 @@ The recommended Kernel API is the package-root surface:
 | `KernelRecipe` | Backend and artifact/layout recipe. Users mainly set `backend`, `layout`, and Cxx build options. |
 | `KernelTopology` | Fixed route, grid, active-count, and capacity contract. It derives `x_size`, route codes, active profiles, and canonical `key`. |
 | `KernelBoundary` | Runtime boundary input. Users may pass parameterized `a/R0/Z0/B0/ka/c_offsets/s_offsets` values or raw `R_boundary/Z_boundary` points for explicit fitting. |
-| `KernelSource` | Runtime heat/current profile arrays plus physical constraints such as `Ip`, `beta`, and optional `case_name`. |
+| `KernelSource` | Runtime pressure-derivative/current profile arrays, LCFS pressure `p0`, physical constraints such as `Ip` and `beta`, and optional `case_name`. |
 | `KernelConfig` | Solver policy for one invocation: method, residual limits, evaluation budget, initial/continuation policy, and normalization mode. |
 | `KernelInitial` | Type contract for an explicit per-call packed state, named coefficient dictionary, or previous `SolveResult`; it overrides continuation. |
 | `SolveResult` | Snapshot returned by `solve()`, containing timing, convergence counters, residuals, packed solution `x`, and scaling data. |

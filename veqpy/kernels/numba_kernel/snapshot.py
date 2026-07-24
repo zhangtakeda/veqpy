@@ -38,6 +38,7 @@ def snapshot_equilibrium_from_kernel_runtime(
     Pn_psin: np.ndarray,
     psin_r: np.ndarray,
     psin_rr: np.ndarray,
+    p0: float,
     alpha1: float,
     alpha2: float,
     output_grid: Grid | None = None,
@@ -82,6 +83,7 @@ def snapshot_equilibrium_from_kernel_runtime(
         Pn_psin=Pn_psin.copy(),
         psin_r=psin_r.copy(),
         psin_rr=psin_rr.copy(),
+        p0=float(p0),
         alpha1=float(alpha1),
         alpha2=float(alpha2),
     )

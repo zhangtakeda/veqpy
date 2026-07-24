@@ -284,6 +284,122 @@ def test_kernel_source_materialization_route_matrix(
     assert not materialized.scaled_current.flags.writeable
 
 
+def test_kernel_source_materializes_p0_and_rejects_zero_complete_pressure() -> None:
+    topology = make_kernel_topology(
+        route="PQ",
+        coordinate="rho",
+        nodes="grid",
+        constraint="none",
+        sample_count=8,
+        psin_count=0,
+    )
+    rho, _ = make_quadrature(topology.Nr, scheme=topology.quadrature)
+    q = 1.71 + 0.16 * rho * rho
+    pressure = 6408.706536
+
+    materialized = materialize_kernel_source(
+        topology,
+        KernelSource(
+            heat_profile=np.zeros(topology.Nr),
+            current_profile=q,
+            p0=pressure,
+        ),
+    )
+
+    assert materialized.scaled_p0 == pytest.approx(MU0 * pressure)
+    with pytest.raises(ValueError, match="complete pressure profile is identically zero"):
+        materialize_kernel_source(
+            topology,
+            KernelSource(
+                heat_profile=np.zeros(topology.Nr),
+                current_profile=q,
+            ),
+        )
+    with pytest.warns(RuntimeWarning, match="p0 must be finite"):
+        with pytest.raises(ValueError, match="p0 must be finite"):
+            materialize_kernel_source(
+                topology,
+                KernelSource(
+                    heat_profile=np.zeros(topology.Nr),
+                    current_profile=q,
+                    p0=np.nan,
+                ),
+            )
+
+
+def _constant_pressure_pq_case(
+    *,
+    constraint: str,
+    beta: float = np.nan,
+) -> tuple[Kernel, KernelBoundary, KernelSource, np.ndarray]:
+    nr = 16
+    topology = make_kernel_topology(
+        h_count=1,
+        kappa_count=0,
+        psin_count=0,
+        c_counts=(),
+        s_counts=(1,),
+        Nr=nr,
+        Nt=16,
+        route="PQ",
+        coordinate="rho",
+        nodes="grid",
+        constraint=constraint,
+        sample_count=nr,
+    )
+    rho, _ = make_quadrature(nr, scheme=topology.quadrature)
+    kernel = numba_kernel(topology=topology)
+    boundary = KernelBoundary(
+        a=1.0,
+        R0=10.0,
+        Z0=0.0,
+        B0=3.0,
+        ka=1.0,
+        s_offsets=(0.0,),
+    )
+    source = KernelSource(
+        heat_profile=np.zeros(nr),
+        current_profile=1.71 + 0.16 * rho * rho,
+        p0=6408.706536,
+        beta=beta,
+    )
+    return kernel, boundary, source, np.zeros(kernel.x_size)
+
+
+def test_pq_rho_constant_pressure_uses_full_p_for_alpha_normalization() -> None:
+    kernel, boundary, source, x = _constant_pressure_pq_case(constraint="none")
+
+    residual = kernel.residual(x, boundary, source)
+    equilibrium = kernel.build_equilibrium(x)
+
+    assert np.all(np.isfinite(residual))
+    assert_allclose(equilibrium.P, source.p0, rtol=0.0, atol=1.0e-12)
+    assert_allclose(equilibrium.P_r, 0.0, rtol=0.0, atol=1.0e-12)
+    assert equilibrium.p0 == pytest.approx(source.p0)
+    assert equilibrium.alpha1 * equilibrium.alpha2 == pytest.approx(MU0 * source.p0)
+    assert equilibrium.beta_t == pytest.approx(2.0 * MU0 * source.p0 / boundary.B0**2)
+    assert equilibrium.resample(Grid(Nr=24, Nt=24)).p0 == pytest.approx(source.p0)
+
+
+def test_beta_constraint_scales_constant_p0_as_the_pressure_profile() -> None:
+    beta = 0.02
+    kernel, boundary, source, x = _constant_pressure_pq_case(
+        constraint="beta",
+        beta=beta,
+    )
+
+    kernel.residual(x, boundary, source)
+    equilibrium = kernel.build_equilibrium(x)
+    expected_pressure = 0.5 * beta * boundary.B0**2 / MU0
+
+    assert_allclose(equilibrium.P, expected_pressure, rtol=2.0e-13, atol=1.0e-8)
+    assert equilibrium.p0 == pytest.approx(expected_pressure)
+    assert equilibrium.beta_t == pytest.approx(beta)
+    assert equilibrium.alpha1 * equilibrium.alpha2 == pytest.approx(
+        MU0 * expected_pressure
+    )
+
+
 @pytest.mark.parametrize(("route", "coordinate", "nodes"), ROUTE_PARITY_CASES)
 def test_kernel_numba_backend_residual_route_matrix_is_finite_and_repeatable(
     route: str,

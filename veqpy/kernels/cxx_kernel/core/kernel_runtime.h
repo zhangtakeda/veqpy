@@ -76,6 +76,7 @@ namespace cxx_kernel_api
             params.R0 = input.R0;
             params.Z0 = input.Z0;
             params.B0 = input.B0;
+            params.p0 = input.p0;
             params.Ip = input.Ip;
             params.beta = input.beta;
             return params;
