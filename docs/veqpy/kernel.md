@@ -43,8 +43,14 @@ equilibrium snapshot assembly, but those details are not separate public objects
 `KernelRecipe.backend` selects the backend implementation; user code continues
 to call the same `Kernel` methods.
 
-Public source inputs stay raw. Every `KernelSource` requires `pprime` and exactly
-one driver selected by the topology route:
+Public source inputs stay raw. Every `KernelSource` requires exactly one pressure
+representation:
+
+- `p=p`: absolute pressure samples; `p0` is derived and must not be supplied.
+- `pprime=pprime, p0=p0`: pressure-derivative samples plus the optional LCFS
+  pressure, which defaults to zero.
+
+It also requires exactly one driver selected by the topology route:
 
 | route | required driver |
 | --- | --- |
@@ -55,16 +61,28 @@ one driver selected by the topology route:
 | `PJ2` | `jpara` |
 | `PQ` | `q` |
 
-For example, a PQ case is constructed as
-`KernelSource(pprime=pprime, q=q, p0=p0, beta=beta)`. Supplying more than one
-driver, no driver, or a driver that does not match `KernelTopology.route` is
-rejected before backend execution. The old generic
+For example, a PQ case can be constructed as either
+`KernelSource(p=p, q=q, beta=beta)` or
+`KernelSource(pprime=pprime, p0=p0, q=q, beta=beta)`. Supplying both pressure
+representations, neither pressure representation, more than one driver, no
+driver, or a driver that does not match `KernelTopology.route` is rejected
+before backend execution. The old generic
 `heat_profile`/`current_profile` keywords are not accepted.
 
-`KernelSource.p0` is the pressure at the LCFS (`rho=1`) in Pa; `Ip` and `beta`
-are the optional global constraints. The runtime reconstructs the complete
-pressure from `pprime` and `p0`; a beta constraint scales both pieces by one
-common factor.
+For uniform `p` samples, the final sample is the LCFS pressure and the
+differentiation matrix acts in the selected source coordinate. The PP
+`sqrt_psin` parameterization applies the chain rule without differentiating on
+an ill-conditioned squared node grid. For Legendre grid samples in `rho`, the
+runtime uses the grid differentiation matrix and interpolates `p` to `rho=1`
+because Gauss-Legendre nodes exclude the edge. `p` is intentionally rejected for
+`coordinate="psin", nodes="grid"`: those nodes are fixed in `rho`, while
+`psin(rho)` is part of the unknown equilibrium. Use explicit `pprime` for that
+topology or switch to uniform psin samples.
+
+`KernelSource.p0` is the pressure at the LCFS in Pa; `Ip` and `beta` are the
+optional global constraints. The runtime reconstructs the complete pressure
+from `pprime` and `p0`; a beta constraint scales both pieces, including `p0`, by
+one common factor.
 Route-dependent scaling and internal materialized source arrays are backend
 runtime details, not user-facing data fields.
 

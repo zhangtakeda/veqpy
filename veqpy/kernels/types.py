@@ -516,29 +516,52 @@ class KernelTopology:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class KernelSource:
-    """Raw pressure data, one explicit route driver, and solve constraints.
+    """One pressure representation, one explicit route driver, and constraints.
 
     The driver keyword is selected by the topology route: ``ffprime`` for PF,
     ``psi_r`` for PP, ``itor`` for PI, ``jtor`` for PJ1, ``jpara`` for PJ2,
-    and ``q`` for PQ.
+    and ``q`` for PQ. Pressure is supplied either as ``p`` or as ``pprime``
+    with an optional LCFS value ``p0``.
     """
 
-    pprime: np.ndarray | list[float] | tuple[float, ...]
+    p: np.ndarray | list[float] | tuple[float, ...] | None = None
+    pprime: np.ndarray | list[float] | tuple[float, ...] | None = None
     ffprime: np.ndarray | list[float] | tuple[float, ...] | None = None
     psi_r: np.ndarray | list[float] | tuple[float, ...] | None = None
     itor: np.ndarray | list[float] | tuple[float, ...] | None = None
     jtor: np.ndarray | list[float] | tuple[float, ...] | None = None
     jpara: np.ndarray | list[float] | tuple[float, ...] | None = None
     q: np.ndarray | list[float] | tuple[float, ...] | None = None
-    p0: float = 0.0
+    p0: float | None = None
     Ip: float = np.nan
     beta: float = np.nan
     case_name: str | None = None
+    _pressure_name: str = field(init=False, repr=False)
+    _pressure_profile: np.ndarray = field(init=False, repr=False)
     _driver_name: str = field(init=False, repr=False)
     _driver_profile: np.ndarray = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        pprime = _readonly_1d(self.pprime, "pprime")
+        pressure_values = {
+            name: value
+            for name, value in (("p", self.p), ("pprime", self.pprime))
+            if value is not None
+        }
+        if len(pressure_values) != 1:
+            supplied = ", ".join(pressure_values) if pressure_values else "none"
+            raise ValueError(
+                "KernelSource requires exactly one pressure input (p or pprime); "
+                f"got {supplied}"
+            )
+        pressure_name, pressure_value = next(iter(pressure_values.items()))
+        pressure = _readonly_1d(pressure_value, pressure_name)
+        if pressure_name == "p":
+            if self.p0 is not None:
+                raise ValueError("p0 is derived from p and cannot be supplied with p")
+            p0 = None
+        else:
+            p0 = 0.0 if self.p0 is None else float(self.p0)
+
         driver_values = {
             name: getattr(self, name)
             for name in SOURCE_DRIVER_BY_ROUTE.values()
@@ -553,20 +576,32 @@ class KernelSource:
             )
         driver_name, driver_value = next(iter(driver_values.items()))
         driver = _readonly_1d(driver_value, driver_name)
-        if pprime.shape != driver.shape:
+        if pressure.shape != driver.shape:
             raise ValueError(
-                f"pprime and {driver_name} must share the same shape, "
-                f"got {pprime.shape} and {driver.shape}"
+                f"{pressure_name} and {driver_name} must share the same shape, "
+                f"got {pressure.shape} and {driver.shape}"
             )
-        object.__setattr__(self, "pprime", pprime)
+        object.__setattr__(self, pressure_name, pressure)
+        object.__setattr__(self, "_pressure_name", pressure_name)
+        object.__setattr__(self, "_pressure_profile", pressure)
         object.__setattr__(self, driver_name, driver)
         object.__setattr__(self, "_driver_name", driver_name)
         object.__setattr__(self, "_driver_profile", driver)
-        object.__setattr__(self, "p0", float(self.p0))
+        object.__setattr__(self, "p0", p0)
         object.__setattr__(self, "Ip", float(self.Ip))
         object.__setattr__(self, "beta", float(self.beta))
         case_name = None if self.case_name is None else str(self.case_name)
         object.__setattr__(self, "case_name", case_name)
+
+    @property
+    def pressure_name(self) -> str:
+        """Canonical pressure keyword supplied by the caller."""
+        return self._pressure_name
+
+    @property
+    def pressure_profile(self) -> np.ndarray:
+        """Read-only samples selected by ``pressure_name``."""
+        return self._pressure_profile
 
     @property
     def driver_name(self) -> str:

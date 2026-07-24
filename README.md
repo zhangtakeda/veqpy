@@ -162,11 +162,13 @@ The package-level Kernel API is intentionally semantic: users construct
 `Kernel(topology=topology)` or `build(topology=topology, ...)`.
 `KernelBoundary`/`KernelSource` carry runtime cases, `KernelConfig` carries the
 handle-level default solve policy, and `KernelRecipe` remains the shared backend
-recipe type. `KernelSource` stores raw user-facing `pprime`, edge pressure `p0`,
-`Ip`, and `beta` values plus exactly one route-specific driver: `ffprime` (PF),
-`psi_r` (PP), `itor` (PI), `jtor` (PJ1), `jpara` (PJ2), or `q` (PQ). The selected
-driver must match `KernelTopology.route`; the Kernel runtime materializes
-route-dependent `mu0` scaling before calling backend kernels. Sine-family Kernel
+recipe type. `KernelSource` stores exactly one raw pressure representation:
+either `p`, or `pprime` with an optional edge pressure `p0`. It also stores `Ip`
+and `beta` plus exactly one route-specific driver: `ffprime` (PF), `psi_r` (PP),
+`itor` (PI), `jtor` (PJ1), `jpara` (PJ2), or `q` (PQ). The selected driver must
+match `KernelTopology.route`; the Kernel runtime derives `pprime`/`p0` from `p`
+when needed and materializes route-dependent `mu0` scaling before calling
+backend kernels. Sine-family Kernel
 inputs are s1-started: `KernelTopology.s_counts=(n1, n2, ...)` and
 `KernelBoundary.s_offsets=(s1, s2, ...)`; backend runtime lowering adds the
 structural s0=0 slot. `KernelRecipe` selects `backend="numba"` for the direct

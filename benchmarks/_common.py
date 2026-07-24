@@ -1621,7 +1621,13 @@ def _updated_case(case: KernelCase, *, update: str, offset: float, index: int) -
     if update in {"source", "mixed"}:
         source = replace(
             source,
-            pprime=_scale_profile(source.pprime, offset, sign=1.0),
+            **{
+                source.pressure_name: _scale_profile(
+                    source.pressure_profile,
+                    offset,
+                    sign=1.0,
+                )
+            },
             **{
                 source.driver_name: _scale_profile(
                     source.driver_profile,

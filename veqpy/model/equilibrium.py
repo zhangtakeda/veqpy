@@ -587,7 +587,8 @@ class Equilibrium(Reactive, Serial):
     def P(self) -> np.ndarray:
         """Physical pressure profile P."""
         P_int = self.grid.accumulate(self.P_r)
-        return self.p0 + P_int - P_int[-1]
+        edge_integral = float(self.grid.integrate(self.P_r))
+        return self.p0 + P_int - edge_integral
 
     @property
     def beta_t(self) -> np.ndarray:
