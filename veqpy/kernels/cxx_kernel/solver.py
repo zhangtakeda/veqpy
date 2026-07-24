@@ -90,6 +90,9 @@ class CxxSolver:
     def metadata(self) -> Any:
         return self._solver().metadata()
 
+    def source_state(self) -> Any:
+        return self._solver().source_state()
+
     def warmup(self, count: int = 1) -> None:
         self._solver().warmup(count)
 

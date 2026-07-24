@@ -28,8 +28,50 @@ SOURCE_ROUTE_CASES = (
     ("PQ", "rho", "grid"),
 )
 
+SOURCE_CONSTRAINT_CASES = (
+    ("PF", "psin", "uniform", "ip"),
+    ("PF", "psin", "uniform", "beta"),
+    ("PP", "psin", "uniform", "ip"),
+    ("PP", "psin", "uniform", "beta"),
+    ("PP", "psin", "uniform", "both"),
+    ("PI", "rho", "uniform", "ip"),
+    ("PI", "rho", "uniform", "beta"),
+    ("PI", "rho", "uniform", "both"),
+    ("PJ1", "psin", "uniform", "ip"),
+    ("PJ1", "psin", "uniform", "beta"),
+    ("PJ1", "psin", "uniform", "both"),
+    ("PJ2", "psin", "uniform", "ip"),
+    ("PJ2", "psin", "uniform", "beta"),
+    ("PJ2", "psin", "uniform", "both"),
+    ("PQ", "rho", "grid", "ip"),
+    ("PQ", "rho", "grid", "beta"),
+    ("PQ", "rho", "grid", "both"),
+)
 
-def _parity_topology(route: str, coordinate: str, nodes: str) -> KernelTopology:
+SOURCE_ALTERNATE_COORDINATE_CASES = (
+    ("PF", "rho", "grid", "beta"),
+    ("PP", "rho", "grid", "beta"),
+    ("PI", "psin", "grid", "beta"),
+    ("PJ1", "rho", "grid", "beta"),
+    ("PJ2", "rho", "grid", "beta"),
+    ("PQ", "psin", "uniform", "beta"),
+)
+
+_SOURCE_STATE_KEYS = (
+    "alpha1",
+    "alpha2",
+    "scaled_effective_p0",
+    "pressure_multiplier",
+)
+
+
+def _parity_topology(
+    route: str,
+    coordinate: str,
+    nodes: str,
+    *,
+    constraint: str = "none",
+) -> KernelTopology:
     nr = 8
     sample_count = nr if nodes == "grid" else 9
     return KernelTopology(
@@ -47,27 +89,34 @@ def _parity_topology(route: str, coordinate: str, nodes: str) -> KernelTopology:
         route=route,
         coordinate=coordinate,
         nodes=nodes,
-        constraint="none",
+        constraint=constraint,
         sample_count=sample_count,
     )
 
 
 def _pressure_sources(
     topology: KernelTopology,
+    *,
+    amplitude: float = 900.0,
 ) -> tuple[KernelSource, KernelSource]:
     parameter = (
         make_quadrature(topology.Nr, scheme=topology.quadrature)[0]
         if topology.nodes == "grid"
         else np.linspace(0.0, 1.0, topology.sample_count, dtype=np.float64)
     )
-    physical_coordinate = parameter * parameter if topology.route == "PP" else parameter
-    rho = (
-        np.sqrt(physical_coordinate)
-        if topology.coordinate == "psin"
-        else physical_coordinate
-    )
+    if topology.nodes == "grid":
+        rho = parameter
+        physical_coordinate = rho * rho if topology.coordinate == "psin" else rho
+    elif topology.source_parameterization == "sqrt_psin":
+        rho = parameter
+        physical_coordinate = rho * rho
+    elif topology.coordinate == "psin":
+        physical_coordinate = parameter
+        rho = np.sqrt(physical_coordinate)
+    else:
+        physical_coordinate = parameter
+        rho = physical_coordinate
     edge_pressure = 6410.0
-    amplitude = 900.0
     if topology.coordinate == "rho":
         pressure = edge_pressure + amplitude * (1.0 - physical_coordinate**2)
         pprime = -2.0 * amplitude * physical_coordinate
@@ -76,7 +125,11 @@ def _pressure_sources(
         pprime = np.full(topology.sample_count, -amplitude, dtype=np.float64)
 
     if topology.route == "PF":
-        driver = 1.0 + 0.2 * rho * rho
+        driver = (
+            rho * (1.0 + 0.2 * rho * rho)
+            if topology.coordinate == "rho"
+            else 1.0 + 0.2 * rho * rho
+        )
     elif topology.route == "PP":
         driver = rho * (1.0 + 0.2 * rho * rho)
     elif topology.route == "PI":
@@ -88,6 +141,10 @@ def _pressure_sources(
     driver_kwargs = {
         SOURCE_DRIVER_BY_ROUTE[topology.route]: np.asarray(driver, dtype=np.float64)
     }
+    if topology.source_uses_ip_constraint:
+        driver_kwargs["Ip"] = 1.0e6
+    if topology.source_uses_beta_constraint:
+        driver_kwargs["beta"] = 0.02
     return (
         KernelSource(p=pressure, **driver_kwargs),
         KernelSource(
@@ -96,6 +153,30 @@ def _pressure_sources(
             **driver_kwargs,
         ),
     )
+
+
+def _runtime_source_state(kernel: Kernel) -> np.ndarray:
+    if kernel.recipe.backend == "numba":
+        workspace = kernel._impl._solver.runtime.source_workspace
+        return np.array(
+            [
+                workspace.alpha_state[0],
+                workspace.alpha_state[1],
+                workspace.pressure_state[0],
+                workspace.pressure_state[1],
+            ],
+            dtype=np.float64,
+        )
+    state = dict(kernel._impl._cxx_solver().source_state())
+    return np.array(
+        [state[name] for name in _SOURCE_STATE_KEYS],
+        dtype=np.float64,
+    )
+
+
+@pytest.fixture(scope="module")
+def cxx_cache_root(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    return tmp_path_factory.mktemp("cxx-source-parity-cache")
 
 
 def _boundary() -> KernelBoundary:
@@ -114,7 +195,7 @@ def test_cxx_and_numba_share_canonical_pressure_source_contract(
     route: str,
     coordinate: str,
     nodes: str,
-    tmp_path: Path,
+    cxx_cache_root: Path,
 ) -> None:
     topology = _parity_topology(route, coordinate, nodes)
     source_from_p, source_from_pprime = _pressure_sources(topology)
@@ -144,7 +225,7 @@ def test_cxx_and_numba_share_canonical_pressure_source_contract(
         "cxx": Kernel(
             topology=topology,
             recipe=KernelRecipe(backend="cxx"),
-            cache_root=tmp_path / "kernel-cache",
+            cache_root=cxx_cache_root,
         ),
     }
     try:
@@ -176,3 +257,145 @@ def test_cxx_and_numba_share_canonical_pressure_source_contract(
         rtol=2.0e-9,
         atol=5.0e-12,
     )
+
+
+@pytest.mark.parametrize(
+    ("route", "coordinate", "nodes", "constraint"),
+    SOURCE_CONSTRAINT_CASES + SOURCE_ALTERNATE_COORDINATE_CASES,
+)
+def test_cxx_and_numba_share_constrained_pressure_state(
+    route: str,
+    coordinate: str,
+    nodes: str,
+    constraint: str,
+    cxx_cache_root: Path,
+) -> None:
+    topology = _parity_topology(
+        route,
+        coordinate,
+        nodes,
+        constraint=constraint,
+    )
+    _, source = _pressure_sources(topology)
+    materialized = materialize_kernel_source(topology, source)
+    kernels = {
+        "numba": Kernel(
+            topology=topology,
+            recipe=KernelRecipe(backend="numba"),
+        ),
+        "cxx": Kernel(
+            topology=topology,
+            recipe=KernelRecipe(backend="cxx"),
+            cache_root=cxx_cache_root,
+        ),
+    }
+    try:
+        x = np.linspace(-2.0e-3, 2.0e-3, topology.x_size, dtype=np.float64)
+        residuals = {
+            backend: kernel.residual(x, _boundary(), source)
+            for backend, kernel in kernels.items()
+        }
+        numba_state = _runtime_source_state(kernels["numba"])
+        cxx_state = _runtime_source_state(kernels["cxx"])
+    finally:
+        for kernel in kernels.values():
+            kernel.close()
+
+    assert np.all(np.isfinite(residuals["numba"]))
+    assert np.all(np.isfinite(residuals["cxx"]))
+    assert np.all(np.isfinite(numba_state))
+    assert np.all(np.isfinite(cxx_state))
+    assert_allclose(
+        residuals["cxx"],
+        residuals["numba"],
+        rtol=2.0e-9,
+        atol=5.0e-10,
+    )
+    assert_allclose(
+        cxx_state,
+        numba_state,
+        rtol=2.0e-9,
+        atol=5.0e-12,
+    )
+    assert cxx_state[2] == pytest.approx(
+        materialized.scaled_p0 * cxx_state[3],
+        rel=2.0e-13,
+        abs=2.0e-13,
+    )
+    if topology.source_uses_beta_constraint:
+        assert cxx_state[3] != pytest.approx(1.0)
+
+
+@pytest.mark.parametrize(("route", "coordinate", "nodes"), SOURCE_ROUTE_CASES)
+@pytest.mark.parametrize("constraint", ["none", "beta"])
+def test_cxx_and_numba_share_constant_pressure_alpha_fallback(
+    route: str,
+    coordinate: str,
+    nodes: str,
+    constraint: str,
+    cxx_cache_root: Path,
+) -> None:
+    topology = _parity_topology(
+        route,
+        coordinate,
+        nodes,
+        constraint=constraint,
+    )
+    source_from_p, source_from_pprime = _pressure_sources(topology, amplitude=0.0)
+    kernels = {
+        "numba": Kernel(
+            topology=topology,
+            recipe=KernelRecipe(backend="numba"),
+        ),
+        "cxx": Kernel(
+            topology=topology,
+            recipe=KernelRecipe(backend="cxx"),
+            cache_root=cxx_cache_root,
+        ),
+    }
+    try:
+        x = np.linspace(-2.0e-3, 2.0e-3, topology.x_size, dtype=np.float64)
+        residuals = {
+            (backend, pressure_mode): kernel.residual(x, _boundary(), source)
+            for backend, kernel in kernels.items()
+            for pressure_mode, source in (
+                ("p", source_from_p),
+                ("pprime", source_from_pprime),
+            )
+        }
+        numba_state = _runtime_source_state(kernels["numba"])
+        cxx_state = _runtime_source_state(kernels["cxx"])
+    finally:
+        for kernel in kernels.values():
+            kernel.close()
+
+    for residual in residuals.values():
+        assert np.all(np.isfinite(residual))
+    for backend in ("numba", "cxx"):
+        assert_allclose(
+            residuals[backend, "p"],
+            residuals[backend, "pprime"],
+            rtol=2.0e-11,
+            atol=5.0e-13,
+        )
+    assert_allclose(
+        residuals["cxx", "pprime"],
+        residuals["numba", "pprime"],
+        rtol=2.0e-9,
+        atol=5.0e-10,
+    )
+    assert_allclose(
+        cxx_state,
+        numba_state,
+        rtol=2.0e-9,
+        atol=5.0e-12,
+    )
+    assert abs(cxx_state[0] * cxx_state[1]) == pytest.approx(
+        abs(cxx_state[2]),
+        rel=2.0e-12,
+        abs=2.0e-13,
+    )
+    if constraint == "none":
+        assert cxx_state[3] == pytest.approx(1.0)
+    else:
+        assert cxx_state[3] != pytest.approx(1.0)

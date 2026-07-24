@@ -8,6 +8,9 @@ NB_MODULE(cxx_ext, module)
         .def(nb::init<int>(),
              nb::arg("solver_code") = static_cast<int>(cxx_kernel_api::SolverMethodPowell))
         .def("metadata", &cxx_python::NativeSolver::metadata)
+        .def("source_state",
+             &cxx_python::NativeSolver::source_state,
+             "Return source scales and effective pressure state from the latest residual evaluation.")
         .def("set_kernel_runtime",
              &cxx_python::NativeSolver::set_kernel_runtime,
              nb::arg("case_name"),

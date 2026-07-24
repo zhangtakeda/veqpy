@@ -116,6 +116,8 @@ namespace source::detail
         RadialVector Pn_psin{};
         double       alpha1 = 0.0;
         double       alpha2 = 0.0;
+        double       scaled_effective_p0 = 0.0;
+        double       pressure_multiplier = 1.0;
         bool         source_materialization_initialized = false;
 
         constexpr void set_uniform_sources(std::span<const double, sample_count> pprime,
@@ -595,7 +597,7 @@ namespace source::detail
                 numerator += realized * raw * GridType::weights[i];
             }
 
-            double pressure_multiplier = 1.0;
+            pressure_multiplier = 1.0;
             if (denominator > 1.0e-28)
                 pressure_multiplier = numerator / denominator;
             else if (has_beta)
@@ -627,6 +629,7 @@ namespace source::detail
                 FFn_psin[i] *= source_rescale;
             }
             alpha1 = normalized_alpha1;
+            scaled_effective_p0 = pressure_multiplier * p0;
         }
 
         template <size_t Row>

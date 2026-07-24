@@ -575,6 +575,17 @@ namespace cxx_python
 
         nb::dict metadata() const { return topology_metadata_dict(context_->input); }
 
+        nb::dict source_state() const
+        {
+            const auto& source_runtime = context_->op.workspace.source_runtime;
+            nb::dict    out;
+            out["alpha1"]              = source_runtime.alpha1;
+            out["alpha2"]              = source_runtime.alpha2;
+            out["scaled_effective_p0"] = source_runtime.scaled_effective_p0;
+            out["pressure_multiplier"] = source_runtime.pressure_multiplier;
+            return out;
+        }
+
         // Typed runtime setter used by the Python Kernel hot path.  The Python layer
         // normalizes arrays to 1D float64/C-contiguous views; this C++ boundary
         // remains authoritative for topology-dependent lengths and enum validity.
