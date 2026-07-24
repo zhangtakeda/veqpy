@@ -43,11 +43,28 @@ equilibrium snapshot assembly, but those details are not separate public objects
 `KernelRecipe.backend` selects the backend implementation; user code continues
 to call the same `Kernel` methods.
 
-Public source inputs stay raw: `KernelSource.heat_profile`,
-`KernelSource.current_profile`, `KernelSource.p0`, `KernelSource.Ip`, and
-`KernelSource.beta`. `p0` is the pressure at the LCFS (`rho=1`) in Pa. The
-runtime reconstructs the complete pressure from the derivative profile and
-`p0`; a beta constraint scales both pieces by one common factor.
+Public source inputs stay raw. Every `KernelSource` requires `pprime` and exactly
+one driver selected by the topology route:
+
+| route | required driver |
+| --- | --- |
+| `PF` | `ffprime` |
+| `PP` | `psi_r` |
+| `PI` | `itor` |
+| `PJ1` | `jtor` |
+| `PJ2` | `jpara` |
+| `PQ` | `q` |
+
+For example, a PQ case is constructed as
+`KernelSource(pprime=pprime, q=q, p0=p0, beta=beta)`. Supplying more than one
+driver, no driver, or a driver that does not match `KernelTopology.route` is
+rejected before backend execution. The old generic
+`heat_profile`/`current_profile` keywords are not accepted.
+
+`KernelSource.p0` is the pressure at the LCFS (`rho=1`) in Pa; `Ip` and `beta`
+are the optional global constraints. The runtime reconstructs the complete
+pressure from `pprime` and `p0`; a beta constraint scales both pieces by one
+common factor.
 Route-dependent scaling and internal materialized source arrays are backend
 runtime details, not user-facing data fields.
 

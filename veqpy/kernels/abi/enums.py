@@ -15,6 +15,14 @@ SOURCE_ROUTE_CODES = {
     "PJ2": 5,
     "PQ": 6,
 }
+SOURCE_DRIVER_BY_ROUTE = {
+    "PF": "ffprime",
+    "PP": "psi_r",
+    "PI": "itor",
+    "PJ1": "jtor",
+    "PJ2": "jpara",
+    "PQ": "q",
+}
 SOURCE_COORDINATE_CODES = {"rho": 1, "psin": 2}
 SOURCE_CONSTRAINT_CODES_BY_FLAGS = {
     (False, False): 0,

@@ -55,12 +55,12 @@ def _uniform_demo_equilibrium():
         s_offsets=(float(np.arcsin(0.5)),),
     )
     source_axis = np.linspace(0.0, 1.0, topology.sample_count)
-    pressure, current = _profiles(source_axis)
+    pprime, ffprime = _profiles(source_axis)
     result = kernel.solve(
         boundary=boundary,
         source=veq.KernelSource(
-            heat_profile=pressure,
-            current_profile=current,
+            pprime=pprime,
+            ffprime=ffprime,
             Ip=3.0e6,
         ),
     )

@@ -40,8 +40,8 @@ def test_geqdsk_benchmark_cases_materialize_from_reference_inputs(
     assert signature
     assert case.topology.x_size > 0
     assert case.boundary.B0 > 0.0
-    assert case.source.heat_profile.size == case.topology.sample_count
-    assert case.source.current_profile.size == case.topology.sample_count
+    assert case.source.pprime.size == case.topology.sample_count
+    assert case.source.driver_profile.size == case.topology.sample_count
 
 
 def test_variant_sweep_benchmark_plans_geqdsk_pareto_rows() -> None:

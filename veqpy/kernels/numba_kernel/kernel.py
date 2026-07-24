@@ -15,6 +15,7 @@ from typing import Any
 import numpy as np
 from numpy.linalg import norm
 
+from veqpy.kernels.abi.enums import SOURCE_DRIVER_BY_ROUTE
 from veqpy.kernels.boundary_materialization import materialize_kernel_boundary
 from veqpy.kernels.initial import KernelInitial, materialize_initial_state
 from veqpy.kernels.pareto import (
@@ -523,14 +524,7 @@ class _NumbaKernelImpl:
             raise TypeError(f"source must be KernelSource, got {type(source).__name__}")
         if case_name is None:
             return source
-        return KernelSource(
-            heat_profile=source.heat_profile,
-            current_profile=source.current_profile,
-            p0=source.p0,
-            Ip=source.Ip,
-            beta=source.beta,
-            case_name=case_name,
-        )
+        return replace(source, case_name=case_name)
 
     def _packed_input(self, value: Any, name: str) -> np.ndarray:
         array = np.asarray(value, dtype=np.float64)
@@ -576,12 +570,12 @@ def _prepare_boundary(topology: KernelTopology) -> KernelBoundary:
 
 def _prepare_source(topology: KernelTopology) -> KernelSource:
     sample_count = int(topology.sample_count)
-    heat_profile = np.full(sample_count, 1.0e6, dtype=np.float64)
-    current_value = 1.0e6 if topology.route in {"PI", "PJ1", "PJ2"} else 1.0
-    current_profile = np.full(sample_count, current_value, dtype=np.float64)
+    pprime = np.full(sample_count, 1.0e6, dtype=np.float64)
+    driver_value = 1.0e6 if topology.route in {"PI", "PJ1", "PJ2"} else 1.0
+    driver = np.full(sample_count, driver_value, dtype=np.float64)
     return KernelSource(
-        heat_profile=heat_profile,
-        current_profile=current_profile,
+        pprime=pprime,
+        **{SOURCE_DRIVER_BY_ROUTE[topology.route]: driver},
         Ip=1.0e6,
         beta=0.5 if topology.source_uses_beta_constraint else np.nan,
     )

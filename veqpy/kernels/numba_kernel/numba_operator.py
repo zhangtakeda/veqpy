@@ -183,12 +183,12 @@ def _run_pj2_psin_uniform_spline_with_scratch_impl(
     root_fields: np.ndarray,
     FFn_psin: np.ndarray,
     Pn_psin: np.ndarray,
-    materialized_heat_input: np.ndarray,
-    materialized_current_input: np.ndarray,
-    heat_input: np.ndarray,
-    current_input: np.ndarray,
-    heat_spline_coeff: np.ndarray,
-    current_spline_coeff: np.ndarray,
+    materialized_pprime_input: np.ndarray,
+    materialized_driver_input: np.ndarray,
+    pprime_input: np.ndarray,
+    driver_input: np.ndarray,
+    pprime_spline_coeff: np.ndarray,
+    driver_spline_coeff: np.ndarray,
     coordinate_code: int,
     R0: float,
     B0: float,
@@ -207,12 +207,12 @@ def _run_pj2_psin_uniform_spline_with_scratch_impl(
     matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     # Materialize the first source sample on the previous psin query, then let
-    # each fixed-point pass update psin and remap heat/current onto the new query.
+    # each fixed-point pass updates psin and remaps pprime/driver onto the new query.
     _uniform_spline_interpolate_pair(
-        materialized_heat_input,
-        materialized_current_input,
-        heat_spline_coeff,
-        current_spline_coeff,
+        materialized_pprime_input,
+        materialized_driver_input,
+        pprime_spline_coeff,
+        driver_spline_coeff,
         source_psin_query,
     )
     alpha1 = np.nan
@@ -222,8 +222,8 @@ def _run_pj2_psin_uniform_spline_with_scratch_impl(
             root_fields,
             FFn_psin,
             Pn_psin,
-            materialized_heat_input,
-            materialized_current_input,
+            materialized_pprime_input,
+            materialized_driver_input,
             coordinate_code,
             R0,
             B0,
@@ -245,12 +245,12 @@ def _run_pj2_psin_uniform_spline_with_scratch_impl(
             source_psin_query,
             psin,
             PJ2_PSIN_UNIFORM_FIXED_POINT_MAX_RESIDUAL,
-            materialized_heat_input,
-            materialized_current_input,
-            heat_input,
-            current_input,
-            heat_spline_coeff,
-            current_spline_coeff,
+            materialized_pprime_input,
+            materialized_driver_input,
+            pprime_input,
+            driver_input,
+            pprime_spline_coeff,
+            driver_spline_coeff,
         ):
             break
     return alpha1, alpha2
@@ -263,10 +263,10 @@ def _run_pj2_psin_uniform_barycentric_with_scratch_impl(
     root_fields: np.ndarray,
     FFn_psin: np.ndarray,
     Pn_psin: np.ndarray,
-    materialized_heat_input: np.ndarray,
-    materialized_current_input: np.ndarray,
-    heat_input: np.ndarray,
-    current_input: np.ndarray,
+    materialized_pprime_input: np.ndarray,
+    materialized_driver_input: np.ndarray,
+    pprime_input: np.ndarray,
+    driver_input: np.ndarray,
     barycentric_weights: np.ndarray,
     coordinate_code: int,
     R0: float,
@@ -288,10 +288,10 @@ def _run_pj2_psin_uniform_barycentric_with_scratch_impl(
     # Same fixed-point contract as the spline path, but interpolation uses a
     # small local barycentric stencil to avoid building dense remap matrices.
     _local_barycentric_interpolate_pair(
-        materialized_heat_input,
-        materialized_current_input,
-        heat_input,
-        current_input,
+        materialized_pprime_input,
+        materialized_driver_input,
+        pprime_input,
+        driver_input,
         source_psin_query,
         barycentric_weights,
     )
@@ -302,8 +302,8 @@ def _run_pj2_psin_uniform_barycentric_with_scratch_impl(
             root_fields,
             FFn_psin,
             Pn_psin,
-            materialized_heat_input,
-            materialized_current_input,
+            materialized_pprime_input,
+            materialized_driver_input,
             coordinate_code,
             R0,
             B0,
@@ -325,10 +325,10 @@ def _run_pj2_psin_uniform_barycentric_with_scratch_impl(
             source_psin_query,
             psin,
             PJ2_PSIN_UNIFORM_FIXED_POINT_MAX_RESIDUAL,
-            materialized_heat_input,
-            materialized_current_input,
-            heat_input,
-            current_input,
+            materialized_pprime_input,
+            materialized_driver_input,
+            pprime_input,
+            driver_input,
             barycentric_weights,
         ):
             break
@@ -505,8 +505,8 @@ def _bind_single_pass_residual_runner_core(
     surface_fields = geometry_workspace.surface_fields
     residual_surface_fields = residual_workspace.surface_fields
     root_fields = residual_workspace.root_fields
-    materialized_heat_input = source_workspace.materialized_heat_input
-    materialized_current_input = source_workspace.materialized_current_input
+    materialized_pprime_input = source_workspace.materialized_pprime_input
+    materialized_driver_input = source_workspace.materialized_driver_input
     FFn_psin = root_fields[3]
     Pn_psin = root_fields[4]
 
@@ -518,8 +518,8 @@ def _bind_single_pass_residual_runner_core(
             root_fields,
             FFn_psin,
             Pn_psin,
-            materialized_heat_input,
-            materialized_current_input,
+            materialized_pprime_input,
+            materialized_driver_input,
             R0,
         )
         alpha_state[0] = alpha1
@@ -574,7 +574,7 @@ def _bind_profile_owned_psin_residual_runner_core(
     def runner(x: np.ndarray, out: np.ndarray) -> None:
         _refresh_hot_runtime(x, hot_runtime_binding=hot_runtime_binding)
         # Profile-owned psin routes copy psin/psin_r/psin_rr from the active
-        # optimized profile, then evaluate heat/current samples at that psin
+        # optimized profile, then evaluate pprime/driver samples at that psin
         # coordinate.  The source kernel writes only source derivatives/scales.
         _materialize_profile_owned_psin_source_impl(
             psin,
@@ -582,13 +582,13 @@ def _bind_profile_owned_psin_residual_runner_core(
             psin_rr,
             profile_owned_psin_binding.source_psin_query,
             profile_owned_psin_binding.source_parameter_query,
-            profile_owned_psin_binding.materialized_heat_input,
-            profile_owned_psin_binding.materialized_current_input,
+            profile_owned_psin_binding.materialized_pprime_input,
+            profile_owned_psin_binding.materialized_driver_input,
             profile_owned_psin_binding.psin_profile_fields,
-            profile_owned_psin_binding.scaled_heat,
-            profile_owned_psin_binding.scaled_current,
-            profile_owned_psin_binding.heat_spline_coeff,
-            profile_owned_psin_binding.current_spline_coeff,
+            profile_owned_psin_binding.scaled_pprime,
+            profile_owned_psin_binding.scaled_driver,
+            profile_owned_psin_binding.pprime_spline_coeff,
+            profile_owned_psin_binding.driver_spline_coeff,
             profile_owned_psin_binding.parameterization_code,
             profile_owned_psin_binding.grid_radial_fields,
             profile_owned_psin_binding.differentiator,
@@ -601,8 +601,8 @@ def _bind_profile_owned_psin_residual_runner_core(
             profile_owned_psin_binding.source_target_root_fields,
             FFn_psin,
             Pn_psin,
-            profile_owned_psin_binding.materialized_heat_input,
-            profile_owned_psin_binding.materialized_current_input,
+            profile_owned_psin_binding.materialized_pprime_input,
+            profile_owned_psin_binding.materialized_driver_input,
             R0,
         )
         alpha_state[0] = alpha1
@@ -649,20 +649,20 @@ def _bind_pj2_psin_uniform_residual_runner_core(
     root_fields = residual_workspace.root_fields
 
     source_psin_query = source_workspace.psin_query
-    materialized_heat_input = source_workspace.materialized_heat_input
-    materialized_current_input = source_workspace.materialized_current_input
+    materialized_pprime_input = source_workspace.materialized_pprime_input
+    materialized_driver_input = source_workspace.materialized_driver_input
     array_scratch = source_workspace.array_scratch
     matrix_scratch = source_workspace.matrix_scratch
     f_profile_fields = profile_workspace.fields_for("F")
     psin_profile_u = profile_workspace.values_for("psin")
-    heat_input = source_plan.scaled_heat
-    current_input = source_plan.scaled_current
-    heat_spline_coeff = build_uniform_source_interpolation_coefficients(
-        heat_input,
+    pprime_input = source_plan.scaled_pprime
+    driver_input = source_plan.scaled_driver
+    pprime_spline_coeff = build_uniform_source_interpolation_coefficients(
+        pprime_input,
         kind=source_plan.interpolation_kind,
     )
-    current_spline_coeff = build_uniform_source_interpolation_coefficients(
-        current_input,
+    driver_spline_coeff = build_uniform_source_interpolation_coefficients(
+        driver_input,
         kind=source_plan.interpolation_kind,
     )
     coordinate_code = int(source_plan.coordinate_code)
@@ -693,7 +693,7 @@ def _bind_pj2_psin_uniform_residual_runner_core(
             # profile before the fixed-point loop starts.
             _normalize_psin_query(source_psin_query, psin_profile_u)
         if has_Ip and use_local_barycentric:
-            # The barycentric helper updates heat/current inside the fixed-point
+            # The barycentric helper updates pprime/driver inside the fixed-point
             # loop without allocating a fresh remap matrix for each psin query.
             alpha1, alpha2 = _run_pj2_psin_uniform_barycentric_with_scratch_impl(
                 source_psin_query,
@@ -701,10 +701,10 @@ def _bind_pj2_psin_uniform_residual_runner_core(
                 root_fields,
                 FFn_psin,
                 Pn_psin,
-                materialized_heat_input,
-                materialized_current_input,
-                heat_input,
-                current_input,
+                materialized_pprime_input,
+                materialized_driver_input,
+                pprime_input,
+                driver_input,
                 barycentric_weights,
                 coordinate_code,
                 R0,
@@ -732,12 +732,12 @@ def _bind_pj2_psin_uniform_residual_runner_core(
                 root_fields,
                 FFn_psin,
                 Pn_psin,
-                materialized_heat_input,
-                materialized_current_input,
-                heat_input,
-                current_input,
-                heat_spline_coeff,
-                current_spline_coeff,
+                materialized_pprime_input,
+                materialized_driver_input,
+                pprime_input,
+                driver_input,
+                pprime_spline_coeff,
+                driver_spline_coeff,
                 coordinate_code,
                 R0,
                 B0,
@@ -758,7 +758,7 @@ def _bind_pj2_psin_uniform_residual_runner_core(
         alpha1 = finalize_pressure_normalization(
             FFn_psin,
             Pn_psin,
-            materialized_heat_input,
+            materialized_pprime_input,
             coordinate_code,
             scaled_p0,
             beta,
@@ -796,16 +796,16 @@ def _bind_source_eval_runner_for_fused_backend(
         out_root_fields: np.ndarray,
         out_FFn_psin: np.ndarray,
         out_Pn_psin: np.ndarray,
-        heat_input: np.ndarray,
-        current_input: np.ndarray,
+        pprime_input: np.ndarray,
+        driver_input: np.ndarray,
         R0: float,
     ) -> tuple[float, float]:
         alpha1, alpha2 = source_eval_binding.source_kernel(
             out_root_fields,
             out_FFn_psin,
             out_Pn_psin,
-            heat_input,
-            current_input,
+            pprime_input,
+            driver_input,
             source_eval_binding.coordinate_code,
             R0,
             source_eval_binding.B0,
@@ -826,7 +826,7 @@ def _bind_source_eval_runner_for_fused_backend(
         alpha1 = finalize_pressure_normalization(
             out_FFn_psin,
             out_Pn_psin,
-            heat_input,
+            pprime_input,
             source_eval_binding.coordinate_code,
             source_eval_binding.scaled_p0,
             source_eval_binding.beta,

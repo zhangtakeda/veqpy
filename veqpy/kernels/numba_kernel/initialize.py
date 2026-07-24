@@ -98,8 +98,8 @@ def estimate_axis_shift_h0(case: object) -> float:
     kappa = abs(float(boundary.ka))
     elongation_factor = 2.0 * kappa / (1.0 + kappa * kappa)
 
-    pressure_drive = _relative_abs_rms(case.heat_input)
-    current_drive = _relative_abs_rms(case.current_input)
+    pressure_drive = _relative_abs_rms(case.pprime_input)
+    current_drive = _relative_abs_rms(case.driver_input)
     source_drive = np.hypot(
         pressure_drive,
         _SOURCE_CURRENT_ROUGHNESS_WEIGHT * current_drive,

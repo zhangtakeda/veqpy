@@ -342,7 +342,8 @@ namespace cxx_kernel_api
             const double epsilon           = input.R0 != 0.0 ? input.a / input.R0 : 0.0;
             const double kappa             = std::abs(input.ka);
             const double elongation_factor = (1.0 + kappa * kappa) != 0.0 ? 2.0 * kappa / (1.0 + kappa * kappa) : 0.0;
-            const double source_drive = std::hypot(relative_abs_rms(input.heat), 0.5 * relative_abs_rms(input.current));
+            const double source_drive =
+                std::hypot(relative_abs_rms(input.pprime), 0.5 * relative_abs_rms(input.driver));
             const double h0           = epsilon * elongation_factor * std::tanh(source_drive);
             return std::abs(h0) <= 1.0e-6 ? 0.0 : h0;
         }
@@ -712,8 +713,8 @@ namespace cxx_kernel_api
         RuntimeCase build_inline_case(int repeat, int warmup, SolverKind solver)
         {
             RuntimeCase input{};
-            input.heat         = default_scaled_heat;
-            input.current      = default_scaled_current;
+            input.pprime       = default_scaled_pprime;
+            input.driver       = default_scaled_driver;
             input.repeat       = repeat;
             input.warmup       = warmup;
             input.solver       = solver;

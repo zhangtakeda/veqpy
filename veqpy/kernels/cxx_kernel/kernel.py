@@ -348,14 +348,7 @@ class _CxxKernelImpl:
             raise TypeError(f"source must be KernelSource, got {type(source).__name__}")
         if case_name is None:
             return source
-        return KernelSource(
-            heat_profile=source.heat_profile,
-            current_profile=source.current_profile,
-            p0=source.p0,
-            Ip=source.Ip,
-            beta=source.beta,
-            case_name=case_name,
-        )
+        return replace(source, case_name=case_name)
 
     def _validate_runtime_case_adaptability(
         self,

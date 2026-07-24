@@ -102,12 +102,12 @@ namespace source::detail
         using SourceVector = Vector<double, sample_count>;
         using RootFields   = Matrix<double, root_field_count, radial_nodes>;
 
-        SourceVector heat_input{};
-        SourceVector current_input{};
+        SourceVector pprime_input{};
+        SourceVector driver_input{};
         RadialVector source_psin_query{};
         RadialVector source_parameter_query{};
-        RadialVector materialized_heat_input{};
-        RadialVector materialized_current_input{};
+        RadialVector materialized_pprime_input{};
+        RadialVector materialized_driver_input{};
         RootFields   profile_root_fields{};
         RootFields   source_target_root_fields{};
         RadialVector active_F{};
@@ -118,13 +118,13 @@ namespace source::detail
         double       alpha2 = 0.0;
         bool         source_materialization_initialized = false;
 
-        constexpr void set_uniform_sources(std::span<const double, sample_count> heat,
-                                           std::span<const double, sample_count> current) noexcept
+        constexpr void set_uniform_sources(std::span<const double, sample_count> pprime,
+                                           std::span<const double, sample_count> driver) noexcept
         {
             for (size_t i = 0; i < sample_count; ++i)
             {
-                heat_input[i]    = heat[i];
-                current_input[i] = current[i];
+                pprime_input[i] = pprime[i];
+                driver_input[i] = driver[i];
             }
             source_materialization_initialized = false;
         }
@@ -147,8 +147,8 @@ namespace source::detail
                 return;
             for (size_t i = 0; i < radial_nodes; ++i)
             {
-                materialized_heat_input[i]    = heat_input[i];
-                materialized_current_input[i] = current_input[i];
+                materialized_pprime_input[i] = pprime_input[i];
+                materialized_driver_input[i] = driver_input[i];
             }
             source_materialization_initialized = true;
         }
@@ -275,14 +275,14 @@ namespace source::detail
             if constexpr (SourceConstraintCode == 0)
             {
                 alpha2                    = psi_square_sign * integral_prof;
-                alpha1                    = -dot(materialized_heat_input, GridType::weights) / integral_prof;
+                alpha1                    = -dot(materialized_pprime_input, GridType::weights) / integral_prof;
                 alpha1 = ensure_pressure_alpha1<true>(
                     alpha1, p0, alpha2, psin_r);
                 const double source_scale = psi_square_sign / (alpha1 * alpha2);
                 for (size_t i = 0; i < radial_nodes; ++i)
                 {
-                    Pn_psin[i]  = materialized_heat_input[i] * source_scale / psin_r[i];
-                    FFn_psin[i] = materialized_current_input[i] * source_scale / psin_r[i];
+                    Pn_psin[i]  = materialized_pprime_input[i] * source_scale / psin_r[i];
+                    FFn_psin[i] = materialized_driver_input[i] * source_scale / psin_r[i];
                 }
                 regularize_ffn_psin(n_axis_fix);
                 (void)Ip;
@@ -302,7 +302,7 @@ namespace source::detail
             else
             {
                 RadialVector Pn_out{uninitialized};
-                compute_Pn_out(Pn_out, materialized_heat_input);
+                compute_Pn_out(Pn_out, materialized_pprime_input);
                 const double pressure_denominator =
                     weighted_dot(Pn_out, geometry, geometry::radial_V_r) +
                     p0 * dot_radial_moment(geometry, geometry::radial_V_r);
@@ -316,8 +316,8 @@ namespace source::detail
             alpha2 = c2 * alpha1;
             for (size_t i = 0; i < radial_nodes; ++i)
             {
-                Pn_psin[i]  = materialized_heat_input[i] * psi_square_sign / psin_r[i];
-                FFn_psin[i] = materialized_current_input[i] * psi_square_sign / psin_r[i];
+                Pn_psin[i]  = materialized_pprime_input[i] * psi_square_sign / psin_r[i];
+                FFn_psin[i] = materialized_driver_input[i] * psi_square_sign / psin_r[i];
             }
             regularize_ffn_psin(n_axis_fix);
         }
@@ -378,7 +378,7 @@ namespace source::detail
 
                 RadialVector pressure_profile{uninitialized};
                 for (size_t i = 0; i < radial_nodes; ++i)
-                    pressure_profile[i] = materialized_heat_input[i] * psin_r[i];
+                    pressure_profile[i] = materialized_pprime_input[i] * psin_r[i];
                 alpha1 = -dot(pressure_profile, GridType::weights);
                 alpha1 = ensure_pressure_alpha1<false>(
                     alpha1, p0, alpha2, psin_r);
@@ -386,8 +386,8 @@ namespace source::detail
                 const double inv_alpha1 = 1.0 / alpha1;
                 for (size_t i = 0; i < radial_nodes; ++i)
                 {
-                    Pn_psin[i]  = materialized_heat_input[i] * inv_alpha1;
-                    FFn_psin[i] = materialized_current_input[i] * inv_alpha1;
+                    Pn_psin[i]  = materialized_pprime_input[i] * inv_alpha1;
+                    FFn_psin[i] = materialized_driver_input[i] * inv_alpha1;
                 }
                 regularize_ffn_psin(n_axis_fix);
                 (void)Ip;
@@ -398,8 +398,8 @@ namespace source::detail
 
             for (size_t i = 0; i < radial_nodes; ++i)
             {
-                Pn_psin[i]  = materialized_heat_input[i];
-                FFn_psin[i] = materialized_current_input[i];
+                Pn_psin[i]  = materialized_pprime_input[i];
+                FFn_psin[i] = materialized_driver_input[i];
             }
             regularize_ffn_psin(n_axis_fix);
 
@@ -587,7 +587,7 @@ namespace source::detail
             double             denominator = 0.0;
             for (size_t i = 0; i < radial_nodes; ++i)
             {
-                const double raw = materialized_heat_input[i];
+                const double raw = materialized_pprime_input[i];
                 denominator += raw * raw * GridType::weights[i];
                 const double realized =
                     RhoCoordinate ? alpha1 * alpha2 * Pn_psin[i] * psin_r[i]
@@ -605,8 +605,8 @@ namespace source::detail
             for (size_t i = 0; i < radial_nodes; ++i)
             {
                 radial_pressure_gradient[i] =
-                    RhoCoordinate ? materialized_heat_input[i]
-                                  : alpha2 * materialized_heat_input[i] * psin_r[i];
+                    RhoCoordinate ? materialized_pprime_input[i]
+                                  : alpha2 * materialized_pprime_input[i] * psin_r[i];
             }
             RadialVector pressure{uninitialized};
             compute_Pn_out(pressure, radial_pressure_gradient);
@@ -814,8 +814,8 @@ namespace source::detail
             {
                 for (size_t i = 0; i < radial_nodes; ++i)
                 {
-                    materialized_heat_input[i]    = heat_input[0];
-                    materialized_current_input[i] = current_input[0];
+                    materialized_pprime_input[i] = pprime_input[0];
+                    materialized_driver_input[i] = driver_input[0];
                 }
             }
             else
@@ -829,25 +829,25 @@ namespace source::detail
                     const double x_nearest = static_cast<double>(nearest) / denom_scale;
                     if (math::abs(q - x_nearest) <= 1.0e-14)
                     {
-                        materialized_heat_input[i]    = heat_input[nearest];
-                        materialized_current_input[i] = current_input[nearest];
+                        materialized_pprime_input[i] = pprime_input[nearest];
+                        materialized_driver_input[i] = driver_input[nearest];
                         continue;
                     }
 
-                    double denominator       = 0.0;
-                    double numerator_heat    = 0.0;
-                    double numerator_current = 0.0;
+                    double denominator      = 0.0;
+                    double numerator_pprime = 0.0;
+                    double numerator_driver = 0.0;
                     for (size_t local_j = 0; local_j < stencil_size; ++local_j)
                     {
                         const size_t j = start + local_j;
                         const double term =
                             SourceShape::barycentric_weights[local_j] / (q - static_cast<double>(j) / denom_scale);
                         denominator += term;
-                        numerator_heat += term * heat_input[j];
-                        numerator_current += term * current_input[j];
+                        numerator_pprime += term * pprime_input[j];
+                        numerator_driver += term * driver_input[j];
                     }
-                    materialized_heat_input[i]    = numerator_heat / denominator;
-                    materialized_current_input[i] = numerator_current / denominator;
+                    materialized_pprime_input[i] = numerator_pprime / denominator;
+                    materialized_driver_input[i] = numerator_driver / denominator;
                 }
             }
         }
@@ -858,8 +858,8 @@ namespace source::detail
             {
                 for (size_t i = 0; i < radial_nodes; ++i)
                 {
-                    materialized_heat_input[i]    = heat_input[0];
-                    materialized_current_input[i] = current_input[0];
+                    materialized_pprime_input[i] = pprime_input[0];
+                    materialized_driver_input[i] = driver_input[0];
                 }
             }
             else
@@ -880,10 +880,10 @@ namespace source::detail
                     {
                         t = q * interval_count - static_cast<double>(interval);
                     }
-                    materialized_heat_input[i] =
-                        evaluate_local_polynomial_value(heat_input, interval, t);
-                    materialized_current_input[i] =
-                        evaluate_local_polynomial_value(current_input, interval, t);
+                    materialized_pprime_input[i] =
+                        evaluate_local_polynomial_value(pprime_input, interval, t);
+                    materialized_driver_input[i] =
+                        evaluate_local_polynomial_value(driver_input, interval, t);
                 }
             }
         }
@@ -1018,8 +1018,8 @@ namespace source::detail
             const double* const radial_V_r = geometry_radial + geometry::radial_V_r * radial_nodes;
             for (size_t i = 0; i < radial_nodes; ++i)
             {
-                out[i] = materialized_current_input[i] * radial_Ln_r[i] +
-                         radial_V_r[i] * materialized_heat_input[i] * pressure_factor;
+                out[i] = materialized_driver_input[i] * radial_Ln_r[i] +
+                         radial_V_r[i] * materialized_pprime_input[i] * pressure_factor;
             }
         }
 
@@ -1034,8 +1034,8 @@ namespace source::detail
             for (size_t i = 0; i < radial_nodes; ++i)
             {
                 out[i] = radial_Kn[i] *
-                         (materialized_current_input[i] * radial_Ln_r[i] +
-                         radial_V_r[i] * materialized_heat_input[i] * pressure_factor);
+                         (materialized_driver_input[i] * radial_Ln_r[i] +
+                         radial_V_r[i] * materialized_pprime_input[i] * pressure_factor);
             }
         }
 
@@ -1137,8 +1137,8 @@ namespace source::detail
             for (size_t i = 0; i < radial_nodes; ++i)
             {
                 total += GridType::weights[i] * source_scale / psin_r[i] *
-                         (two_pi * radial_Ln_r[i] * materialized_current_input[i] +
-                          inv_two_pi * radial_V_r[i] * materialized_heat_input[i]);
+                         (two_pi * radial_Ln_r[i] * materialized_driver_input[i] +
+                          inv_two_pi * radial_V_r[i] * materialized_pprime_input[i]);
             }
             return total;
         }
@@ -1163,8 +1163,8 @@ namespace source::detail
             for (size_t i = 0; i < radial_nodes; ++i)
             {
                 radial_pressure_gradient[i] =
-                    RhoCoordinate ? materialized_heat_input[i]
-                                  : flux_scale * materialized_heat_input[i] * psin_r[i];
+                    RhoCoordinate ? materialized_pprime_input[i]
+                                  : flux_scale * materialized_pprime_input[i] * psin_r[i];
             }
             RadialVector pressure{uninitialized};
             compute_Pn_out(pressure, radial_pressure_gradient);
@@ -1195,17 +1195,17 @@ namespace source::detail
             if constexpr (SourceConstraintCode == 1 || SourceConstraintCode == 3)
             {
                 for (size_t i = 0; i < radial_nodes; ++i)
-                    psin_r[i] = materialized_current_input[i];
+                    psin_r[i] = materialized_driver_input[i];
                 alpha2 = Ip /
                          (2.0 * geometry::detail::pi *
                           geometry.radial_field(geometry::radial_Kn, radial_nodes - 1) * psin_r[radial_nodes - 1]);
             }
             else
             {
-                alpha2 = dot(materialized_current_input, GridType::weights);
+                alpha2 = dot(materialized_driver_input, GridType::weights);
                 const double inv_alpha2 = 1.0 / alpha2;
                 for (size_t i = 0; i < radial_nodes; ++i)
-                    psin_r[i] = materialized_current_input[i] * inv_alpha2;
+                    psin_r[i] = materialized_driver_input[i] * inv_alpha2;
                 (void)Ip;
             }
 
@@ -1228,13 +1228,13 @@ namespace source::detail
                 {
                     if constexpr (RhoCoordinate)
                     {
-                        Pn_psin[i] = materialized_heat_input[i] / psin_r[i];
-                        Pn_r[i]    = materialized_heat_input[i];
+                        Pn_psin[i] = materialized_pprime_input[i] / psin_r[i];
+                        Pn_r[i]    = materialized_pprime_input[i];
                     }
                     else
                     {
-                        Pn_psin[i] = materialized_heat_input[i];
-                        Pn_r[i]    = materialized_heat_input[i] * psin_r[i];
+                        Pn_psin[i] = materialized_pprime_input[i];
+                        Pn_r[i]    = materialized_pprime_input[i] * psin_r[i];
                     }
                 }
                 RadialVector Pn_out{uninitialized};
@@ -1253,24 +1253,24 @@ namespace source::detail
             {
                 if constexpr (RhoCoordinate)
                 {
-                    alpha1               = -dot(materialized_heat_input, GridType::weights) / alpha2;
+                    alpha1               = -dot(materialized_pprime_input, GridType::weights) / alpha2;
                     alpha1 = ensure_pressure_alpha1<RhoCoordinate>(
                         alpha1, p0, alpha2, psin_r);
                     const double scaling = 1.0 / (alpha1 * alpha2);
                     for (size_t i = 0; i < radial_nodes; ++i)
-                        Pn_psin[i] = materialized_heat_input[i] * scaling / psin_r[i];
+                        Pn_psin[i] = materialized_pprime_input[i] * scaling / psin_r[i];
                 }
                 else
                 {
                     double pressure_total = 0.0;
                     for (size_t i = 0; i < radial_nodes; ++i)
-                        pressure_total += materialized_heat_input[i] * psin_r[i] * alpha2 * GridType::weights[i];
+                        pressure_total += materialized_pprime_input[i] * psin_r[i] * alpha2 * GridType::weights[i];
                     alpha1 = -pressure_total / alpha2;
                     alpha1 = ensure_pressure_alpha1<RhoCoordinate>(
                         alpha1, p0, alpha2, psin_r);
                     const double inv_alpha1 = 1.0 / alpha1;
                     for (size_t i = 0; i < radial_nodes; ++i)
-                        Pn_psin[i] = materialized_heat_input[i] * inv_alpha1;
+                        Pn_psin[i] = materialized_pprime_input[i] * inv_alpha1;
                 }
                 (void)beta;
                 (void)B0;
@@ -1296,14 +1296,14 @@ namespace source::detail
             RadialVector Itor{uninitialized};
             if constexpr (SourceConstraintCode == 1 || SourceConstraintCode == 3)
             {
-                const double source_scale = Ip / materialized_current_input[radial_nodes - 1];
+                const double source_scale = Ip / materialized_driver_input[radial_nodes - 1];
                 for (size_t i = 0; i < radial_nodes; ++i)
-                    Itor[i] = materialized_current_input[i] * source_scale;
+                    Itor[i] = materialized_driver_input[i] * source_scale;
             }
             else
             {
                 for (size_t i = 0; i < radial_nodes; ++i)
-                    Itor[i] = materialized_current_input[i];
+                    Itor[i] = materialized_driver_input[i];
                 (void)Ip;
             }
             floor_signed_current_primitive(Itor);
@@ -1341,13 +1341,13 @@ namespace source::detail
                 {
                     if constexpr (RhoCoordinate)
                     {
-                        Pn_psin[i] = materialized_heat_input[i] / psin_r[i];
-                        Pn_r[i]    = materialized_heat_input[i];
+                        Pn_psin[i] = materialized_pprime_input[i] / psin_r[i];
+                        Pn_r[i]    = materialized_pprime_input[i];
                     }
                     else
                     {
-                        Pn_psin[i] = materialized_heat_input[i];
-                        Pn_r[i]    = materialized_heat_input[i] * psin_r[i];
+                        Pn_psin[i] = materialized_pprime_input[i];
+                        Pn_r[i]    = materialized_pprime_input[i] * psin_r[i];
                     }
                 }
                 RadialVector Pn_out{uninitialized};
@@ -1366,24 +1366,24 @@ namespace source::detail
             {
                 if constexpr (RhoCoordinate)
                 {
-                    alpha1               = -dot(materialized_heat_input, GridType::weights) / alpha2;
+                    alpha1               = -dot(materialized_pprime_input, GridType::weights) / alpha2;
                     alpha1 = ensure_pressure_alpha1<RhoCoordinate>(
                         alpha1, p0, alpha2, psin_r);
                     const double scaling = 1.0 / (alpha1 * alpha2);
                     for (size_t i = 0; i < radial_nodes; ++i)
-                        Pn_psin[i] = materialized_heat_input[i] * scaling / psin_r[i];
+                        Pn_psin[i] = materialized_pprime_input[i] * scaling / psin_r[i];
                 }
                 else
                 {
                     double pressure_total = 0.0;
                     for (size_t i = 0; i < radial_nodes; ++i)
-                        pressure_total += materialized_heat_input[i] * psin_r[i] * alpha2 * GridType::weights[i];
+                        pressure_total += materialized_pprime_input[i] * psin_r[i] * alpha2 * GridType::weights[i];
                     alpha1 = -pressure_total / alpha2;
                     alpha1 = ensure_pressure_alpha1<RhoCoordinate>(
                         alpha1, p0, alpha2, psin_r);
                     const double inv_alpha1 = 1.0 / alpha1;
                     for (size_t i = 0; i < radial_nodes; ++i)
-                        Pn_psin[i] = materialized_heat_input[i] * inv_alpha1;
+                        Pn_psin[i] = materialized_pprime_input[i] * inv_alpha1;
                 }
                 (void)beta;
                 (void)B0;
@@ -1408,7 +1408,7 @@ namespace source::detail
 
             RadialVector integrand_j{uninitialized};
             for (size_t i = 0; i < radial_nodes; ++i)
-                integrand_j[i] = materialized_current_input[i] * geometry.radial_field(geometry::radial_S_r, i);
+                integrand_j[i] = materialized_driver_input[i] * geometry.radial_field(geometry::radial_S_r, i);
 
             RadialVector I_tor_prof{uninitialized};
             radial_grid_accumulator_matvec_into<GridType>(I_tor_prof, integrand_j);
@@ -1421,7 +1421,7 @@ namespace source::detail
                 for (size_t i = 0; i < radial_nodes; ++i)
                 {
                     I_tor[i] = I_tor_prof[i] * source_scale;
-                    jtor[i]  = materialized_current_input[i] * source_scale;
+                    jtor[i]  = materialized_driver_input[i] * source_scale;
                 }
             }
             else
@@ -1429,7 +1429,7 @@ namespace source::detail
                 for (size_t i = 0; i < radial_nodes; ++i)
                 {
                     I_tor[i] = I_tor_prof[i];
-                    jtor[i]  = materialized_current_input[i];
+                    jtor[i]  = materialized_driver_input[i];
                 }
                 (void)Ip;
             }
@@ -1466,13 +1466,13 @@ namespace source::detail
                 {
                     if constexpr (RhoCoordinate)
                     {
-                        Pn_psin[i] = materialized_heat_input[i] / psin_r[i];
-                        Pn_r[i]    = materialized_heat_input[i];
+                        Pn_psin[i] = materialized_pprime_input[i] / psin_r[i];
+                        Pn_r[i]    = materialized_pprime_input[i];
                     }
                     else
                     {
-                        Pn_psin[i] = materialized_heat_input[i];
-                        Pn_r[i]    = materialized_heat_input[i] * psin_r[i];
+                        Pn_psin[i] = materialized_pprime_input[i];
+                        Pn_r[i]    = materialized_pprime_input[i] * psin_r[i];
                     }
                 }
                 RadialVector Pn_out{uninitialized};
@@ -1491,24 +1491,24 @@ namespace source::detail
             {
                 if constexpr (RhoCoordinate)
                 {
-                    alpha1               = -dot(materialized_heat_input, GridType::weights) / alpha2;
+                    alpha1               = -dot(materialized_pprime_input, GridType::weights) / alpha2;
                     alpha1 = ensure_pressure_alpha1<RhoCoordinate>(
                         alpha1, p0, alpha2, psin_r);
                     const double scaling = 1.0 / (alpha1 * alpha2);
                     for (size_t i = 0; i < radial_nodes; ++i)
-                        Pn_psin[i] = materialized_heat_input[i] * scaling / psin_r[i];
+                        Pn_psin[i] = materialized_pprime_input[i] * scaling / psin_r[i];
                 }
                 else
                 {
                     double pressure_total = 0.0;
                     for (size_t i = 0; i < radial_nodes; ++i)
-                        pressure_total += materialized_heat_input[i] * psin_r[i] * alpha2 * GridType::weights[i];
+                        pressure_total += materialized_pprime_input[i] * psin_r[i] * alpha2 * GridType::weights[i];
                     alpha1 = -pressure_total / alpha2;
                     alpha1 = ensure_pressure_alpha1<RhoCoordinate>(
                         alpha1, p0, alpha2, psin_r);
                     const double inv_alpha1 = 1.0 / alpha1;
                     for (size_t i = 0; i < radial_nodes; ++i)
-                        Pn_psin[i] = materialized_heat_input[i] * inv_alpha1;
+                        Pn_psin[i] = materialized_pprime_input[i] * inv_alpha1;
                 }
                 (void)beta;
                 (void)B0;
@@ -1538,7 +1538,7 @@ namespace source::detail
             for (size_t i = 0; i < radial_nodes; ++i)
             {
                 integrand[i] = geometry.radial_field(geometry::radial_Ln_r, i) *
-                               materialized_current_input[i] / active_F[i];
+                               materialized_driver_input[i] / active_F[i];
             }
 
             RadialVector integral_val{uninitialized};
@@ -1589,13 +1589,13 @@ namespace source::detail
                 {
                     if constexpr (RhoCoordinate)
                     {
-                        Pn_psin[i] = materialized_heat_input[i] / psin_r[i];
-                        Pn_r[i]    = materialized_heat_input[i];
+                        Pn_psin[i] = materialized_pprime_input[i] / psin_r[i];
+                        Pn_r[i]    = materialized_pprime_input[i];
                     }
                     else
                     {
-                        Pn_psin[i] = materialized_heat_input[i];
-                        Pn_r[i]    = materialized_heat_input[i] * psin_r[i];
+                        Pn_psin[i] = materialized_pprime_input[i];
+                        Pn_r[i]    = materialized_pprime_input[i] * psin_r[i];
                     }
                 }
                 RadialVector Pn_out{uninitialized};
@@ -1614,21 +1614,21 @@ namespace source::detail
             {
                 if constexpr (RhoCoordinate)
                 {
-                    alpha1               = -dot(materialized_heat_input, GridType::weights) / alpha2;
+                    alpha1               = -dot(materialized_pprime_input, GridType::weights) / alpha2;
                     alpha1 = ensure_pressure_alpha1<RhoCoordinate>(
                         alpha1, p0, alpha2, psin_r);
                     const double scaling = 1.0 / (alpha1 * alpha2);
                     for (size_t i = 0; i < radial_nodes; ++i)
-                        Pn_psin[i] = materialized_heat_input[i] * scaling / psin_r[i];
+                        Pn_psin[i] = materialized_pprime_input[i] * scaling / psin_r[i];
                 }
                 else
                 {
-                    alpha1 = -weighted_dot(materialized_heat_input, psin_r, GridType::weights);
+                    alpha1 = -weighted_dot(materialized_pprime_input, psin_r, GridType::weights);
                     alpha1 = ensure_pressure_alpha1<RhoCoordinate>(
                         alpha1, p0, alpha2, psin_r);
                     const double inv_alpha1 = 1.0 / alpha1;
                     for (size_t i = 0; i < radial_nodes; ++i)
-                        Pn_psin[i] = materialized_heat_input[i] * inv_alpha1;
+                        Pn_psin[i] = materialized_pprime_input[i] * inv_alpha1;
                 }
                 (void)beta;
             }
@@ -1738,7 +1738,7 @@ namespace source::detail
                 trial_psin_r[i] *= inv_alpha2;
                 if (!math::is_finite(trial_psin_r[i]) || trial_psin_r[i] <= 0.0)
                     return std::numeric_limits<double>::quiet_NaN();
-                trial_Pn_r[i] = materialized_heat_input[i] * trial_psin_r[i];
+                trial_Pn_r[i] = materialized_pprime_input[i] * trial_psin_r[i];
             }
             compute_Pn_out(trial_Pn, trial_Pn_r);
             const double beta_den = weighted_dot(trial_Pn, geometry, geometry::radial_V_r);
@@ -1836,14 +1836,14 @@ namespace source::detail
                     two_pi * edge_F / Ip *
                     geometry.radial_field(geometry::radial_Kn, radial_nodes - 1) *
                     geometry.radial_field(geometry::radial_Ln_r, radial_nodes - 1) /
-                    materialized_current_input[radial_nodes - 1];
+                    materialized_driver_input[radial_nodes - 1];
                 for (size_t i = 0; i < radial_nodes; ++i)
-                    q_prof[i] = materialized_current_input[i] * edge_scale;
+                    q_prof[i] = materialized_driver_input[i] * edge_scale;
             }
             else
             {
                 for (size_t i = 0; i < radial_nodes; ++i)
-                    q_prof[i] = materialized_current_input[i];
+                    q_prof[i] = materialized_driver_input[i];
                 (void)Ip;
             }
 
@@ -1862,7 +1862,7 @@ namespace source::detail
             if constexpr (SourceConstraintCode == 2 || SourceConstraintCode == 3)
             {
                 RadialVector Pn_out{uninitialized};
-                compute_Pn_out(Pn_out, materialized_heat_input);
+                compute_Pn_out(Pn_out, materialized_pprime_input);
                 const double beta_den_pre =
                     weighted_dot(Pn_out, geometry, geometry::radial_V_r) +
                     p0 * dot_radial_moment(geometry, geometry::radial_V_r);
@@ -1886,7 +1886,7 @@ namespace source::detail
                 coeff_y[i] = 2.0 * W_r[i];
                 rhs[i] = -pressure_factor * pressure_scale *
                          geometry.radial_field(geometry::radial_V_r, i) *
-                         materialized_heat_input[i] * q_prof[i] /
+                         materialized_pprime_input[i] * q_prof[i] /
                          geometry.radial_field(geometry::radial_Ln_r, i);
             }
 
@@ -1922,16 +1922,16 @@ namespace source::detail
             {
                 alpha1 = beta_C / alpha2;
                 for (size_t i = 0; i < radial_nodes; ++i)
-                    Pn_psin[i] = materialized_heat_input[i] / psin_r[i];
+                    Pn_psin[i] = materialized_pprime_input[i] / psin_r[i];
             }
             else
             {
-                alpha1               = -dot(materialized_heat_input, GridType::weights) / alpha2;
+                alpha1               = -dot(materialized_pprime_input, GridType::weights) / alpha2;
                 alpha1 = ensure_pressure_alpha1<true>(
                     alpha1, p0, alpha2, psin_r);
                 const double scaling = 1.0 / (alpha1 * alpha2);
                 for (size_t i = 0; i < radial_nodes; ++i)
-                    Pn_psin[i] = materialized_heat_input[i] * scaling / psin_r[i];
+                    Pn_psin[i] = materialized_pprime_input[i] * scaling / psin_r[i];
             }
 
             RadialVector Y_r{uninitialized};
@@ -1966,14 +1966,14 @@ namespace source::detail
                     two_pi * edge_F / Ip *
                     geometry.radial_field(geometry::radial_Kn, radial_nodes - 1) *
                     geometry.radial_field(geometry::radial_Ln_r, radial_nodes - 1) /
-                    materialized_current_input[radial_nodes - 1];
+                    materialized_driver_input[radial_nodes - 1];
                 for (size_t i = 0; i < radial_nodes; ++i)
-                    q_prof[i] = materialized_current_input[i] * edge_scale;
+                    q_prof[i] = materialized_driver_input[i] * edge_scale;
             }
             else
             {
                 for (size_t i = 0; i < radial_nodes; ++i)
-                    q_prof[i] = materialized_current_input[i];
+                    q_prof[i] = materialized_driver_input[i];
                 (void)Ip;
             }
 
@@ -2008,7 +2008,7 @@ namespace source::detail
                     F0_rhs[i] = 0.0;
                     F1_rhs[i] = -pressure_factor *
                                 geometry.radial_field(geometry::radial_V_r, i) *
-                                materialized_heat_input[i];
+                                materialized_pprime_input[i];
                 }
                 solve_pq_linear_system_two_rhs(
                     F_solved,
@@ -2028,7 +2028,7 @@ namespace source::detail
                 for (size_t i = 0; i < radial_nodes; ++i)
                 {
                     F_solved[i] += alpha1 * F1[i];
-                    Pn_psin[i] = materialized_heat_input[i];
+                    Pn_psin[i] = materialized_pprime_input[i];
                 }
             }
             else
@@ -2038,7 +2038,7 @@ namespace source::detail
                 {
                     rhs[i] = -pressure_factor *
                              geometry.radial_field(geometry::radial_V_r, i) *
-                             materialized_heat_input[i];
+                             materialized_pprime_input[i];
                 }
                 solve_pq_linear_system(
                     F_solved, GridType::differentiator, coeff_d, coeff_y, rhs, edge_F);
@@ -2069,12 +2069,12 @@ namespace source::detail
 
             if constexpr (SourceConstraintCode == 0 || SourceConstraintCode == 1)
             {
-                alpha1 = -weighted_dot(materialized_heat_input, psin_r, GridType::weights);
+                alpha1 = -weighted_dot(materialized_pprime_input, psin_r, GridType::weights);
                 alpha1 = ensure_pressure_alpha1<false>(
                     alpha1, p0, alpha2, psin_r);
                 const double inv_alpha1 = 1.0 / alpha1;
                 for (size_t i = 0; i < radial_nodes; ++i)
-                    Pn_psin[i] = materialized_heat_input[i] * inv_alpha1;
+                    Pn_psin[i] = materialized_pprime_input[i] * inv_alpha1;
             }
 
             RadialVector F_r{uninitialized};

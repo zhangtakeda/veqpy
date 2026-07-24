@@ -16,6 +16,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from veqpy.kernels.abi.enums import SOURCE_DRIVER_BY_ROUTE
 from veqpy.kernels.types import KernelSource, KernelTopology
 from veqpy.numerics import make_quadrature
 
@@ -27,7 +28,7 @@ SETUP_NORMALIZED_ABS_MIN = 1.0e-3
 SETUP_NORMALIZED_ABS_MAX = 1.0e3
 SETUP_PHYSICAL_ABS_MIN = SETUP_NORMALIZED_ABS_MIN / MU0
 SETUP_PHYSICAL_ABS_MAX = SETUP_NORMALIZED_ABS_MAX / MU0
-CURRENT_PROFILE_ROUTES = frozenset({"PI", "PJ1", "PJ2"})
+MU0_SCALED_DRIVER_ROUTES = frozenset({"PI", "PJ1", "PJ2"})
 KERNEL_SOURCE_ADVICE = (
     "Pass raw case values to KernelSource; source lowering applies mu0 scaling once."
 )
@@ -37,16 +38,16 @@ KERNEL_SOURCE_ADVICE = (
 class MaterializedKernelSource:
     """Backend-internal source arrays after route-dependent scaling."""
 
-    scaled_heat: np.ndarray
-    scaled_current: np.ndarray
+    scaled_pprime: np.ndarray
+    scaled_driver: np.ndarray
     scaled_p0: float
     scaled_Ip: float
     beta: float
     case_name: str | None = None
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "scaled_heat", _readonly_array(self.scaled_heat))
-        object.__setattr__(self, "scaled_current", _readonly_array(self.scaled_current))
+        object.__setattr__(self, "scaled_pprime", _readonly_array(self.scaled_pprime))
+        object.__setattr__(self, "scaled_driver", _readonly_array(self.scaled_driver))
         object.__setattr__(self, "scaled_p0", float(self.scaled_p0))
         object.__setattr__(self, "scaled_Ip", float(self.scaled_Ip))
         object.__setattr__(self, "beta", float(self.beta))
@@ -66,6 +67,12 @@ def materialize_kernel_source(
         raise TypeError(f"topology must be KernelTopology, got {type(topology).__name__}")
     if not isinstance(source, KernelSource):
         raise TypeError(f"source must be KernelSource, got {type(source).__name__}")
+    expected_driver = SOURCE_DRIVER_BY_ROUTE[topology.route]
+    if source.driver_name != expected_driver:
+        raise ValueError(
+            f"route {topology.route} requires driver {expected_driver!r}, "
+            f"got {source.driver_name!r}"
+        )
     _validate_source_length(topology, source)
     return materialize_source_inputs(
         route=topology.route,
@@ -75,13 +82,13 @@ def materialize_kernel_source(
         grid_size=topology.Nr,
         quadrature=topology.quadrature,
         parameterization=topology.source_parameterization,
-        heat=source.heat_profile,
-        current=source.current_profile,
+        pprime=source.pprime,
+        driver=source.driver_profile,
         p0=source.p0,
         Ip=source.Ip,
         beta=source.beta,
-        heat_name="heat_profile",
-        current_name="current_profile",
+        pprime_name="pprime",
+        driver_name=source.driver_name,
         advice=KERNEL_SOURCE_ADVICE,
         case_name=source.case_name if case_name is None else case_name,
     )
@@ -89,14 +96,14 @@ def materialize_kernel_source(
 
 def _validate_source_length(topology: KernelTopology, source: KernelSource) -> None:
     expected_samples = topology.sample_count
-    heat_length = source.heat_profile.size
-    current_length = source.current_profile.size
-    if heat_length != expected_samples or current_length != expected_samples:
+    pprime_length = source.pprime.size
+    driver_length = source.driver_profile.size
+    if pprime_length != expected_samples or driver_length != expected_samples:
         raise ValueError(
-            "case does not match kernel topology: heat_profile and current_profile "
+            f"case does not match kernel topology: pprime and {source.driver_name} "
             f"must have length {expected_samples} for "
             f"route={topology.route}/{topology.coordinate}/{topology.nodes}, "
-            f"got {heat_length} and {current_length}"
+            f"got {pprime_length} and {driver_length}"
         )
 
 
@@ -106,13 +113,13 @@ def materialize_source_inputs(
     coordinate: str,
     nodes: str,
     sample_count: int,
-    heat: np.ndarray,
-    current: np.ndarray,
+    pprime: np.ndarray,
+    driver: np.ndarray,
     p0: float,
     Ip: float,
     beta: float,
-    heat_name: str,
-    current_name: str,
+    pprime_name: str,
+    driver_name: str,
     advice: str,
     case_name: str | None = None,
     grid_size: int | None = None,
@@ -133,31 +140,33 @@ def materialize_source_inputs(
         quadrature=quadrature,
         parameterization=parameterization,
     )
-    regular_heat, regular_current = _regularize_source_profiles(
+    regular_pprime, regular_driver = _regularize_source_profiles(
         route=route_key,
         coordinate=coordinate_key,
         nodes=nodes_key,
         rho=rho,
-        heat=heat,
-        current=current,
-        heat_name=heat_name,
-        current_name=current_name,
+        pprime=pprime,
+        driver=driver,
+        pprime_name=pprime_name,
+        driver_name=driver_name,
         fix_rho=float(fix_rho),
     )
     scaled_p0 = _scale_pressure_offset_input(p0, name="p0", advice=advice)
-    if not np.any(regular_heat != 0.0) and scaled_p0 == 0.0:
+    if not np.any(regular_pprime != 0.0) and scaled_p0 == 0.0:
         raise ValueError(
             "The complete pressure profile is identically zero: "
-            f"{heat_name} is all zero and p0 is zero. "
+            f"{pprime_name} is all zero and p0 is zero. "
             "A non-zero pressure profile is required until the current-based "
             "alpha fallback is implemented."
         )
     return MaterializedKernelSource(
-        scaled_heat=_scale_pressure_like_input(regular_heat, name=heat_name, advice=advice),
-        scaled_current=_scale_current_input(
-            regular_current,
+        scaled_pprime=_scale_pressure_like_input(
+            regular_pprime, name=pprime_name, advice=advice
+        ),
+        scaled_driver=_scale_driver_input(
+            regular_driver,
             route=route_key,
-            name=current_name,
+            name=driver_name,
             advice=advice,
         ),
         scaled_p0=scaled_p0,
@@ -193,30 +202,30 @@ def _regularize_source_profiles(
     coordinate: str,
     nodes: str,
     rho: np.ndarray,
-    heat: np.ndarray,
-    current: np.ndarray,
-    heat_name: str,
-    current_name: str,
+    pprime: np.ndarray,
+    driver: np.ndarray,
+    pprime_name: str,
+    driver_name: str,
     fix_rho: float,
 ) -> tuple[np.ndarray, np.ndarray]:
-    heat_array = np.asarray(heat, dtype=np.float64)
-    current_array = np.asarray(current, dtype=np.float64)
-    heat_kind, current_kind = _source_regularity_kinds(route, coordinate)
+    pprime_array = np.asarray(pprime, dtype=np.float64)
+    driver_array = np.asarray(driver, dtype=np.float64)
+    pprime_kind, driver_kind = _source_regularity_kinds(route, coordinate)
     context = f"{route}/{coordinate}/{nodes}"
     return (
         _regularize_source_profile_if_needed(
-            heat_array,
+            pprime_array,
             rho=rho,
-            kind=heat_kind,
-            name=heat_name,
+            kind=pprime_kind,
+            name=pprime_name,
             context=context,
             fix_rho=fix_rho,
         ),
         _regularize_source_profile_if_needed(
-            current_array,
+            driver_array,
             rho=rho,
-            kind=current_kind,
-            name=current_name,
+            kind=driver_kind,
+            name=driver_name,
             context=context,
             fix_rho=fix_rho,
         ),
@@ -224,18 +233,18 @@ def _regularize_source_profiles(
 
 
 def _source_regularity_kinds(route: str, coordinate: str) -> tuple[str, str]:
-    heat_kind = "linear" if coordinate == "rho" else "even"
+    pprime_kind = "linear" if coordinate == "rho" else "even"
     if route in {"PF"}:
-        current_kind = "linear" if coordinate == "rho" else "even"
+        driver_kind = "linear" if coordinate == "rho" else "even"
     elif route == "PP":
-        current_kind = "linear"
+        driver_kind = "linear"
     elif route == "PI":
-        current_kind = "quadratic"
+        driver_kind = "quadratic"
     elif route in {"PJ1", "PJ2", "PQ"}:
-        current_kind = "even"
+        driver_kind = "even"
     else:
-        current_kind = "even"
-    return heat_kind, current_kind
+        driver_kind = "even"
+    return pprime_kind, driver_kind
 
 
 def _regularize_source_profile_if_needed(
@@ -339,7 +348,7 @@ def _scale_pressure_offset_input(value: float, *, name: str, advice: str) -> flo
     return scalar * MU0
 
 
-def _scale_current_input(
+def _scale_driver_input(
     value: np.ndarray,
     *,
     route: str,
@@ -348,7 +357,7 @@ def _scale_current_input(
 ) -> np.ndarray:
     array = np.asarray(value, dtype=np.float64)
     _validate_finite_profile(array, name=name, advice=advice)
-    if route in CURRENT_PROFILE_ROUTES:
+    if route in MU0_SCALED_DRIVER_ROUTES:
         return _readonly_array(array * MU0)
     return _readonly_array(array)
 

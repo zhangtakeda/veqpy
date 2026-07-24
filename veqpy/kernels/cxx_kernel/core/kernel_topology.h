@@ -174,8 +174,8 @@ namespace cxx_kernel_api
         struct RuntimeCase
         {
             std::string                                    case_name = "PF_psin_uniform_Ip";
-            std::array<double, CompiledSource::sample_count> heat{};
-            std::array<double, CompiledSource::sample_count> current{};
+            std::array<double, CompiledSource::sample_count> pprime{};
+            std::array<double, CompiledSource::sample_count> driver{};
             std::array<double, CompiledShape::x_size>        x0{};
             std::array<double, CompiledShape::x_size>        x_scale{};
             std::array<double, CompiledShape::x_size>        residual_scale{};
@@ -275,7 +275,7 @@ namespace cxx_kernel_api
             return input.max_evaluations > 500 ? input.max_evaluations : 500;
         }
 
-        constexpr std::array<double, 51> default_scaled_heat_values = {
+        constexpr std::array<double, 51> default_scaled_pprime_values = {
             -0.789683058574694,    -0.7925936329632908, -0.7953979059157582, -0.7981175242684836, -0.8007734699426484,
             -0.8033829643453037,   -0.8059602413311435, -0.8085160883171674, -0.811058402798229,  -0.8135924782601793,
             -0.8161210171627857,   -0.8186443668543919, -0.8211602449193173, -0.82366353909573,   -0.8261466407410907,
@@ -289,7 +289,7 @@ namespace cxx_kernel_api
             -0.004428769494182179,
         };
 
-        constexpr std::array<double, 51> default_scaled_current_values = {
+        constexpr std::array<double, 51> default_scaled_driver_values = {
             -0.2884247371510828,  -0.28903009704030685,  -0.28957011555052764,   -0.29005075790401863,
             -0.2904781886031161,  -0.2908575435658439,   -0.2911919683745232,    -0.2914838716684553,
             -0.2917344967330943,  -0.2919437907627883,   -0.29211086667346203,   -0.2922346427093772,
@@ -317,8 +317,8 @@ namespace cxx_kernel_api
             return out;
         }
 
-        constexpr auto default_scaled_heat    = source_defaults_from(default_scaled_heat_values);
-        constexpr auto default_scaled_current = source_defaults_from(default_scaled_current_values);
+        constexpr auto default_scaled_pprime    = source_defaults_from(default_scaled_pprime_values);
+        constexpr auto default_scaled_driver = source_defaults_from(default_scaled_driver_values);
 
     } // namespace
 

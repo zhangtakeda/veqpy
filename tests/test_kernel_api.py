@@ -18,6 +18,7 @@ from veqpy import (
     KernelSource,
     KernelTopology,
 )
+from veqpy.kernels.abi.enums import SOURCE_DRIVER_BY_ROUTE
 from veqpy.kernels.abi.source_semantics import materialize_kernel_source
 from veqpy.kernels.numba_kernel.residual_scale import make_residual_scale
 from veqpy.numerics import make_quadrature
@@ -66,10 +67,10 @@ def tiny_kernel_boundary() -> KernelBoundary:
 
 def tiny_kernel_source() -> KernelSource:
     psin = np.linspace(0.0, 1.0, 9, dtype=np.float64)
-    current_profile, scaled_heat = pf_reference_profiles(psin)
+    ffprime, scaled_pprime = pf_reference_profiles(psin)
     return KernelSource(
-        heat_profile=scaled_heat / MU0,
-        current_profile=current_profile,
+        pprime=scaled_pprime / MU0,
+        ffprime=ffprime,
         Ip=3.0e6,
     )
 
@@ -113,24 +114,24 @@ def route_kernel_source(
         sample_count=sample_count,
         nr=nr,
     )
-    heat_profile = (
+    pprime = (
         rho * (1.0e6 + 0.4e6 * rho * rho) if coordinate == "rho" else 1.0e6 + 0.4e6 * rho * rho
     )
     if route == "PI":
-        current_profile = rho * rho * (1.0e6 + 2.0e6 * rho * rho)
+        driver = rho * rho * (1.0e6 + 2.0e6 * rho * rho)
     elif route in {"PJ1", "PJ2"}:
-        current_profile = 1.0e6 + 2.0e6 * rho * rho
+        driver = 1.0e6 + 2.0e6 * rho * rho
     elif route == "PP":
-        current_profile = rho * (1.0 + 2.0 * rho * rho)
+        driver = rho * (1.0 + 2.0 * rho * rho)
     elif route == "PF":
-        current_profile = (
+        driver = (
             rho * (1.0 + 2.0 * rho * rho) if coordinate == "rho" else 1.0 + 2.0 * rho * rho
         )
     else:
-        current_profile = 1.0 + 2.0 * rho * rho
+        driver = 1.0 + 2.0 * rho * rho
     return KernelSource(
-        heat_profile=heat_profile,
-        current_profile=current_profile,
+        pprime=pprime,
+        **{SOURCE_DRIVER_BY_ROUTE[route]: driver},
         Ip=3.0e6,
     )
 
@@ -271,17 +272,18 @@ def test_kernel_source_materialization_route_matrix(
     materialized = materialize_kernel_source(topology, source)
 
     assert topology.source_route_key == (route, coordinate, nodes)
-    assert materialized.scaled_heat.shape == (topology.sample_count,)
-    assert materialized.scaled_current.shape == (topology.sample_count,)
-    assert_allclose(materialized.scaled_heat, source.heat_profile * MU0)
+    assert materialized.scaled_pprime.shape == (topology.sample_count,)
+    assert materialized.scaled_driver.shape == (topology.sample_count,)
+    assert source.driver_name == SOURCE_DRIVER_BY_ROUTE[route]
+    assert_allclose(materialized.scaled_pprime, source.pprime * MU0)
     if route in {"PI", "PJ1", "PJ2"}:
-        assert_allclose(materialized.scaled_current, source.current_profile * MU0)
+        assert_allclose(materialized.scaled_driver, source.driver_profile * MU0)
     else:
-        assert_allclose(materialized.scaled_current, source.current_profile)
+        assert_allclose(materialized.scaled_driver, source.driver_profile)
     assert materialized.scaled_Ip == pytest.approx(source.Ip * MU0)
     assert_allclose([materialized.beta], [source.beta], equal_nan=True)
-    assert not materialized.scaled_heat.flags.writeable
-    assert not materialized.scaled_current.flags.writeable
+    assert not materialized.scaled_pprime.flags.writeable
+    assert not materialized.scaled_driver.flags.writeable
 
 
 def test_kernel_source_materializes_p0_and_rejects_zero_complete_pressure() -> None:
@@ -300,8 +302,8 @@ def test_kernel_source_materializes_p0_and_rejects_zero_complete_pressure() -> N
     materialized = materialize_kernel_source(
         topology,
         KernelSource(
-            heat_profile=np.zeros(topology.Nr),
-            current_profile=q,
+            pprime=np.zeros(topology.Nr),
+            q=q,
             p0=pressure,
         ),
     )
@@ -311,8 +313,8 @@ def test_kernel_source_materializes_p0_and_rejects_zero_complete_pressure() -> N
         materialize_kernel_source(
             topology,
             KernelSource(
-                heat_profile=np.zeros(topology.Nr),
-                current_profile=q,
+                pprime=np.zeros(topology.Nr),
+                q=q,
             ),
         )
     with pytest.warns(RuntimeWarning, match="p0 must be finite"):
@@ -320,8 +322,8 @@ def test_kernel_source_materializes_p0_and_rejects_zero_complete_pressure() -> N
             materialize_kernel_source(
                 topology,
                 KernelSource(
-                    heat_profile=np.zeros(topology.Nr),
-                    current_profile=q,
+                    pprime=np.zeros(topology.Nr),
+                    q=q,
                     p0=np.nan,
                 ),
             )
@@ -358,8 +360,8 @@ def _constant_pressure_pq_case(
         s_offsets=(0.0,),
     )
     source = KernelSource(
-        heat_profile=np.zeros(nr),
-        current_profile=1.71 + 0.16 * rho * rho,
+        pprime=np.zeros(nr),
+        q=1.71 + 0.16 * rho * rho,
         p0=6408.706536,
         beta=beta,
     )

@@ -163,8 +163,8 @@ namespace cxx_python
                                              double             ka,
                                              RuntimeArrayView   c_offsets,
                                              RuntimeArrayView   s_offsets,
-                                             RuntimeArrayView   scaled_heat,
-                                             RuntimeArrayView   scaled_current,
+                                             RuntimeArrayView   scaled_pprime,
+                                             RuntimeArrayView   scaled_driver,
                                              double             scaled_p0,
                                              double             scaled_Ip,
                                              double             beta,
@@ -200,8 +200,8 @@ namespace cxx_python
         if constexpr (CompiledShape::M_max >= 1)
             input.s1_offset = input.s_offsets[1];
 
-        read_exact_runtime_array(scaled_heat, "scaled_heat", input.heat);
-        read_exact_runtime_array(scaled_current, "scaled_current", input.current);
+        read_exact_runtime_array(scaled_pprime, "scaled_pprime", input.pprime);
+        read_exact_runtime_array(scaled_driver, "scaled_driver", input.driver);
 
         input.p0      = scaled_p0;
         input.Ip      = scaled_Ip;
@@ -586,8 +586,8 @@ namespace cxx_python
                                 double             ka,
                                 RuntimeArrayView   c_offsets,
                                 RuntimeArrayView   s_offsets,
-                                RuntimeArrayView   scaled_heat,
-                                RuntimeArrayView   scaled_current,
+                                RuntimeArrayView   scaled_pprime,
+                                RuntimeArrayView   scaled_driver,
                                 double             scaled_p0,
                                 double             scaled_Ip,
                                 double             beta,
@@ -614,8 +614,8 @@ namespace cxx_python
                                                            ka,
                                                            c_offsets,
                                                            s_offsets,
-                                                           scaled_heat,
-                                                           scaled_current,
+                                                           scaled_pprime,
+                                                           scaled_driver,
                                                            scaled_p0,
                                                            scaled_Ip,
                                                            beta,
@@ -796,7 +796,7 @@ namespace cxx_python
                    old.ka == now.ka && old.c0_offset == now.c0_offset && old.s1_offset == now.s1_offset &&
                    old.p0 == now.p0 &&
                    same_offsets(old.c_offsets, now.c_offsets) && same_offsets(old.s_offsets, now.s_offsets) &&
-                   same_array(old.heat, now.heat) && same_array(old.current, now.current);
+                   same_array(old.pprime, now.pprime) && same_array(old.driver, now.driver);
         }
 
         void fill_certified_result(SolveResult&                                   result,

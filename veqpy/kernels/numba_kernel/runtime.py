@@ -172,12 +172,12 @@ class KernelRuntimeCase:
         return kernel_boundary_s_offsets_with_s0(self.boundary)
 
     @property
-    def heat_input(self) -> np.ndarray:
-        return self.source.heat_profile
+    def pprime_input(self) -> np.ndarray:
+        return self.source.pprime
 
     @property
-    def current_input(self) -> np.ndarray:
-        return self.source.current_profile
+    def driver_input(self) -> np.ndarray:
+        return self.source.driver_profile
 
     @property
     def p0(self) -> float:
@@ -600,9 +600,9 @@ def _build_kernel_source_plan(
         coordinate=topology.coordinate,
         nodes=topology.nodes,
         parameterization=topology.source_parameterization,
-        source_sample_count=int(materialized.scaled_heat.shape[0]),
-        scaled_heat=materialized.scaled_heat,
-        scaled_current=materialized.scaled_current,
+        source_sample_count=int(materialized.scaled_pprime.shape[0]),
+        scaled_pprime=materialized.scaled_pprime,
+        scaled_driver=materialized.scaled_driver,
         scaled_p0=materialized.scaled_p0,
         scaled_Ip=materialized.scaled_Ip,
         beta=materialized.beta,
@@ -626,8 +626,8 @@ def _placeholder_source_plan(
         nodes=topology.nodes,
         parameterization=source_parameterization_for_route_key(topology.source_route_key),
         source_sample_count=samples,
-        scaled_heat=placeholder,
-        scaled_current=placeholder,
+        scaled_pprime=placeholder,
+        scaled_driver=placeholder,
         scaled_p0=0.0,
         scaled_Ip=np.nan,
         beta=np.nan,

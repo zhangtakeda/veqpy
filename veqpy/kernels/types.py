@@ -26,6 +26,7 @@ from veqpy.kernels.abi.enums import (
     SOURCE_CONSTRAINT_FLAGS_BY_ROUTE,
     SOURCE_CONSTRAINT_LABELS_BY_FLAGS,
     SOURCE_COORDINATE_CODES,
+    SOURCE_DRIVER_BY_ROUTE,
     SOURCE_NODES_CODES,
     SOURCE_PARAMETERIZATION_CODES,
     SOURCE_ROUTE_CODES,
@@ -513,32 +514,69 @@ class KernelTopology:
         object.__setattr__(self, "key", expected_key)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class KernelSource:
-    """Runtime source and physical constraints for one Kernel solve."""
+    """Raw pressure data, one explicit route driver, and solve constraints.
 
-    heat_profile: np.ndarray | list[float] | tuple[float, ...]
-    current_profile: np.ndarray | list[float] | tuple[float, ...]
+    The driver keyword is selected by the topology route: ``ffprime`` for PF,
+    ``psi_r`` for PP, ``itor`` for PI, ``jtor`` for PJ1, ``jpara`` for PJ2,
+    and ``q`` for PQ.
+    """
+
+    pprime: np.ndarray | list[float] | tuple[float, ...]
+    ffprime: np.ndarray | list[float] | tuple[float, ...] | None = None
+    psi_r: np.ndarray | list[float] | tuple[float, ...] | None = None
+    itor: np.ndarray | list[float] | tuple[float, ...] | None = None
+    jtor: np.ndarray | list[float] | tuple[float, ...] | None = None
+    jpara: np.ndarray | list[float] | tuple[float, ...] | None = None
+    q: np.ndarray | list[float] | tuple[float, ...] | None = None
     p0: float = 0.0
     Ip: float = np.nan
     beta: float = np.nan
     case_name: str | None = None
+    _driver_name: str = field(init=False, repr=False)
+    _driver_profile: np.ndarray = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        heat = _readonly_1d(self.heat_profile, "heat_profile")
-        current = _readonly_1d(self.current_profile, "current_profile")
-        if heat.shape != current.shape:
+        pprime = _readonly_1d(self.pprime, "pprime")
+        driver_values = {
+            name: getattr(self, name)
+            for name in SOURCE_DRIVER_BY_ROUTE.values()
+            if getattr(self, name) is not None
+        }
+        if len(driver_values) != 1:
+            supplied = ", ".join(driver_values) if driver_values else "none"
+            choices = ", ".join(SOURCE_DRIVER_BY_ROUTE.values())
             raise ValueError(
-                "heat_profile and current_profile must share the same shape, "
-                f"got {heat.shape} and {current.shape}"
+                "KernelSource requires exactly one route driver "
+                f"({choices}); got {supplied}"
             )
-        object.__setattr__(self, "heat_profile", heat)
-        object.__setattr__(self, "current_profile", current)
+        driver_name, driver_value = next(iter(driver_values.items()))
+        driver = _readonly_1d(driver_value, driver_name)
+        if pprime.shape != driver.shape:
+            raise ValueError(
+                f"pprime and {driver_name} must share the same shape, "
+                f"got {pprime.shape} and {driver.shape}"
+            )
+        object.__setattr__(self, "pprime", pprime)
+        object.__setattr__(self, driver_name, driver)
+        object.__setattr__(self, "_driver_name", driver_name)
+        object.__setattr__(self, "_driver_profile", driver)
         object.__setattr__(self, "p0", float(self.p0))
         object.__setattr__(self, "Ip", float(self.Ip))
         object.__setattr__(self, "beta", float(self.beta))
         case_name = None if self.case_name is None else str(self.case_name)
         object.__setattr__(self, "case_name", case_name)
+
+    @property
+    def driver_name(self) -> str:
+        """Canonical route-driver keyword supplied by the caller."""
+        return self._driver_name
+
+    @property
+    def driver_profile(self) -> np.ndarray:
+        """Read-only route-driver samples selected by ``driver_name``."""
+        return self._driver_profile
 
 
 @dataclass(frozen=True, slots=True)

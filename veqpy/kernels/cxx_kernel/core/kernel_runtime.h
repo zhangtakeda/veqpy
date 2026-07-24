@@ -63,8 +63,8 @@ namespace cxx_kernel_api
             setup.profile_params = profile_params_for_case(input);
             for (size_t i = 0; i < CompiledSource::sample_count; ++i)
             {
-                setup.heat[i]    = input.heat[i];
-                setup.current[i] = input.current[i];
+                setup.pprime[i] = input.pprime[i];
+                setup.driver[i] = input.driver[i];
             }
             return setup;
         }
