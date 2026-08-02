@@ -44,6 +44,11 @@ topology to flat arrays; `Profile` remains on the model side for
 
 These fields are sufficient to reconstruct common physical quantities, but they do not store temporary buffers from the solver hot path. When the user reads properties such as `R`, `Z`, `F`, `P`, `q`, `Ip`, `beta_t`, `jtor`, `jpara`, `jphi`, `Psi`, or `Phi`, the object computes the required values by formula and lets `Reactive` maintain dependency consistency.
 
+`F` retains the sign of `R0 * B0`. The PJ2 diagnostic `jpara` denotes
+`<J·B> / (F <R^-2>)`; it is not the IMAS `j_total = <J·B> / B0`
+representation. Using `gm1 = <R^-2> = (2π)^2 Ln_r / V_r`, the latter is
+reconstructed as `jpara * F * gm1 / B0`.
+
 ## Geometry and Diagnostics
 
 The model layer exposes stable snapshot diagnostics, not every intermediate array used during residual assembly. Geometrically, `Equilibrium` provides flux-surface mapping, Jacobian-related fields, area/volume, and flux-surface-averaged geometry factors. Physically, it provides pressure, toroidal-field function, safety factor, current, and flux diagnostics.

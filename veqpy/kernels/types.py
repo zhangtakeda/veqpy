@@ -521,7 +521,8 @@ class KernelSource:
     The driver keyword is selected by the topology route: ``ffprime`` for PF,
     ``psi_r`` for PP, ``itor`` for PI, ``jtor`` for PJ1, ``jpara`` for PJ2,
     and ``q`` for PQ. Pressure is supplied either as ``p`` or as ``pprime``
-    with an optional LCFS value ``p0``.
+    with an optional LCFS value ``p0``. The PJ2 ``jpara`` driver has VEQ's
+    ``<J·B> / (F * <R^-2>)`` semantics, not IMAS ``<J·B> / B0`` semantics.
     """
 
     p: np.ndarray | list[float] | tuple[float, ...] | None = None

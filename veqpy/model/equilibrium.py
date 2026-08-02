@@ -568,10 +568,10 @@ class Equilibrium(Reactive, Serial):
 
     @property
     def F(self) -> np.ndarray:
-        """Poloidal current function F (R*B_phi)."""
+        """Signed poloidal current function ``F = R * B_phi``."""
         if np.any(self.F2 < 1e-6):
             raise ValueError("Negative F2 encountered, cannot compute F")
-        return np.sqrt(self.F2)
+        return np.copysign(np.sqrt(self.F2), self.R0 * self.B0)
 
     @property
     def P_r(self) -> np.ndarray:
@@ -654,7 +654,12 @@ class Equilibrium(Reactive, Serial):
 
     @property
     def jpara(self) -> np.ndarray:
-        """Parallel current density <j.B>/B0, model-side diagnostic."""
+        """PJ2 current profile ``<J·B> / (F * <R^-2>)``.
+
+        This is not the IMAS parallel-current convention ``<J·B> / B0``.
+        With ``gm1 = <R^-2> = (2*pi)^2 * Ln_r / V_r``, the corresponding
+        IMAS total-current profile is ``jpara * F * gm1 / B0``.
+        """
         F_r = self.grid.differentiate(self.F)
         term_r = (
             self.Kn_r * self.psin_r / self.F

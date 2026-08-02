@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 import veqpy as veq
+from veqpy.kernels.abi.source_semantics import MU0
 from veqpy.model import Grid
 
 
@@ -24,7 +26,7 @@ def _profiles(psin: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return pressure, current
 
 
-def _uniform_demo_equilibrium():
+def _demo_equilibrium(*, b0: float = 3.0, ip: float = 3.0e6):
     topology = veq.KernelTopology(
         h_count=3,
         v_count=0,
@@ -50,7 +52,7 @@ def _uniform_demo_equilibrium():
         a=1.05 / 1.85,
         R0=1.05,
         Z0=0.0,
-        B0=3.0,
+        B0=b0,
         ka=2.2,
         s_offsets=(float(np.arcsin(0.5)),),
     )
@@ -61,10 +63,18 @@ def _uniform_demo_equilibrium():
         source=veq.KernelSource(
             pprime=pprime,
             ffprime=ffprime,
-            Ip=3.0e6,
+            Ip=ip,
         ),
     )
     assert result.success
+    equilibrium = kernel.build_equilibrium()
+    kernel.close()
+    return equilibrium
+
+
+def _uniform_demo_equilibrium():
+    equilibrium = _demo_equilibrium()
+    topology = equilibrium.grid
     grid = Grid(
         Nr=65,
         Nt=64,
@@ -73,7 +83,7 @@ def _uniform_demo_equilibrium():
         M_max=topology.M_max,
         K_max=topology.K_max,
     )
-    return kernel.build_equilibrium().resample(grid)
+    return equilibrium.resample(grid)
 
 
 def test_uniform_equilibrium_exposes_neoclassical_geometry_profiles() -> None:
@@ -92,3 +102,75 @@ def test_uniform_equilibrium_exposes_neoclassical_geometry_profiles() -> None:
     assert np.isclose(equilibrium.ftrap[0], 0.07780086351634649, rtol=2e-13)
     assert np.isclose(equilibrium.ftrap[-1], 0.80962984152523, rtol=2e-13)
     assert not equilibrium.ftrap.flags.writeable
+
+
+@pytest.mark.parametrize(
+    ("b0", "ip"),
+    [(-3.0, -3.0e6), (-3.0, 3.0e6), (3.0, -3.0e6), (3.0, 3.0e6)],
+)
+def test_signed_f_and_q_follow_the_fixed_cocos_contract(b0: float, ip: float) -> None:
+    equilibrium = _demo_equilibrium(b0=b0, ip=ip)
+
+    assert equilibrium.F[-1] == pytest.approx(equilibrium.R0 * b0, rel=2.0e-15)
+    assert np.all(np.sign(equilibrium.F) == np.sign(b0))
+    assert np.all(np.sign(equilibrium.q) == np.sign(b0 * ip))
+    assert equilibrium.Ip == pytest.approx(ip, rel=2.0e-13)
+
+    geqdsk = equilibrium.to_geqdsk(
+        R_range=(
+            float(np.min(equilibrium.R)) - 0.1,
+            float(np.max(equilibrium.R)) + 0.1,
+        ),
+        Z_range=(
+            float(np.min(equilibrium.Z)) - 0.1,
+            float(np.max(equilibrium.Z)) + 0.1,
+        ),
+        NR=17,
+        NZ=19,
+    )
+    assert geqdsk.Bt0 == b0
+    assert np.all(np.sign(geqdsk.F) == np.sign(b0))
+    assert np.all(np.sign(geqdsk.q) == np.sign(b0 * ip))
+
+
+@pytest.mark.parametrize("b0", [-3.0, 3.0])
+def test_pj2_jpara_reconstructs_imas_jtotal_with_gm1(b0: float) -> None:
+    equilibrium = _demo_equilibrium(b0=b0)
+    two_pi = 2.0 * np.pi
+
+    # VEQ's Ln_r is the poloidal mean of J/R, while V_r is 2*pi times
+    # the integral of J*R. Their ratio therefore gives IMAS gm1=<R^-2>.
+    gm1 = two_pi**2 * equilibrium.Ln_r / equilibrium.V_r
+    surface_weights = equilibrium.J * equilibrium.R
+    gm1_direct = np.sum(surface_weights / equilibrium.R**2, axis=1) / np.sum(
+        surface_weights,
+        axis=1,
+    )
+    np.testing.assert_allclose(gm1, gm1_direct, rtol=2.0e-15, atol=2.0e-15)
+
+    bphi2 = (equilibrium.F[:, None] / equilibrium.R) ** 2
+    bp2 = (
+        (equilibrium.alpha2 * equilibrium.psin_r[:, None]) ** 2
+        * equilibrium.gttdivJR
+        / (equilibrium.J * equilibrium.R)
+    )
+    gm5 = np.sum(surface_weights * (bphi2 + bp2), axis=1) / np.sum(
+        surface_weights,
+        axis=1,
+    )
+    gm9 = two_pi * equilibrium.S_r / equilibrium.V_r
+    dpressure_dpsi = equilibrium.alpha1 * equilibrium.Pn_psin / (two_pi * MU0)
+
+    jtotal_from_pj2 = equilibrium.jpara * equilibrium.F * gm1 / equilibrium.B0
+    jtor_over_r = equilibrium.jtor * gm9
+    jtor_over_r += two_pi * dpressure_dpsi * (1.0 - equilibrium.F**2 * gm1 / gm5)
+    jtotal_from_jtor = gm5 * jtor_over_r / (equilibrium.F * gm1 * equilibrium.B0)
+
+    relative_l2 = np.linalg.norm(jtotal_from_pj2 - jtotal_from_jtor) / np.linalg.norm(
+        jtotal_from_jtor
+    )
+    interior_relative_l2 = np.linalg.norm(
+        jtotal_from_pj2[:-1] - jtotal_from_jtor[:-1]
+    ) / np.linalg.norm(jtotal_from_jtor[:-1])
+    assert relative_l2 < 8.0e-3
+    assert interior_relative_l2 < 2.0e-3
