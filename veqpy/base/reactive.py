@@ -1,70 +1,88 @@
+"""Push-invalidated reactive properties for read-heavy model objects.
+
+Subclasses declare independent roots explicitly; dependencies of derived
+properties are inferred from their AST or declared with ``depends_on``. The
+runtime moves dependency bookkeeping from reads to writes:
+
+- a root write marks its transitive derived dependents dirty;
+- a clean derived read is one bit test plus one list lookup;
+- nested ``Reactive`` objects notify parents through weak subscriptions;
+- derived values are recomputed lazily and keep the existing snapshot value
+  semantics.
+
+The implementation accepts native scalar/container values, arrays, nested
+``Reactive`` objects, and externally owned snapshot objects. Mutable native
+containers are frozen internally and exposed as fresh values of their original
+built-in type. External snapshot objects are passed through unchanged and are
+therefore expected not to mutate during the owning object's lifetime.
 """
-Module: veqpy.base.reactive
 
-Role:
-- Provide reactive caching and pull-based dependency freshness checks for model
-  objects and solved snapshots.
-- Keep public objects in a minimal-root-state form while rebuilding derived
-  quantities lazily from formulas.
-
-Public API:
-- Reactive
-- depends_on
-
-Design notes:
-- Subclasses declare independent root fields in ``root_properties``.  Assigning
-  a root value only updates that field and bumps a version token; it does not
-  walk the dependency graph or eagerly recompute downstream properties.
-- Derived ``@property`` values are wrapped at class creation time.  Dependencies
-  are inferred from the property AST when possible, and non-obvious dependencies
-  can be declared explicitly with ``depends_on``.
-- Derived reads compare cached dependency tokens and recompute only when a direct
-  dependency changed.  If a dependency value is itself ``Reactive``, the nested
-  object's revision participates in the token so child root writes invalidate
-  parent-derived values that depend on that child.
-- ``Reactive`` is intentionally not used for Kernel hot paths.  Runtime solver
-  state uses explicit workspaces and in-place arrays; snapshots use this formula
-  system because they need interpretable, serializable, on-demand diagnostics.
-"""
 from __future__ import annotations
 
 import ast
 import inspect
 import textwrap
+import weakref
 from collections.abc import Callable
 from copy import deepcopy
-from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any
 
 import numpy as np
 
-# -----------------------------------------------------------------------------
-# Public interface
-# -----------------------------------------------------------------------------
+_MISSING = object()
+_SCALAR_TYPES = {type(None), bool, int, float, complex, str, bytes}
+_PICKLE_ROOTS_KEY = "__reactive_roots__"
+_PICKLE_EXTRAS_KEY = "__reactive_extras__"
+_PICKLE_VERSION_KEY = "__reactive_state_version__"
+_PICKLE_STATE_VERSION = 1
+_PLAN_LIST = "list"
+_PLAN_TUPLE = "tuple"
+_PLAN_DICT = "dict"
+_PLAN_SET = "set"
+_PLAN_BYTEARRAY = "bytearray"
 
 
 class Reactive:
-    """Base class for reactive caching.
+    """Reactive cache with push invalidation and constant-time clean reads.
 
-    Each reactive node, root or derived, owns a monotonically increasing version.
-    Root setters only assign and bump their own version plus the object's state
-    revision. Derived recomputation bumps only the derived node version.
-    Derived getters compare the versions of their direct dependencies and
-    recompute lazily when at least one token changed.
-
-    If a dependency value is itself ``Reactive``, its object-level state
-    revision is included in the token. This is what makes
-    ``parent.child.root = value`` invalidate parent-derived properties that
-    depend on ``parent.child``.
+    Arrays are frozen on assignment. Mutable built-in containers are converted
+    to immutable internal forms and reconstructed only when exposed. Only
+    nested ``Reactive`` instances propagate internal updates. Initialization
+    is idempotent so existing subclasses may assign roots before or after their
+    ``super().__init__()`` call.
     """
 
     dependency_graph: dict[str, set[str]] = {}
     root_properties: set[str]
     _reactive_derived_properties: frozenset[str] = frozenset()
     _reactive_all_properties: frozenset[str] = frozenset()
+    _reactive_indices: dict[str, int] = {}
+    _reactive_root_indices: dict[str, int] = {}
+    _reactive_dependent_masks: dict[str, int] = {}
+    _reactive_all_dirty_mask: int = 0
 
     def __init__(self) -> None:
-        self._init_reactive_state()
+        if "_reactive_values" in self.__dict__:
+            return
+        object.__setattr__(
+            self,
+            "_reactive_values",
+            [None] * len(self._reactive_derived_properties),
+        )
+        object.__setattr__(
+            self,
+            "_reactive_value_plans",
+            [None] * len(self._reactive_derived_properties),
+        )
+        object.__setattr__(
+            self,
+            "_reactive_root_plans",
+            [None] * len(self.root_properties),
+        )
+        object.__setattr__(self, "_reactive_dirty_mask", self._reactive_all_dirty_mask)
+        object.__setattr__(self, "_reactive_revision", 0)
+        object.__setattr__(self, "_reactive_observers", {})
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
@@ -74,9 +92,18 @@ class Reactive:
         reverse_adj = _build_reverse_adj(dependency_graph)
         _validate_dependency_graph(roots, dependency_graph, reverse_adj)
 
+        derived_names = tuple(sorted(dependency_graph))
         cls.dependency_graph = dependency_graph
-        cls._reactive_derived_properties = frozenset(dependency_graph.keys())
-        cls._reactive_all_properties = frozenset(roots | set(dependency_graph.keys()))
+        cls._reactive_derived_properties = frozenset(derived_names)
+        cls._reactive_all_properties = frozenset(roots | set(derived_names))
+        cls._reactive_indices = {name: i for i, name in enumerate(derived_names)}
+        cls._reactive_root_indices = {name: i for i, name in enumerate(sorted(roots))}
+        cls._reactive_all_dirty_mask = (1 << len(derived_names)) - 1
+        cls._reactive_dependent_masks = _build_dependent_masks(
+            roots=roots,
+            derived_names=derived_names,
+            reverse_adj=reverse_adj,
+        )
 
         cls._setup_root_properties(roots)
         cls._wrap_derived_properties(dependency_graph)
@@ -85,62 +112,108 @@ class Reactive:
         cls = self.__class__
         cloned = cls.__new__(cls)
         memo[id(self)] = cloned
+        Reactive.__init__(cloned)
 
-        for k, v in self.__dict__.items():
-            if k == "cache":
-                object.__setattr__(cloned, k, {})
-            else:
-                object.__setattr__(cloned, k, deepcopy(v, memo))
+        internal = {
+            "_reactive_values",
+            "_reactive_value_plans",
+            "_reactive_root_plans",
+            "_reactive_dirty_mask",
+            "_reactive_revision",
+            "_reactive_observers",
+        }
+        cached_roots = {f"cached_{name}" for name in cls.root_properties}
+        for name, value in self.__dict__.items():
+            if name not in internal and name not in cached_roots:
+                object.__setattr__(cloned, name, deepcopy(value, memo))
 
-        cloned._init_reactive_state()
+        for root in sorted(cls.root_properties):
+            if f"cached_{root}" in self.__dict__:
+                setattr(cloned, root, deepcopy(getattr(self, root), memo))
         return cloned
 
+    def __copy__(self):
+        raise TypeError(f"{type(self).__name__} does not support shallow copy; use copy.deepcopy()")
+
+    def __getstate__(self) -> dict[str, Any]:
+        """Serialize authoritative roots, never caches or observer state."""
+
+        roots = {
+            name: getattr(self, name)
+            for name in sorted(self.root_properties)
+            if f"cached_{name}" in self.__dict__
+        }
+        internal = {
+            "_reactive_values",
+            "_reactive_value_plans",
+            "_reactive_root_plans",
+            "_reactive_dirty_mask",
+            "_reactive_revision",
+            "_reactive_observers",
+        }
+        cached_roots = {f"cached_{name}" for name in self.root_properties}
+        extras = {
+            name: value
+            for name, value in self.__dict__.items()
+            if name not in internal and name not in cached_roots
+        }
+        return {
+            _PICKLE_VERSION_KEY: _PICKLE_STATE_VERSION,
+            _PICKLE_ROOTS_KEY: roots,
+            _PICKLE_EXTRAS_KEY: extras,
+        }
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        """Restore roots and rebuild an empty derived cache plus subscriptions."""
+
+        Reactive.__init__(self)
+        if _PICKLE_ROOTS_KEY in state:
+            roots = state[_PICKLE_ROOTS_KEY]
+            extras = state.get(_PICKLE_EXTRAS_KEY, {})
+        else:
+            # Best-effort support for objects pickled from the pull-based
+            # implementation, whose authoritative roots lived in cached_*.
+            roots = {}
+            extras = {
+                name: value
+                for name, value in state.items()
+                if not name.startswith("cached_")
+                and name not in {"cache", "_version", "_revision"}
+            }
+            for name in self.root_properties:
+                cached_name = f"cached_{name}"
+                if cached_name in state:
+                    roots[name] = state[cached_name]
+                elif name in state:
+                    roots[name] = state[name]
+        for name, value in extras.items():
+            object.__setattr__(self, name, value)
+        for name in sorted(self.root_properties):
+            if name in roots:
+                setattr(self, name, roots[name])
+
     def invalidate(self, *names: str) -> None:
-        """Invalidate cached values.
-
-        With no names, clear this instance's derived cache and bump the object
-        revision so parents that depend on this object will revalidate.
-
-        With names, each named root/derived node has its version bumped. Named
-        derived caches are removed; downstream caches are left in place and will
-        self-detect staleness on next read.
-        """
-
-        self._init_reactive_state()
+        """Mark selected nodes, or every derived node, dirty."""
 
         if not names:
-            self.cache.clear()
-            self._bump_revision()
-            return
-
-        for name in names:
-            self.cache.pop(name, None)
-            self._bump_version(name)
-
-    @dataclass(frozen=True)
-    class _CacheEntry:
-        value: Any
-        dependency_tokens: tuple[tuple[str, tuple[int, int | None]], ...]
-
-    def _init_reactive_state(self) -> None:
-        """Initialize per-instance reactive bookkeeping.
-
-        This method is intentionally idempotent so root setters still work in
-        subclasses that assign roots before calling ``super().__init__()``.
-        """
-
-        if "cache" not in self.__dict__:
-            object.__setattr__(self, "cache", {})
-
-        if "_version" not in self.__dict__:
-            object.__setattr__(
-                self,
-                "_version",
-                {name: 0 for name in self._reactive_all_properties},
-            )
-
-        if "_revision" not in self.__dict__:
-            object.__setattr__(self, "_revision", 0)
+            for name, index in self._reactive_indices.items():
+                value = self._reactive_values[index]
+                if value is not None:
+                    self._unsubscribe_nested(name, value)
+                self._reactive_values[index] = None
+                self._reactive_value_plans[index] = None
+            self._reactive_dirty_mask = self._reactive_all_dirty_mask
+        else:
+            dirty = 0
+            for name in names:
+                if name not in self._reactive_all_properties:
+                    raise KeyError(f"unknown Reactive node {name!r}")
+                dirty |= self._reactive_dependent_masks.get(name, 0)
+                index = self._reactive_indices.get(name)
+                if index is not None:
+                    dirty |= 1 << index
+            self._reactive_dirty_mask |= dirty
+        self._state_changed()
 
     @classmethod
     def _validate_root_properties(cls) -> set[str]:
@@ -155,13 +228,9 @@ class Reactive:
 
     @classmethod
     def _setup_root_properties(cls, roots: set[str]) -> None:
-        """Create or wrap version-bumping properties for root attributes."""
-
         for name in roots:
             attr = cls._find_property(name)
             if attr is None:
-                # Most model classes declare roots as plain assignments; install
-                # descriptors so __init__ assignment still bumps reactive state.
                 cls._install_default_root_property(name)
             else:
                 cls._wrap_existing_root_property(name, attr)
@@ -169,27 +238,34 @@ class Reactive:
     @classmethod
     def _install_default_root_property(cls, name: str) -> None:
         cached_name = f"cached_{name}"
+        root_slot = cls._reactive_root_indices[name]
 
         def fget(self):
-            self._init_reactive_state()
-            v = getattr(self, cached_name, None)
-            return _freeze_ndarray(v)
+            self._ensure_reactive_state()
+            value = self.__dict__.get(cached_name)
+            plan = self._reactive_root_plans[root_slot]
+            return value if plan is None else _expose_reactive_value(value, plan)
 
         def fset(self, value):
-            self._init_reactive_state()
+            self._ensure_reactive_state()
             value = self._prepare_root_value(name, value)
-            object.__setattr__(self, cached_name, _freeze_ndarray(value))
-            self._bump_version(name)
+            value, plan = _prepare_reactive_value(value, path=name)
+            old = self.__dict__.get(cached_name, _MISSING)
+            self._reject_nested_cycle(value, node=name)
+            if old is not _MISSING:
+                self._unsubscribe_nested(name, old)
+            object.__setattr__(self, cached_name, value)
+            self._reactive_root_plans[root_slot] = plan
+            self._subscribe_nested(name, value)
+            self._reactive_dirty_mask |= self._reactive_dependent_masks.get(name, 0)
+            self._state_changed()
 
         fget._reactive_root_wrapped = True  # type: ignore[attr-defined]
         fset._reactive_root_wrapped = True  # type: ignore[attr-defined]
-
         setattr(cls, name, property(fget=fget, fset=fset))
 
     @classmethod
     def _wrap_existing_root_property(cls, name: str, attr: property) -> None:
-        """Wrap a user-defined root property so its setter bumps the version."""
-
         if getattr(attr.fget, "_reactive_root_wrapped", False) or getattr(
             attr.fset, "_reactive_root_wrapped", False
         ):
@@ -197,22 +273,33 @@ class Reactive:
 
         original_fget = attr.fget
         original_fset = attr.fset
+        root_slot = cls._reactive_root_indices[name]
 
         def fget(self):
-            self._init_reactive_state()
+            self._ensure_reactive_state()
             if original_fget is None:
                 raise AttributeError(f"unreadable attribute {name!r}")
-            return _freeze_ndarray(original_fget(self))
+            value = original_fget(self)
+            plan = self._reactive_root_plans[root_slot]
+            return value if plan is None else _expose_reactive_value(value, plan)
 
         if original_fset is None:
             fset = None
         else:
 
             def fset(self, value):
-                self._init_reactive_state()
+                self._ensure_reactive_state()
+                old = original_fget(self) if original_fget is not None else _MISSING
                 value = self._prepare_root_value(name, value)
-                original_fset(self, _freeze_ndarray(value))
-                self._bump_version(name)
+                value, plan = _prepare_reactive_value(value, path=name)
+                self._reject_nested_cycle(value, node=name)
+                if old is not _MISSING:
+                    self._unsubscribe_nested(name, old)
+                original_fset(self, value)
+                self._reactive_root_plans[root_slot] = plan
+                self._subscribe_nested(name, value)
+                self._reactive_dirty_mask |= self._reactive_dependent_masks.get(name, 0)
+                self._state_changed()
 
             fset._reactive_root_wrapped = True  # type: ignore[attr-defined]
             fset.__wrapped__ = original_fset  # type: ignore[attr-defined]
@@ -220,105 +307,133 @@ class Reactive:
         fget._reactive_root_wrapped = True  # type: ignore[attr-defined]
         if original_fget is not None:
             fget.__wrapped__ = original_fget  # type: ignore[attr-defined]
-
-        setattr(
-            cls,
-            name,
-            property(fget=fget, fset=fset, fdel=attr.fdel, doc=attr.__doc__),
-        )
+        setattr(cls, name, property(fget=fget, fset=fset, fdel=attr.fdel, doc=attr.__doc__))
 
     @classmethod
     def _wrap_derived_properties(
         cls,
         dependency_graph: dict[str, set[str]],
     ) -> None:
-        """Wrap derived properties with version-token based lazy cache lookups."""
-
-        for name, deps in dependency_graph.items():
+        del dependency_graph
+        for name, index in cls._reactive_indices.items():
             attr = cls._find_property(name)
             if attr is None or attr.fget is None:
                 continue
-
             original_fget = _unwrap_function(attr.fget)
-            ordered_deps = tuple(sorted(deps))
+            bit = 1 << index
 
-            def make_lazy_fget(orig, n, dep_names):
+            def make_lazy_fget(orig, node, slot, node_bit):
                 def lazy_fget(self):
-                    self._init_reactive_state()
+                    self._ensure_reactive_state()
+                    if not self._reactive_dirty_mask & node_bit:
+                        value = self._reactive_values[slot]
+                        plan = self._reactive_value_plans[slot]
+                        return value if plan is None else _expose_reactive_value(value, plan)
 
-                    tokens = tuple((dep, self._dependency_token(dep)) for dep in dep_names)
-
-                    entry = self.cache.get(n)
-                    if entry is not None and entry.dependency_tokens == tokens:
-                        return entry.value
-
-                    # Cache entries are validated by direct dependency tokens,
-                    # so downstream properties can stay cached until read.
                     value = orig(self)
-                    self.cache[n] = self._CacheEntry(value=value, dependency_tokens=tokens)
-                    self._bump_version(n, bump_object_revision=False)
-                    return value
+                    value, plan = _prepare_reactive_value(value, path=node)
+                    self._reject_nested_cycle(value, node=node)
+                    old = self._reactive_values[slot]
+                    if old is not None:
+                        self._unsubscribe_nested(node, old)
+                    self._reactive_values[slot] = value
+                    self._reactive_value_plans[slot] = plan
+                    self._subscribe_nested(node, value)
+                    self._reactive_dirty_mask &= ~node_bit
+                    return value if plan is None else _expose_reactive_value(value, plan)
 
                 lazy_fget.__wrapped__ = orig
                 return lazy_fget
 
-            lazy_prop = property(
-                fget=make_lazy_fget(original_fget, name, ordered_deps),
-                fset=attr.fset,
-                fdel=attr.fdel,
-                doc=attr.__doc__,
+            setattr(
+                cls,
+                name,
+                property(
+                    fget=make_lazy_fget(original_fget, name, index, bit),
+                    fset=attr.fset,
+                    fdel=attr.fdel,
+                    doc=attr.__doc__,
+                ),
             )
-            setattr(cls, name, lazy_prop)
 
-    def _dependency_token(self, name: str) -> tuple[int, int | None]:
-        """Return the current version token for a direct dependency."""
-
-        self._init_reactive_state()
-
-        if name in self._reactive_derived_properties:
-            # Force the dependency to validate/recompute before reading its
-            # version. Without this, A -> B -> root can return stale A because
-            # B's version would not change until B is read.
-            value = getattr(self, name)
-        else:
-            value = getattr(self, name, None)
-
-        own_version = self._version.get(name, 0)
-        nested_revision = _nested_reactive_revision(value)
-        return (own_version, nested_revision)
+    def _ensure_reactive_state(self) -> None:
+        if "_reactive_values" not in self.__dict__:
+            Reactive.__init__(self)
 
     def _prepare_root_value(self, name: str, value: Any) -> Any:
-        """Normalize and validate a root assignment before storage.
-
-        Subclasses can override ``reactive_inspections`` to centralize root
-        coercion and validation while keeping ``__init__`` as plain assignment.
-        """
-
         return type(self).reactive_inspections(name, value)
 
     @classmethod
     def reactive_inspections(cls, name: str, value: Any) -> Any:
-        """Subclass hook for root normalization/validation."""
-
         return value
 
-    def _bump_version(self, name: str, *, bump_object_revision: bool = True) -> None:
-        self._init_reactive_state()
-        self._version[name] = self._version.get(name, 0) + 1
-        if bump_object_revision:
-            self._bump_revision()
+    def _state_changed(self) -> None:
+        self._reactive_revision += 1
+        self._notify_observers()
 
-    def _bump_revision(self) -> None:
-        self._init_reactive_state()
-        object.__setattr__(self, "_revision", self._revision + 1)
+    def _nested_dependency_changed(self, node: str) -> None:
+        self._reactive_dirty_mask |= self._reactive_dependent_masks.get(node, 0)
+        self._state_changed()
+
+    def _subscribe_nested(self, node: str, value: Any) -> None:
+        for child in _iter_nested_reactives(value):
+            child._add_observer(self, node)
+
+    def _unsubscribe_nested(self, node: str, value: Any) -> None:
+        for child in _iter_nested_reactives(value):
+            child._remove_observer(self, node)
+
+    def _add_observer(self, parent: Reactive, node: str) -> None:
+        key = (id(parent), node)
+        self._reactive_observers[key] = weakref.ref(parent)
+
+    def _remove_observer(self, parent: Reactive, node: str) -> None:
+        self._reactive_observers.pop((id(parent), node), None)
+
+    def _notify_observers(self) -> None:
+        stale: list[tuple[int, str]] = []
+        for key, parent_ref in tuple(self._reactive_observers.items()):
+            parent = parent_ref()
+            if parent is None:
+                stale.append(key)
+            else:
+                parent._nested_dependency_changed(key[1])
+        for key in stale:
+            self._reactive_observers.pop(key, None)
+
+    def _reject_nested_cycle(self, value: Any, *, node: str) -> None:
+        for child in _iter_nested_reactives(value):
+            if child is self or child._contains_reactive(self, set()):
+                raise ValueError(
+                    f"Reactive containment must be acyclic; node {node!r} creates a cycle"
+                )
+
+    def _contains_reactive(self, target: Reactive, seen: set[int]) -> bool:
+        if self is target:
+            return True
+        identity = id(self)
+        if identity in seen:
+            return False
+        seen.add(identity)
+        values: list[Any] = []
+        for root in self.root_properties:
+            cached_name = f"cached_{root}"
+            if cached_name in self.__dict__:
+                values.append(self.__dict__[cached_name])
+        for index, value in enumerate(self._reactive_values):
+            if not self._reactive_dirty_mask & (1 << index):
+                values.append(value)
+        for value in values:
+            for child in _iter_nested_reactives(value):
+                if child._contains_reactive(target, seen):
+                    return True
+        return False
 
     @classmethod
     def _build_dependency_graph(cls, roots: set[str]) -> dict[str, set[str]]:
-        """Build the dependency graph for all reactive derived properties."""
-
         valid_nodes = set(roots)
         props: dict[str, property] = {}
-        base_props = set(Reactive.__dict__.keys())
+        base_props = set(Reactive.__dict__)
 
         for name in dir(cls):
             if name.startswith("__") or name in base_props:
@@ -334,38 +449,25 @@ class Reactive:
         for name, prop in props.items():
             if prop.fget is None:
                 continue
-
             original_func = _unwrap_function(prop.fget)
             raw_deps = _parse_dependency(original_func)
             explicit = getattr(original_func, "_reactive_deps", None)
             if explicit is not None:
-                # Explicit dependencies augment AST inference for dynamic reads
-                # that cannot be found from ``self.attr`` syntax.
-                raw_deps = raw_deps | explicit
-
-            graph[name] = {d for d in raw_deps if d in valid_nodes and d != name}
-
+                raw_deps |= explicit
+            graph[name] = {dep for dep in raw_deps if dep in valid_nodes and dep != name}
         return graph
 
     @classmethod
     def _find_property(cls, name: str) -> property | None:
         for klass in cls.__mro__:
             if name in klass.__dict__:
-                obj = klass.__dict__[name]
-                if isinstance(obj, property):
-                    return obj
-                return None
+                value = klass.__dict__[name]
+                return value if isinstance(value, property) else None
         return None
 
 
 def depends_on(*deps: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-    """Declare additional dependencies for a property.
-
-    The dependency names should be first-level reactive attribute names, e.g.
-    ``"profile"`` or ``"layout"``. For nested Reactive objects, depending on the
-    first-level attribute is sufficient because its nested revision is included
-    in the dependency token.
-    """
+    """Declare dependencies that cannot be inferred from ``self.attr`` reads."""
 
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         setattr(func, "_reactive_deps", set(deps))
@@ -374,51 +476,139 @@ def depends_on(*deps: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]
     return decorator
 
 
-# -----------------------------------------------------------------------------
-# Private implementation
-# -----------------------------------------------------------------------------
+def _build_dependent_masks(
+    *,
+    roots: set[str],
+    derived_names: tuple[str, ...],
+    reverse_adj: dict[str, set[str]],
+) -> dict[str, int]:
+    indices = {name: i for i, name in enumerate(derived_names)}
+    memo: dict[str, int] = {}
+
+    def descendants(node: str) -> int:
+        cached = memo.get(node)
+        if cached is not None:
+            return cached
+        mask = 0
+        for child in reverse_adj.get(node, ()):
+            mask |= 1 << indices[child]
+            mask |= descendants(child)
+        memo[node] = mask
+        return mask
+
+    return {name: descendants(name) for name in roots | set(derived_names)}
 
 
-def _freeze_ndarray(value: Any) -> Any:
-    if isinstance(value, np.ndarray) and value.flags.writeable:
-        value.flags.writeable = False
-    return value
+def _prepare_reactive_value(value: Any, *, path: str) -> tuple[Any, Any]:
+    """Freeze a value and return its minimal public-exposure plan."""
 
-
-def _nested_reactive_revision(value: Any) -> int | None:
+    value_type = type(value)
+    if value_type in _SCALAR_TYPES or isinstance(value, np.generic):
+        return value, None
+    if value_type is np.ndarray:
+        if value.dtype.hasobject:
+            raise TypeError(f"{path} cannot contain an object-dtype ndarray")
+        if value.flags.writeable:
+            value.flags.writeable = False
+        return value, None
     if isinstance(value, Reactive):
-        value._init_reactive_state()
-        return value._revision
+        return value, None
+    if value_type is bytearray:
+        return bytes(value), _PLAN_BYTEARRAY
+    if value_type is list:
+        prepared_items: list[Any] = []
+        child_plans: list[Any] = []
+        for index, item in enumerate(value):
+            prepared, plan = _prepare_reactive_value(item, path=f"{path}[{index}]")
+            prepared_items.append(prepared)
+            child_plans.append(plan)
+        return tuple(prepared_items), (_PLAN_LIST, tuple(child_plans))
+    if value_type is tuple:
+        prepared_items: list[Any] = []
+        child_plans: list[Any] = []
+        changed = False
+        for index, item in enumerate(value):
+            prepared, plan = _prepare_reactive_value(item, path=f"{path}[{index}]")
+            prepared_items.append(prepared)
+            child_plans.append(plan)
+            changed |= prepared is not item or plan is not None
+        if not changed:
+            return value, None
+        return tuple(prepared_items), (_PLAN_TUPLE, tuple(child_plans))
+    if value_type is dict:
+        prepared: dict[Any, Any] = {}
+        child_plans: list[tuple[Any, Any]] = []
+        for key, item in value.items():
+            if type(key) not in _SCALAR_TYPES - {type(None)}:
+                raise TypeError(f"{path} has unsupported dictionary key {type(key).__name__}")
+            prepared_item, plan = _prepare_reactive_value(item, path=f"{path}[{key!r}]")
+            prepared[key] = prepared_item
+            child_plans.append((key, plan))
+        return MappingProxyType(prepared), (_PLAN_DICT, tuple(child_plans))
+    if value_type is set:
+        prepared_items = []
+        for item in value:
+            prepared, plan = _prepare_reactive_value(item, path=f"{path}[set-item]")
+            if plan is not None:
+                raise TypeError(f"{path} set items must already be immutable")
+            prepared_items.append(prepared)
+        return frozenset(prepared_items), _PLAN_SET
+    if value_type is frozenset:
+        prepared_items = []
+        changed = False
+        for item in value:
+            prepared, plan = _prepare_reactive_value(item, path=f"{path}[set-item]")
+            if plan is not None:
+                raise TypeError(f"{path} frozenset items must already be immutable")
+            prepared_items.append(prepared)
+            changed |= prepared is not item
+        return (frozenset(prepared_items) if changed else value), None
+    # External data contracts (for example frozen kernel dataclasses or an
+    # equilibrium supplied by another package) are snapshot roots. They do not
+    # participate in nested invalidation and must be replaced as a whole when
+    # their state changes.
+    return value, None
 
-    if isinstance(value, dict):
-        return _nested_reactive_collection_revision(value.values())
 
-    if isinstance(value, (tuple, list)):
-        return _nested_reactive_collection_revision(value)
+def _expose_reactive_value(value: Any, plan: Any) -> Any:
+    """Restore the public built-in type only where freezing changed it."""
 
-    return None
+    if plan is None:
+        return value
+    kind = plan if isinstance(plan, str) else plan[0]
+    if kind == _PLAN_BYTEARRAY:
+        return bytearray(value)
+    if kind == _PLAN_SET:
+        return set(value)
+    if kind in {_PLAN_LIST, _PLAN_TUPLE}:
+        child_plans = plan[1]
+        exposed = (
+            _expose_reactive_value(item, child_plan)
+            for item, child_plan in zip(value, child_plans, strict=True)
+        )
+        return list(exposed) if kind == _PLAN_LIST else tuple(exposed)
+    if kind == _PLAN_DICT:
+        return {key: _expose_reactive_value(value[key], child_plan) for key, child_plan in plan[1]}
+    raise RuntimeError(f"unknown Reactive exposure plan {kind!r}")
 
 
-def _nested_reactive_collection_revision(values) -> int | None:
-    revisions: list[int] = []
-    for item in values:
-        revision = _nested_reactive_revision(item)
-        if revision is not None:
-            revisions.append(revision)
-
-    if not revisions:
-        return None
-    return hash(tuple(revisions))
+def _iter_nested_reactives(value: Any):
+    if isinstance(value, Reactive):
+        yield value
+    elif type(value) in {tuple, frozenset}:
+        for item in value:
+            yield from _iter_nested_reactives(item)
+    elif type(value) in {dict, MappingProxyType}:
+        for item in value.values():
+            yield from _iter_nested_reactives(item)
 
 
 def _build_reverse_adj(dependency_graph: dict[str, set[str]]) -> dict[str, set[str]]:
-    """Build a one-hop reverse adjacency map: property -> direct dependents."""
-
-    rev: dict[str, set[str]] = {}
-    for prop_name, deps in dependency_graph.items():
-        for dep in deps:
-            rev.setdefault(dep, set()).add(prop_name)
-    return rev
+    reverse: dict[str, set[str]] = {}
+    for property_name, dependencies in dependency_graph.items():
+        for dependency in dependencies:
+            reverse.setdefault(dependency, set()).add(property_name)
+    return reverse
 
 
 def _validate_dependency_graph(
@@ -426,98 +616,41 @@ def _validate_dependency_graph(
     dependency_graph: dict[str, set[str]],
     reverse_adj: dict[str, set[str]],
 ) -> None:
-    """Validate that the dependency graph is acyclic."""
+    nodes = roots | set(dependency_graph)
+    in_degree = {node: 0 for node in nodes}
+    for property_name, dependencies in dependency_graph.items():
+        in_degree[property_name] = len(dependencies)
 
-    all_props = set(roots) | set(dependency_graph.keys())
-    if not all_props:
-        return
-
-    in_degree: dict[str, int] = {p: 0 for p in all_props}
-
-    for prop, deps in dependency_graph.items():
-        in_degree[prop] = len(deps)
-
-    for root in roots:
-        in_degree.setdefault(root, 0)
-
-    queue = sorted([p for p, d in in_degree.items() if d == 0])
-
+    ready = sorted(node for node, degree in in_degree.items() if degree == 0)
     processed = 0
-    while queue:
-        next_queue = []
-        for node in queue:
+    while ready:
+        next_ready: list[str] = []
+        for node in ready:
             processed += 1
-            for child in reverse_adj.get(node, set()):
-                in_degree[child] -= 1
-                if in_degree[child] == 0:
-                    next_queue.append(child)
-        queue = sorted(next_queue)
-
-    if processed != len(all_props):
-        remaining = [p for p in all_props if in_degree.get(p, 0) > 0]
-        cycles = _detect_cycles(remaining, dependency_graph)
-        raise ValueError(
-            "Circular dependency detected:\n"
-            + f"-- involved properties: {remaining}\n"
-            + f"-- dependency cycles: {cycles}"
-        )
+            for dependent in reverse_adj.get(node, ()):
+                in_degree[dependent] -= 1
+                if in_degree[dependent] == 0:
+                    next_ready.append(dependent)
+        ready = sorted(next_ready)
+    if processed != len(nodes):
+        cyclic = sorted(name for name, degree in in_degree.items() if degree > 0)
+        raise ValueError(f"Circular dependency detected among properties: {cyclic}")
 
 
-def _detect_cycles(
-    nodes: list[str],
-    dependency_graph: dict[str, set[str]],
-) -> list[list[str]]:
-    """Detect and return all cyclic dependency paths."""
-
-    cycles: list[list[str]] = []
-    node_set = set(nodes)
-
-    def dfs(node: str, path: list[str], visited: set[str]):
-        if node in path:
-            cycle_start = path.index(node)
-            cycles.append(path[cycle_start:] + [node])
-            return
-
-        if node in visited:
-            return
-
-        visited.add(node)
-        path.append(node)
-
-        for dep in dependency_graph.get(node, set()):
-            if dep in node_set:
-                dfs(dep, path.copy(), visited)
-
-    visited_global: set[str] = set()
-    for node in nodes:
-        if node not in visited_global:
-            dfs(node, [], visited_global)
-
-    return cycles
+def _unwrap_function(function: Callable[..., Any]) -> Callable[..., Any]:
+    return getattr(function, "__wrapped__", function)
 
 
-def _unwrap_function(func):
-    if hasattr(func, "__wrapped__"):
-        return func.__wrapped__
-    return func
-
-
-def _parse_dependency(func) -> set[str]:
-    """Parse names of ``self.xxx`` attributes accessed by a function."""
-
+def _parse_dependency(function: Callable[..., Any]) -> set[str]:
     try:
-        source = inspect.getsource(func)
+        source = inspect.getsource(function)
     except (OSError, TypeError):
         return set()
-
-    source = textwrap.dedent(source)
-    tree = ast.parse(source)
+    tree = ast.parse(textwrap.dedent(source))
     names: set[str] = set()
 
     class Visitor(ast.NodeVisitor):
-        """AST node visitor."""
-
-        def visit_Attribute(self, node):
+        def visit_Attribute(self, node: ast.Attribute) -> None:
             if isinstance(node.value, ast.Name) and node.value.id == "self":
                 names.add(node.attr)
             self.generic_visit(node)

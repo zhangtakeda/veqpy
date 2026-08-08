@@ -25,6 +25,7 @@ Design notes:
   objects rebuild derived quantities through formulas instead of replaying stale
   cache contents.
 """
+
 from __future__ import annotations
 
 import inspect
@@ -273,6 +274,14 @@ def _check_type(value: Any, expected: type | tuple) -> bool:
             return all(_check_type(v, args[0]) for v in value)
         return True
 
+    if origin in {set, frozenset}:
+        if not isinstance(value, origin):
+            return False
+        args = get_args(expected)
+        if args and value:
+            return all(_check_type(v, args[0]) for v in value)
+        return True
+
     if origin is tuple:
         if not isinstance(value, tuple):
             return False
@@ -297,6 +306,9 @@ def _check_type(value: Any, expected: type | tuple) -> bool:
 
     if expected is np.ndarray:
         return isinstance(value, np.ndarray)
+
+    if expected in {bytes, bytearray}:
+        return isinstance(value, expected)
 
     if expected in {int, float, str, bool}:
         return isinstance(value, (expected, np.generic))
@@ -347,8 +359,18 @@ def _python_to_json(value: Any) -> Any:
     if isinstance(value, np.ndarray):
         return value.tolist()
 
+    if isinstance(value, (bytes, bytearray)):
+        return list(value)
+
     if isinstance(value, list):
         return [_python_to_json(v) for v in value]
+
+    if isinstance(value, (set, frozenset)):
+        items = [_python_to_json(v) for v in value]
+        try:
+            return sorted(items)
+        except TypeError:
+            return items
 
     if isinstance(value, tuple):
         return [_python_to_json(v) for v in value]
@@ -383,6 +405,11 @@ def _json_to_python(data: Any, expected: type | tuple) -> Any:
         inner = get_args(expected)[0] if get_args(expected) else Any
         return [_json_to_python(item, inner) for item in data]
 
+    if origin in {set, frozenset} and isinstance(data, (list, set, frozenset)):
+        inner = get_args(expected)[0] if get_args(expected) else Any
+        converted = (_json_to_python(item, inner) for item in data)
+        return origin(converted)
+
     if origin is tuple and isinstance(data, (list, tuple)):
         args = get_args(expected)
         if args:
@@ -404,6 +431,12 @@ def _json_to_python(data: Any, expected: type | tuple) -> Any:
 
     if expected is np.ndarray:
         return np.array(data) if not isinstance(data, np.ndarray) else data
+
+    if expected is bytes:
+        return bytes(data)
+
+    if expected is bytearray:
+        return bytearray(data)
 
     if expected in {int, float, str, bool}:
         return data.item() if isinstance(data, np.generic) else data
@@ -428,6 +461,11 @@ def _json_to_python_union(data: Any, members: tuple) -> Any:
     for t in members:
         if t is np.ndarray and isinstance(data, list):
             return np.array(data)
+        if t in {bytes, bytearray} and isinstance(data, list):
+            return t(data)
+        origin = get_origin(t)
+        if origin in {set, frozenset} and isinstance(data, list):
+            return _json_to_python(data, t)
         if t in {int, float, str, bool} and isinstance(data, (int, float, str, bool)):
             return t(data)
 
