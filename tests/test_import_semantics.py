@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib
+import subprocess
+import sys
 
 import veqpy
 
@@ -106,3 +108,17 @@ def test_direct_module_imports_are_available() -> None:
 
     for module_name in modules:
         assert importlib.import_module(module_name)
+
+
+def test_model_import_does_not_eagerly_load_matplotlib() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys, veqpy; assert 'matplotlib' not in sys.modules",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
