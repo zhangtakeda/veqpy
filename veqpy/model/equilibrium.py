@@ -840,6 +840,13 @@ class Equilibrium(Reactive, Serial):
         return _readonly_owned(out)
 
     @property
+    def Phi_r(self) -> np.ndarray:
+        """Derivative of toroidal flux ``Phi`` with respect to VEQ ``rho``."""
+        out = np.empty_like(self.rho)
+        eqnb.update_scaled_product(out, self.F, self.Ln_r, 2.0 * np.pi)
+        return _readonly_owned(out)
+
+    @property
     def Phi(self) -> np.ndarray:
         """Toroidal flux Phi."""
         out = np.empty_like(self.rho)
@@ -850,6 +857,118 @@ class Equilibrium(Reactive, Serial):
             self.grid.accumulator,
         )
         return _readonly_owned(out)
+
+    @property
+    def _toroidal_flux_coordinates(self) -> np.ndarray:
+        out = np.empty((4, self.grid.Nr), dtype=np.float64)
+        invalid = eqnb.update_toroidal_flux_coordinates(
+            out,
+            self.Phi,
+            self.F,
+            self.Ln_r,
+            self.B0,
+            self.rho,
+        )
+        if invalid:
+            raise ValueError(
+                "IMAS toroidal-flux coordinates contain a non-finite or "
+                f"non-physical value at radial index {invalid - 1}"
+            )
+        return _readonly_owned(out)
+
+    @property
+    def rho_tor(self) -> np.ndarray:
+        """IMAS toroidal-flux coordinate ``sqrt(Phi / (pi * B0))`` [m]."""
+        return self._toroidal_flux_coordinates[eqnb.RHO_TOR]
+
+    @property
+    def rho_tor_norm(self) -> np.ndarray:
+        """IMAS toroidal-flux coordinate normalized from axis to boundary."""
+        return self._toroidal_flux_coordinates[eqnb.RHO_TOR_NORM]
+
+    @property
+    def rho_tor_r(self) -> np.ndarray:
+        """Derivative of physical ``rho_tor`` with respect to VEQ ``rho`` [m]."""
+        return self._toroidal_flux_coordinates[eqnb.RHO_TOR_R]
+
+    @property
+    def rho_tor_norm_r(self) -> np.ndarray:
+        """Derivative of ``rho_tor_norm`` with respect to VEQ ``rho``."""
+        return self._toroidal_flux_coordinates[eqnb.RHO_TOR_NORM_R]
+
+    @property
+    def _gm_fields(self) -> np.ndarray:
+        out = np.empty((10, self.grid.Nr), dtype=np.float64)
+        invalid = eqnb.update_gm(
+            out,
+            self.R,
+            self.J,
+            self.gttdivJR,
+            self.F,
+            _validated_radial_root(self.psin_r, self.grid, "psin_r"),
+            self.Ln_r,
+            self.S_r,
+            self.V_r,
+            self.rho_tor_r,
+            self.alpha2,
+            self.rho,
+        )
+        if invalid:
+            raise ValueError(
+                "IMAS gm geometry contains a non-finite or non-physical value "
+                f"at radial index {invalid - 1}"
+            )
+        return _readonly_owned(out)
+
+    @property
+    def gm1(self) -> np.ndarray:
+        """IMAS ``gm1 = <1/R^2>`` [m^-2]."""
+        return self._gm_fields[eqnb.GM1]
+
+    @property
+    def gm2(self) -> np.ndarray:
+        """IMAS ``gm2 = <|grad rho_tor|^2/R^2>`` [m^-2]."""
+        return self._gm_fields[eqnb.GM2]
+
+    @property
+    def gm3(self) -> np.ndarray:
+        """IMAS ``gm3 = <|grad rho_tor|^2>``."""
+        return self._gm_fields[eqnb.GM3]
+
+    @property
+    def gm4(self) -> np.ndarray:
+        """IMAS ``gm4 = <1/B^2>`` [T^-2]."""
+        return self._gm_fields[eqnb.GM4]
+
+    @property
+    def gm5(self) -> np.ndarray:
+        """IMAS ``gm5 = <B^2>`` [T^2]."""
+        return self._gm_fields[eqnb.GM5]
+
+    @property
+    def gm6(self) -> np.ndarray:
+        """IMAS ``gm6 = <|grad rho_tor|^2/B^2>`` [T^-2]."""
+        return self._gm_fields[eqnb.GM6]
+
+    @property
+    def gm7(self) -> np.ndarray:
+        """IMAS ``gm7 = <|grad rho_tor|>``."""
+        return self._gm_fields[eqnb.GM7]
+
+    @property
+    def gm8(self) -> np.ndarray:
+        """IMAS ``gm8 = <R>`` [m]."""
+        return self._gm_fields[eqnb.GM8]
+
+    @property
+    def gm9(self) -> np.ndarray:
+        """IMAS ``gm9 = <1/R>`` [m^-1]."""
+        return self._gm_fields[eqnb.GM9]
+
+    @property
+    def gm10(self) -> np.ndarray:
+        """IMAS.jl/FUSE extension ``gm10 = <R^2>`` [m^2]."""
+        return self._gm_fields[eqnb.GM10]
 
     def plot(
         self,

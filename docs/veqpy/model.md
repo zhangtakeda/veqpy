@@ -46,7 +46,10 @@ These fields are sufficient to reconstruct common physical quantities without
 retaining solver-hot-path memory. When the user reads properties such as `R`,
 `Z`, `F`, `P`, `q`, `Ip`, `beta_t`, `jtor`, `jpara`, `jtotal`, `jphi`, `Psi`, or
 `Phi`, a self-contained Numba kernel materializes a new result and `Reactive`
-caches it until a direct dependency changes.
+caches it until a direct dependency changes. The snapshot also exposes the IMAS
+toroidal-flux derivative `Phi_r`, coordinates `rho_tor`, `rho_tor_norm`, and
+their VEQ-`rho` derivatives, together with `gm1` through `gm9` and the
+FUSE/IMAS.jl `gm10` extension.
 
 `F` retains the sign of `R0 * B0`. The PJ2 diagnostic `jpara` denotes
 `<J·B> / (F <R^-2>)`, while `jtotal` directly exposes the IMAS convention
@@ -62,6 +65,33 @@ A small set of packed geometry fields is retained because those combinations
 have stable meaning for plotting, comparison, and GEQDSK export. Finer local
 derivative combinations, residual projection matrices, and backend workspaces
 remain in the Kernel runtime layer and do not become public snapshot API.
+
+### IMAS gm geometry
+
+`Equilibrium` follows the IMAS flux-surface-average definitions. Here
+`<...>` is the Jacobian-weighted flux-surface average and
+`rho_tor = sqrt(Phi / (pi B0))` is the physical toroidal-flux coordinate in
+metres. It must not be replaced by the normalized coordinate
+`rho_tor_norm` when calculating gradient-bearing coefficients.
+
+| Property | Definition | Unit |
+| -------- | ---------- | ---- |
+| `gm1` | `<1/R^2>` | `m^-2` |
+| `gm2` | `<\|grad rho_tor\|^2/R^2>` | `m^-2` |
+| `gm3` | `<\|grad rho_tor\|^2>` | `1` |
+| `gm4` | `<1/B^2>` | `T^-2` |
+| `gm5` | `<B^2>` | `T^2` |
+| `gm6` | `<\|grad rho_tor\|^2/B^2>` | `T^-2` |
+| `gm7` | `<\|grad rho_tor\|>` | `1` |
+| `gm8` | `<R>` | `m` |
+| `gm9` | `<1/R>` | `m^-1` |
+| `gm10` | `<R^2>` | `m^2` |
+
+The current public IMAS data dictionary standardizes `gm1` through `gm9`.
+`gm10` is provided as an explicitly documented compatibility extension because
+IMAS.jl and FUSE retain it in their equilibrium 1D data model. All ten
+coefficients share one lazy Numba materialization because the surface weights,
+magnetic-field magnitude, and `grad rho_tor` metric are common intermediates.
 
 ## Numba Field Materialization
 

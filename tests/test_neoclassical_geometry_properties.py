@@ -114,6 +114,98 @@ def test_uniform_equilibrium_exposes_neoclassical_geometry_profiles() -> None:
     assert not equilibrium.ftrap.flags.writeable
 
 
+def test_equilibrium_exposes_imas_toroidal_flux_coordinates() -> None:
+    equilibrium = _uniform_demo_equilibrium()
+
+    np.testing.assert_allclose(
+        equilibrium.Phi_r,
+        2.0 * np.pi * equilibrium.F * equilibrium.Ln_r,
+        rtol=2.0e-15,
+        atol=2.0e-15,
+    )
+    np.testing.assert_allclose(
+        equilibrium.Phi,
+        equilibrium.grid.accumulate(equilibrium.Phi_r),
+        rtol=2.0e-15,
+        atol=2.0e-15,
+    )
+    expected = np.sqrt(equilibrium.Phi / (np.pi * equilibrium.B0))
+    np.testing.assert_allclose(equilibrium.rho_tor, expected, rtol=2.0e-15, atol=2.0e-15)
+    np.testing.assert_allclose(
+        equilibrium.rho_tor_norm,
+        (expected - expected[0]) / (expected[-1] - expected[0]),
+        rtol=2.0e-15,
+        atol=2.0e-15,
+    )
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        derivative = equilibrium.F * equilibrium.Ln_r / (
+            equilibrium.B0 * equilibrium.rho_tor
+        )
+    derivative = _axis_even_rho2_limit(derivative, equilibrium.rho)
+    np.testing.assert_allclose(
+        equilibrium.rho_tor_r,
+        derivative,
+        rtol=2.0e-15,
+        atol=2.0e-15,
+    )
+    np.testing.assert_allclose(
+        equilibrium.rho_tor_norm_r,
+        derivative / (expected[-1] - expected[0]),
+        rtol=2.0e-15,
+        atol=2.0e-15,
+    )
+    assert equilibrium.rho_tor_norm[0] == 0.0
+    assert equilibrium.rho_tor_norm[-1] == 1.0
+    assert not equilibrium.rho_tor.flags.writeable
+
+
+def test_equilibrium_gm_series_matches_imas_flux_surface_averages() -> None:
+    equilibrium = _uniform_demo_equilibrium()
+    weights = equilibrium.J * equilibrium.R
+
+    def surface_average(values: np.ndarray) -> np.ndarray:
+        with np.errstate(divide="ignore", invalid="ignore"):
+            result = np.sum(weights * values, axis=1) / np.sum(weights, axis=1)
+        return _axis_even_rho2_limit(result, equilibrium.rho)
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        bp2 = (
+            (equilibrium.alpha2 * equilibrium.psin_r[:, None]) ** 2
+            * equilibrium.gttdivJR
+            / (equilibrium.J * equilibrium.R)
+        )
+        grad_rho_tor2 = (
+            equilibrium.rho_tor_r[:, None] ** 2
+            * equilibrium.gttdivJR
+            * equilibrium.R
+            / equilibrium.J
+        )
+    bp2[0] = np.nan
+    grad_rho_tor2[0] = np.nan
+    b2 = (equilibrium.F[:, None] / equilibrium.R) ** 2 + bp2
+
+    expected = (
+        surface_average(1.0 / equilibrium.R**2),
+        surface_average(grad_rho_tor2 / equilibrium.R**2),
+        surface_average(grad_rho_tor2),
+        surface_average(1.0 / b2),
+        surface_average(b2),
+        surface_average(grad_rho_tor2 / b2),
+        surface_average(np.sqrt(grad_rho_tor2)),
+        surface_average(equilibrium.R),
+        surface_average(1.0 / equilibrium.R),
+        surface_average(equilibrium.R**2),
+    )
+    for index, reference in enumerate(expected, start=1):
+        values = getattr(equilibrium, f"gm{index}")
+        np.testing.assert_allclose(values, reference, rtol=3.0e-14, atol=3.0e-14)
+        assert np.all(np.isfinite(values))
+        assert np.all(values > 0.0)
+        assert not values.flags.writeable
+        assert getattr(equilibrium, f"gm{index}") is values
+
+
 @pytest.mark.parametrize(
     ("b0", "ip"),
     [(-3.0, -3.0e6), (-3.0, 3.0e6), (3.0, -3.0e6), (3.0, 3.0e6)],
@@ -125,6 +217,14 @@ def test_signed_f_and_q_follow_the_fixed_cocos_contract(b0: float, ip: float) ->
     assert np.all(np.sign(equilibrium.F) == np.sign(b0))
     assert np.all(np.sign(equilibrium.q) == np.sign(b0 * ip))
     assert equilibrium.Ip == pytest.approx(ip, rel=2.0e-13)
+    np.testing.assert_allclose(
+        equilibrium.rho_tor**2,
+        equilibrium.Phi / (np.pi * b0),
+        rtol=2.0e-15,
+        atol=2.0e-15,
+    )
+    for index in range(1, 11):
+        assert np.all(getattr(equilibrium, f"gm{index}") > 0.0)
 
     geqdsk = equilibrium.to_geqdsk(
         R_range=(
@@ -150,9 +250,7 @@ def test_pj2_jpara_reconstructs_imas_jtotal_with_gm1(b0: float) -> None:
 
     # VEQ's Ln_r is the poloidal mean of J/R, while V_r is 2*pi times
     # the integral of J*R. Their ratio therefore gives IMAS gm1=<R^-2>.
-    with np.errstate(divide="ignore", invalid="ignore"):
-        gm1 = two_pi**2 * equilibrium.Ln_r / equilibrium.V_r
-    gm1 = _axis_even_rho2_limit(gm1, equilibrium.rho)
+    gm1 = equilibrium.gm1
     surface_weights = equilibrium.J * equilibrium.R
     with np.errstate(divide="ignore", invalid="ignore"):
         gm1_direct = np.sum(surface_weights / equilibrium.R**2, axis=1) / np.sum(
@@ -169,13 +267,17 @@ def test_pj2_jpara_reconstructs_imas_jtotal_with_gm1(b0: float) -> None:
         / (equilibrium.J * equilibrium.R)
     )
     with np.errstate(divide="ignore", invalid="ignore"):
-        gm5 = np.sum(surface_weights * (bphi2 + bp2), axis=1) / np.sum(
+        gm5_direct = np.sum(surface_weights * (bphi2 + bp2), axis=1) / np.sum(
             surface_weights,
             axis=1,
         )
-        gm9 = two_pi * equilibrium.S_r / equilibrium.V_r
-    gm5 = _axis_even_rho2_limit(gm5, equilibrium.rho)
-    gm9 = _axis_even_rho2_limit(gm9, equilibrium.rho)
+        gm9_direct = two_pi * equilibrium.S_r / equilibrium.V_r
+    gm5_direct = _axis_even_rho2_limit(gm5_direct, equilibrium.rho)
+    gm9_direct = _axis_even_rho2_limit(gm9_direct, equilibrium.rho)
+    np.testing.assert_allclose(equilibrium.gm5, gm5_direct, rtol=2.0e-15, atol=2.0e-15)
+    np.testing.assert_allclose(equilibrium.gm9, gm9_direct, rtol=2.0e-15, atol=2.0e-15)
+    gm5 = equilibrium.gm5
+    gm9 = equilibrium.gm9
     dpressure_dpsi = equilibrium.alpha1 * equilibrium.Pn_psin / (two_pi * MU0)
 
     jtotal_from_pj2 = equilibrium.jpara * equilibrium.F * gm1 / equilibrium.B0

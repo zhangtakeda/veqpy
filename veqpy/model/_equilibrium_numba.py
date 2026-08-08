@@ -43,6 +43,25 @@ KN = 2
 KN_R = 3
 LN_R = 4
 
+# IMAS equilibrium ``profiles_1d`` geometric coefficients.  GM10 is retained
+# as the IMAS.jl/FUSE extension ``<R^2>`` even though the current public IMAS
+# data dictionary standardizes only GM1 through GM9.
+GM1 = 0
+GM2 = 1
+GM3 = 2
+GM4 = 3
+GM5 = 4
+GM6 = 5
+GM7 = 6
+GM8 = 7
+GM9 = 8
+GM10 = 9
+
+RHO_TOR = 0
+RHO_TOR_NORM = 1
+RHO_TOR_R = 2
+RHO_TOR_NORM_R = 3
+
 @njit(cache=True, nogil=True, inline="always")
 def _power_terms_at(rho: float, power: int) -> tuple[float, float, float]:
     if power == 0:
@@ -755,6 +774,144 @@ def update_phi(
         for k in range(out.shape[0]):
             total += accumulator[i, k] * f[k] * ln_r[k]
         out[i] = 2.0 * np.pi * total
+
+
+@njit(cache=True, nogil=True)
+def update_toroidal_flux_coordinates(
+    out: np.ndarray,
+    phi: np.ndarray,
+    f: np.ndarray,
+    ln_r: np.ndarray,
+    B0: float,
+    rho: np.ndarray,
+) -> int:
+    """Materialize IMAS ``rho_tor`` coordinates and radial derivatives."""
+
+    if B0 == 0.0 or not np.isfinite(B0):
+        return 1
+
+    for i in range(phi.shape[0]):
+        rho_tor_squared = phi[i] / (np.pi * B0)
+        if rho_tor_squared < 0.0 or not np.isfinite(rho_tor_squared):
+            return i + 1
+        rho_tor = np.sqrt(rho_tor_squared)
+        out[RHO_TOR, i] = rho_tor
+        if rho_tor == 0.0:
+            out[RHO_TOR_R, i] = np.nan
+        else:
+            out[RHO_TOR_R, i] = f[i] * ln_r[i] / (B0 * rho_tor)
+
+    _regularize_axis_rho2_1d(out[RHO_TOR_R], rho)
+    axis_value = out[RHO_TOR, 0]
+    span = out[RHO_TOR, -1] - axis_value
+    if span == 0.0 or not np.isfinite(span):
+        return phi.shape[0]
+    for i in range(phi.shape[0]):
+        out[RHO_TOR_NORM, i] = (out[RHO_TOR, i] - axis_value) / span
+        out[RHO_TOR_NORM_R, i] = out[RHO_TOR_R, i] / span
+
+    for row in range(out.shape[0]):
+        invalid = _first_nonfinite_1d(out[row])
+        if invalid:
+            return invalid
+    return 0
+
+
+@njit(cache=True, nogil=True)
+def update_gm(
+    out: np.ndarray,
+    radius: np.ndarray,
+    jacobian: np.ndarray,
+    gttdivjr: np.ndarray,
+    f: np.ndarray,
+    psin_r: np.ndarray,
+    ln_r: np.ndarray,
+    surface_area_r: np.ndarray,
+    volume_r: np.ndarray,
+    rho_tor_r: np.ndarray,
+    alpha2: float,
+    rho: np.ndarray,
+) -> int:
+    """Materialize IMAS gm1--gm9 and the IMAS.jl/FUSE gm10 extension."""
+
+    has_axis = out.shape[1] >= 3 and abs(rho[0]) < 1.0e-10
+    gm1_scale = (2.0 * np.pi) ** 2
+    gm9_scale = 2.0 * np.pi
+    for i in range(out.shape[1]):
+        if has_axis and i == 0:
+            for field in range(out.shape[0]):
+                out[field, i] = np.nan
+            continue
+        if volume_r[i] == 0.0 or not np.isfinite(volume_r[i]):
+            return i + 1
+
+        weight_sum = 0.0
+        gm2_sum = 0.0
+        gm3_sum = 0.0
+        gm4_sum = 0.0
+        gm5_sum = 0.0
+        gm6_sum = 0.0
+        gm7_sum = 0.0
+        gm8_sum = 0.0
+        gm10_sum = 0.0
+        for j in range(radius.shape[1]):
+            r = radius[i, j]
+            jac = jacobian[i, j]
+            jr = jac * r
+            if r == 0.0 or jac == 0.0 or not np.isfinite(jr):
+                return i + 1
+
+            bphi2 = (f[i] / r) ** 2
+            bp2 = (alpha2 * psin_r[i]) ** 2 * gttdivjr[i, j] / jr
+            grad_rho_tor2 = (
+                rho_tor_r[i]
+                * rho_tor_r[i]
+                * gttdivjr[i, j]
+                * r
+                / jac
+            )
+            b2 = bphi2 + bp2
+            if (
+                b2 <= 0.0
+                or grad_rho_tor2 < 0.0
+                or not np.isfinite(b2)
+                or not np.isfinite(grad_rho_tor2)
+            ):
+                return i + 1
+
+            weight_sum += jr
+            gm2_sum += jr * grad_rho_tor2 / (r * r)
+            gm3_sum += jr * grad_rho_tor2
+            gm4_sum += jr / b2
+            gm5_sum += jr * b2
+            gm6_sum += jr * grad_rho_tor2 / b2
+            gm7_sum += jr * np.sqrt(grad_rho_tor2)
+            gm8_sum += jr * r
+            gm10_sum += jr * r * r
+
+        if weight_sum == 0.0 or not np.isfinite(weight_sum):
+            return i + 1
+        inv_weight = 1.0 / weight_sum
+        out[GM1, i] = gm1_scale * ln_r[i] / volume_r[i]
+        out[GM2, i] = gm2_sum * inv_weight
+        out[GM3, i] = gm3_sum * inv_weight
+        out[GM4, i] = gm4_sum * inv_weight
+        out[GM5, i] = gm5_sum * inv_weight
+        out[GM6, i] = gm6_sum * inv_weight
+        out[GM7, i] = gm7_sum * inv_weight
+        out[GM8, i] = gm8_sum * inv_weight
+        out[GM9, i] = gm9_scale * surface_area_r[i] / volume_r[i]
+        out[GM10, i] = gm10_sum * inv_weight
+
+    if has_axis:
+        for field in range(out.shape[0]):
+            _regularize_axis_rho2_1d(out[field], rho)
+
+    for field in range(out.shape[0]):
+        invalid = _first_nonfinite_1d(out[field])
+        if invalid:
+            return invalid
+    return 0
 
 
 @njit(cache=True, nogil=True)
