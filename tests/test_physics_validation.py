@@ -92,7 +92,6 @@ def test_numba_geqdsk_low_order_solution_has_physical_diagnostics(case_key: str)
         "gm7",
         "gm8",
         "gm9",
-        "gm10",
     ):
         values = np.asarray(getattr(equilibrium, name), dtype=np.float64)
         assert values.size > 0

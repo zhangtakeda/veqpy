@@ -195,7 +195,6 @@ def test_equilibrium_gm_series_matches_imas_flux_surface_averages() -> None:
         surface_average(np.sqrt(grad_rho_tor2)),
         surface_average(equilibrium.R),
         surface_average(1.0 / equilibrium.R),
-        surface_average(equilibrium.R**2),
     )
     for index, reference in enumerate(expected, start=1):
         values = getattr(equilibrium, f"gm{index}")
@@ -223,7 +222,7 @@ def test_signed_f_and_q_follow_the_fixed_cocos_contract(b0: float, ip: float) ->
         rtol=2.0e-15,
         atol=2.0e-15,
     )
-    for index in range(1, 11):
+    for index in range(1, 10):
         assert np.all(getattr(equilibrium, f"gm{index}") > 0.0)
 
     geqdsk = equilibrium.to_geqdsk(

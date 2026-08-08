@@ -43,9 +43,7 @@ KN = 2
 KN_R = 3
 LN_R = 4
 
-# IMAS equilibrium ``profiles_1d`` geometric coefficients.  GM10 is retained
-# as the IMAS.jl/FUSE extension ``<R^2>`` even though the current public IMAS
-# data dictionary standardizes only GM1 through GM9.
+# IMAS equilibrium ``profiles_1d`` geometric coefficients.
 GM1 = 0
 GM2 = 1
 GM3 = 2
@@ -55,7 +53,6 @@ GM6 = 5
 GM7 = 6
 GM8 = 7
 GM9 = 8
-GM10 = 9
 
 RHO_TOR = 0
 RHO_TOR_NORM = 1
@@ -832,7 +829,7 @@ def update_gm(
     alpha2: float,
     rho: np.ndarray,
 ) -> int:
-    """Materialize IMAS gm1--gm9 and the IMAS.jl/FUSE gm10 extension."""
+    """Materialize the IMAS gm1--gm9 flux-surface geometry coefficients."""
 
     has_axis = out.shape[1] >= 3 and abs(rho[0]) < 1.0e-10
     gm1_scale = (2.0 * np.pi) ** 2
@@ -853,7 +850,6 @@ def update_gm(
         gm6_sum = 0.0
         gm7_sum = 0.0
         gm8_sum = 0.0
-        gm10_sum = 0.0
         for j in range(radius.shape[1]):
             r = radius[i, j]
             jac = jacobian[i, j]
@@ -887,7 +883,6 @@ def update_gm(
             gm6_sum += jr * grad_rho_tor2 / b2
             gm7_sum += jr * np.sqrt(grad_rho_tor2)
             gm8_sum += jr * r
-            gm10_sum += jr * r * r
 
         if weight_sum == 0.0 or not np.isfinite(weight_sum):
             return i + 1
@@ -901,7 +896,6 @@ def update_gm(
         out[GM7, i] = gm7_sum * inv_weight
         out[GM8, i] = gm8_sum * inv_weight
         out[GM9, i] = gm9_scale * surface_area_r[i] / volume_r[i]
-        out[GM10, i] = gm10_sum * inv_weight
 
     if has_axis:
         for field in range(out.shape[0]):

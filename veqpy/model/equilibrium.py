@@ -898,7 +898,7 @@ class Equilibrium(Reactive, Serial):
 
     @property
     def _gm_fields(self) -> np.ndarray:
-        out = np.empty((10, self.grid.Nr), dtype=np.float64)
+        out = np.empty((9, self.grid.Nr), dtype=np.float64)
         invalid = eqnb.update_gm(
             out,
             self.R,
@@ -964,11 +964,6 @@ class Equilibrium(Reactive, Serial):
     def gm9(self) -> np.ndarray:
         """IMAS ``gm9 = <1/R>`` [m^-1]."""
         return self._gm_fields[eqnb.GM9]
-
-    @property
-    def gm10(self) -> np.ndarray:
-        """IMAS.jl/FUSE extension ``gm10 = <R^2>`` [m^2]."""
-        return self._gm_fields[eqnb.GM10]
 
     def plot(
         self,

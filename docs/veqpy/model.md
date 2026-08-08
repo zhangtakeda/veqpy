@@ -48,8 +48,8 @@ retaining solver-hot-path memory. When the user reads properties such as `R`,
 `Phi`, a self-contained Numba kernel materializes a new result and `Reactive`
 caches it until a direct dependency changes. The snapshot also exposes the IMAS
 toroidal-flux derivative `Phi_r`, coordinates `rho_tor`, `rho_tor_norm`, and
-their VEQ-`rho` derivatives, together with `gm1` through `gm9` and the
-FUSE/IMAS.jl `gm10` extension.
+their VEQ-`rho` derivatives, together with the IMAS properties `gm1` through
+`gm9`.
 
 `F` retains the sign of `R0 * B0`. The PJ2 diagnostic `jpara` denotes
 `<J·B> / (F <R^-2>)`, while `jtotal` directly exposes the IMAS convention
@@ -85,12 +85,8 @@ metres. It must not be replaced by the normalized coordinate
 | `gm7` | `<\|grad rho_tor\|>` | `1` |
 | `gm8` | `<R>` | `m` |
 | `gm9` | `<1/R>` | `m^-1` |
-| `gm10` | `<R^2>` | `m^2` |
 
-The current public IMAS data dictionary standardizes `gm1` through `gm9`.
-`gm10` is provided as an explicitly documented compatibility extension because
-IMAS.jl and FUSE retain it in their equilibrium 1D data model. All ten
-coefficients share one lazy Numba materialization because the surface weights,
+All nine coefficients share one lazy Numba materialization because the surface weights,
 magnetic-field magnitude, and `grad rho_tor` metric are common intermediates.
 
 ## Numba Field Materialization
