@@ -86,6 +86,16 @@ def _uniform_demo_equilibrium():
     return equilibrium.resample(grid)
 
 
+def _axis_even_rho2_limit(values: np.ndarray, rho: np.ndarray) -> np.ndarray:
+    """Return a copy with the removable even axis value reconstructed."""
+
+    result = np.asarray(values, dtype=np.float64).copy()
+    if result.shape[0] >= 3 and abs(rho[0]) < 1.0e-10:
+        x0, x1, x2 = rho[:3] ** 2
+        result[0] = result[1] + (result[2] - result[1]) * (x0 - x1) / (x2 - x1)
+    return result
+
+
 def test_uniform_equilibrium_exposes_neoclassical_geometry_profiles() -> None:
     equilibrium = _uniform_demo_equilibrium()
 
@@ -99,7 +109,7 @@ def test_uniform_equilibrium_exposes_neoclassical_geometry_profiles() -> None:
     assert equilibrium.kappa.shape == equilibrium.rho.shape
     assert np.all(np.isfinite(equilibrium.ftrap))
     assert np.all((equilibrium.ftrap >= 0.0) & (equilibrium.ftrap <= 1.0))
-    assert np.isclose(equilibrium.ftrap[0], 0.07780086351634649, rtol=2e-13)
+    assert equilibrium.ftrap[0] == 0.0
     assert np.isclose(equilibrium.ftrap[-1], 0.80962984152523, rtol=2e-13)
     assert not equilibrium.ftrap.flags.writeable
 
@@ -140,12 +150,16 @@ def test_pj2_jpara_reconstructs_imas_jtotal_with_gm1(b0: float) -> None:
 
     # VEQ's Ln_r is the poloidal mean of J/R, while V_r is 2*pi times
     # the integral of J*R. Their ratio therefore gives IMAS gm1=<R^-2>.
-    gm1 = two_pi**2 * equilibrium.Ln_r / equilibrium.V_r
+    with np.errstate(divide="ignore", invalid="ignore"):
+        gm1 = two_pi**2 * equilibrium.Ln_r / equilibrium.V_r
+    gm1 = _axis_even_rho2_limit(gm1, equilibrium.rho)
     surface_weights = equilibrium.J * equilibrium.R
-    gm1_direct = np.sum(surface_weights / equilibrium.R**2, axis=1) / np.sum(
-        surface_weights,
-        axis=1,
-    )
+    with np.errstate(divide="ignore", invalid="ignore"):
+        gm1_direct = np.sum(surface_weights / equilibrium.R**2, axis=1) / np.sum(
+            surface_weights,
+            axis=1,
+        )
+    gm1_direct = _axis_even_rho2_limit(gm1_direct, equilibrium.rho)
     np.testing.assert_allclose(gm1, gm1_direct, rtol=2.0e-15, atol=2.0e-15)
 
     bphi2 = (equilibrium.F[:, None] / equilibrium.R) ** 2
@@ -154,14 +168,24 @@ def test_pj2_jpara_reconstructs_imas_jtotal_with_gm1(b0: float) -> None:
         * equilibrium.gttdivJR
         / (equilibrium.J * equilibrium.R)
     )
-    gm5 = np.sum(surface_weights * (bphi2 + bp2), axis=1) / np.sum(
-        surface_weights,
-        axis=1,
-    )
-    gm9 = two_pi * equilibrium.S_r / equilibrium.V_r
+    with np.errstate(divide="ignore", invalid="ignore"):
+        gm5 = np.sum(surface_weights * (bphi2 + bp2), axis=1) / np.sum(
+            surface_weights,
+            axis=1,
+        )
+        gm9 = two_pi * equilibrium.S_r / equilibrium.V_r
+    gm5 = _axis_even_rho2_limit(gm5, equilibrium.rho)
+    gm9 = _axis_even_rho2_limit(gm9, equilibrium.rho)
     dpressure_dpsi = equilibrium.alpha1 * equilibrium.Pn_psin / (two_pi * MU0)
 
     jtotal_from_pj2 = equilibrium.jpara * equilibrium.F * gm1 / equilibrium.B0
+    np.testing.assert_allclose(
+        equilibrium.jtotal,
+        jtotal_from_pj2,
+        rtol=2.0e-15,
+        atol=2.0e-15,
+    )
+    assert not equilibrium.jtotal.flags.writeable
     jtor_over_r = equilibrium.jtor * gm9
     jtor_over_r += two_pi * dpressure_dpsi * (1.0 - equilibrium.F**2 * gm1 / gm5)
     jtotal_from_jtor = gm5 * jtor_over_r / (equilibrium.F * gm1 * equilibrium.B0)

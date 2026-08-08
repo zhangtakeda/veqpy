@@ -70,7 +70,16 @@ def test_numba_geqdsk_low_order_solution_has_physical_diagnostics(case_key: str)
     assert_finite(equilibrium.beta_t, name=f"{case_key} beta_t")
     assert 0.0 <= float(equilibrium.beta_t) <= 1.0
 
-    for name in ("rho", "psin", "Psi", "q", "FFn_psin", "Pn_psin", "jtor"):
+    for name in (
+        "rho",
+        "psin",
+        "Psi",
+        "q",
+        "FFn_psin",
+        "Pn_psin",
+        "jtor",
+        "jtotal",
+    ):
         values = np.asarray(getattr(equilibrium, name), dtype=np.float64)
         assert values.size > 0
         assert np.all(np.isfinite(values)), f"{case_key} {name} contains non-finite values"

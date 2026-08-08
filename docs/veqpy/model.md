@@ -42,12 +42,17 @@ topology to flat arrays; `Profile` remains on the model side for
 - pressure integration constant at the LCFS: `p0`;
 - scaling coefficients: `alpha1`, `alpha2`.
 
-These fields are sufficient to reconstruct common physical quantities, but they do not store temporary buffers from the solver hot path. When the user reads properties such as `R`, `Z`, `F`, `P`, `q`, `Ip`, `beta_t`, `jtor`, `jpara`, `jphi`, `Psi`, or `Phi`, the object computes the required values by formula and lets `Reactive` maintain dependency consistency.
+These fields are sufficient to reconstruct common physical quantities without
+retaining solver-hot-path memory. When the user reads properties such as `R`,
+`Z`, `F`, `P`, `q`, `Ip`, `beta_t`, `jtor`, `jpara`, `jtotal`, `jphi`, `Psi`, or
+`Phi`, a self-contained Numba kernel materializes a new result and `Reactive`
+caches it until a direct dependency changes.
 
 `F` retains the sign of `R0 * B0`. The PJ2 diagnostic `jpara` denotes
-`<J·B> / (F <R^-2>)`; it is not the IMAS `j_total = <J·B> / B0`
-representation. Using `gm1 = <R^-2> = (2π)^2 Ln_r / V_r`, the latter is
-reconstructed as `jpara * F * gm1 / B0`.
+`<J·B> / (F <R^-2>)`, while `jtotal` directly exposes the IMAS convention
+`j_total = <J·B> / B0`. Internally it uses
+`gm1 = <R^-2> = (2π)^2 Ln_r / V_r` and therefore equals
+`jpara * F * gm1 / B0`.
 
 ## Geometry and Diagnostics
 
@@ -57,6 +62,56 @@ A small set of packed geometry fields is retained because those combinations
 have stable meaning for plotting, comparison, and GEQDSK export. Finer local
 derivative combinations, residual projection matrices, and backend workspaces
 remain in the Kernel runtime layer and do not become public snapshot API.
+
+## Numba Field Materialization
+
+`Equilibrium` field materialization is independent of `veqpy.kernels`, source
+lowering, adapters, and solver workspaces. Its private Numba implementation
+consumes only root scalars/profiles and tables supplied by `Grid`. Numba removes
+Python loop overhead and vectorized temporary arrays, but does not change the
+value semantics of Reactive properties.
+
+The calculation graph follows three rules:
+
+1. Each physical property is a normal reactive node. Reading `q`, for example,
+   does not calculate current-density or GS-residual fields. Its newly allocated
+   immutable result is retained by the Reactive cache, so repeated reads do not
+   recalculate or reallocate it.
+2. Work is grouped only where the same coordinate derivatives dominate every
+   member: the `R` coordinate stage, the `Z` coordinate stage, and the
+   Jacobian/metric plus five radial geometry integrals. Reading `R` alone does
+   not materialize `Z` or the metric group.
+3. When a dependency changes, recomputation returns a new array. References to
+   an older cached result remain unchanged; public values are never live views
+   of shared mutable execution memory.
+
+Root radial profiles are shape-checked at the dependency boundary that consumes
+them. A malformed `FFn_psin` therefore blocks `FFn_r`, `F`, or `q`, but it does
+not prevent independent geometry such as `R` from being read. Replacing `Grid`
+invalidates grid-dependent descendants through the ordinary Reactive graph.
+
+### Magnetic-axis limits
+
+On grids that contain `rho=0`, the public coordinate Jacobian is the raw
+Jacobian produced by the surface map. It is not floored or clamped. Consequently
+`J`, `S`, `V`, `S_r`, `V_r`, and `Ln_r` vanish at the magnetic axis through their
+defining formulas. The model repairs only removable singularities in quantities
+that divide these primitives:
+
+- the local `gttdivJR` row uses its leading `rho*(A + O(rho))` form; its radial
+  derivative and the finite mixed metric coefficient use the corresponding
+  first-order-in-`rho` local limit (local fixed-angle geometry is not generally
+  even in `rho`);
+- flux functions `q`, `jtor`, `jpara`, and `jtotal` use an even-in-`rho^2`
+  limit reconstructed from the first two off-axis surfaces;
+- `ftrap` follows its leading `sqrt(rho)*(A + O(rho))` behavior, and the local
+  `jphi` formula is evaluated directly at the axis rather than extrapolated
+  independently for every poloidal angle.
+
+These repairs apply only to the coordinate singularity at the first radial
+point. A zero or non-finite metric denominator on an off-axis surface is an
+invalid equilibrium and raises an error; it is neither clamped nor
+extrapolated.
 
 ## Snapshot Responsibilities
 

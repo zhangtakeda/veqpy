@@ -11,7 +11,8 @@ Public API:
 
 Notes:
 - `Equilibrium` is a snapshot, not a solver runtime container.
-- Does not own packed state or the residual hot path.
+- Physical fields are materialized lazily by self-contained model-side Numba
+  kernels; packed solve state and persistent workspaces remain outside the model.
 """
 
 from __future__ import annotations
@@ -38,6 +39,8 @@ from veqpy.base import Reactive, Serial
 from veqpy.model.geqdsk import Geqdsk
 from veqpy.model.grid import Grid
 from veqpy.model.profile import Profile
+
+from . import _equilibrium_numba as eqnb
 
 plt.style.use("seaborn-v0_8-paper")
 plt.rcParams.update(
@@ -234,31 +237,6 @@ def _regularize_axis_linear_profile(
     return values
 
 
-def _regularize_axis_linear_surface(
-    values: np.ndarray,
-    rho: np.ndarray,
-    *,
-    copy: bool = False,
-) -> np.ndarray:
-    values = np.array(values, dtype=np.float64, copy=copy)
-    rho = np.asarray(rho, dtype=np.float64)
-    if values.ndim != 2 or rho.ndim != 1 or values.shape[0] != rho.shape[0]:
-        raise ValueError(f"values/rho shape mismatch: {values.shape} vs {rho.shape}")
-    if values.shape[0] < 3 or abs(rho[0]) >= 1e-10:
-        return values
-
-    # Apply the same axis-limit repair independently for each theta sample of a
-    # surface diagnostic; the equilibrium root fields themselves are unchanged.
-    rho1 = float(rho[1])
-    rho2 = float(rho[2])
-    if abs(rho2 - rho1) < 1e-14:
-        return values
-
-    slope = (values[2] - values[1]) / (rho2 - rho1)
-    values[0] = values[1] + slope * (rho[0] - rho1)
-    return values
-
-
 class Equilibrium(Reactive, Serial):
     """Equilibrium snapshot object on one grid."""
 
@@ -386,271 +364,402 @@ class Equilibrium(Reactive, Serial):
         return self.grid.sin_mtheta[1]
 
     @property
+    def _h_fields(self) -> np.ndarray:
+        return _materialize_profile_fields(self.shape_profiles.get("h"), self.grid)
+
+    @property
+    def _v_fields(self) -> np.ndarray:
+        return _materialize_profile_fields(self.shape_profiles.get("v"), self.grid)
+
+    @property
+    def _kappa_fields(self) -> np.ndarray:
+        return _materialize_profile_fields(self.shape_profiles.get("k"), self.grid)
+
+    @property
+    def _fourier_profile_fields(self) -> tuple[np.ndarray, np.ndarray]:
+        return _materialize_fourier_profile_fields(self.shape_profiles, self.grid)
+
+    @property
     def h(self) -> np.ndarray:
         """Normalized horizontal/Shafranov-shift profile on ``rho``."""
-        return _const_array(_shape_profile_fields(self.shape_profiles, "h", self.grid)[0])
+        return self._h_fields[0]
 
     @property
     def v(self) -> np.ndarray:
         """Normalized vertical-shift profile on ``rho``."""
-        return _const_array(_shape_profile_fields(self.shape_profiles, "v", self.grid)[0])
+        return self._v_fields[0]
 
     @property
     def kappa(self) -> np.ndarray:
         """Elongation profile; public name for shape profile ``k``."""
-        return _const_array(_shape_profile_fields(self.shape_profiles, "k", self.grid)[0])
+        return self._kappa_fields[0]
 
     @property
     def Rc(self) -> np.ndarray:
         """Flux-surface major-radius center in metres."""
-        return _const_array(self.R0 + self.a * self.h)
+        out = np.empty_like(self.rho)
+        eqnb.update_rc(out, self.R0, self.a, self.h)
+        return _readonly_owned(out)
 
     @property
     def epsilon(self) -> np.ndarray:
         """Local inverse aspect ratio ``a*rho/Rc``."""
-        return _const_array(self.a * self.rho / self.Rc)
+        out = np.empty_like(self.rho)
+        eqnb.update_epsilon(out, self.a, self.rho, self.Rc)
+        return _readonly_owned(out)
 
     @property
     def ftrap(self) -> np.ndarray:
         """Trapped-particle fraction from the full flux-surface magnetic field."""
-        R = self.R
-        J = self.surface_fields[4]
-        with np.errstate(divide="ignore", invalid="ignore"):
-            bphi_squared = (self.F[:, None] / R) ** 2
-            bp_squared = (self.alpha2 * self.psin_r[:, None]) ** 2 * self.gttdivJR / (J * R)
-            magnetic_field = np.sqrt(bphi_squared + bp_squared)
-        weights = J * R
-        weight_sum = np.sum(weights, axis=1)
-        bmax = np.max(magnetic_field, axis=1)
-
-        def flux_surface_average(values: np.ndarray) -> np.ndarray:
-            return np.sum(values * weights, axis=1) / weight_sum
-
-        with np.errstate(divide="ignore", invalid="ignore"):
-            x = magnetic_field / bmax[:, None]
-            h = flux_surface_average(magnetic_field) / bmax
-            h2 = flux_surface_average(magnetic_field**2) / bmax**2
-            hf_integrand = (1.0 - np.sqrt(1.0 - x) * (1.0 + 0.5 * x)) / x**2
-            hf = flux_surface_average(hf_integrand)
-            ftu = 1.0 - h2 / h**2 * (1.0 - np.sqrt(1.0 - h) * (1.0 + 0.5 * h))
-            ftl = 1.0 - h2 * hf
-            trapped = 0.75 * ftu + 0.25 * ftl
-        trapped = _regularize_axis_linear_profile(trapped, self.rho, copy=True)
-        if np.any(~np.isfinite(trapped)):
+        out = np.empty_like(self.rho)
+        invalid = eqnb.update_ftrap(
+            out,
+            self.R,
+            self.J,
+            self.gttdivJR,
+            self.F,
+            _validated_radial_root(self.psin_r, self.grid, "psin_r"),
+            self.alpha2,
+            self.rho,
+        )
+        if invalid:
             raise ValueError("trapped-particle fraction contains non-finite values")
-        return _const_array(trapped)
+        return _readonly_owned(out)
+
+    @property
+    def _R_geometry_fields(self) -> np.ndarray:
+        grid = self.grid
+        _validate_equilibrium_grid_tables(grid)
+        out = np.empty((18, grid.Nr, grid.Nt), dtype=np.float64)
+        c_fields, s_fields = self._fourier_profile_fields
+        eqnb.update_r_coordinates(
+            out,
+            self.a,
+            self.R0,
+            grid.rho,
+            grid.theta,
+            grid.cos_mtheta,
+            grid.sin_mtheta,
+            grid.m_cos_mtheta,
+            grid.m_sin_mtheta,
+            grid.m2_cos_mtheta,
+            grid.m2_sin_mtheta,
+            self._h_fields,
+            c_fields,
+            s_fields,
+        )
+        return _readonly_owned(out)
+
+    @property
+    def _Z_geometry_fields(self) -> np.ndarray:
+        grid = self.grid
+        _validate_equilibrium_grid_tables(grid)
+        out = np.empty((18, grid.Nr, grid.Nt), dtype=np.float64)
+        eqnb.update_z_coordinates(
+            out,
+            self.a,
+            self.Z0,
+            grid.rho,
+            grid.sin_mtheta[1],
+            grid.cos_mtheta[1],
+            self._v_fields,
+            self._kappa_fields,
+        )
+        return _readonly_owned(out)
+
+    @property
+    def _metric_geometry(self) -> tuple[np.ndarray, np.ndarray]:
+        surface, radial, invalid = eqnb.materialize_metric_geometry(
+            self._R_geometry_fields,
+            self._Z_geometry_fields,
+            self.rho,
+        )
+        if invalid:
+            raise ValueError(
+                "Equilibrium metric geometry is singular away from the magnetic axis "
+                f"at radial index {invalid - 1}"
+            )
+        return _readonly_owned(surface), _readonly_owned(radial)
 
     @property
     def _materialized_geometry(self) -> tuple[np.ndarray, np.ndarray]:
-        """Materialized geometry fields owned directly by ``Equilibrium``.
-
-        The tuple is internal-only and contains ``(surface_fields, radial_fields)``.
-        ``Z`` is a separate reactive property because the Kernel geometry stage
-        intentionally does not store the full two-dimensional ``Z`` surface.
-        """
-
-        return _materialized_geometry_from_shape_profiles(
-            shape_profiles=self.shape_profiles,
-            grid=self.grid,
-            a=self.a,
-            R0=self.R0,
-        )
+        """Compatibility view of the lazily materialized metric group."""
+        return self._metric_geometry
 
     @property
     def surface_fields(self) -> np.ndarray:
         """Packed two-dimensional geometry fields on ``(rho, theta)``."""
-        return self._materialized_geometry[0]
+        return self._metric_geometry[0]
 
     @property
     def radial_fields(self) -> np.ndarray:
         """Packed one-dimensional radial geometry integrals."""
-        return self._materialized_geometry[1]
+        return self._metric_geometry[1]
 
     @property
     def R(self) -> np.ndarray:
         """Major-radius surface coordinates on ``(rho, theta)``."""
-        return self.surface_fields[1]
+        return self._R_geometry_fields[eqnb.R]
 
     @property
     def Z(self) -> np.ndarray:
         """Vertical surface coordinates on ``(rho, theta)``."""
-        grid = self.grid
-        v_fields = _shape_profile_fields(self.shape_profiles, "v", grid)
-        k_fields = _shape_profile_fields(self.shape_profiles, "k", grid)
-        return _const_array(
-            self.Z0
-            + self.a
-            * (v_fields[0, :, None] - grid.rho[:, None] * k_fields[0, :, None] * grid.sin_mtheta[1])
-        )
+        return self._Z_geometry_fields[eqnb.Z]
 
     @property
     def Z_t(self) -> np.ndarray:
         """Poloidal derivative of ``Z``."""
-        return self.surface_fields[3]
+        return self._Z_geometry_fields[eqnb.Z_T]
 
     @property
     def J(self) -> np.ndarray:
         """Surface Jacobian field."""
-        return self.surface_fields[4]
+        return self.surface_fields[eqnb.J]
 
     @property
     def JdivR(self) -> np.ndarray:
         """Jacobian divided by major radius."""
-        return self.surface_fields[5]
+        return self.surface_fields[eqnb.JDIVR]
 
     @property
     def gttdivJR(self) -> np.ndarray:
         """Metric coefficient ``g_tt / (J*R)``."""
-        return self.surface_fields[7]
+        return self.surface_fields[eqnb.GTTDIVJR]
 
     @property
     def gttdivJR_r(self) -> np.ndarray:
         """Radial derivative of ``g_tt / (J*R)``."""
-        return self.surface_fields[8]
+        return self.surface_fields[eqnb.GTTDIVJR_R]
 
     @property
     def grtdivJR_t(self) -> np.ndarray:
         """Poloidal derivative of the mixed metric coefficient ``g_rt/(J*R)``."""
-        return self.surface_fields[6]
+        return self.surface_fields[eqnb.GRTDIVJR_T]
 
     @property
     def S(self) -> np.ndarray:
         """Flux-surface area S = -int R*Z_t dtheta."""
-        R, Z_t = self.R, self.Z_t
-        return -self.grid.integrate(R * Z_t, axis=1)
+        out = np.empty_like(self.rho)
+        eqnb.update_surface_area(out, self.R, self.Z_t)
+        return _readonly_owned(out)
 
     @property
     def S_r(self) -> np.ndarray:
         """Flux-surface area derivative S_r = int J dtheta."""
-        return self.radial_fields[0]
+        return self.radial_fields[eqnb.S_R]
 
     @property
     def V(self) -> np.ndarray:
         """Flux-surface volume V = -pi*int R**2*Z_t dtheta."""
-        R, Z_t = self.R, self.Z_t
-        return -np.pi * self.grid.integrate(R**2 * Z_t, axis=1)
+        out = np.empty_like(self.rho)
+        eqnb.update_volume(out, self.R, self.Z_t)
+        return _readonly_owned(out)
 
     @property
     def V_r(self) -> np.ndarray:
         """Flux-surface volume derivative V_r = 2pi * int J*R dtheta."""
-        return self.radial_fields[1]
+        return self.radial_fields[eqnb.V_R]
 
     @property
     def Kn(self) -> np.ndarray:
         """Normalized geometry factor Kn = int gttdivJR dtheta/(2pi)."""
-        return self.radial_fields[2]
+        return self.radial_fields[eqnb.KN]
 
     @property
     def Kn_r(self) -> np.ndarray:
         """Radial derivative of Kn."""
-        return self.radial_fields[3]
+        return self.radial_fields[eqnb.KN_R]
 
     @property
     def Ln_r(self) -> np.ndarray:
         """Normalized geometry factor Ln_r = int JdivR dtheta/(2pi)."""
-        return self.radial_fields[4]
+        return self.radial_fields[eqnb.LN_R]
 
     @property
     def FF_r(self) -> np.ndarray:
         """Physical F*F' profile, model-side diagnostic."""
-        return self.alpha1 * self.alpha2 * self.FFn_r
+        out = np.empty_like(self.rho)
+        eqnb.update_scaled_copy(out, self.FFn_r, self.alpha1 * self.alpha2)
+        return _readonly_owned(out)
 
     @property
     def FFn_r(self) -> np.ndarray:
         """Radial derivative of the normalized ``F*F'`` source profile."""
-        return self.FFn_psin * self.psin_r
+        out = np.empty_like(self.rho)
+        eqnb.update_scaled_product(
+            out,
+            _validated_radial_root(self.FFn_psin, self.grid, "FFn_psin"),
+            _validated_radial_root(self.psin_r, self.grid, "psin_r"),
+            1.0,
+        )
+        return _readonly_owned(out)
 
     @property
     def F2(self) -> np.ndarray:
         """Physical F^2 profile."""
-        FF_int = self.grid.accumulate(self.FF_r)
-        return (self.R0 * self.B0) ** 2 + 2.0 * (FF_int - FF_int[-1])
+        out = np.empty_like(self.rho)
+        eqnb.update_f2(
+            out,
+            self.FF_r,
+            self.grid.accumulator,
+            (self.R0 * self.B0) ** 2,
+        )
+        return _readonly_owned(out)
 
     @property
     def F(self) -> np.ndarray:
         """Signed poloidal current function ``F = R * B_phi``."""
-        if np.any(self.F2 < 1e-6):
+        out = np.empty_like(self.rho)
+        invalid = eqnb.update_f(out, self.F2, self.R0 * self.B0)
+        if invalid:
             raise ValueError("Negative F2 encountered, cannot compute F")
-        return np.copysign(np.sqrt(self.F2), self.R0 * self.B0)
+        return _readonly_owned(out)
 
     @property
     def P_r(self) -> np.ndarray:
         """Physical pressure gradient P', model-side diagnostic."""
-        return self.alpha1 * self.alpha2 * self.Pn_r / MU0
+        out = np.empty_like(self.rho)
+        eqnb.update_scaled_copy(out, self.Pn_r, self.alpha1 * self.alpha2 / MU0)
+        return _readonly_owned(out)
 
     @property
     def Pn_r(self) -> np.ndarray:
         """Radial derivative of the normalized pressure source profile."""
-        return self.Pn_psin * self.psin_r
+        out = np.empty_like(self.rho)
+        eqnb.update_scaled_product(
+            out,
+            _validated_radial_root(self.Pn_psin, self.grid, "Pn_psin"),
+            _validated_radial_root(self.psin_r, self.grid, "psin_r"),
+            1.0,
+        )
+        return _readonly_owned(out)
 
     @property
     def P(self) -> np.ndarray:
         """Physical pressure profile P."""
-        P_int = self.grid.accumulate(self.P_r)
-        edge_integral = float(self.grid.integrate(self.P_r))
-        return self.p0 + P_int - edge_integral
+        out = np.empty_like(self.rho)
+        eqnb.update_pressure(
+            out,
+            self.P_r,
+            self.grid.accumulator,
+            self.grid.weights,
+            self.p0,
+        )
+        return _readonly_owned(out)
 
     @property
-    def beta_t(self) -> np.ndarray:
+    def beta_t(self) -> float:
         """Toroidal beta beta_t = 2*mu0*<P> / B0^2."""
-        P_avg = float(self.grid.integrate(self.P * self.V_r) / self.grid.integrate(self.V_r))
-        return float(2.0 * MU0 * P_avg / self.B0**2)
+        return float(eqnb.update_beta_t(self.P, self.V_r, self.grid.weights, self.B0))
 
     @property
     def Gn1(self) -> np.ndarray:
         """Normalized source term before alpha1 in the GS operator."""
-        R, JdivR = self.R, self.JdivR
-        return JdivR * (self.FFn_psin[:, None] + R**2 * self.Pn_psin[:, None])
+        out = np.empty((self.grid.Nr, self.grid.Nt), dtype=np.float64)
+        eqnb.update_gn1(
+            out,
+            self.R,
+            self.JdivR,
+            _validated_radial_root(self.FFn_psin, self.grid, "FFn_psin"),
+            _validated_radial_root(self.Pn_psin, self.grid, "Pn_psin"),
+        )
+        return _readonly_owned(out)
 
     @property
     def Gn2(self) -> np.ndarray:
         """Normalized geometry term before alpha2 in the GS operator."""
-        return (
-            self.gttdivJR * self.psin_rr[:, None]
-            + (self.gttdivJR_r - self.grtdivJR_t) * self.psin_r[:, None]
+        out = np.empty((self.grid.Nr, self.grid.Nt), dtype=np.float64)
+        eqnb.update_gn2(
+            out,
+            self.gttdivJR,
+            self.gttdivJR_r,
+            self.grtdivJR_t,
+            _validated_radial_root(self.psin_r, self.grid, "psin_r"),
+            _validated_radial_root(self.psin_rr, self.grid, "psin_rr"),
         )
+        return _readonly_owned(out)
 
     @property
     def G(self) -> np.ndarray:
         """GS operator residual field G = alpha1 * Gn1 + alpha2 * Gn2."""
-        return self.alpha1 * self.Gn1 + self.alpha2 * self.Gn2
+        out = np.empty((self.grid.Nr, self.grid.Nt), dtype=np.float64)
+        eqnb.update_linear_combination_2d(
+            out,
+            self.Gn1,
+            self.Gn2,
+            self.alpha1,
+            self.alpha2,
+        )
+        return _readonly_owned(out)
 
     @property
-    def Ip(self) -> np.ndarray:
+    def Ip(self) -> float:
         """Total plasma current Ip (Amps)."""
-        return -self.alpha1 * self.grid.integrate(self.Gn1) / MU0
+        return float(eqnb.update_ip(self.Gn1, self.grid.weights, self.alpha1))
 
     @property
     def q(self) -> np.ndarray:
         """Safety factor q, model-side diagnostic."""
-        with np.errstate(divide="ignore", invalid="ignore"):
-            q = self.F * self.Ln_r / (self.alpha2 * self.psin_r)
-        return _regularize_axis_linear_profile(q, self.rho)
+        out = np.empty_like(self.rho)
+        invalid = eqnb.update_q(
+            out,
+            self.F,
+            self.Ln_r,
+            self.alpha2,
+            _validated_radial_root(self.psin_r, self.grid, "psin_r"),
+            self.rho,
+        )
+        if invalid:
+            raise ValueError(
+                "q contains a non-finite value away from a removable magnetic-axis "
+                f"singularity at radial index {invalid - 1}"
+            )
+        return _readonly_owned(out)
 
     @property
     def s(self) -> np.ndarray:
         """Magnetic shear s, model-side diagnostic."""
-        q_r = self.grid.differentiate(self.q)
-        return self.rho * q_r / self.q
+        out = np.empty_like(self.rho)
+        eqnb.update_shear(
+            out,
+            self.q,
+            self.rho,
+            self.grid.differentiator,
+        )
+        return _readonly_owned(out)
 
     @property
     def Itor(self) -> np.ndarray:
         """Toroidal current distribution I_tor(rho), model-side diagnostic."""
-        return 2.0 * np.pi * self.Kn * self.alpha2 * self.psin_r / MU0
+        out = np.empty_like(self.rho)
+        eqnb.update_itor(
+            out,
+            self.Kn,
+            self.alpha2,
+            _validated_radial_root(self.psin_r, self.grid, "psin_r"),
+        )
+        return _readonly_owned(out)
 
     @property
     def jtor(self) -> np.ndarray:
         """Toroidal current density j_phi, model-side diagnostic."""
-        with np.errstate(divide="ignore", invalid="ignore"):
-            jtor = (
-                -self.alpha1
-                / (MU0 * self.S_r)
-                * (
-                    2.0 * np.pi * self.FFn_psin * self.Ln_r
-                    + self.V_r * self.Pn_psin / (2.0 * np.pi)
-                )
+        out = np.empty_like(self.rho)
+        invalid = eqnb.update_jtor(
+            out,
+            _validated_radial_root(self.FFn_psin, self.grid, "FFn_psin"),
+            _validated_radial_root(self.Pn_psin, self.grid, "Pn_psin"),
+            self.Ln_r,
+            self.S_r,
+            self.V_r,
+            self.alpha1,
+            self.rho,
+        )
+        if invalid:
+            raise ValueError(
+                "jtor contains a non-finite value away from a removable magnetic-axis "
+                f"singularity at radial index {invalid - 1}"
             )
-        return _regularize_axis_linear_profile(jtor, self.rho)
+        return _readonly_owned(out)
 
     @property
     def jpara(self) -> np.ndarray:
@@ -660,36 +769,87 @@ class Equilibrium(Reactive, Serial):
         With ``gm1 = <R^-2> = (2*pi)^2 * Ln_r / V_r``, the corresponding
         IMAS total-current profile is ``jpara * F * gm1 / B0``.
         """
-        F_r = self.grid.differentiate(self.F)
-        term_r = (
-            self.Kn_r * self.psin_r / self.F
-            + self.Kn * self.psin_rr / self.F
-            - self.Kn * self.psin_r * F_r / self.F**2
+        out = np.empty_like(self.rho)
+        invalid = eqnb.update_jpara(
+            out,
+            self.F,
+            self.Kn,
+            self.Kn_r,
+            self.Ln_r,
+            _validated_radial_root(self.psin_r, self.grid, "psin_r"),
+            _validated_radial_root(self.psin_rr, self.grid, "psin_rr"),
+            self.alpha2,
+            self.rho,
+            self.grid.differentiator,
         )
+        if invalid:
+            raise ValueError(
+                "jpara contains a non-finite value away from a removable magnetic-axis "
+                f"singularity at radial index {invalid - 1}"
+            )
+        return _readonly_owned(out)
 
-        with np.errstate(divide="ignore", invalid="ignore"):
-            jpara = self.alpha2 / MU0 * self.F / self.Ln_r * term_r
-        return _regularize_axis_linear_profile(jpara, self.rho)
+    @property
+    def jtotal(self) -> np.ndarray:
+        """IMAS total parallel-current convention ``<J·B> / B0``.
+
+        ``jpara`` retains VEQ/PJ2's ``<J·B> / (F <R^-2>)`` convention;
+        this property applies ``gm1 = <R^-2> = (2*pi)^2 Ln_r / V_r`` so
+        callers can compare directly with ``equilibrium.time_slice[].profiles_1d.j_total``.
+        """
+
+        out = np.empty_like(self.rho)
+        invalid = eqnb.update_jtotal(
+            out,
+            self.jpara,
+            self.F,
+            self.Ln_r,
+            self.V_r,
+            self.B0,
+            self.rho,
+        )
+        if invalid:
+            raise ValueError(
+                "jtotal contains a non-finite value away from a removable magnetic-axis "
+                f"singularity at radial index {invalid - 1}"
+            )
+        return _readonly_owned(out)
 
     @property
     def jphi(self) -> np.ndarray:
         """Local toroidal current density j_phi(R, Z)."""
-        R = self.R
-        with np.errstate(divide="ignore", invalid="ignore"):
-            jphi = (
-                -self.alpha1 / (MU0 * R) * (self.FFn_psin[:, None] + R**2 * self.Pn_psin[:, None])
-            )
-        return _regularize_axis_linear_surface(jphi, self.rho)
+        out = np.empty((self.grid.Nr, self.grid.Nt), dtype=np.float64)
+        eqnb.update_jphi(
+            out,
+            self.R,
+            _validated_radial_root(self.FFn_psin, self.grid, "FFn_psin"),
+            _validated_radial_root(self.Pn_psin, self.grid, "Pn_psin"),
+            self.alpha1,
+        )
+        return _readonly_owned(out)
 
     @property
     def Psi(self) -> np.ndarray:
         """Physical poloidal flux Psi."""
-        return 2.0 * np.pi * self.alpha2 * self.psin
+        out = np.empty_like(self.rho)
+        eqnb.update_scaled_copy(
+            out,
+            _validated_radial_root(self.psin, self.grid, "psin"),
+            2.0 * np.pi * self.alpha2,
+        )
+        return _readonly_owned(out)
 
     @property
     def Phi(self) -> np.ndarray:
         """Toroidal flux Phi."""
-        return 2.0 * np.pi * self.grid.accumulate(self.F * self.Ln_r)
+        out = np.empty_like(self.rho)
+        eqnb.update_phi(
+            out,
+            self.F,
+            self.Ln_r,
+            self.grid.accumulator,
+        )
+        return _readonly_owned(out)
 
     def plot(
         self,
@@ -818,25 +978,128 @@ def _normalize_shape_profiles(
     return normalized
 
 
-def _const_surface_radial_fields(
-    surface_fields: np.ndarray,
-    radial_fields: np.ndarray,
+def _validate_equilibrium_grid_tables(grid: Grid) -> None:
+    """Validate the root-grid tables consumed by model-side Numba kernels."""
+
+    expected_radial = (grid.Nr,)
+    expected_radial_matrix = (grid.Nr, grid.Nr)
+    expected_basis = (grid.L_max + 1, grid.Nr)
+    expected_trig = (grid.M_max + 1, grid.Nt)
+    for name in ("rho", "weights"):
+        value = getattr(grid, name)
+        if value.shape != expected_radial:
+            raise ValueError(f"grid.{name} must have shape {expected_radial}, got {value.shape}")
+    for name in ("accumulator", "differentiator"):
+        value = getattr(grid, name)
+        if value.shape != expected_radial_matrix:
+            raise ValueError(
+                f"grid.{name} must have shape {expected_radial_matrix}, got {value.shape}"
+            )
+    for name in ("T", "T_r", "T_rr"):
+        value = getattr(grid, name)
+        if value.shape != expected_basis:
+            raise ValueError(f"grid.{name} must have shape {expected_basis}, got {value.shape}")
+    for name in (
+        "cos_mtheta",
+        "sin_mtheta",
+        "m_cos_mtheta",
+        "m_sin_mtheta",
+        "m2_cos_mtheta",
+        "m2_sin_mtheta",
+    ):
+        value = getattr(grid, name)
+        if value.shape != expected_trig:
+            raise ValueError(f"grid.{name} must have shape {expected_trig}, got {value.shape}")
+
+
+def _validated_profile_coefficients(
+    profile: Profile,
+    grid: Grid,
+) -> tuple[np.ndarray, int]:
+    coeff = profile.coeff
+    if coeff is None:
+        return np.empty(0, dtype=np.float64), 0
+    count = int(coeff.size)
+    limit = grid.L_max + 1
+    if count > limit:
+        raise ValueError(
+            f"shape profile coefficient count {count} exceeds grid basis size {limit}"
+        )
+    if np.any(~np.isfinite(coeff)):
+        raise ValueError("shape profile coefficients must be finite")
+    return coeff, count
+
+
+def _materialize_profile_fields(
+    profile: Profile | None,
+    grid: Grid,
+) -> np.ndarray:
+    """Materialize one profile into a new Reactive cache value via Numba."""
+
+    _validate_equilibrium_grid_tables(grid)
+    out = np.empty((3, grid.Nr), dtype=np.float64)
+    if profile is None:
+        scale = 1.0
+        power = 0
+        envelope_power = 1
+        amplitude_power = 1.0
+        offset = 0.0
+        coeff = np.empty(0, dtype=np.float64)
+        coeff_count = 0
+    else:
+        coeff, coeff_count = _validated_profile_coefficients(profile, grid)
+        scale = profile.scale
+        power = profile.power
+        envelope_power = profile.envelope_power
+        amplitude_power = profile.amplitude_power
+        offset = profile.offset
+    eqnb.update_profile_fields(
+        out,
+        grid.rho,
+        grid.T,
+        grid.T_r,
+        grid.T_rr,
+        scale,
+        power,
+        envelope_power,
+        amplitude_power,
+        offset,
+        coeff,
+        coeff_count,
+    )
+    return _readonly_owned(out)
+
+
+def _materialize_fourier_profile_fields(
+    shape_profiles: dict[str, Profile],
     grid: Grid,
 ) -> tuple[np.ndarray, np.ndarray]:
-    expected_surface_shape = (9, grid.Nr, grid.Nt)
-    expected_radial_shape = (5, grid.Nr)
-    if surface_fields.shape != expected_surface_shape:
-        raise ValueError(
-            f"surface_fields must have shape {expected_surface_shape}, got {surface_fields.shape}"
-        )
-    if radial_fields.shape != expected_radial_shape:
-        raise ValueError(
-            f"radial_fields must have shape {expected_radial_shape}, got {radial_fields.shape}"
-        )
-    return (
-        _const_array(surface_fields),
-        _const_array(radial_fields),
-    )
+    """Materialize the Fourier profile families without persistent buffers."""
+
+    fields = np.zeros((2, grid.M_max + 1, 3, grid.Nr), dtype=np.float64)
+    for family, prefix in enumerate(("c", "s")):
+        first_order = 0 if prefix == "c" else 1
+        for order in range(first_order, grid.M_max + 1):
+            profile = shape_profiles.get(f"{prefix}{order}")
+            if profile is None:
+                continue
+            fields[family, order] = _materialize_profile_fields(profile, grid)
+    _readonly_owned(fields)
+    return fields[0], fields[1]
+
+
+def _validated_radial_root(value: np.ndarray, grid: Grid, name: str) -> np.ndarray:
+    expected = (grid.Nr,)
+    if value.shape != expected:
+        raise ValueError(f"{name} must have shape {expected}, got {value.shape}")
+    return value
+
+
+def _readonly_owned(array: np.ndarray) -> np.ndarray:
+    """Freeze a newly allocated property result without copying it."""
+
+    array.flags.writeable = False
+    return array
 
 
 def _const_array(value: np.ndarray) -> np.ndarray:
@@ -1217,292 +1480,8 @@ def _resample_profile_linear(
     return np.interp(rho_eval, rho_src, y_src, left=left_val, right=right_val)
 
 
-def _materialized_geometry_from_shape_profiles(
-    *,
-    shape_profiles: dict[str, Profile],
-    grid: Grid,
-    a: float,
-    R0: float,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Re-materialize surface/radial geometry fields from passive shape profiles."""
-
-    (
-        h_fields,
-        v_fields,
-        k_fields,
-        c_fields,
-        s_fields,
-        c_active_order,
-        s_active_order,
-    ) = _geometry_profile_fields(shape_profiles, grid)
-    return _materialized_geometry_from_profile_fields(
-        a=a,
-        R0=R0,
-        grid=grid,
-        h_fields=h_fields,
-        v_fields=v_fields,
-        k_fields=k_fields,
-        c_fields=c_fields,
-        s_fields=s_fields,
-        c_active_order=c_active_order,
-        s_active_order=s_active_order,
-    )
-
-
-def _geometry_profile_fields(
-    shape_profiles: dict[str, Profile],
-    grid: Grid,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, int, int]:
-    h_fields = _shape_profile_fields(shape_profiles, "h", grid)
-    v_fields = _shape_profile_fields(shape_profiles, "v", grid)
-    k_fields = _shape_profile_fields(shape_profiles, "k", grid)
-
-    c_fields = np.zeros((grid.M_max + 1, 3, grid.Nr), dtype=np.float64)
-    s_fields = np.zeros((grid.M_max + 1, 3, grid.Nr), dtype=np.float64)
-    c_active_order = 0
-    s_active_order = 0
-    for order in range(grid.M_max + 1):
-        c_name = f"c{order}"
-        if c_name in shape_profiles:
-            c_fields[order] = _evaluate_profile_fields(shape_profiles[c_name], grid)
-            c_active_order = max(c_active_order, order)
-        if order == 0:
-            continue
-        s_name = f"s{order}"
-        if s_name in shape_profiles:
-            s_fields[order] = _evaluate_profile_fields(shape_profiles[s_name], grid)
-            s_active_order = max(s_active_order, order)
-    return h_fields, v_fields, k_fields, c_fields, s_fields, c_active_order, s_active_order
-
-
-def _materialized_geometry_from_profile_fields(
-    *,
-    a: float,
-    R0: float,
-    grid: Grid,
-    h_fields: np.ndarray,
-    v_fields: np.ndarray,
-    k_fields: np.ndarray,
-    c_fields: np.ndarray,
-    s_fields: np.ndarray,
-    c_active_order: int,
-    s_active_order: int,
-) -> tuple[np.ndarray, np.ndarray]:
-    surface_fields = np.empty((9, grid.Nr, grid.Nt), dtype=np.float64)
-    radial_fields = np.empty((5, grid.Nr), dtype=np.float64)
-    _update_model_geometry(
-        surface_fields,
-        radial_fields,
-        float(a),
-        float(R0),
-        grid,
-        h_fields,
-        v_fields,
-        k_fields,
-        c_fields,
-        s_fields,
-        int(c_active_order),
-        int(s_active_order),
-    )
-    return _const_surface_radial_fields(surface_fields, radial_fields, grid)
-
-
-def _shape_profile_fields(
-    shape_profiles: dict[str, Profile],
-    name: str,
-    grid: Grid,
-) -> np.ndarray:
-    if name not in shape_profiles:
-        return np.zeros((3, grid.Nr), dtype=np.float64)
-    return _evaluate_profile_fields(shape_profiles[name], grid)
-
-
 def _evaluate_profile_fields(profile: Profile, grid: Grid) -> np.ndarray:
     return profile.with_grid(grid).fields
-
-
-def _update_model_geometry(
-    surface_fields: np.ndarray,
-    radial_fields: np.ndarray,
-    a: float,
-    R0: float,
-    grid: Grid,
-    h_fields: np.ndarray,
-    v_fields: np.ndarray,
-    k_fields: np.ndarray,
-    c_fields: np.ndarray,
-    s_fields: np.ndarray,
-    c_active_order: int,
-    s_active_order: int,
-) -> None:
-    rho = grid.rho
-    theta = grid.theta
-    cos_mtheta = grid.cos_mtheta
-    sin_mtheta = grid.sin_mtheta
-    m_cos_mtheta = grid.m_cos_mtheta
-    m_sin_mtheta = grid.m_sin_mtheta
-    m2_cos_mtheta = grid.m2_cos_mtheta
-    m2_sin_mtheta = grid.m2_sin_mtheta
-
-    sin_tb = surface_fields[0]
-    R_surface = surface_fields[1]
-    R_t_surface = surface_fields[2]
-    Z_t_surface = surface_fields[3]
-    J_surface = surface_fields[4]
-    JdivR_surface = surface_fields[5]
-    grtdivJR_t_surface = surface_fields[6]
-    gttdivJR_surface = surface_fields[7]
-    gttdivJR_r_surface = surface_fields[8]
-    S_r = radial_fields[0]
-    V_r = radial_fields[1]
-    Kn = radial_fields[2]
-    Kn_r = radial_fields[3]
-    Ln_r = radial_fields[4]
-
-    nr = rho.shape[0]
-    nt = theta.shape[0]
-    theta_scale = 2.0 * np.pi / nt
-    mean_scale = 1.0 / nt
-    two_pi = 2.0 * np.pi
-    c_limit = _effective_model_fourier_limit(c_fields, c_active_order, cos_mtheta.shape[0])
-    s_limit = _effective_model_fourier_limit(s_fields, s_active_order, sin_mtheta.shape[0])
-
-    for i in range(nr):
-        rho_i = rho[i]
-        h_i = h_fields[0, i]
-        h_r_i = h_fields[1, i]
-        h_rr_i = h_fields[2, i]
-        v_r_i = v_fields[1, i]
-        v_rr_i = v_fields[2, i]
-        k_i = k_fields[0, i]
-        k_r_i = k_fields[1, i]
-        k_rr_i = k_fields[2, i]
-        c0_i = c_fields[0, 0, i]
-        c0_r_i = c_fields[0, 1, i]
-        c0_rr_i = c_fields[0, 2, i]
-
-        sum_J = 0.0
-        sum_JR = 0.0
-        sum_gttdivJR = 0.0
-        sum_gttdivJR_r = 0.0
-        sum_JdivR = 0.0
-
-        for j in range(nt):
-            sin_t = sin_mtheta[1, j]
-            cos_t = cos_mtheta[1, j]
-
-            tb_ij = theta[j] + c0_i
-            tb_r_ij = c0_r_i
-            tb_t_ij = 1.0
-            tb_rr_ij = c0_rr_i
-            tb_rt_ij = 0.0
-            tb_tt_ij = 0.0
-
-            for order in range(1, c_limit):
-                cos_kt = cos_mtheta[order, j]
-                k_sin_kt = m_sin_mtheta[order, j]
-                k2_cos_kt = m2_cos_mtheta[order, j]
-                c_i = c_fields[order, 0, i]
-                c_r_i = c_fields[order, 1, i]
-                c_rr_i = c_fields[order, 2, i]
-
-                tb_ij += c_i * cos_kt
-                tb_r_ij += c_r_i * cos_kt
-                tb_t_ij -= c_i * k_sin_kt
-                tb_rr_ij += c_rr_i * cos_kt
-                tb_rt_ij -= c_r_i * k_sin_kt
-                tb_tt_ij -= c_i * k2_cos_kt
-
-            for order in range(1, s_limit):
-                sin_kt = sin_mtheta[order, j]
-                k_cos_kt = m_cos_mtheta[order, j]
-                k2_sin_kt = m2_sin_mtheta[order, j]
-                s_i = s_fields[order, 0, i]
-                s_r_i = s_fields[order, 1, i]
-                s_rr_i = s_fields[order, 2, i]
-
-                tb_ij += s_i * sin_kt
-                tb_r_ij += s_r_i * sin_kt
-                tb_t_ij += s_i * k_cos_kt
-                tb_rr_ij += s_rr_i * sin_kt
-                tb_rt_ij += s_r_i * k_cos_kt
-                tb_tt_ij -= s_i * k2_sin_kt
-
-            cos_tb_ij = np.cos(tb_ij)
-            sin_tb_ij = np.sin(tb_ij)
-
-            R_ij = R0 + a * (h_i + rho_i * cos_tb_ij)
-            if R_ij < 1.0e-6:
-                R_ij = 1.0e-6
-
-            R_r_ij = a * (h_r_i + cos_tb_ij - rho_i * sin_tb_ij * tb_r_ij)
-            R_t_ij = -a * rho_i * sin_tb_ij * tb_t_ij
-            R_rr_ij = a * (
-                h_rr_i
-                - 2.0 * sin_tb_ij * tb_r_ij
-                - rho_i * (cos_tb_ij * tb_r_ij * tb_r_ij + sin_tb_ij * tb_rr_ij)
-            )
-            R_rt_ij = -a * (
-                sin_tb_ij * tb_t_ij + rho_i * (cos_tb_ij * tb_r_ij * tb_t_ij + sin_tb_ij * tb_rt_ij)
-            )
-            R_tt_ij = -a * rho_i * (cos_tb_ij * tb_t_ij * tb_t_ij + sin_tb_ij * tb_tt_ij)
-
-            Z_r_ij = a * (v_r_i - (k_i + rho_i * k_r_i) * sin_t)
-            Z_t_ij = -a * rho_i * k_i * cos_t
-            Z_rr_ij = a * (v_rr_i - (2.0 * k_r_i + rho_i * k_rr_i) * sin_t)
-            Z_rt_ij = -a * (k_i + rho_i * k_r_i) * cos_t
-            Z_tt_ij = a * rho_i * k_i * sin_t
-
-            J_ij = R_t_ij * Z_r_ij - R_r_ij * Z_t_ij
-            if J_ij < 1.0e-6:
-                J_ij = 1.0e-6
-
-            J_r_ij = -(R_rr_ij * Z_t_ij - R_rt_ij * Z_r_ij + R_r_ij * Z_rt_ij - R_t_ij * Z_rr_ij)
-            J_t_ij = -(R_rt_ij * Z_t_ij - R_tt_ij * Z_r_ij + R_r_ij * Z_tt_ij - R_t_ij * Z_rt_ij)
-            JR_ij = J_ij * R_ij
-            JR_r_ij = J_r_ij * R_ij + J_ij * R_r_ij
-            JR_t_ij = J_t_ij * R_ij + J_ij * R_t_ij
-            JdivR_ij = J_ij / R_ij
-
-            grt_ij = R_r_ij * R_t_ij + Z_r_ij * Z_t_ij
-            grt_t_ij = R_rt_ij * R_t_ij + R_r_ij * R_tt_ij + Z_rt_ij * Z_t_ij + Z_r_ij * Z_tt_ij
-            gtt_ij = R_t_ij * R_t_ij + Z_t_ij * Z_t_ij
-            gtt_r_ij = 2.0 * (R_t_ij * R_rt_ij + Z_t_ij * Z_rt_ij)
-            inv_JR = 1.0 / JR_ij
-            grtdivJR_t_ij = (grt_t_ij - grt_ij * JR_t_ij * inv_JR) * inv_JR
-            gttdivJR_ij = gtt_ij * inv_JR
-            gttdivJR_r_ij = gtt_r_ij * inv_JR - gtt_ij * JR_r_ij * inv_JR * inv_JR
-
-            sin_tb[i, j] = sin_tb_ij
-            R_surface[i, j] = R_ij
-            R_t_surface[i, j] = R_t_ij
-            Z_t_surface[i, j] = Z_t_ij
-            J_surface[i, j] = J_ij
-            JdivR_surface[i, j] = JdivR_ij
-            grtdivJR_t_surface[i, j] = grtdivJR_t_ij
-            gttdivJR_surface[i, j] = gttdivJR_ij
-            gttdivJR_r_surface[i, j] = gttdivJR_r_ij
-
-            sum_J += J_ij
-            sum_JR += JR_ij
-            sum_gttdivJR += gttdivJR_ij
-            sum_gttdivJR_r += gttdivJR_r_ij
-            sum_JdivR += JdivR_ij
-
-        S_r[i] = sum_J * theta_scale
-        V_r[i] = sum_JR * theta_scale * two_pi
-        Kn[i] = sum_gttdivJR * mean_scale
-        Kn_r[i] = sum_gttdivJR_r * mean_scale
-        Ln_r[i] = sum_JdivR * mean_scale
-
-
-def _effective_model_fourier_limit(fields: np.ndarray, active_order: int, trig_count: int) -> int:
-    declared_limit = min(active_order + 1, fields.shape[0], trig_count)
-    effective_limit = min(1, declared_limit)
-    for order in range(1, declared_limit):
-        if np.any(fields[order] != 0.0):
-            effective_limit = order + 1
-    return effective_limit
 
 
 def _build_geqdsk_rectilinear_grid(
