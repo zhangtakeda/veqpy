@@ -22,6 +22,7 @@ from veqpy.numerics import interpolation_matrix, make_calculus, make_quadrature
 
 MU0 = 4.0e-7 * np.pi
 DEFAULT_SOURCE_FIX_RHO = 0.05
+SOURCE_REGULARITY_ANCHOR_COUNT = 4
 SOURCE_REGULARITY_RTOL = 5.0e-2
 SOURCE_REGULARITY_ATOL = 1.0e-10
 SETUP_NORMALIZED_ABS_MIN = 1.0e-3
@@ -491,46 +492,73 @@ def _regularize_source_profile_if_needed(
 
 
 def _regularize_axis_linear(profile: np.ndarray, rho: np.ndarray, n_fix: int) -> None:
-    anchor0 = n_fix
-    anchor1 = n_fix + 1
-    rho0 = rho[anchor0]
-    rho1 = rho[anchor1]
-    x0 = rho0 * rho0
-    x1 = rho1 * rho1
-    ratio0 = profile[anchor0] / rho0
-    ratio1 = profile[anchor1] / rho1
-    gradient = (ratio1 - ratio0) / (x1 - x0)
+    fit = _axis_rho2_least_squares(profile, rho, n_fix, radial_power=1)
+    if fit is None:
+        return
+    intercept, gradient = fit
     for i in range(n_fix):
         x = rho[i] * rho[i]
-        profile[i] = rho[i] * (ratio0 + gradient * (x - x0))
+        profile[i] = rho[i] * (intercept + gradient * x)
 
 
 def _regularize_axis_quadratic(profile: np.ndarray, rho: np.ndarray, n_fix: int) -> None:
-    anchor0 = n_fix
-    anchor1 = n_fix + 1
-    rho0 = rho[anchor0]
-    rho1 = rho[anchor1]
-    x0 = rho0 * rho0
-    x1 = rho1 * rho1
-    ratio0 = profile[anchor0] / x0
-    ratio1 = profile[anchor1] / x1
-    gradient = (ratio1 - ratio0) / (x1 - x0)
+    fit = _axis_rho2_least_squares(profile, rho, n_fix, radial_power=2)
+    if fit is None:
+        return
+    intercept, gradient = fit
     for i in range(n_fix):
         x = rho[i] * rho[i]
-        profile[i] = x * (ratio0 + gradient * (x - x0))
+        profile[i] = x * (intercept + gradient * x)
 
 
 def _regularize_axis_even(profile: np.ndarray, rho: np.ndarray, n_fix: int) -> None:
-    anchor0 = n_fix
-    anchor1 = n_fix + 1
-    x0 = rho[anchor0] * rho[anchor0]
-    x1 = rho[anchor1] * rho[anchor1]
-    value0 = profile[anchor0]
-    value1 = profile[anchor1]
-    gradient = (value1 - value0) / (x1 - x0)
+    fit = _axis_rho2_least_squares(profile, rho, n_fix, radial_power=0)
+    if fit is None:
+        return
+    intercept, gradient = fit
     for i in range(n_fix):
         x = rho[i] * rho[i]
-        profile[i] = value0 + gradient * (x - x0)
+        profile[i] = intercept + gradient * x
+
+
+def _axis_rho2_least_squares(
+    profile: np.ndarray,
+    rho: np.ndarray,
+    n_fix: int,
+    *,
+    radial_power: int,
+) -> tuple[float, float] | None:
+    """Fit the leading parity expansion from a fixed off-axis stencil."""
+
+    anchor_count = min(SOURCE_REGULARITY_ANCHOR_COUNT, profile.size - n_fix)
+    if anchor_count < 2:
+        return None
+
+    sum_x = 0.0
+    sum_y = 0.0
+    for offset in range(anchor_count):
+        index = n_fix + offset
+        radius = float(rho[index])
+        x = radius * radius
+        denominator = radius**radial_power
+        sum_x += x
+        sum_y += float(profile[index]) / denominator
+    mean_x = sum_x / anchor_count
+    mean_y = sum_y / anchor_count
+
+    covariance = 0.0
+    variance = 0.0
+    for offset in range(anchor_count):
+        index = n_fix + offset
+        radius = float(rho[index])
+        x_delta = radius * radius - mean_x
+        y_delta = float(profile[index]) / radius**radial_power - mean_y
+        covariance += x_delta * y_delta
+        variance += x_delta * x_delta
+    if variance <= np.finfo(np.float64).tiny:
+        return None
+    gradient = covariance / variance
+    return mean_y - gradient * mean_x, gradient
 
 
 def _scale_pressure_like_input(value: np.ndarray, *, name: str, advice: str) -> np.ndarray:
