@@ -110,6 +110,7 @@ def build_kernel_layout(
     raw_source_stage_runner = build_bound_source_stage_runner(
         plan=plan,
         case=case,
+        grid_workspace=grid_workspace,
         source_workspace=source_workspace,
         profile_workspace=profile_workspace,
         residual_workspace=residual_workspace,

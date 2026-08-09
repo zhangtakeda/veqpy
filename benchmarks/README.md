@@ -25,10 +25,13 @@ shape-error frontier samples.
 
 ## Scripts
 
-- `numba_routes.py`: Numba backend synthetic route matrix through `veqpy.Kernel`.
+- `numba_routes.py`: Numba backend geometric-rho synthetic route matrix through
+  `veqpy.Kernel`; psin routes remain focused physics/API tests rather than
+  performance qualification rows.
 - `numba_variant_sweep.py`: Numba `Kernel.variant()` construction-cost comparison.
 - `numba_pareto.py`: Numba `Kernel.pareto()` reduced-candidate screening benchmark.
-- `cxx_routes.py`: Cxx backend route matrix compared with the Numba backend.
+- `cxx_routes.py`: Cxx backend geometric-rho route matrix compared with the
+  Numba backend.
 - `cxx_geqdsk.py`: GEQDSK Cxx backend matrix compared with the Numba backend.
 - `cxx_continuation.py`: Cxx backend continuation-policy benchmark.
 - `cxx_boundary_fitters.py`: boundary R/Z scatter-to-coefficient fitter method/backend matrix.

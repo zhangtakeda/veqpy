@@ -29,6 +29,7 @@ from veqpy.kernels.numba_kernel.workspace.field_rows import (
     GRID_RADIAL_X,
     GRID_RADIAL_Y,
 )
+from veqpy.numerics import interpolation_matrix
 
 if TYPE_CHECKING:
     from veqpy.model import Grid
@@ -60,7 +61,9 @@ class GridWorkspace:
     # T             (L_max+1, Nr)
     # T_r           (L_max+1, Nr)
     # T_rr          (L_max+1, Nr)
-    radial_fields: np.ndarray  # (8+K_max+3*L_max, Nr)
+    # axis_weights  (Nr,): interpolation from radial nodes to rho=0
+    # edge_weights  (Nr,): interpolation from radial nodes to rho=1
+    radial_fields: np.ndarray  # (10+K_max+3*L_max, Nr)
 
     # theta         (Nt,)
     # cos_mtheta    (M_max+1, Nt)
@@ -109,6 +112,16 @@ class GridWorkspace:
         """Packed second derivatives of the Chebyshev basis."""
         start = GRID_RADIAL_RHO_POWERS_START + self.K_max + 2 * self.L_max + 4
         return self.radial_fields[start : start + self.L_max + 1]
+
+    @property
+    def edge_interpolation_weights(self) -> np.ndarray:
+        """Weights that evaluate a radial nodal field at the LCFS, ``rho=1``."""
+        return self.radial_fields[-1]
+
+    @property
+    def axis_interpolation_weights(self) -> np.ndarray:
+        """Weights that evaluate a radial nodal field at the axis, ``rho=0``."""
+        return self.radial_fields[-2]
 
     @property
     def theta(self) -> np.ndarray:
@@ -219,7 +232,7 @@ def _pack_radial_fields(
     L_max = T.shape[0] - 1
     K_max = int(K_max)
 
-    fields = np.empty((8 + K_max + 3 * L_max, Nr), dtype=np.float64)
+    fields = np.empty((10 + K_max + 3 * L_max, Nr), dtype=np.float64)
     fields[GRID_RADIAL_RHO] = rho
     fields[GRID_RADIAL_X] = x
     fields[GRID_RADIAL_Y] = y
@@ -234,6 +247,12 @@ def _pack_radial_fields(
     fields[T_start:T_stop] = T
     fields[T_stop:T_r_stop] = T_r
     fields[T_r_stop : T_r_stop + L_max + 1] = T_rr
+    endpoint_weights = interpolation_matrix(
+        rho,
+        np.array([0.0, 1.0], dtype=np.float64),
+    )
+    fields[-2] = endpoint_weights[0]
+    fields[-1] = endpoint_weights[1]
     fields.flags.writeable = False
     return fields
 

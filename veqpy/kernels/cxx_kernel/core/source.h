@@ -179,9 +179,7 @@ namespace source::detail
             RadialVector       integrated{uninitialized};
             radial_grid_multi_matvec_into<GridType>(psin_rr, integrated, psin_r);
             store_root_row<root_psin_rr>(psin_rr);
-            const double offset = integrated[0];
-            const double scale  = integrated[radial_nodes - 1] - offset;
-            store_psin_coordinate(integrated, offset, scale);
+            store_psin_coordinate(integrated, full_integral(psin_r));
             copy_source_target_to_profile_root();
 
             for (size_t i = 0; i < radial_nodes; ++i)
@@ -270,9 +268,7 @@ namespace source::detail
             RadialVector integrated{uninitialized};
             radial_grid_multi_matvec_into<GridType>(psin_rr, integrated, psin_r);
             store_root_row<root_psin_rr>(psin_rr);
-            const double offset = integrated[0];
-            const double scale  = integrated[radial_nodes - 1] - offset;
-            store_psin_coordinate(integrated, offset, scale);
+            store_psin_coordinate(integrated, full_integral(psin_r));
 
             if constexpr (SourceConstraintCode == 0)
             {
@@ -370,9 +366,7 @@ namespace source::detail
             RadialVector integrated{uninitialized};
             radial_grid_multi_matvec_into<GridType>(psin_rr, integrated, psin_r);
             store_root_row<root_psin_rr>(psin_rr);
-            const double offset = integrated[0];
-            const double scale  = integrated[radial_nodes - 1] - offset;
-            store_psin_coordinate(integrated, offset, scale);
+            store_psin_coordinate(integrated, full_integral(psin_r));
 
             if constexpr (SourceConstraintCode == 0)
             {
@@ -698,30 +692,18 @@ namespace source::detail
             RadialVector integrated{uninitialized};
             matvec_into(integrated, GridType::accumulator, psin_r);
 
-            const double offset = integrated[0];
-            const double scale  = integrated[radial_nodes - 1] - offset;
-            store_psin_coordinate(integrated, offset, scale);
+            store_psin_coordinate(integrated, full_integral(psin_r));
         }
 
-        constexpr void store_psin_coordinate(const RadialVector& integrated, double offset, double scale) noexcept
+        constexpr void store_psin_coordinate(const RadialVector& integrated, double scale) noexcept
         {
             const double inv_scale = 1.0 / scale;
-            if constexpr (radial_nodes == 1)
-            {
-                source_target_root_fields(root_psin, 0) = 1.0;
-            }
-            else
-            {
-                source_target_root_fields(root_psin, 0) = 0.0;
-                for (size_t i = 1; i + 1 < radial_nodes; ++i)
-                    source_target_root_fields(root_psin, i) = (integrated[i] - offset) * inv_scale;
-                source_target_root_fields(root_psin, radial_nodes - 1) = 1.0;
-            }
+            for (size_t i = 0; i < radial_nodes; ++i)
+                source_target_root_fields(root_psin, i) = integrated[i] * inv_scale;
         }
 
-        static constexpr void floor_signed_current_primitive(RadialVector& profile) noexcept
+        static constexpr void floor_signed_current_primitive(RadialVector& profile, double edge) noexcept
         {
-            const double edge        = profile[radial_nodes - 1];
             const double abs_edge    = math::abs(edge);
             const double floor_value = (abs_edge > 1.0 ? abs_edge : 1.0) * 1.0e-12;
             if (edge < 0.0)
@@ -978,17 +960,8 @@ namespace source::detail
 
         constexpr void seed_psin_query_from_passive_psin_profile() noexcept
         {
-            if constexpr (radial_nodes == 1)
-            {
-                source_psin_query[0] = 1.0;
-            }
-            else
-            {
-                for (size_t i = 0; i < radial_nodes; ++i)
-                    source_psin_query[i] = GridType::nodes[i] * GridType::nodes[i];
-                source_psin_query[0] = 0.0;
-                source_psin_query[radial_nodes - 1] = 1.0;
-            }
+            for (size_t i = 0; i < radial_nodes; ++i)
+                source_psin_query[i] = GridType::nodes[i] * GridType::nodes[i];
         }
 
         constexpr bool update_fixed_point_psin_query() noexcept
@@ -1109,6 +1082,30 @@ namespace source::detail
             return total;
         }
 
+        static constexpr double axis_eval(const RadialVector& values) noexcept
+        {
+            return dot(values, GridType::axis_interpolation_weights);
+        }
+
+        static constexpr double edge_eval(const RadialVector& values) noexcept
+        {
+            return dot(values, GridType::edge_interpolation_weights);
+        }
+
+        static constexpr double full_integral(const RadialVector& values) noexcept
+        {
+            return dot(values, GridType::weights);
+        }
+
+        template <typename GeometryRuntime>
+        static constexpr double edge_geometry_field(const GeometryRuntime& geometry, size_t row) noexcept
+        {
+            double value = 0.0;
+            for (size_t i = 0; i < radial_nodes; ++i)
+                value += GridType::edge_interpolation_weights[i] * geometry.radial_field(row, i);
+            return value;
+        }
+
         template <typename GeometryRuntime>
         constexpr double g1n_psin_integral_from_radial_moments(const GeometryRuntime& geometry) const noexcept
         {
@@ -1199,9 +1196,6 @@ namespace source::detail
             {
                 for (size_t i = 0; i < radial_nodes; ++i)
                     psin_r[i] = materialized_driver_input[i];
-                alpha2 = Ip /
-                         (2.0 * geometry::detail::pi *
-                          geometry.radial_field(geometry::radial_Kn, radial_nodes - 1) * psin_r[radial_nodes - 1]);
             }
             else
             {
@@ -1215,14 +1209,18 @@ namespace source::detail
             store_root_row<root_psin_r>(psin_r);
             regularize_psin_r(n_axis_fix);
             psin_r = const_root_row<root_psin_r>();
+            if constexpr (SourceConstraintCode == 1 || SourceConstraintCode == 3)
+            {
+                alpha2 = Ip /
+                         (2.0 * geometry::detail::pi *
+                          edge_geometry_field(geometry, geometry::radial_Kn) * edge_eval(psin_r));
+            }
 
             RadialVector psin_rr{uninitialized};
             RadialVector integrated{uninitialized};
             radial_grid_multi_matvec_into<GridType>(psin_rr, integrated, psin_r);
             store_root_row<root_psin_rr>(psin_rr);
-            const double offset = integrated[0];
-            const double scale  = integrated[radial_nodes - 1] - offset;
-            store_psin_coordinate(integrated, offset, scale);
+            store_psin_coordinate(integrated, full_integral(psin_r));
 
             if constexpr (SourceConstraintCode == 2 || SourceConstraintCode == 3)
             {
@@ -1299,7 +1297,7 @@ namespace source::detail
             RadialVector Itor{uninitialized};
             if constexpr (SourceConstraintCode == 1 || SourceConstraintCode == 3)
             {
-                const double source_scale = Ip / materialized_driver_input[radial_nodes - 1];
+                const double source_scale = Ip / edge_eval(materialized_driver_input);
                 for (size_t i = 0; i < radial_nodes; ++i)
                     Itor[i] = materialized_driver_input[i] * source_scale;
             }
@@ -1309,7 +1307,7 @@ namespace source::detail
                     Itor[i] = materialized_driver_input[i];
                 (void)Ip;
             }
-            floor_signed_current_primitive(Itor);
+            floor_signed_current_primitive(Itor, edge_eval(Itor));
 
             constexpr double inv_two_pi = 1.0 / (2.0 * geometry::detail::pi);
             RadialVector     itor_over_kn{uninitialized};
@@ -1329,9 +1327,7 @@ namespace source::detail
             RadialVector integrated{uninitialized};
             radial_grid_multi_matvec_into<GridType>(psin_rr, integrated, psin_r);
             store_root_row<root_psin_rr>(psin_rr);
-            const double offset = integrated[0];
-            const double scale  = integrated[radial_nodes - 1] - offset;
-            store_psin_coordinate(integrated, offset, scale);
+            store_psin_coordinate(integrated, full_integral(psin_r));
 
             RadialVector Itor_r{uninitialized};
             matvec_into(Itor_r, GridType::differentiator, Itor);
@@ -1418,9 +1414,11 @@ namespace source::detail
 
             RadialVector I_tor{uninitialized};
             RadialVector jtor{uninitialized};
+            const double current_edge = full_integral(integrand_j);
+            double       source_scale = 1.0;
             if constexpr (SourceConstraintCode == 1 || SourceConstraintCode == 3)
             {
-                const double source_scale = Ip / I_tor_prof[radial_nodes - 1];
+                source_scale = Ip / current_edge;
                 for (size_t i = 0; i < radial_nodes; ++i)
                 {
                     I_tor[i] = I_tor_prof[i] * source_scale;
@@ -1438,7 +1436,7 @@ namespace source::detail
             }
 
             enforce_axis_even_profile(jtor);
-            floor_signed_current_primitive(I_tor);
+            floor_signed_current_primitive(I_tor, current_edge * source_scale);
 
             constexpr double inv_two_pi = 1.0 / (2.0 * geometry::detail::pi);
             RadialVector     itor_over_kn{uninitialized};
@@ -1458,9 +1456,7 @@ namespace source::detail
             RadialVector integrated{uninitialized};
             radial_grid_multi_matvec_into<GridType>(psin_rr, integrated, psin_r);
             store_root_row<root_psin_rr>(psin_rr);
-            const double offset = integrated[0];
-            const double scale  = integrated[radial_nodes - 1] - offset;
-            store_psin_coordinate(integrated, offset, scale);
+            store_psin_coordinate(integrated, full_integral(psin_r));
 
             if constexpr (SourceConstraintCode == 2 || SourceConstraintCode == 3)
             {
@@ -1550,8 +1546,8 @@ namespace source::detail
             RadialVector I_tor{uninitialized};
             if constexpr (SourceConstraintCode == 1 || SourceConstraintCode == 3)
             {
-                const double edge_F       = RhoCoordinate ? active_F[radial_nodes - 1] : R0 * B0;
-                const double source_scale = Ip / (edge_F * integral_val[radial_nodes - 1]);
+                const double edge_F       = RhoCoordinate ? edge_eval(active_F) : R0 * B0;
+                const double source_scale = Ip / (edge_F * full_integral(integrand));
                 for (size_t i = 0; i < radial_nodes; ++i)
                     I_tor[i] = active_F[i] * integral_val[i] * source_scale;
             }
@@ -1581,9 +1577,7 @@ namespace source::detail
             RadialVector integrated{uninitialized};
             radial_grid_multi_matvec_into<GridType>(psin_rr, integrated, psin_r);
             store_root_row<root_psin_rr>(psin_rr);
-            const double offset = integrated[0];
-            const double scale  = integrated[radial_nodes - 1] - offset;
-            store_psin_coordinate(integrated, offset, scale);
+            store_psin_coordinate(integrated, full_integral(psin_r));
 
             if constexpr (SourceConstraintCode == 2 || SourceConstraintCode == 3)
             {
@@ -1642,9 +1636,7 @@ namespace source::detail
             regularize_ffn_psin(n_axis_fix);
         }
 
-        template <typename Differentiator>
         static constexpr void solve_pq_linear_system(RadialVector&          solution,
-                                                     const Differentiator&  differentiator,
                                                      const RadialVector&    coeff_d,
                                                      const RadialVector&    coeff_y,
                                                      const RadialVector&    forcing,
@@ -1655,27 +1647,23 @@ namespace source::detail
 
             for (size_t i = 0; i < radial_nodes; ++i)
             {
+                rhs(i, 0) = edge_value;
                 for (size_t j = 0; j < radial_nodes; ++j)
-                    matrix(i, j) = coeff_d[i] * differentiator(i, j);
-                matrix(i, i) += coeff_y[i];
-                rhs(i, 0) = forcing[i];
+                {
+                    const double edge_relative_integral = GridType::accumulator(i, j) - GridType::weights[j];
+                    matrix(i, j) = edge_relative_integral * coeff_y[j] / coeff_d[j];
+                    rhs(i, 0) += edge_relative_integral * forcing[j] / coeff_d[j];
+                }
+                matrix(i, i) += 1.0;
             }
-
-            constexpr size_t edge = radial_nodes - 1;
-            for (size_t j = 0; j < radial_nodes; ++j)
-                matrix(edge, j) = 0.0;
-            matrix(edge, edge) = 1.0;
-            rhs(edge, 0)       = edge_value;
 
             const auto solved = linalg::solve<linalg::Doolittle>(matrix, rhs);
             for (size_t i = 0; i < radial_nodes; ++i)
                 solution[i] = solved(i, 0);
         }
 
-        template <typename Differentiator>
         static constexpr void solve_pq_linear_system_two_rhs(RadialVector&          solution0,
                                                              RadialVector&          solution1,
-                                                             const Differentiator&  differentiator,
                                                              const RadialVector&    coeff_d,
                                                              const RadialVector&    coeff_y,
                                                              const RadialVector&    forcing0,
@@ -1688,19 +1676,18 @@ namespace source::detail
 
             for (size_t i = 0; i < radial_nodes; ++i)
             {
+                rhs(i, 0) = edge_value0;
+                rhs(i, 1) = edge_value1;
                 for (size_t j = 0; j < radial_nodes; ++j)
-                    matrix(i, j) = coeff_d[i] * differentiator(i, j);
-                matrix(i, i) += coeff_y[i];
-                rhs(i, 0) = forcing0[i];
-                rhs(i, 1) = forcing1[i];
+                {
+                    const double edge_relative_integral = GridType::accumulator(i, j) - GridType::weights[j];
+                    const double inv_coeff_d = 1.0 / coeff_d[j];
+                    matrix(i, j) = edge_relative_integral * coeff_y[j] * inv_coeff_d;
+                    rhs(i, 0) += edge_relative_integral * forcing0[j] * inv_coeff_d;
+                    rhs(i, 1) += edge_relative_integral * forcing1[j] * inv_coeff_d;
+                }
+                matrix(i, i) += 1.0;
             }
-
-            constexpr size_t edge = radial_nodes - 1;
-            for (size_t j = 0; j < radial_nodes; ++j)
-                matrix(edge, j) = 0.0;
-            matrix(edge, edge) = 1.0;
-            rhs(edge, 0)       = edge_value0;
-            rhs(edge, 1)       = edge_value1;
 
             const auto solved = linalg::solve<linalg::Doolittle>(matrix, rhs);
             for (size_t i = 0; i < radial_nodes; ++i)
@@ -1835,11 +1822,18 @@ namespace source::detail
             if constexpr (SourceConstraintCode == 1 || SourceConstraintCode == 3)
             {
                 constexpr double two_pi = 2.0 * geometry::detail::pi;
+                double edge_q            = 0.0;
+                double edge_Kn           = 0.0;
+                double edge_Ln_r         = 0.0;
+                for (size_t i = 0; i < radial_nodes; ++i)
+                {
+                    const double edge_weight = GridType::edge_interpolation_weights[i];
+                    edge_q += edge_weight * materialized_driver_input[i];
+                    edge_Kn += edge_weight * geometry.radial_field(geometry::radial_Kn, i);
+                    edge_Ln_r += edge_weight * geometry.radial_field(geometry::radial_Ln_r, i);
+                }
                 const double     edge_scale =
-                    two_pi * edge_F / Ip *
-                    geometry.radial_field(geometry::radial_Kn, radial_nodes - 1) *
-                    geometry.radial_field(geometry::radial_Ln_r, radial_nodes - 1) /
-                    materialized_driver_input[radial_nodes - 1];
+                    two_pi * edge_F / Ip * edge_Kn * edge_Ln_r / edge_q;
                 for (size_t i = 0; i < radial_nodes; ++i)
                     q_prof[i] = materialized_driver_input[i] * edge_scale;
             }
@@ -1895,7 +1889,7 @@ namespace source::detail
 
             RadialVector Y{uninitialized};
             solve_pq_linear_system(
-                Y, GridType::differentiator, coeff_d, coeff_y, rhs, edge_F * edge_F);
+                Y, coeff_d, coeff_y, rhs, edge_F * edge_F);
 
             const double sign_F = edge_F < 0.0 ? -1.0 : 1.0;
             RadialVector psin_r{uninitialized};
@@ -1917,9 +1911,7 @@ namespace source::detail
             RadialVector integrated{uninitialized};
             radial_grid_multi_matvec_into<GridType>(psin_rr, integrated, psin_r);
             store_root_row<root_psin_rr>(psin_rr);
-            const double offset = integrated[0];
-            const double scale  = integrated[radial_nodes - 1] - offset;
-            store_psin_coordinate(integrated, offset, scale);
+            store_psin_coordinate(integrated, full_integral(psin_r));
 
             if constexpr (SourceConstraintCode == 2 || SourceConstraintCode == 3)
             {
@@ -1938,7 +1930,8 @@ namespace source::detail
             }
 
             RadialVector Y_r{uninitialized};
-            matvec_into(Y_r, GridType::differentiator, Y);
+            for (size_t i = 0; i < radial_nodes; ++i)
+                Y_r[i] = (rhs[i] - coeff_y[i] * Y[i]) / coeff_d[i];
             const double ffn_scale = 0.5 / (alpha1 * alpha2);
             for (size_t i = 0; i < radial_nodes; ++i)
                 FFn_psin[i] = Y_r[i] * ffn_scale / psin_r[i];
@@ -1965,11 +1958,18 @@ namespace source::detail
             if constexpr (SourceConstraintCode == 1 || SourceConstraintCode == 3)
             {
                 constexpr double two_pi = 2.0 * geometry::detail::pi;
+                double edge_q            = 0.0;
+                double edge_Kn           = 0.0;
+                double edge_Ln_r         = 0.0;
+                for (size_t i = 0; i < radial_nodes; ++i)
+                {
+                    const double edge_weight = GridType::edge_interpolation_weights[i];
+                    edge_q += edge_weight * materialized_driver_input[i];
+                    edge_Kn += edge_weight * geometry.radial_field(geometry::radial_Kn, i);
+                    edge_Ln_r += edge_weight * geometry.radial_field(geometry::radial_Ln_r, i);
+                }
                 const double     edge_scale =
-                    two_pi * edge_F / Ip *
-                    geometry.radial_field(geometry::radial_Kn, radial_nodes - 1) *
-                    geometry.radial_field(geometry::radial_Ln_r, radial_nodes - 1) /
-                    materialized_driver_input[radial_nodes - 1];
+                    two_pi * edge_F / Ip * edge_Kn * edge_Ln_r / edge_q;
                 for (size_t i = 0; i < radial_nodes; ++i)
                     q_prof[i] = materialized_driver_input[i] * edge_scale;
             }
@@ -2016,7 +2016,6 @@ namespace source::detail
                 solve_pq_linear_system_two_rhs(
                     F_solved,
                     F1,
-                    GridType::differentiator,
                     coeff_d,
                     coeff_y,
                     F0_rhs,
@@ -2044,7 +2043,7 @@ namespace source::detail
                              materialized_pprime_input[i];
                 }
                 solve_pq_linear_system(
-                    F_solved, GridType::differentiator, coeff_d, coeff_y, rhs, edge_F);
+                    F_solved, coeff_d, coeff_y, rhs, edge_F);
                 (void)beta;
             }
 
@@ -2066,9 +2065,7 @@ namespace source::detail
             RadialVector integrated{uninitialized};
             radial_grid_multi_matvec_into<GridType>(psin_rr, integrated, psin_r);
             store_root_row<root_psin_rr>(psin_rr);
-            const double offset = integrated[0];
-            const double scale  = integrated[radial_nodes - 1] - offset;
-            store_psin_coordinate(integrated, offset, scale);
+            store_psin_coordinate(integrated, full_integral(psin_r));
 
             if constexpr (SourceConstraintCode == 0 || SourceConstraintCode == 1)
             {
@@ -2081,7 +2078,15 @@ namespace source::detail
             }
 
             RadialVector F_r{uninitialized};
-            matvec_into(F_r, GridType::differentiator, F_solved);
+            for (size_t i = 0; i < radial_nodes; ++i)
+            {
+                double forcing = -pressure_factor *
+                                 geometry.radial_field(geometry::radial_V_r, i) *
+                                 materialized_pprime_input[i];
+                if constexpr (SourceConstraintCode == 2 || SourceConstraintCode == 3)
+                    forcing *= alpha1;
+                F_r[i] = (forcing - coeff_y[i] * F_solved[i]) / coeff_d[i];
+            }
             const double inv_alpha1 = 1.0 / alpha1;
             for (size_t i = 0; i < radial_nodes; ++i)
             {

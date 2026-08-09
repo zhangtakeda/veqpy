@@ -1403,6 +1403,8 @@ namespace grid::detail
         static constexpr auto   weights        = Quadrature::template weights<Nr>;
         static constexpr auto   accumulator    = Calculus::template accumulator<Nr, Quadrature>;
         static constexpr auto   differentiator = Calculus::template differentiator<Nr, Quadrature>;
+        static constexpr auto   axis_interpolation_weights = interpolation_weights(nodes, 0.0);
+        static constexpr auto   edge_interpolation_weights = interpolation_weights(nodes, 1.0);
         static constexpr auto   x              = make_x(nodes);
         static constexpr auto   y              = make_y(nodes);
         static constexpr auto   rhos           = make_rhos<Kmax>(nodes);

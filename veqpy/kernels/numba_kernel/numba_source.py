@@ -274,6 +274,31 @@ def _source_grid_rho(grid_radial_fields: np.ndarray) -> np.ndarray:
     return grid_radial_fields[GRID_RADIAL_RHO]
 
 
+@njit(cache=True, nogil=True, inline="always")
+def _source_grid_axis_weights(grid_radial_fields: np.ndarray) -> np.ndarray:
+    return grid_radial_fields[-2]
+
+
+@njit(cache=True, nogil=True, inline="always")
+def _source_grid_edge_weights(grid_radial_fields: np.ndarray) -> np.ndarray:
+    return grid_radial_fields[-1]
+
+
+@njit(cache=True, nogil=True, inline="always")
+def _axis_eval(profile: np.ndarray, grid_radial_fields: np.ndarray) -> float:
+    return dot(profile, _source_grid_axis_weights(grid_radial_fields))
+
+
+@njit(cache=True, nogil=True, inline="always")
+def _edge_eval(profile: np.ndarray, grid_radial_fields: np.ndarray) -> float:
+    return dot(profile, _source_grid_edge_weights(grid_radial_fields))
+
+
+@njit(cache=True, nogil=True, inline="always")
+def _full_integral(profile: np.ndarray, weights: np.ndarray) -> float:
+    return dot(profile, weights)
+
+
 @njit(cache=True, nogil=True)
 def full_differentiation(
     out: np.ndarray, arr: np.ndarray, differentiator: np.ndarray
@@ -295,24 +320,22 @@ def _update_psin_coordinate(
     out_psin: np.ndarray,
     psin_r: np.ndarray,
     accumulator: np.ndarray,
+    weights: np.ndarray,
 ) -> np.ndarray:
-    # Source kernels solve for a positive psin_r first.  The coordinate itself
-    # is then integrated and normalized to the external [0, 1] flux convention.
+    # The prefix accumulator is anchored at the physical axis, even though the
+    # Gauss nodes do not include rho=0.  Normalize with the full [0, 1]
+    # quadrature, not the first/last interior samples.
     full_integration(out_psin, psin_r, accumulator)
-    return _normalize_psin_coordinate_inplace(out_psin)
+    return _normalize_psin_coordinate_inplace(out_psin, _full_integral(psin_r, weights))
 
 
 @njit(cache=True, nogil=True)
-def _normalize_psin_coordinate_inplace(psin: np.ndarray) -> np.ndarray:
-    offset = psin[0]
-    scale = psin[-1] - offset
+def _normalize_psin_coordinate_inplace(psin: np.ndarray, scale: float) -> np.ndarray:
     if abs(scale) < 1e-12:
         raise ValueError("psin does not span a valid normalized flux interval")
 
     for i in range(psin.shape[0]):
-        psin[i] = (psin[i] - offset) / scale
-    psin[0] = 0.0
-    psin[-1] = 1.0
+        psin[i] /= scale
     return psin
 
 
@@ -363,9 +386,8 @@ def _regularize_psin_r(psin_r: np.ndarray, rho: np.ndarray, n_fix: int) -> np.nd
 
 
 @njit(cache=True, fastmath=True, nogil=True)
-def _floor_signed_current_primitive(profile: np.ndarray) -> np.ndarray:
+def _floor_signed_current_primitive(profile: np.ndarray, edge: float) -> np.ndarray:
     """Apply a tiny same-sign floor to cumulative current primitives."""
-    edge = profile[-1]
     floor_value = max(abs(edge), 1.0) * 1.0e-12
     if edge < 0.0:
         for i in range(profile.shape[0]):
@@ -558,9 +580,7 @@ def finalize_pressure_normalization(
     if denominator > 1.0e-28:
         pressure_multiplier = numerator / denominator
     elif np.isfinite(beta):
-        pressure_multiplier = (
-            alpha1 * alpha2 if coordinate_code == RHO_COORDINATE else alpha1
-        )
+        pressure_multiplier = alpha1 * alpha2 if coordinate_code == RHO_COORDINATE else alpha1
     else:
         # With pprime == 0, p0 is already an absolute pressure unless a beta
         # branch explicitly selected a different multiplier before this helper.
@@ -618,10 +638,7 @@ def _psin_beta_pressure_denominator(
     scaled_p0: float,
     alpha2: float,
 ) -> float:
-    return (
-        alpha2 * weighted_dot(relative_pressure, V_r, weights)
-        + scaled_p0 * dot(V_r, weights)
-    )
+    return alpha2 * weighted_dot(relative_pressure, V_r, weights) + scaled_p0 * dot(V_r, weights)
 
 
 @njit(cache=True, nogil=True)
@@ -634,9 +651,7 @@ def _solve_pf_psin_beta_alpha1(
     beta_target: float,
 ) -> float:
     # beta_target = alpha1*p0*V + alpha1**2*c2*<p_rel>.
-    quadratic = (
-        alpha2_per_alpha1 * weighted_dot(relative_pressure, V_r, weights)
-    )
+    quadratic = alpha2_per_alpha1 * weighted_dot(relative_pressure, V_r, weights)
     linear = scaled_p0 * dot(V_r, weights)
     if abs(quadratic) <= 1.0e-14:
         if abs(linear) <= 1.0e-14:
@@ -969,25 +984,25 @@ def _dense_solve_two_rhs_inplace(
 def _fill_pq_linear_matrix(
     A: np.ndarray,
     rhs: np.ndarray,
-    D: np.ndarray,
+    accumulator: np.ndarray,
+    weights: np.ndarray,
     coeff_d: np.ndarray,
     coeff_y: np.ndarray,
     forcing: np.ndarray,
     edge_value: float,
     n: int,
 ) -> None:
-    """Assemble the dense first-order PQ collocation system and impose edge value."""
+    """Assemble the edge-conditioned integral form of a first-order PQ ODE."""
     for i in range(n):
+        rhs_i = edge_value
         for j in range(n):
-            A[i, j] = coeff_d[i] * D[i, j]
-        A[i, i] += coeff_y[i]
-        rhs[i] = forcing[i]
-
-    edge = n - 1
-    for j in range(n):
-        A[edge, j] = 0.0
-    A[edge, edge] = 1.0
-    rhs[edge] = edge_value
+            if abs(coeff_d[j]) <= 1.0e-14:
+                raise ValueError("PQ integral solve received near-zero derivative coefficient")
+            edge_relative_integral = accumulator[i, j] - weights[j]
+            A[i, j] = edge_relative_integral * coeff_y[j] / coeff_d[j]
+            rhs_i += edge_relative_integral * forcing[j] / coeff_d[j]
+        A[i, i] += 1.0
+        rhs[i] = rhs_i
 
 
 @njit(cache=True, nogil=True)
@@ -995,7 +1010,8 @@ def _fill_pq_linear_matrix_two_rhs(
     A: np.ndarray,
     rhs0: np.ndarray,
     rhs1: np.ndarray,
-    D: np.ndarray,
+    accumulator: np.ndarray,
+    weights: np.ndarray,
     coeff_d: np.ndarray,
     coeff_y: np.ndarray,
     forcing0: np.ndarray,
@@ -1004,20 +1020,21 @@ def _fill_pq_linear_matrix_two_rhs(
     edge_value1: float,
     n: int,
 ) -> None:
-    """Assemble one dense PQ system with two edge-conditioned RHS vectors."""
+    """Assemble one integral PQ system with two edge-conditioned RHS vectors."""
     for i in range(n):
+        rhs_i0 = edge_value0
+        rhs_i1 = edge_value1
         for j in range(n):
-            A[i, j] = coeff_d[i] * D[i, j]
-        A[i, i] += coeff_y[i]
-        rhs0[i] = forcing0[i]
-        rhs1[i] = forcing1[i]
-
-    edge = n - 1
-    for j in range(n):
-        A[edge, j] = 0.0
-    A[edge, edge] = 1.0
-    rhs0[edge] = edge_value0
-    rhs1[edge] = edge_value1
+            if abs(coeff_d[j]) <= 1.0e-14:
+                raise ValueError("PQ integral solve received near-zero derivative coefficient")
+            edge_relative_integral = accumulator[i, j] - weights[j]
+            inv_coeff_d = 1.0 / coeff_d[j]
+            A[i, j] = edge_relative_integral * coeff_y[j] * inv_coeff_d
+            rhs_i0 += edge_relative_integral * forcing0[j] * inv_coeff_d
+            rhs_i1 += edge_relative_integral * forcing1[j] * inv_coeff_d
+        A[i, i] += 1.0
+        rhs0[i] = rhs_i0
+        rhs1[i] = rhs_i1
 
 
 @njit(cache=True, nogil=True)
@@ -1056,6 +1073,7 @@ def _fill_pq_q_profile(
     driver_input: np.ndarray,
     Kn: np.ndarray,
     Ln_r: np.ndarray,
+    edge_weights: np.ndarray,
     edge_F: float,
     Ip: float,
 ) -> None:
@@ -1063,10 +1081,13 @@ def _fill_pq_q_profile(
     if has_Ip:
         if abs(Ip) <= 1.0e-14:
             raise ValueError("PQ strict solve received near-zero Ip")
-        if abs(driver_input[-1]) <= 1.0e-14:
+        edge_q = dot(driver_input, edge_weights)
+        edge_Kn = dot(Kn, edge_weights)
+        edge_Ln_r = dot(Ln_r, edge_weights)
+        if abs(edge_q) <= 1.0e-14:
             raise ValueError("PQ strict solve received near-zero edge q input")
         q_scale = (2.0 * np.pi * edge_F) / Ip
-        q_scale *= Kn[-1] * Ln_r[-1] / driver_input[-1]
+        q_scale *= edge_Kn * edge_Ln_r / edge_q
         for i in range(out_q.shape[0]):
             out_q[i] = driver_input[i] * q_scale
     else:
@@ -1133,9 +1154,7 @@ def _pq_psin_beta_residual(
     beta_den = weighted_dot(trial_Pn, V_r, weights)
     if not np.isfinite(beta_den):
         return np.nan
-    return alpha1 * (
-        scaled_p0 * dot(V_r, weights) + alpha2 * beta_den
-    ) - beta_target
+    return alpha1 * (scaled_p0 * dot(V_r, weights) + alpha2 * beta_den) - beta_target
 
 
 @njit(cache=True, nogil=True)
@@ -1340,9 +1359,7 @@ def _resolve_source_inputs_prepared(
     """Resolve source inputs when all arrays are already normalized ndarrays."""
 
     if pprime.ndim != 1 or driver.ndim != 1:
-        raise ValueError(
-            f"Expected 1D pprime/driver inputs, got {pprime.shape} and {driver.shape}"
-        )
+        raise ValueError(f"Expected 1D pprime/driver inputs, got {pprime.shape} and {driver.shape}")
     if pprime.shape != driver.shape:
         raise ValueError(f"pprime/driver shape mismatch: {pprime.shape} vs {driver.shape}")
     if pprime.shape[0] != source_sample_count:
@@ -1465,7 +1482,7 @@ def _update_pf_from_rho_inputs_with_scratch(
     # to integrate to one so downstream geometry uses the canonical psin scale.
     out_psin_r /= integral_prof
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
-    _update_psin_coordinate(out_psin, out_psin_r, accumulator)
+    _update_psin_coordinate(out_psin, out_psin_r, accumulator, weights)
     if (not has_Ip) and (not has_beta):
         # With no global Ip/beta target, PF determines both alpha scales from
         # the integrated source profiles.  Rho-coordinate PF inputs are
@@ -1509,9 +1526,7 @@ def _update_pf_from_rho_inputs_with_scratch(
             * beta
             * B0**2
             * dot(V_r, weights)
-            / _rho_beta_pressure_denominator(
-                scratch_aux, V_r, weights, scaled_p0
-            )
+            / _rho_beta_pressure_denominator(scratch_aux, V_r, weights, scaled_p0)
         )
         alpha1 = _signed_sqrt_ratio(c1, c2)
     else:
@@ -1565,7 +1580,7 @@ def _update_pf_from_psin_uniform_inputs_with_scratch(
     integral_prof = dot(out_psin_r, weights)
     out_psin_r /= integral_prof
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
-    _update_psin_coordinate(out_psin, out_psin_r, accumulator)
+    _update_psin_coordinate(out_psin, out_psin_r, accumulator, weights)
     if (not has_Ip) and (not has_beta):
         alpha2 = psi_scale_sign * integral_prof
         pressure_profile = array_scratch[_SLOT_AUX0]
@@ -1660,7 +1675,7 @@ def _update_pf_from_psin_grid_inputs_with_scratch(
     integral_prof = dot(out_psin_r, weights)
     out_psin_r /= integral_prof
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
-    _update_psin_coordinate(out_psin, out_psin_r, accumulator)
+    _update_psin_coordinate(out_psin, out_psin_r, accumulator, weights)
     if (not has_Ip) and (not has_beta):
         alpha2 = psi_scale_sign * integral_prof
         pressure_profile = array_scratch[_SLOT_AUX0]
@@ -1753,13 +1768,19 @@ def _update_pp_from_rho_inputs_with_scratch(
         # absolute scale through the edge value; otherwise alpha2 is the weighted
         # normalization integral.
         copy_into(out_psin_r, driver_input)
-        alpha2 = Ip / (2.0 * np.pi * Kn[-1] * out_psin_r[-1])
+        _regularize_psin_r(out_psin_r, rho, n_axis_fix)
+        alpha2 = Ip / (
+            2.0
+            * np.pi
+            * _edge_eval(Kn, grid_radial_fields)
+            * _edge_eval(out_psin_r, grid_radial_fields)
+        )
     else:
         alpha2 = dot(driver_input, weights)
         scale_into(out_psin_r, driver_input, 1.0 / alpha2)
-    _regularize_psin_r(out_psin_r, rho, n_axis_fix)
+        _regularize_psin_r(out_psin_r, rho, n_axis_fix)
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
-    _update_psin_coordinate(out_psin, out_psin_r, accumulator)
+    _update_psin_coordinate(out_psin, out_psin_r, accumulator, weights)
     if has_beta:
         scaled_ratio_into(out_Pn_psin, pprime_input, out_psin_r, 1.0)
         scratch_Pn_r = array_scratch[_SLOT_PNr]
@@ -1771,12 +1792,7 @@ def _update_pp_from_rho_inputs_with_scratch(
             * beta
             * B0**2
             * dot(V_r, weights)
-            / (
-                alpha2
-                * _rho_beta_pressure_denominator(
-                    scratch_aux, V_r, weights, scaled_p0
-                )
-            )
+            / (alpha2 * _rho_beta_pressure_denominator(scratch_aux, V_r, weights, scaled_p0))
         )
     else:
         scratch_Pr = array_scratch[_SLOT_Pr]
@@ -1843,13 +1859,19 @@ def _update_pp_from_psin_uniform_inputs_with_scratch(
     has_beta = not np.isnan(beta)
     if has_Ip:
         copy_into(out_psin_r, driver_input)
-        alpha2 = Ip / (2.0 * np.pi * Kn[-1] * out_psin_r[-1])
+        _regularize_psin_r(out_psin_r, rho, n_axis_fix)
+        alpha2 = Ip / (
+            2.0
+            * np.pi
+            * _edge_eval(Kn, grid_radial_fields)
+            * _edge_eval(out_psin_r, grid_radial_fields)
+        )
     else:
         alpha2 = dot(driver_input, weights)
         scale_into(out_psin_r, driver_input, 1.0 / alpha2)
-    _regularize_psin_r(out_psin_r, rho, n_axis_fix)
+        _regularize_psin_r(out_psin_r, rho, n_axis_fix)
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
-    _update_psin_coordinate(out_psin, out_psin_r, accumulator)
+    _update_psin_coordinate(out_psin, out_psin_r, accumulator, weights)
     if has_beta:
         copy_into(out_Pn_psin, pprime_input)
         scratch_Pn_r = array_scratch[_SLOT_PNr]
@@ -1861,9 +1883,7 @@ def _update_pp_from_psin_uniform_inputs_with_scratch(
             * beta
             * B0**2
             * dot(V_r, weights)
-            / _psin_beta_pressure_denominator(
-                scratch_aux, V_r, weights, scaled_p0, alpha2
-            )
+            / _psin_beta_pressure_denominator(scratch_aux, V_r, weights, scaled_p0, alpha2)
         )
     else:
         scratch_Pr = array_scratch[_SLOT_Pr]
@@ -1930,13 +1950,19 @@ def _update_pp_from_psin_grid_inputs_with_scratch(
     has_beta = not np.isnan(beta)
     if has_Ip:
         copy_into(out_psin_r, driver_input)
-        alpha2 = Ip / (2.0 * np.pi * Kn[-1] * out_psin_r[-1])
+        _regularize_psin_r(out_psin_r, rho, n_axis_fix)
+        alpha2 = Ip / (
+            2.0
+            * np.pi
+            * _edge_eval(Kn, grid_radial_fields)
+            * _edge_eval(out_psin_r, grid_radial_fields)
+        )
     else:
         alpha2 = dot(driver_input, weights)
         scale_into(out_psin_r, driver_input, 1.0 / alpha2)
-    _regularize_psin_r(out_psin_r, rho, n_axis_fix)
+        _regularize_psin_r(out_psin_r, rho, n_axis_fix)
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
-    _update_psin_coordinate(out_psin, out_psin_r, accumulator)
+    _update_psin_coordinate(out_psin, out_psin_r, accumulator, weights)
     if has_beta:
         copy_into(out_Pn_psin, pprime_input)
         scratch_Pn_r = array_scratch[_SLOT_PNr]
@@ -1948,9 +1974,7 @@ def _update_pp_from_psin_grid_inputs_with_scratch(
             * beta
             * B0**2
             * dot(V_r, weights)
-            / _psin_beta_pressure_denominator(
-                scratch_aux, V_r, weights, scaled_p0, alpha2
-            )
+            / _psin_beta_pressure_denominator(scratch_aux, V_r, weights, scaled_p0, alpha2)
         )
     else:
         scratch_Pr = array_scratch[_SLOT_Pr]
@@ -2023,17 +2047,17 @@ def _update_pi_from_rho_inputs_with_scratch(
         # PI source profiles represent cumulative toroidal current.  Rescale the
         # whole primitive when Ip is prescribed, then differentiate only after
         # psin_r has been normalized.
-        scale_into(Itor, driver_input, Ip / driver_input[-1])
+        scale_into(Itor, driver_input, Ip / _edge_eval(driver_input, grid_radial_fields))
     else:
         copy_into(Itor, driver_input)
-    _floor_signed_current_primitive(Itor)
+    _floor_signed_current_primitive(Itor, _edge_eval(Itor, grid_radial_fields))
     itor_over_kn = array_scratch[_SLOT_INTEGRAND]
     scaled_ratio_into(itor_over_kn, Itor, Kn, 1.0 / (2.0 * np.pi))
     alpha2 = dot(itor_over_kn, weights)
     scaled_ratio_into(out_psin_r, Itor, Kn, 1.0 / (2.0 * np.pi * alpha2))
     _regularize_psin_r(out_psin_r, rho, n_axis_fix)
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
-    _update_psin_coordinate(out_psin, out_psin_r, accumulator)
+    _update_psin_coordinate(out_psin, out_psin_r, accumulator, weights)
     Itor_r = array_scratch[_SLOT_AUX1]
     full_differentiation(Itor_r, Itor, differentiator)
     _regularize_axis_linear(Itor_r, rho, n_axis_fix)
@@ -2048,12 +2072,7 @@ def _update_pi_from_rho_inputs_with_scratch(
             * beta
             * B0**2
             * dot(V_r, weights)
-            / (
-                alpha2
-                * _rho_beta_pressure_denominator(
-                    scratch_aux, V_r, weights, scaled_p0
-                )
-            )
+            / (alpha2 * _rho_beta_pressure_denominator(scratch_aux, V_r, weights, scaled_p0))
         )
     else:
         scratch_Pr = array_scratch[_SLOT_Pr]
@@ -2110,17 +2129,17 @@ def _update_pi_from_psin_uniform_inputs_with_scratch(
     has_beta = not np.isnan(beta)
     Itor = array_scratch[_SLOT_AUX0]
     if has_Ip:
-        scale_into(Itor, driver_input, Ip / driver_input[-1])
+        scale_into(Itor, driver_input, Ip / _edge_eval(driver_input, grid_radial_fields))
     else:
         copy_into(Itor, driver_input)
-    _floor_signed_current_primitive(Itor)
+    _floor_signed_current_primitive(Itor, _edge_eval(Itor, grid_radial_fields))
     itor_over_kn = array_scratch[_SLOT_INTEGRAND]
     scaled_ratio_into(itor_over_kn, Itor, Kn, 1.0 / (2.0 * np.pi))
     alpha2 = dot(itor_over_kn, weights)
     scaled_ratio_into(out_psin_r, Itor, Kn, 1.0 / (2.0 * np.pi * alpha2))
     _regularize_psin_r(out_psin_r, rho, n_axis_fix)
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
-    _update_psin_coordinate(out_psin, out_psin_r, accumulator)
+    _update_psin_coordinate(out_psin, out_psin_r, accumulator, weights)
     Itor_r = array_scratch[_SLOT_AUX1]
     full_differentiation(Itor_r, Itor, differentiator)
     _regularize_axis_linear(Itor_r, rho, n_axis_fix)
@@ -2135,9 +2154,7 @@ def _update_pi_from_psin_uniform_inputs_with_scratch(
             * beta
             * B0**2
             * dot(V_r, weights)
-            / _psin_beta_pressure_denominator(
-                scratch_aux, V_r, weights, scaled_p0, alpha2
-            )
+            / _psin_beta_pressure_denominator(scratch_aux, V_r, weights, scaled_p0, alpha2)
         )
     else:
         scratch_Pr = array_scratch[_SLOT_Pr]
@@ -2194,17 +2211,17 @@ def _update_pi_from_psin_grid_inputs_with_scratch(
     has_beta = not np.isnan(beta)
     Itor = array_scratch[_SLOT_AUX0]
     if has_Ip:
-        scale_into(Itor, driver_input, Ip / driver_input[-1])
+        scale_into(Itor, driver_input, Ip / _edge_eval(driver_input, grid_radial_fields))
     else:
         copy_into(Itor, driver_input)
-    _floor_signed_current_primitive(Itor)
+    _floor_signed_current_primitive(Itor, _edge_eval(Itor, grid_radial_fields))
     itor_over_kn = array_scratch[_SLOT_INTEGRAND]
     scaled_ratio_into(itor_over_kn, Itor, Kn, 1.0 / (2.0 * np.pi))
     alpha2 = dot(itor_over_kn, weights)
     scaled_ratio_into(out_psin_r, Itor, Kn, 1.0 / (2.0 * np.pi * alpha2))
     _regularize_psin_r(out_psin_r, rho, n_axis_fix)
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
-    _update_psin_coordinate(out_psin, out_psin_r, accumulator)
+    _update_psin_coordinate(out_psin, out_psin_r, accumulator, weights)
     Itor_r = array_scratch[_SLOT_AUX1]
     full_differentiation(Itor_r, Itor, differentiator)
     _regularize_axis_linear(Itor_r, rho, n_axis_fix)
@@ -2219,9 +2236,7 @@ def _update_pi_from_psin_grid_inputs_with_scratch(
             * beta
             * B0**2
             * dot(V_r, weights)
-            / _psin_beta_pressure_denominator(
-                scratch_aux, V_r, weights, scaled_p0, alpha2
-            )
+            / _psin_beta_pressure_denominator(scratch_aux, V_r, weights, scaled_p0, alpha2)
         )
     else:
         scratch_Pr = array_scratch[_SLOT_Pr]
@@ -2286,23 +2301,26 @@ def _update_pj1_from_rho_inputs_with_scratch(
     copy_into(I_tor_prof, out_psin_r)
     I_tor = array_scratch[_SLOT_AUX1]
     jtor = array_scratch[_SLOT_AUX2]
+    current_edge = _full_integral(integrand_j, weights)
+    source_scale = 1.0
     if has_Ip:
         # PJ1 integrates a current-density-like input into I_tor first; the same
         # Ip scale must be applied to the primitive and to the local jtor profile.
-        scale_into(I_tor, I_tor_prof, Ip / I_tor_prof[-1])
-        scale_into(jtor, driver_input, Ip / I_tor_prof[-1])
+        source_scale = Ip / current_edge
+        scale_into(I_tor, I_tor_prof, source_scale)
+        scale_into(jtor, driver_input, source_scale)
     else:
         copy_into(I_tor, I_tor_prof)
         copy_into(jtor, driver_input)
     _enforce_axis_even_profile(jtor, rho)
-    _floor_signed_current_primitive(I_tor)
+    _floor_signed_current_primitive(I_tor, current_edge * source_scale)
     itor_over_kn = array_scratch[_SLOT_INTEGRAND]
     scaled_ratio_into(itor_over_kn, I_tor, Kn, 1.0 / (2.0 * np.pi))
     alpha2 = dot(itor_over_kn, weights)
     scaled_ratio_into(out_psin_r, I_tor, Kn, 1.0 / (2.0 * np.pi * alpha2))
     _regularize_psin_r(out_psin_r, rho, n_axis_fix)
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
-    _update_psin_coordinate(out_psin, out_psin_r, accumulator)
+    _update_psin_coordinate(out_psin, out_psin_r, accumulator, weights)
     if has_beta:
         scaled_ratio_into(out_Pn_psin, pprime_input, out_psin_r, 1.0)
         scratch_Pn_r = array_scratch[_SLOT_PNr]
@@ -2314,12 +2332,7 @@ def _update_pj1_from_rho_inputs_with_scratch(
             * beta
             * B0**2
             * dot(V_r, weights)
-            / (
-                alpha2
-                * _rho_beta_pressure_denominator(
-                    scratch_aux, V_r, weights, scaled_p0
-                )
-            )
+            / (alpha2 * _rho_beta_pressure_denominator(scratch_aux, V_r, weights, scaled_p0))
         )
     else:
         scratch_Pr = array_scratch[_SLOT_Pr]
@@ -2390,21 +2403,24 @@ def _update_pj1_from_psin_uniform_inputs_with_scratch(
     copy_into(I_tor_prof, out_psin_r)
     I_tor = array_scratch[_SLOT_AUX1]
     jtor = array_scratch[_SLOT_AUX2]
+    current_edge = _full_integral(integrand_j, weights)
+    source_scale = 1.0
     if has_Ip:
-        scale_into(I_tor, I_tor_prof, Ip / I_tor_prof[-1])
-        scale_into(jtor, driver_input, Ip / I_tor_prof[-1])
+        source_scale = Ip / current_edge
+        scale_into(I_tor, I_tor_prof, source_scale)
+        scale_into(jtor, driver_input, source_scale)
     else:
         copy_into(I_tor, I_tor_prof)
         copy_into(jtor, driver_input)
     _enforce_axis_even_profile(jtor, rho)
-    _floor_signed_current_primitive(I_tor)
+    _floor_signed_current_primitive(I_tor, current_edge * source_scale)
     itor_over_kn = array_scratch[_SLOT_INTEGRAND]
     scaled_ratio_into(itor_over_kn, I_tor, Kn, 1.0 / (2.0 * np.pi))
     alpha2 = dot(itor_over_kn, weights)
     scaled_ratio_into(out_psin_r, I_tor, Kn, 1.0 / (2.0 * np.pi * alpha2))
     _regularize_psin_r(out_psin_r, rho, n_axis_fix)
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
-    _update_psin_coordinate(out_psin, out_psin_r, accumulator)
+    _update_psin_coordinate(out_psin, out_psin_r, accumulator, weights)
     if has_beta:
         copy_into(out_Pn_psin, pprime_input)
         scratch_Pn_r = array_scratch[_SLOT_PNr]
@@ -2416,9 +2432,7 @@ def _update_pj1_from_psin_uniform_inputs_with_scratch(
             * beta
             * B0**2
             * dot(V_r, weights)
-            / _psin_beta_pressure_denominator(
-                scratch_aux, V_r, weights, scaled_p0, alpha2
-            )
+            / _psin_beta_pressure_denominator(scratch_aux, V_r, weights, scaled_p0, alpha2)
         )
     else:
         scratch_Pr = array_scratch[_SLOT_Pr]
@@ -2489,21 +2503,24 @@ def _update_pj1_from_psin_grid_inputs_with_scratch(
     copy_into(I_tor_prof, out_psin_r)
     I_tor = array_scratch[_SLOT_AUX1]
     jtor = array_scratch[_SLOT_AUX2]
+    current_edge = _full_integral(integrand_j, weights)
+    source_scale = 1.0
     if has_Ip:
-        scale_into(I_tor, I_tor_prof, Ip / I_tor_prof[-1])
-        scale_into(jtor, driver_input, Ip / I_tor_prof[-1])
+        source_scale = Ip / current_edge
+        scale_into(I_tor, I_tor_prof, source_scale)
+        scale_into(jtor, driver_input, source_scale)
     else:
         copy_into(I_tor, I_tor_prof)
         copy_into(jtor, driver_input)
     _enforce_axis_even_profile(jtor, rho)
-    _floor_signed_current_primitive(I_tor)
+    _floor_signed_current_primitive(I_tor, current_edge * source_scale)
     itor_over_kn = array_scratch[_SLOT_INTEGRAND]
     scaled_ratio_into(itor_over_kn, I_tor, Kn, 1.0 / (2.0 * np.pi))
     alpha2 = dot(itor_over_kn, weights)
     scaled_ratio_into(out_psin_r, I_tor, Kn, 1.0 / (2.0 * np.pi * alpha2))
     _regularize_psin_r(out_psin_r, rho, n_axis_fix)
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
-    _update_psin_coordinate(out_psin, out_psin_r, accumulator)
+    _update_psin_coordinate(out_psin, out_psin_r, accumulator, weights)
     if has_beta:
         copy_into(out_Pn_psin, pprime_input)
         scratch_Pn_r = array_scratch[_SLOT_PNr]
@@ -2515,9 +2532,7 @@ def _update_pj1_from_psin_grid_inputs_with_scratch(
             * beta
             * B0**2
             * dot(V_r, weights)
-            / _psin_beta_pressure_denominator(
-                scratch_aux, V_r, weights, scaled_p0, alpha2
-            )
+            / _psin_beta_pressure_denominator(scratch_aux, V_r, weights, scaled_p0, alpha2)
         )
     else:
         scratch_Pr = array_scratch[_SLOT_Pr]
@@ -2594,7 +2609,12 @@ def _update_pj2_from_psin_uniform_inputs_with_scratch(
     if has_Ip:
         # PJ2 couples the source current to the current F profile.  In psin
         # routes the edge normalization uses the physical edge F=R0*B0.
-        scaled_product_into(I_tor, F, integral_val, Ip / (R0 * B0 * integral_val[-1]))
+        scaled_product_into(
+            I_tor,
+            F,
+            integral_val,
+            Ip / (R0 * B0 * _full_integral(integrand, weights)),
+        )
     else:
         scaled_product_into(I_tor, F, integral_val, 2.0 * np.pi)
     scaled_ratio_into(integrand, I_tor, Kn, 1.0 / (2.0 * np.pi))
@@ -2602,7 +2622,7 @@ def _update_pj2_from_psin_uniform_inputs_with_scratch(
     scale_into(out_psin_r, integrand, 1.0 / alpha2)
     _regularize_psin_r(out_psin_r, rho, n_axis_fix)
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
-    _update_psin_coordinate(out_psin, out_psin_r, accumulator)
+    _update_psin_coordinate(out_psin, out_psin_r, accumulator, weights)
 
     if has_beta:
         product_into(scratch_Pn_r, pprime_input, out_psin_r)
@@ -2612,9 +2632,7 @@ def _update_pj2_from_psin_uniform_inputs_with_scratch(
             * beta
             * B0**2
             * dot(V_r, weights)
-            / _psin_beta_pressure_denominator(
-                scratch_aux, V_r, weights, scaled_p0, alpha2
-            )
+            / _psin_beta_pressure_denominator(scratch_aux, V_r, weights, scaled_p0, alpha2)
         )
         copy_into(out_Pn_psin, pprime_input)
     else:
@@ -2681,7 +2699,12 @@ def _update_pj2_from_psin_grid_inputs_with_scratch(
     copy_into(integral_val, out_psin_r)
 
     if has_Ip:
-        scaled_product_into(I_tor, F, integral_val, Ip / (R0 * B0 * integral_val[-1]))
+        scaled_product_into(
+            I_tor,
+            F,
+            integral_val,
+            Ip / (R0 * B0 * _full_integral(integrand, weights)),
+        )
     else:
         scaled_product_into(I_tor, F, integral_val, 2.0 * np.pi)
     scaled_ratio_into(integrand, I_tor, Kn, 1.0 / (2.0 * np.pi))
@@ -2689,7 +2712,7 @@ def _update_pj2_from_psin_grid_inputs_with_scratch(
     scale_into(out_psin_r, integrand, 1.0 / alpha2)
     _regularize_psin_r(out_psin_r, rho, n_axis_fix)
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
-    _update_psin_coordinate(out_psin, out_psin_r, accumulator)
+    _update_psin_coordinate(out_psin, out_psin_r, accumulator, weights)
 
     if has_beta:
         product_into(scratch_Pn_r, pprime_input, out_psin_r)
@@ -2699,9 +2722,7 @@ def _update_pj2_from_psin_grid_inputs_with_scratch(
             * beta
             * B0**2
             * dot(V_r, weights)
-            / _psin_beta_pressure_denominator(
-                scratch_aux, V_r, weights, scaled_p0, alpha2
-            )
+            / _psin_beta_pressure_denominator(scratch_aux, V_r, weights, scaled_p0, alpha2)
         )
         copy_into(out_Pn_psin, pprime_input)
     else:
@@ -2769,7 +2790,12 @@ def _update_pj2_from_rho_inputs_with_scratch(
     copy_into(integral_val, out_psin_r)
     I_tor = array_scratch[_SLOT_AUX1]
     if has_Ip:
-        scaled_product_into(I_tor, F, integral_val, Ip / (F[-1] * integral_val[-1]))
+        scaled_product_into(
+            I_tor,
+            F,
+            integral_val,
+            Ip / (_edge_eval(F, grid_radial_fields) * _full_integral(integrand, weights)),
+        )
     else:
         scaled_product_into(I_tor, F, integral_val, 2.0 * np.pi)
     itor_over_kn = array_scratch[_SLOT_INTEGRAND]
@@ -2778,7 +2804,7 @@ def _update_pj2_from_rho_inputs_with_scratch(
     scaled_ratio_into(out_psin_r, I_tor, Kn, 1.0 / (2.0 * np.pi * alpha2))
     _regularize_psin_r(out_psin_r, rho, n_axis_fix)
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
-    _update_psin_coordinate(out_psin, out_psin_r, accumulator)
+    _update_psin_coordinate(out_psin, out_psin_r, accumulator, weights)
     if has_beta:
         scaled_ratio_into(out_Pn_psin, pprime_input, out_psin_r, 1.0)
         scratch_Pn_r = array_scratch[_SLOT_PNr]
@@ -2790,12 +2816,7 @@ def _update_pj2_from_rho_inputs_with_scratch(
             * beta
             * B0**2
             * dot(V_r, weights)
-            / (
-                alpha2
-                * _rho_beta_pressure_denominator(
-                    scratch_aux, V_r, weights, scaled_p0
-                )
-            )
+            / (alpha2 * _rho_beta_pressure_denominator(scratch_aux, V_r, weights, scaled_p0))
         )
     else:
         scratch_Pr = array_scratch[_SLOT_Pr]
@@ -2846,6 +2867,7 @@ def _update_pq_from_psin_uniform_inputs_with_scratch(
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
     rho = _source_grid_rho(grid_radial_fields)
+    edge_weights = _source_grid_edge_weights(grid_radial_fields)
     V_r, Kn, _, Ln_r, _, _, _ = _source_geometry_workspace_views(radial_fields, surface_fields)
     n = rho.shape[0]
     edge_F = R0 * B0
@@ -2861,7 +2883,7 @@ def _update_pq_from_psin_uniform_inputs_with_scratch(
     F_r = array_scratch[_SLOT_Fr]
     A = array_scratch[_SLOT_PQ_MATRIX : _SLOT_PQ_MATRIX + n, :]
 
-    _fill_pq_q_profile(q_prof, driver_input, Kn, Ln_r, edge_F, Ip)
+    _fill_pq_q_profile(q_prof, driver_input, Kn, Ln_r, edge_weights, edge_F, Ip)
     _fill_pq_W_and_derivative(W, F_r, Kn, Ln_r, q_prof, differentiator)
 
     # PQ/psin treats q as strict input.  The unknown F profile solves a dense
@@ -2880,29 +2902,30 @@ def _update_pq_from_psin_uniform_inputs_with_scratch(
         # Solve A F0 = b_edge and A F1 = b_pressure, then determine alpha1 from
         # the scalar beta constraint with F = F0 + alpha1 * F1.
         for i in range(n):
-            F_solved[i] = 0.0
+            rhs[i] = 0.0
             W[i] = -pressure_factor * V_r[i] * pprime_input[i]
             if not np.isfinite(W[i]):
                 raise ValueError("PQ/psin strict beta solve assembled non-finite pressure RHS")
         _fill_pq_linear_matrix_two_rhs(
             A,
             F_solved,
-            W,
-            differentiator,
+            F_r,
+            accumulator,
+            weights,
             coeff_d,
             coeff_y,
-            F_solved,
+            rhs,
             W,
             edge_F,
             0.0,
             n,
         )
-        _dense_solve_two_rhs_inplace(A, F_solved, W, n, 1.0e-12)
+        _dense_solve_two_rhs_inplace(A, F_solved, F_r, n, 1.0e-12)
 
         beta_target = 0.5 * beta * B0**2 * dot(V_r, weights)
         alpha1 = _solve_pq_psin_beta_alpha1(
             F_solved,
-            W,
+            F_r,
             q_prof,
             Ln_r,
             pprime_input,
@@ -2910,21 +2933,20 @@ def _update_pq_from_psin_uniform_inputs_with_scratch(
             weights,
             accumulator,
             out_psin_r,
-            coeff_d,
-            coeff_y,
+            rhs,
+            W,
             scaled_p0,
             beta_target,
         )
         for i in range(n):
-            F_solved[i] = F_solved[i] + alpha1 * W[i]
+            F_solved[i] = F_solved[i] + alpha1 * F_r[i]
         copy_into(out_Pn_psin, pprime_input)
     else:
         for i in range(n):
             rhs[i] = -pressure_factor * V_r[i] * pprime_input[i]
             if not np.isfinite(rhs[i]):
                 raise ValueError("PQ/psin strict solve assembled non-finite pressure RHS")
-        _fill_pq_linear_matrix(A, rhs, differentiator, coeff_d, coeff_y, rhs, edge_F, n)
-        copy_into(F_solved, rhs)
+        _fill_pq_linear_matrix(A, F_solved, accumulator, weights, coeff_d, coeff_y, rhs, edge_F, n)
         _dense_solve_one_rhs_inplace(A, F_solved, n, 1.0e-12)
         alpha1 = 0.0
 
@@ -2937,7 +2959,7 @@ def _update_pq_from_psin_uniform_inputs_with_scratch(
     # the solver psin_r branch back to a positive [0, 1] coordinate.
     alpha2 = _normalize_pq_signed_psi_r(out_psin_r, weights, rho, n_axis_fix)
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
-    _update_psin_coordinate(out_psin, out_psin_r, accumulator)
+    _update_psin_coordinate(out_psin, out_psin_r, accumulator, weights)
 
     if not has_beta:
         alpha1 = -weighted_dot(pprime_input, out_psin_r, weights)
@@ -2956,7 +2978,10 @@ def _update_pq_from_psin_uniform_inputs_with_scratch(
             out_Pn_psin[i] = pprime_input[i] / alpha1
     _validate_pq_source_scalar(alpha1, 1)
 
-    full_differentiation(F_r, F_solved, differentiator)
+    forcing_scale = alpha1 if has_beta else 1.0
+    for i in range(n):
+        forcing_i = -pressure_factor * forcing_scale * V_r[i] * pprime_input[i]
+        F_r[i] = (forcing_i - coeff_y[i] * F_solved[i]) / coeff_d[i]
 
     for i in range(n):
         if abs(Ln_r[i]) <= 1.0e-14:
@@ -2995,6 +3020,7 @@ def _update_pq_from_psin_grid_inputs_with_scratch(
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
     rho = _source_grid_rho(grid_radial_fields)
+    edge_weights = _source_grid_edge_weights(grid_radial_fields)
     V_r, Kn, _, Ln_r, _, _, _ = _source_geometry_workspace_views(radial_fields, surface_fields)
     n = rho.shape[0]
     edge_F = R0 * B0
@@ -3010,7 +3036,7 @@ def _update_pq_from_psin_grid_inputs_with_scratch(
     F_r = array_scratch[_SLOT_Fr]
     A = array_scratch[_SLOT_PQ_MATRIX : _SLOT_PQ_MATRIX + n, :]
 
-    _fill_pq_q_profile(q_prof, driver_input, Kn, Ln_r, edge_F, Ip)
+    _fill_pq_q_profile(q_prof, driver_input, Kn, Ln_r, edge_weights, edge_F, Ip)
     _fill_pq_W_and_derivative(W, F_r, Kn, Ln_r, q_prof, differentiator)
 
     # Grid and uniform psin variants share the same strict-q algebra after the
@@ -3027,29 +3053,30 @@ def _update_pq_from_psin_grid_inputs_with_scratch(
         # Solve A F0 = b_edge and A F1 = b_pressure, then determine alpha1 from
         # the scalar beta constraint with F = F0 + alpha1 * F1.
         for i in range(n):
-            F_solved[i] = 0.0
+            rhs[i] = 0.0
             W[i] = -pressure_factor * V_r[i] * pprime_input[i]
             if not np.isfinite(W[i]):
                 raise ValueError("PQ/psin strict beta solve assembled non-finite pressure RHS")
         _fill_pq_linear_matrix_two_rhs(
             A,
             F_solved,
-            W,
-            differentiator,
+            F_r,
+            accumulator,
+            weights,
             coeff_d,
             coeff_y,
-            F_solved,
+            rhs,
             W,
             edge_F,
             0.0,
             n,
         )
-        _dense_solve_two_rhs_inplace(A, F_solved, W, n, 1.0e-12)
+        _dense_solve_two_rhs_inplace(A, F_solved, F_r, n, 1.0e-12)
 
         beta_target = 0.5 * beta * B0**2 * dot(V_r, weights)
         alpha1 = _solve_pq_psin_beta_alpha1(
             F_solved,
-            W,
+            F_r,
             q_prof,
             Ln_r,
             pprime_input,
@@ -3057,21 +3084,20 @@ def _update_pq_from_psin_grid_inputs_with_scratch(
             weights,
             accumulator,
             out_psin_r,
-            coeff_d,
-            coeff_y,
+            rhs,
+            W,
             scaled_p0,
             beta_target,
         )
         for i in range(n):
-            F_solved[i] = F_solved[i] + alpha1 * W[i]
+            F_solved[i] = F_solved[i] + alpha1 * F_r[i]
         copy_into(out_Pn_psin, pprime_input)
     else:
         for i in range(n):
             rhs[i] = -pressure_factor * V_r[i] * pprime_input[i]
             if not np.isfinite(rhs[i]):
                 raise ValueError("PQ/psin strict solve assembled non-finite pressure RHS")
-        _fill_pq_linear_matrix(A, rhs, differentiator, coeff_d, coeff_y, rhs, edge_F, n)
-        copy_into(F_solved, rhs)
+        _fill_pq_linear_matrix(A, F_solved, accumulator, weights, coeff_d, coeff_y, rhs, edge_F, n)
         _dense_solve_one_rhs_inplace(A, F_solved, n, 1.0e-12)
         alpha1 = 0.0
 
@@ -3082,7 +3108,7 @@ def _update_pq_from_psin_grid_inputs_with_scratch(
 
     alpha2 = _normalize_pq_signed_psi_r(out_psin_r, weights, rho, n_axis_fix)
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
-    _update_psin_coordinate(out_psin, out_psin_r, accumulator)
+    _update_psin_coordinate(out_psin, out_psin_r, accumulator, weights)
 
     if not has_beta:
         alpha1 = -weighted_dot(pprime_input, out_psin_r, weights)
@@ -3101,7 +3127,10 @@ def _update_pq_from_psin_grid_inputs_with_scratch(
             out_Pn_psin[i] = pprime_input[i] / alpha1
     _validate_pq_source_scalar(alpha1, 1)
 
-    full_differentiation(F_r, F_solved, differentiator)
+    forcing_scale = alpha1 if has_beta else 1.0
+    for i in range(n):
+        forcing_i = -pressure_factor * forcing_scale * V_r[i] * pprime_input[i]
+        F_r[i] = (forcing_i - coeff_y[i] * F_solved[i]) / coeff_d[i]
 
     for i in range(n):
         if abs(Ln_r[i]) <= 1.0e-14:
@@ -3143,6 +3172,7 @@ def _update_pq_from_rho_inputs_with_scratch(
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
     rho = _source_grid_rho(grid_radial_fields)
+    edge_weights = _source_grid_edge_weights(grid_radial_fields)
     V_r, Kn, _, Ln_r, _, _, _ = _source_geometry_workspace_views(radial_fields, surface_fields)
     n = rho.shape[0]
     edge_F = R0 * B0
@@ -3158,7 +3188,7 @@ def _update_pq_from_rho_inputs_with_scratch(
     Y_r = array_scratch[_SLOT_Fr]
     A = array_scratch[_SLOT_PQ_MATRIX : _SLOT_PQ_MATRIX + n, :]
 
-    _fill_pq_q_profile(q_prof, driver_input, Kn, Ln_r, edge_F, Ip)
+    _fill_pq_q_profile(q_prof, driver_input, Kn, Ln_r, edge_weights, edge_F, Ip)
     _fill_pq_W_and_derivative(W, Y_r, Kn, Ln_r, q_prof, differentiator)
 
     # In rho-coordinate PQ, solving for Y=F**2 keeps the strict edge condition
@@ -3169,9 +3199,7 @@ def _update_pq_from_rho_inputs_with_scratch(
     if has_beta:
         copy_into(rhs, pprime_input)
         _compute_Pn_out(coeff_y, rhs, accumulator, weights)
-        beta_den_pre = _rho_beta_pressure_denominator(
-            coeff_y, V_r, weights, scaled_p0
-        )
+        beta_den_pre = _rho_beta_pressure_denominator(coeff_y, V_r, weights, scaled_p0)
         if not np.isfinite(beta_den_pre) or abs(beta_den_pre) <= 1.0e-14:
             raise ValueError("PQ/rho strict beta solve produced invalid pressure integral")
         beta_C = 0.5 * beta * B0**2 * dot(V_r, weights) / beta_den_pre
@@ -3185,8 +3213,17 @@ def _update_pq_from_rho_inputs_with_scratch(
         if not np.isfinite(coeff_d[i]) or not np.isfinite(coeff_y[i]) or not np.isfinite(rhs[i]):
             raise ValueError("PQ/rho strict solve assembled non-finite system")
 
-    _fill_pq_linear_matrix(A, rhs, differentiator, coeff_d, coeff_y, rhs, edge_F * edge_F, n)
-    copy_into(Y, rhs)
+    _fill_pq_linear_matrix(
+        A,
+        Y,
+        accumulator,
+        weights,
+        coeff_d,
+        coeff_y,
+        rhs,
+        edge_F * edge_F,
+        n,
+    )
     _dense_solve_one_rhs_inplace(A, Y, n, 1.0e-12)
 
     sign_F = 1.0
@@ -3202,7 +3239,7 @@ def _update_pq_from_rho_inputs_with_scratch(
 
     alpha2 = _normalize_pq_signed_psi_r(out_psin_r, weights, rho, n_axis_fix)
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
-    _update_psin_coordinate(out_psin, out_psin_r, accumulator)
+    _update_psin_coordinate(out_psin, out_psin_r, accumulator, weights)
 
     if has_beta:
         scaled_ratio_into(out_Pn_psin, pprime_input, out_psin_r, 1.0)
@@ -3227,7 +3264,11 @@ def _update_pq_from_rho_inputs_with_scratch(
             out_Pn_psin[i] = pprime_input[i] / denom
     _validate_pq_source_scalar(alpha1, 1)
 
-    full_differentiation(Y_r, Y, differentiator)
+    for i in range(n):
+        forcing_i = (
+            -pressure_factor * pressure_scale * V_r[i] * pprime_input[i] * q_prof[i] / Ln_r[i]
+        )
+        Y_r[i] = (forcing_i - coeff_y[i] * Y[i]) / coeff_d[i]
     for i in range(n):
         denom = alpha1 * alpha2 * out_psin_r[i]
         if abs(denom) <= 1.0e-14:
@@ -3416,6 +3457,7 @@ def _materialize_profile_owned_psin_source_impl(
     grid_radial_fields: np.ndarray,
     differentiator: np.ndarray,
     accumulator: np.ndarray,
+    weights: np.ndarray,
     n_axis_fix: int,
     barycentric_weights: np.ndarray,
     use_barycentric: bool,
@@ -3429,7 +3471,7 @@ def _materialize_profile_owned_psin_source_impl(
 
     _regularize_psin_r(out_psin_r, rho, n_axis_fix)
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
-    _update_psin_coordinate(out_psin, out_psin_r, accumulator)
+    _update_psin_coordinate(out_psin, out_psin_r, accumulator, weights)
 
     for i in range(out_psin.shape[0]):
         psin_value = out_psin[i]

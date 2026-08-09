@@ -12,6 +12,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from veqpy.kernels.abi.source_semantics import (
+    DEFAULT_SOURCE_FIX_RHO,
     MU0,
     MaterializedKernelSource,
     materialize_kernel_source,
@@ -185,7 +186,7 @@ class NumbaRuntime:
         self,
         topology: KernelTopology,
         *,
-        fix_rho: float = 0.05,
+        fix_rho: float = DEFAULT_SOURCE_FIX_RHO,
         source_interpolation_kind: str = SOURCE_INTERP_DEFAULT,
     ) -> None:
         self.capacity_topology = topology

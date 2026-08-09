@@ -79,6 +79,17 @@ because Gauss-Legendre nodes exclude the edge. `p` is intentionally rejected for
 `psin(rho)` is part of the unknown equilibrium. Use explicit `pprime` for that
 topology or switch to uniform psin samples.
 
+Source lowering also checks the leading magnetic-axis parity over
+`rho < DEFAULT_SOURCE_FIX_RHO`. A rho derivative is continued as
+`rho * (a + b*rho**2)`, cumulative current as
+`rho**2 * (a + b*rho**2)`, and an axis-finite scalar as
+`a + b*rho**2`. The two coefficients are fitted from a fixed four-point
+off-axis stencil. This overdetermined fit damps a noisy individual anchor while
+remaining a constant-cost setup operation. It runs only when a public source is
+materialized; residual-generated profiles retain the cheaper backend-local
+limit and do not repeat this fit on every callback. Profiles already within the
+regularity tolerance are passed through unchanged.
+
 `KernelSource.p0` is the pressure at the LCFS in Pa; `Ip` and `beta` are the
 optional global constraints. The runtime reconstructs the complete pressure
 from `pprime` and `p0`; a beta constraint scales both pieces, including `p0`, by
@@ -94,6 +105,34 @@ therefore remains a public input convenience implemented once by shared
 lowering; it is not a second backend-specific source mode.
 Route-dependent scaling and internal materialized source arrays are backend
 runtime details, not user-facing data fields.
+
+## Radial Endpoints
+
+The default Legendre grid is open: its first and last nodes are interior to
+``(0, 1)`` and therefore are not the magnetic axis or LCFS. The shared grid
+contract exposes three distinct operations:
+
+- ``grid.axis_eval(profile)`` evaluates a nodal field at ``rho=0``;
+- ``grid.edge_eval(profile)`` evaluates it at ``rho=1``;
+- ``grid.full_integral(profile)`` integrates it over the complete ``[0, 1]``
+  interval.
+
+Numba and Cxx source routes use the corresponding precomputed endpoint weights
+and full quadrature when applying ``Ip`` constraints. A raw ``profile[0]`` or
+``profile[-1]`` is only an endpoint value when the profile's own public sampling
+contract is explicitly endpoint-inclusive.
+
+The solved ``psin`` array likewise stores values at the internal radial nodes;
+it is not overwritten to begin at zero and end at one. Its normalization is
+set by the full integral of ``psin_r``. Consequently ``axis_eval(psin)=0`` and
+``edge_eval(psin)=1`` while, on an open grid, ``0 < psin[0] < psin[-1] < 1``.
+
+``Equilibrium.resample()`` evaluates a native polynomial-collocation snapshot
+at the target nodes, including true axis and LCFS values when the target grid
+owns them. The IMAS coordinate ``rho_tor_norm`` is normalized by the complete
+toroidal-flux integral rather than the first and last stored samples. GEQDSK
+export similarly materializes explicit axis and LCFS surfaces before building
+its boundary, one-dimensional profiles, and two-dimensional flux mesh.
 
 ## Solve Flow
 

@@ -28,6 +28,7 @@ from veqpy.numerics import (
     THETA_AXIS,
     apply_accumulation,
     apply_differentiation,
+    interpolation_matrix,
     make_calculus,
     make_quadrature,
 )
@@ -157,6 +158,45 @@ class Grid(Reactive, Serial):
     def weights(self) -> np.ndarray:
         """Radial quadrature weights paired with ``rho``."""
         return self.quadrature[1]
+
+    @property
+    def edge_interpolation_weights(self) -> np.ndarray:
+        """Weights that evaluate a radial nodal field at the LCFS."""
+        weights = interpolation_matrix(
+            self.rho,
+            np.array([1.0], dtype=np.float64),
+        )[0]
+        return _const_array(weights)
+
+    @property
+    def axis_interpolation_weights(self) -> np.ndarray:
+        """Weights that evaluate a radial nodal field at the magnetic axis."""
+        weights = interpolation_matrix(
+            self.rho,
+            np.array([0.0], dtype=np.float64),
+        )[0]
+        return _const_array(weights)
+
+    def axis_eval(self, profile: np.ndarray) -> float:
+        """Evaluate a nodal radial profile at the magnetic axis."""
+        values = np.asarray(profile, dtype=np.float64)
+        if values.shape != self.rho.shape:
+            raise ValueError(f"profile shape must be {self.rho.shape}, got {values.shape}")
+        return float(np.dot(self.axis_interpolation_weights, values))
+
+    def edge_eval(self, profile: np.ndarray) -> float:
+        """Evaluate a nodal radial profile at the LCFS."""
+        values = np.asarray(profile, dtype=np.float64)
+        if values.shape != self.rho.shape:
+            raise ValueError(f"profile shape must be {self.rho.shape}, got {values.shape}")
+        return float(np.dot(self.edge_interpolation_weights, values))
+
+    def full_integral(self, profile: np.ndarray) -> float:
+        """Integrate a nodal radial profile over the complete ``[0, 1]`` domain."""
+        values = np.asarray(profile, dtype=np.float64)
+        if values.shape != self.rho.shape:
+            raise ValueError(f"profile shape must be {self.rho.shape}, got {values.shape}")
+        return float(np.dot(self.weights, values))
 
     @property
     def theta(self) -> np.ndarray:

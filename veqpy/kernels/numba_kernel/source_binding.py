@@ -23,6 +23,7 @@ def build_bound_source_stage_runner(
     *,
     plan,
     case,
+    grid_workspace,
     source_workspace,
     profile_workspace,
     residual_workspace,
@@ -38,6 +39,7 @@ def build_bound_source_stage_runner(
         return _build_pj2_psin_uniform_source_stage_runner(
             plan=plan,
             case=case,
+            grid_workspace=grid_workspace,
             source_workspace=source_workspace,
             profile_workspace=profile_workspace,
             residual_workspace=residual_workspace,
@@ -110,6 +112,7 @@ def _build_source_stage_runner_shared(
                     grid_workspace.radial_fields,
                     grid_workspace.differentiator,
                     grid_workspace.accumulator,
+                    grid_workspace.weights,
                     int(n_axis_fix),
                     source_workspace.barycentric_weights,
                     bool(source_plan.uses_barycentric_interpolation),
@@ -196,6 +199,7 @@ def _build_pj2_psin_uniform_source_stage_runner(
     *,
     plan,
     case,
+    grid_workspace,
     source_workspace,
     profile_workspace,
     residual_workspace,
@@ -211,6 +215,8 @@ def _build_pj2_psin_uniform_source_stage_runner(
     FFn_psin = root_fields[3]
     Pn_psin = root_fields[4]
     case_R0 = float(case.R0)
+    axis_weights = grid_workspace.axis_interpolation_weights
+    edge_weights = grid_workspace.edge_interpolation_weights
 
     def runner() -> tuple[float, float]:
         if source_workspace.psin_query[0] < 0.0:
@@ -222,14 +228,12 @@ def _build_pj2_psin_uniform_source_stage_runner(
                     f"Expected psin query to be 1D with at least two points, "
                     f"got {source_workspace.psin_query.shape}"
                 )
-            offset = float(source_workspace.psin_query[0])
-            scale = float(source_workspace.psin_query[-1] - offset)
+            offset = float(np.dot(axis_weights, source_workspace.psin_query))
+            scale = float(np.dot(edge_weights, source_workspace.psin_query) - offset)
             if abs(scale) < 1e-12:
                 raise ValueError("psin query does not span a valid normalized flux interval")
             source_workspace.psin_query -= offset
             source_workspace.psin_query /= scale
-            source_workspace.psin_query[0] = 0.0
-            source_workspace.psin_query[-1] = 1.0
         alpha1 = float("nan")
         alpha2 = float("nan")
         for _ in range(numba_source.PJ2_PSIN_UNIFORM_FIXED_POINT_MAX_ITER):

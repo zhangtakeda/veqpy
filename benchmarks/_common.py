@@ -59,7 +59,10 @@ def benchmark_result_path(name: str, filename: str | None = None) -> Path:
 MU0 = 4.0e-7 * np.pi
 
 ROUTE_BENCHMARK_MODES = ("PF", "PP", "PI", "PJ1", "PJ2", "PQ")
-ROUTE_BENCHMARK_COORDINATES = ("rho", "psin")
+# Route performance qualification follows the public geometric-rho contract.
+# psin remains supported and is covered by focused physics/API tests, but is
+# not mixed into route timing or pass-rate summaries.
+ROUTE_BENCHMARK_COORDINATES = ("rho",)
 ROUTE_BENCHMARK_NODES = ("uniform", "grid")
 ROUTE_BENCHMARK_CONSTRAINTS = {
     "PF": ("ip", "beta", "none"),

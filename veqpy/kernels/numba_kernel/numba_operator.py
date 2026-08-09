@@ -83,16 +83,19 @@ def bind_source_eval_runner(
     )
 
 
-def _normalize_psin_query(out: np.ndarray, source: np.ndarray) -> None:
+def _normalize_psin_query(
+    out: np.ndarray,
+    source: np.ndarray,
+    axis_weights: np.ndarray,
+    edge_weights: np.ndarray,
+) -> None:
     np.copyto(out, source)
-    offset = float(out[0])
-    scale = float(out[-1] - offset)
+    offset = float(np.dot(axis_weights, source))
+    scale = float(np.dot(edge_weights, source) - offset)
     if abs(scale) < 1.0e-12:
         raise ValueError("psin query does not span a valid normalized flux interval")
     out -= offset
     out /= scale
-    out[0] = 0.0
-    out[-1] = 1.0
 
 
 def _refresh_hot_runtime(
@@ -593,6 +596,7 @@ def _bind_profile_owned_psin_residual_runner_core(
             profile_owned_psin_binding.grid_radial_fields,
             profile_owned_psin_binding.differentiator,
             profile_owned_psin_binding.accumulator,
+            grid_workspace.weights,
             n_axis_fix,
             profile_owned_psin_binding.barycentric_weights,
             profile_owned_psin_binding.use_barycentric,
@@ -691,7 +695,12 @@ def _bind_pj2_psin_uniform_residual_runner_core(
             # ``invalidate_source_state`` marks the query with -1.  The first
             # evaluation after an x0 reset re-seeds it from the optimized psin
             # profile before the fixed-point loop starts.
-            _normalize_psin_query(source_psin_query, psin_profile_u)
+            _normalize_psin_query(
+                source_psin_query,
+                psin_profile_u,
+                grid_workspace.axis_interpolation_weights,
+                grid_workspace.edge_interpolation_weights,
+            )
         if has_Ip and use_local_barycentric:
             # The barycentric helper updates pprime/driver inside the fixed-point
             # loop without allocating a fresh remap matrix for each psin query.

@@ -154,6 +154,8 @@ def _seed_active_psin_coefficients(
         target = _normalized_source_psin_target(
             raw_target,
             expected_shape=plan.grid_workspace.rho.shape,
+            axis_weights=plan.grid_workspace.axis_interpolation_weights,
+            edge_weights=plan.grid_workspace.edge_interpolation_weights,
         )
         if target is None:
             return
@@ -175,6 +177,8 @@ def _normalized_source_psin_target(
     target: np.ndarray | None,
     *,
     expected_shape: tuple[int, ...],
+    axis_weights: np.ndarray,
+    edge_weights: np.ndarray,
 ) -> np.ndarray | None:
     if target is None:
         return None
@@ -182,14 +186,12 @@ def _normalized_source_psin_target(
     if psin.shape != expected_shape or not np.all(np.isfinite(psin)):
         return None
 
-    offset = float(psin[0])
-    scale = float(psin[-1] - offset)
+    offset = float(np.dot(axis_weights, psin))
+    scale = float(np.dot(edge_weights, psin) - offset)
     if abs(scale) <= _TINY:
         return None
 
     normalized = (psin - offset) / scale
-    normalized[0] = 0.0
-    normalized[-1] = 1.0
     if not np.all(np.isfinite(normalized)):
         return None
     return normalized
@@ -315,6 +317,8 @@ def _project_psin0_source_target_coefficient(
     coeff = _project_psin0_source_target_coefficient_impl(
         psin,
         np.asarray(plan.grid_workspace.weights, dtype=np.float64),
+        np.asarray(plan.grid_workspace.axis_interpolation_weights, dtype=np.float64),
+        np.asarray(plan.grid_workspace.edge_interpolation_weights, dtype=np.float64),
         profile_workspace.profile_rp_fields[psin_profile_id, 0],
         profile_workspace.profile_rp_fields[psin_profile_id, 1],
         profile_workspace.profile_env_fields[psin_profile_id, 0],
@@ -331,6 +335,8 @@ def _project_psin0_source_target_coefficient(
 def _project_psin0_source_target_coefficient_impl(
     target: np.ndarray,
     weights: np.ndarray,
+    axis_weights: np.ndarray,
+    edge_weights: np.ndarray,
     radial_power: np.ndarray,
     radial_power_r: np.ndarray,
     envelope: np.ndarray,
@@ -341,8 +347,12 @@ def _project_psin0_source_target_coefficient_impl(
     size = target.shape[0]
     if size < 2:
         return np.nan
-    target_offset = target[0]
-    target_scale = target[size - 1] - target_offset
+    target_offset = 0.0
+    target_edge = 0.0
+    for i in range(size):
+        target_offset += axis_weights[i] * target[i]
+        target_edge += edge_weights[i] * target[i]
+    target_scale = target_edge - target_offset
     if not np.isfinite(target_offset) or not np.isfinite(target_scale):
         return np.nan
     if abs(target_scale) <= _TINY:

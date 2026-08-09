@@ -114,9 +114,7 @@ def route_kernel_source(
         sample_count=sample_count,
         nr=nr,
     )
-    pprime = (
-        rho * (1.0e6 + 0.4e6 * rho * rho) if coordinate == "rho" else 1.0e6 + 0.4e6 * rho * rho
-    )
+    pprime = rho * (1.0e6 + 0.4e6 * rho * rho) if coordinate == "rho" else 1.0e6 + 0.4e6 * rho * rho
     if route == "PI":
         driver = rho * rho * (1.0e6 + 2.0e6 * rho * rho)
     elif route in {"PJ1", "PJ2"}:
@@ -124,9 +122,7 @@ def route_kernel_source(
     elif route == "PP":
         driver = rho * (1.0 + 2.0 * rho * rho)
     elif route == "PF":
-        driver = (
-            rho * (1.0 + 2.0 * rho * rho) if coordinate == "rho" else 1.0 + 2.0 * rho * rho
-        )
+        driver = rho * (1.0 + 2.0 * rho * rho) if coordinate == "rho" else 1.0 + 2.0 * rho * rho
     else:
         driver = 1.0 + 2.0 * rho * rho
     return KernelSource(
@@ -383,6 +379,23 @@ def test_pq_rho_constant_pressure_uses_full_p_for_alpha_normalization() -> None:
     assert equilibrium.resample(Grid(Nr=24, Nt=24)).p0 == pytest.approx(source.p0)
 
 
+def test_pq_rho_ip_constraint_closes_total_current_on_open_radial_grid() -> None:
+    kernel, boundary, source, x = _constant_pressure_pq_case(constraint="ip")
+    target_ip = 1.0e6
+    constrained_source = KernelSource(
+        pprime=source.pprime,
+        q=source.q,
+        p0=source.p0,
+        Ip=target_ip,
+    )
+
+    kernel.residual(x, boundary, constrained_source)
+    equilibrium = kernel.build_equilibrium(x)
+
+    assert equilibrium.grid.rho[-1] < 1.0
+    assert equilibrium.Ip == pytest.approx(target_ip, rel=1.0e-7)
+
+
 def test_beta_constraint_scales_constant_p0_as_the_pressure_profile() -> None:
     beta = 0.02
     kernel, boundary, source, x = _constant_pressure_pq_case(
@@ -397,9 +410,7 @@ def test_beta_constraint_scales_constant_p0_as_the_pressure_profile() -> None:
     assert_allclose(equilibrium.P, expected_pressure, rtol=2.0e-13, atol=1.0e-8)
     assert equilibrium.p0 == pytest.approx(expected_pressure)
     assert equilibrium.beta_t == pytest.approx(beta)
-    assert equilibrium.alpha1 * equilibrium.alpha2 == pytest.approx(
-        MU0 * expected_pressure
-    )
+    assert equilibrium.alpha1 * equilibrium.alpha2 == pytest.approx(MU0 * expected_pressure)
 
 
 @pytest.mark.parametrize(("route", "coordinate", "nodes"), ROUTE_PARITY_CASES)

@@ -110,7 +110,7 @@ def test_uniform_equilibrium_exposes_neoclassical_geometry_profiles() -> None:
     assert np.all(np.isfinite(equilibrium.ftrap))
     assert np.all((equilibrium.ftrap >= 0.0) & (equilibrium.ftrap <= 1.0))
     assert equilibrium.ftrap[0] == 0.0
-    assert np.isclose(equilibrium.ftrap[-1], 0.80962984152523, rtol=2e-13)
+    assert np.isclose(equilibrium.ftrap[-1], 0.8098271965033752, rtol=2e-13)
     assert not equilibrium.ftrap.flags.writeable
 
 
@@ -131,17 +131,18 @@ def test_equilibrium_exposes_imas_toroidal_flux_coordinates() -> None:
     )
     expected = np.sqrt(equilibrium.Phi / (np.pi * equilibrium.B0))
     np.testing.assert_allclose(equilibrium.rho_tor, expected, rtol=2.0e-15, atol=2.0e-15)
+    rho_tor_edge = np.sqrt(
+        equilibrium.grid.full_integral(equilibrium.Phi_r) / (np.pi * equilibrium.B0)
+    )
     np.testing.assert_allclose(
         equilibrium.rho_tor_norm,
-        (expected - expected[0]) / (expected[-1] - expected[0]),
+        expected / rho_tor_edge,
         rtol=2.0e-15,
         atol=2.0e-15,
     )
 
     with np.errstate(divide="ignore", invalid="ignore"):
-        derivative = equilibrium.F * equilibrium.Ln_r / (
-            equilibrium.B0 * equilibrium.rho_tor
-        )
+        derivative = equilibrium.F * equilibrium.Ln_r / (equilibrium.B0 * equilibrium.rho_tor)
     derivative = _axis_even_rho2_limit(derivative, equilibrium.rho)
     np.testing.assert_allclose(
         equilibrium.rho_tor_r,
@@ -151,12 +152,12 @@ def test_equilibrium_exposes_imas_toroidal_flux_coordinates() -> None:
     )
     np.testing.assert_allclose(
         equilibrium.rho_tor_norm_r,
-        derivative / (expected[-1] - expected[0]),
+        derivative / rho_tor_edge,
         rtol=2.0e-15,
         atol=2.0e-15,
     )
     assert equilibrium.rho_tor_norm[0] == 0.0
-    assert equilibrium.rho_tor_norm[-1] == 1.0
+    assert equilibrium.rho_tor_norm[-1] == pytest.approx(1.0, abs=3.0e-16)
     assert not equilibrium.rho_tor.flags.writeable
 
 
@@ -212,7 +213,11 @@ def test_equilibrium_gm_series_matches_imas_flux_surface_averages() -> None:
 def test_signed_f_and_q_follow_the_fixed_cocos_contract(b0: float, ip: float) -> None:
     equilibrium = _demo_equilibrium(b0=b0, ip=ip)
 
-    assert equilibrium.F[-1] == pytest.approx(equilibrium.R0 * b0, rel=2.0e-15)
+    edge_f2 = np.dot(equilibrium.grid.edge_interpolation_weights, equilibrium.F2)
+    assert equilibrium.grid.rho[-1] < 1.0
+    # Endpoint extrapolation from an open Gauss grid loses a few digits even
+    # though the edge-conditioned integral identity is exact on the grid.
+    assert edge_f2 == pytest.approx((equilibrium.R0 * b0) ** 2, rel=2.0e-8)
     assert np.all(np.sign(equilibrium.F) == np.sign(b0))
     assert np.all(np.sign(equilibrium.q) == np.sign(b0 * ip))
     assert equilibrium.Ip == pytest.approx(ip, rel=2.0e-13)
@@ -222,6 +227,14 @@ def test_signed_f_and_q_follow_the_fixed_cocos_contract(b0: float, ip: float) ->
         rtol=2.0e-15,
         atol=2.0e-15,
     )
+    rho_tor_edge = np.sqrt(equilibrium.grid.full_integral(equilibrium.Phi_r) / (np.pi * b0))
+    np.testing.assert_allclose(
+        equilibrium.rho_tor_norm,
+        equilibrium.rho_tor / rho_tor_edge,
+        rtol=2.0e-15,
+        atol=2.0e-15,
+    )
+    assert 0.0 < equilibrium.rho_tor_norm[0] < equilibrium.rho_tor_norm[-1] < 1.0
     for index in range(1, 10):
         assert np.all(getattr(equilibrium, f"gm{index}") > 0.0)
 
@@ -240,6 +253,20 @@ def test_signed_f_and_q_follow_the_fixed_cocos_contract(b0: float, ip: float) ->
     assert geqdsk.Bt0 == b0
     assert np.all(np.sign(geqdsk.F) == np.sign(b0))
     assert np.all(np.sign(geqdsk.q) == np.sign(b0 * ip))
+    endpoint_grid = Grid(
+        Nr=equilibrium.grid.Nr + 2,
+        Nt=equilibrium.grid.Nt,
+        quadrature_scheme="uniform",
+        L_max=equilibrium.grid.L_max,
+        M_max=equilibrium.grid.M_max,
+        K_max=equilibrium.grid.K_max,
+    )
+    endpoint_equilibrium = equilibrium.resample(endpoint_grid)
+    np.testing.assert_allclose(
+        geqdsk.boundary,
+        np.column_stack((endpoint_equilibrium.R[-1], endpoint_equilibrium.Z[-1])),
+    )
+    assert not np.allclose(geqdsk.boundary, np.column_stack((equilibrium.R[-1], equilibrium.Z[-1])))
 
 
 @pytest.mark.parametrize("b0", [-3.0, 3.0])
@@ -299,3 +326,16 @@ def test_pj2_jpara_reconstructs_imas_jtotal_with_gm1(b0: float) -> None:
     ) / np.linalg.norm(jtotal_from_jtor[:-1])
     assert relative_l2 < 8.0e-3
     assert interior_relative_l2 < 2.0e-3
+
+
+def test_jtor_axis_is_the_conservative_itor_over_area_limit() -> None:
+    equilibrium = _uniform_demo_equilibrium()
+    rho2_1 = equilibrium.rho[1] ** 2
+    rho2_2 = equilibrium.rho[2] ** 2
+    ratio_1 = equilibrium.Itor[1] / equilibrium.S[1]
+    ratio_2 = equilibrium.Itor[2] / equilibrium.S[2]
+    expected = (rho2_2 * ratio_1 - rho2_1 * ratio_2) / (rho2_2 - rho2_1)
+
+    assert equilibrium.rho[0] == 0.0
+    assert np.isfinite(equilibrium.jtor[0])
+    assert equilibrium.jtor[0] == pytest.approx(expected, rel=2.0e-15)
