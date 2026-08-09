@@ -233,6 +233,8 @@ User-facing architecture notes:
   semantics, and warm continuation.
 - [`backends.md`][backends-doc]: Numba/Cxx backend responsibilities, cache
   behavior, and benchmark entry points.
+- [`release-1.3.1.md`][release-1.3.1]: 1.3.1 numerical-correctness,
+  equilibrium-model, and performance improvements.
 - [`release-1.3.0.md`][release-1.3.0]: 1.3.0 highlights, breaking changes, and
   migration examples.
 
@@ -290,6 +292,7 @@ VEQPy is associated with the companion manuscript **[Zhang2026]**. Related VEQ-f
 [tests]: tests/
 [architecture-doc]: docs/veqpy/architecture.md
 [model-doc]: docs/veqpy/model.md
+[release-1.3.1]: docs/veqpy/release-1.3.1.md
 [release-1.3.0]: docs/veqpy/release-1.3.0.md
 [kernel-doc]: docs/veqpy/kernel.md
 [backends-doc]: docs/veqpy/backends.md
