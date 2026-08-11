@@ -56,7 +56,7 @@ Smooth and axis-regular cases retain their previous profile accuracy.
 | PJ1 | final generic `FFn_psin` fit and direct jtor even-axis rewrite | `psin_r` limit and enclosed-current primitive floor | Exact pointwise current closure improves from `3.2e-7` to roundoff for the smooth case and from `1.54e1` to order `1e-15` for the pressure-irregular stress case. |
 | PJ2 | final generic `FFn_psin` even-axis fit | `psin_r` limit | The final fit is numerically redundant and is not part of the optimized-F closure. |
 | PJ3 | final generic `FFn_psin` even-axis fit | `psin_r` limit | PJ3 shares the optimized-F closure with PJ2; the same ablation leaves results and convergence unchanged. |
-| PQ | nothing | `psin_r` and `FFn_psin` limits | Removing the FFn limit raises the smooth uniform F-profile RMS error from `1.7e-3` to `1.5e-1`; perturbed cases become one to two orders of magnitude worse. The current strict PQ formulation therefore still needs this derived-profile limit. |
+| PQ | final generic `FFn_psin` even-axis fit | `psin_r` limit and the zero-value limit of `d(F**2)/drho` | Directly deleting all treatment raises the smooth uniform F-profile RMS error from `1.7e-3` to `1.5e-1`. Applying the removable limit to the odd numerator instead retains the `1.7e-3` error while avoiding a post-closure fit of `FFn_psin`. |
 
 The signed floor on current primitives is retained in both coordinate modes.
 It protects residual evaluations whose nonlinear trial state temporarily
@@ -81,6 +81,37 @@ not cosmetic source smoothing.
 The positive floor is a residual-domain guard rather than a statement about the
 accepted final equilibrium. It remains common to Numba and C++ so nonlinear
 trial states have the same protected evaluation domain.
+
+## PQ Quotient Limit
+
+The rho-coordinate PQ route uses the strict q relation to solve a first-order
+equation for $Y=F^2$. With $W=K_nL_{n,r}/q$, its local form is
+
+$$
+(W+q)Y_r+2W_rY=
+-\frac{V_r p_r q}{2\pi^2L_{n,r}},
+$$
+
+up to the route's pressure normalization. The magnetic source is then
+
+$$
+FF' = \frac{Y_r}{2\alpha_1\alpha_2\psi_{n,r}}.
+$$
+
+Both $Y_r$ and $\psi_{n,r}$ vanish linearly at the magnetic axis, so the last
+expression is a removable $0/0$ limit. The old implementation first formed the
+quotient and then imposed an even fit on `FFn_psin`. The revised implementation
+reconstructs $Y_r/\rho$ from the first two samples outside the axis interval,
+sets the corresponding odd zero-value limit of $Y_r$, and only then evaluates
+the quotient. It therefore regularizes the quantity whose value is known at the
+axis, without imposing a separate derivative condition on the final source.
+
+Across `Nr=32, 48, 64`, native Gauss and endpoint-inclusive uniform source
+samples, and smooth, pressure-regular, and q-regular perturbations, all 18 PQ
+cases remain finite and converge. For the smooth `Nr=32` uniform case, the
+F-profile RMS errors are `1.673e-3` with the previous final-source fit,
+`1.672e-3` with the numerator limit, and `1.529e-1` when both are omitted. The
+q-authority shape error remains approximately `2e-7` in both stable forms.
 
 ## PPP Confirmation
 

@@ -3469,6 +3469,7 @@ def _update_pq_from_rho_inputs_with_scratch(
             -pressure_factor * pressure_scale * V_r[i] * pprime_input[i] * q_prof[i] / Ln_r[i]
         )
         Y_r[i] = (forcing_i - coeff_y[i] * Y[i]) / coeff_d[i]
+    _regularize_axis_linear(Y_r, rho, n_axis_fix)
     for i in range(n):
         denom = alpha1 * alpha2 * out_psin_r[i]
         if abs(denom) <= 1.0e-14:
@@ -3476,7 +3477,6 @@ def _update_pq_from_rho_inputs_with_scratch(
         out_FFn_psin[i] = 0.5 * Y_r[i] / denom
         if not np.isfinite(out_FFn_psin[i]) or not np.isfinite(out_Pn_psin[i]):
             raise ValueError("PQ/rho strict solve produced non-finite normalized source")
-    _regularize_ffn_psin(out_FFn_psin, rho, n_axis_fix)
     return alpha1, alpha2
 
 

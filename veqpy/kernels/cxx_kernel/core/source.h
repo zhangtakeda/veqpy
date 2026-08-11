@@ -2006,10 +2006,10 @@ namespace source::detail
             RadialVector Y_r{uninitialized};
             for (size_t i = 0; i < radial_nodes; ++i)
                 Y_r[i] = (rhs[i] - coeff_y[i] * Y[i]) / coeff_d[i];
+            regularize_axis_linear(Y_r, n_axis_fix);
             const double ffn_scale = 0.5 / (alpha1 * alpha2);
             for (size_t i = 0; i < radial_nodes; ++i)
                 FFn_psin[i] = Y_r[i] * ffn_scale / psin_r[i];
-            regularize_ffn_psin(n_axis_fix);
         }
 
         template <int SourceConstraintCode, typename GeometryRuntime>

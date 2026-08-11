@@ -86,16 +86,16 @@ rewrite an inner radial interval. Route closures may still regularize their own
 derived quantities before an internal division; those backend-local limits
 never modify the public source arrays.
 
-For `coordinate="rho"`, the route stage follows a stricter ownership rule. PF,
-PP, PI, PJ1, PJ2, and PJ3 preserve the `FFn_psin` implied by the route equation;
-they do not apply a second generic even-axis fit after closing the route. PI
-still reconstructs the axis limit of `dItor/drho`, because differentiating the
-current primitive is ill-conditioned there. Every route reconstructs and floors
-`psin_r` before using it as a flux coordinate or denominator. PQ additionally
-retains its `FFn_psin` axis limit because its strict q closure differentiates a
-reconstructed F profile and is otherwise ill-conditioned. These are limits of
-derived coordinates or differentiated quantities, not edits to the authoritative
-source profile.
+For `coordinate="rho"`, the route stage follows a stricter ownership rule. No
+route applies a generic even-axis fit to `FFn_psin` after closing its defining
+equation. PI still reconstructs the zero-value axis limit of `dItor/drho`,
+because differentiating the current primitive is ill-conditioned there. PQ
+solves a first-order equation for `Y = F**2`; it reconstructs the odd
+zero-value limit of `dY/drho` before dividing by `psin_r`, instead of fitting
+the resulting `FFn_psin`. Every route reconstructs and floors `psin_r` before
+using it as a flux coordinate or denominator. These are limits of derived
+coordinates or odd differentiated quantities, not edits to the authoritative
+source profile and not generic zero-derivative parity constraints.
 
 The route-by-route ablation and convergence evidence is recorded in
 [`source-axis-policy.md`](source-axis-policy.md).
