@@ -80,16 +80,12 @@ because Gauss-Legendre nodes exclude the edge. `p` is intentionally rejected for
 `psin(rho)` is part of the unknown equilibrium. Use explicit `pprime` for that
 topology or switch to uniform psin samples.
 
-Source lowering also checks the leading magnetic-axis parity over
-`rho < DEFAULT_SOURCE_FIX_RHO`. A rho derivative is continued as
-`rho * (a + b*rho**2)`, cumulative current as
-`rho**2 * (a + b*rho**2)`, and an axis-finite scalar as
-`a + b*rho**2`. The two coefficients are fitted from a fixed four-point
-off-axis stencil. This overdetermined fit damps a noisy individual anchor while
-remaining a constant-cost setup operation. It runs only when a public source is
-materialized; residual-generated profiles retain the cheaper backend-local
-limit and do not repeat this fit on every callback. Profiles already within the
-regularity tolerance are passed through unchanged.
+Source lowering preserves every finite `pprime` and route-driver sample exactly
+apart from documented unit scaling. It does not impose magnetic-axis parity or
+rewrite an inner radial interval. Route closures may still regularize their own
+derived quantities, such as reconstructed `psin_r` or `FFn_psin`, before an
+internal division; those backend-local limits never modify the public source
+arrays.
 
 `KernelSource.p0` is the pressure at the LCFS in Pa; `Ip` and `beta` are the
 optional global constraints. The runtime reconstructs the complete pressure

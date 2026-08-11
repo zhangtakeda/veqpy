@@ -22,9 +22,6 @@ from veqpy.numerics import interpolation_matrix, make_calculus, make_quadrature
 
 MU0 = 4.0e-7 * np.pi
 DEFAULT_SOURCE_FIX_RHO = 0.05
-SOURCE_REGULARITY_ANCHOR_COUNT = 4
-SOURCE_REGULARITY_RTOL = 5.0e-2
-SOURCE_REGULARITY_ATOL = 1.0e-10
 SETUP_NORMALIZED_ABS_MIN = 1.0e-3
 SETUP_NORMALIZED_ABS_MAX = 1.0e3
 SETUP_PHYSICAL_ABS_MIN = SETUP_NORMALIZED_ABS_MIN / MU0
@@ -131,7 +128,6 @@ def materialize_source_inputs(
     quadrature: str = "legendre",
     calculus: str = "spectral",
     parameterization: str = "identity",
-    fix_rho: float = DEFAULT_SOURCE_FIX_RHO,
 ) -> MaterializedKernelSource:
     """Lower raw route inputs to the shared backend-internal source units."""
 
@@ -152,27 +148,8 @@ def materialize_source_inputs(
         pprime_name=pprime_name,
         advice=advice,
     )
-    rho = _source_rho_axis(
-        coordinate=coordinate_key,
-        nodes=nodes_key,
-        sample_count=int(sample_count),
-        grid_size=grid_size,
-        quadrature=quadrature,
-        parameterization=parameterization,
-    )
-    regular_pprime, regular_driver = _regularize_source_profiles(
-        route=route_key,
-        coordinate=coordinate_key,
-        nodes=nodes_key,
-        rho=rho,
-        pprime=raw_pprime,
-        driver=driver,
-        pprime_name=pprime_name,
-        driver_name=driver_name,
-        fix_rho=float(fix_rho),
-    )
     scaled_p0 = _scale_pressure_offset_input(raw_p0, name="p0", advice=advice)
-    if not np.any(regular_pprime != 0.0) and scaled_p0 == 0.0:
+    if not np.any(raw_pprime != 0.0) and scaled_p0 == 0.0:
         if pressure_mode == "p":
             detail = "p is all zero"
         else:
@@ -184,10 +161,10 @@ def materialize_source_inputs(
         )
     return MaterializedKernelSource(
         scaled_pprime=_scale_pressure_like_input(
-            regular_pprime, name=pprime_name, advice=advice
+            raw_pprime, name=pprime_name, advice=advice
         ),
         scaled_driver=_scale_driver_input(
-            regular_driver,
+            driver,
             route=route_key,
             name=driver_name,
             advice=advice,
@@ -375,190 +352,6 @@ def _source_profile_array(
             f"{name} must contain {sample_count} samples, got {array.size}"
         )
     return array
-
-
-def _source_rho_axis(
-    *,
-    coordinate: str,
-    nodes: str,
-    sample_count: int,
-    grid_size: int | None,
-    quadrature: str,
-    parameterization: str,
-) -> np.ndarray:
-    if nodes == "grid":
-        size = sample_count if grid_size is None else int(grid_size)
-        rho, _ = make_quadrature(size, scheme=quadrature)
-        return np.asarray(rho, dtype=np.float64)
-
-    axis = np.linspace(0.0, 1.0, sample_count, dtype=np.float64)
-    if coordinate == "psin" and parameterization != "sqrt_psin":
-        return np.sqrt(axis)
-    return axis
-
-
-def _regularize_source_profiles(
-    *,
-    route: str,
-    coordinate: str,
-    nodes: str,
-    rho: np.ndarray,
-    pprime: np.ndarray,
-    driver: np.ndarray,
-    pprime_name: str,
-    driver_name: str,
-    fix_rho: float,
-) -> tuple[np.ndarray, np.ndarray]:
-    pprime_array = np.asarray(pprime, dtype=np.float64)
-    driver_array = np.asarray(driver, dtype=np.float64)
-    pprime_kind, driver_kind = _source_regularity_kinds(route, coordinate)
-    context = f"{route}/{coordinate}/{nodes}"
-    return (
-        _regularize_source_profile_if_needed(
-            pprime_array,
-            rho=rho,
-            kind=pprime_kind,
-            name=pprime_name,
-            context=context,
-            fix_rho=fix_rho,
-        ),
-        _regularize_source_profile_if_needed(
-            driver_array,
-            rho=rho,
-            kind=driver_kind,
-            name=driver_name,
-            context=context,
-            fix_rho=fix_rho,
-        ),
-    )
-
-
-def _source_regularity_kinds(route: str, coordinate: str) -> tuple[str, str]:
-    pprime_kind = "linear" if coordinate == "rho" else "even"
-    if route in {"PF"}:
-        driver_kind = "linear" if coordinate == "rho" else "even"
-    elif route == "PP":
-        driver_kind = "linear"
-    elif route == "PI":
-        driver_kind = "quadratic"
-    elif route in {"PJ1", "PJ2", "PJ3", "PQ"}:
-        driver_kind = "even"
-    else:
-        driver_kind = "even"
-    return pprime_kind, driver_kind
-
-
-def _regularize_source_profile_if_needed(
-    value: np.ndarray,
-    *,
-    rho: np.ndarray,
-    kind: str,
-    name: str,
-    context: str,
-    fix_rho: float,
-) -> np.ndarray:
-    array = np.asarray(value, dtype=np.float64)
-    n_fix = int(np.searchsorted(rho, fix_rho))
-    if n_fix <= 0 or n_fix + 1 >= array.size:
-        return array
-    if not np.all(np.isfinite(array)):
-        return array
-
-    repaired = array.copy()
-    if kind == "linear":
-        _regularize_axis_linear(repaired, rho, n_fix)
-    elif kind == "quadratic":
-        _regularize_axis_quadratic(repaired, rho, n_fix)
-    else:
-        _regularize_axis_even(repaired, rho, n_fix)
-
-    head_original = array[:n_fix]
-    head_repaired = repaired[:n_fix]
-    abs_delta = float(np.max(np.abs(head_original - head_repaired)))
-    scale = max(
-        float(np.max(np.abs(array))),
-        float(np.max(np.abs(repaired))),
-        1.0,
-    )
-    if abs_delta <= SOURCE_REGULARITY_ATOL + SOURCE_REGULARITY_RTOL * scale:
-        return array
-
-    message = (
-        f"Adjusted source axis regularity: {name} on {context} deviates from "
-        f"{kind} magnetic-axis behavior by {abs_delta:.6g}."
-    )
-    warnings.warn(message, RuntimeWarning, stacklevel=3)
-    return repaired
-
-
-def _regularize_axis_linear(profile: np.ndarray, rho: np.ndarray, n_fix: int) -> None:
-    fit = _axis_rho2_least_squares(profile, rho, n_fix, radial_power=1)
-    if fit is None:
-        return
-    intercept, gradient = fit
-    for i in range(n_fix):
-        x = rho[i] * rho[i]
-        profile[i] = rho[i] * (intercept + gradient * x)
-
-
-def _regularize_axis_quadratic(profile: np.ndarray, rho: np.ndarray, n_fix: int) -> None:
-    fit = _axis_rho2_least_squares(profile, rho, n_fix, radial_power=2)
-    if fit is None:
-        return
-    intercept, gradient = fit
-    for i in range(n_fix):
-        x = rho[i] * rho[i]
-        profile[i] = x * (intercept + gradient * x)
-
-
-def _regularize_axis_even(profile: np.ndarray, rho: np.ndarray, n_fix: int) -> None:
-    fit = _axis_rho2_least_squares(profile, rho, n_fix, radial_power=0)
-    if fit is None:
-        return
-    intercept, gradient = fit
-    for i in range(n_fix):
-        x = rho[i] * rho[i]
-        profile[i] = intercept + gradient * x
-
-
-def _axis_rho2_least_squares(
-    profile: np.ndarray,
-    rho: np.ndarray,
-    n_fix: int,
-    *,
-    radial_power: int,
-) -> tuple[float, float] | None:
-    """Fit the leading parity expansion from a fixed off-axis stencil."""
-
-    anchor_count = min(SOURCE_REGULARITY_ANCHOR_COUNT, profile.size - n_fix)
-    if anchor_count < 2:
-        return None
-
-    sum_x = 0.0
-    sum_y = 0.0
-    for offset in range(anchor_count):
-        index = n_fix + offset
-        radius = float(rho[index])
-        x = radius * radius
-        denominator = radius**radial_power
-        sum_x += x
-        sum_y += float(profile[index]) / denominator
-    mean_x = sum_x / anchor_count
-    mean_y = sum_y / anchor_count
-
-    covariance = 0.0
-    variance = 0.0
-    for offset in range(anchor_count):
-        index = n_fix + offset
-        radius = float(rho[index])
-        x_delta = radius * radius - mean_x
-        y_delta = float(profile[index]) / radius**radial_power - mean_y
-        covariance += x_delta * y_delta
-        variance += x_delta * x_delta
-    if variance <= np.finfo(np.float64).tiny:
-        return None
-    gradient = covariance / variance
-    return mean_y - gradient * mean_x, gradient
 
 
 def _scale_pressure_like_input(value: np.ndarray, *, name: str, advice: str) -> np.ndarray:

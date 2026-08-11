@@ -214,6 +214,30 @@ def test_grid_p_uses_grid_differentiator_and_interpolates_the_lcfs_value() -> No
     )
 
 
+def test_p_lowering_does_not_impose_axis_parity() -> None:
+    topology = _topology(nodes="uniform")
+    rho = np.linspace(0.0, 1.0, topology.sample_count, dtype=np.float64)
+    edge_pressure = 6408.706536
+    amplitude = 2200.0
+    pressure = edge_pressure + amplitude * (1.0 - rho)
+
+    materialized = materialize_kernel_source(
+        topology,
+        KernelSource(
+            p=pressure,
+            q=1.71 + 0.16 * rho * rho,
+        ),
+    )
+
+    assert_allclose(
+        materialized.scaled_pprime / MU0,
+        -amplitude,
+        rtol=2.0e-13,
+        atol=1.0e-8,
+    )
+    assert materialized.scaled_p0 / MU0 == pytest.approx(edge_pressure)
+
+
 @pytest.mark.parametrize("nodes", ["uniform", "grid"])
 def test_constant_p_produces_an_exact_zero_derivative(nodes: str) -> None:
     topology = _topology(nodes=nodes)

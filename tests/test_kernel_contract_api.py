@@ -512,7 +512,7 @@ def test_kernel_source_materialization_does_not_reject_profile_magnitude() -> No
     assert materialized.beta == 0.03
 
 
-def test_kernel_source_materialization_repairs_irregular_axis_profiles() -> None:
+def test_kernel_source_materialization_preserves_irregular_axis_profiles() -> None:
     topology = make_kernel_topology(
         route="PF",
         coordinate="rho",
@@ -535,13 +535,10 @@ def test_kernel_source_materialization_repairs_irregular_axis_profiles() -> None
         Ip=3.0e6,
     )
 
-    with pytest.warns(RuntimeWarning, match="Adjusted source axis regularity"):
-        materialized = materialize_kernel_source(topology, source)
+    materialized = materialize_kernel_source(topology, source)
 
-    assert materialized.scaled_pprime[0] == pytest.approx(0.0)
-    assert materialized.scaled_driver[0] == pytest.approx(0.0)
-    assert_allclose(materialized.scaled_pprime[1:], pprime[1:] * MU0)
-    assert_allclose(materialized.scaled_driver[1:], ffprime[1:])
+    assert_allclose(materialized.scaled_pprime, pprime * MU0)
+    assert_allclose(materialized.scaled_driver, ffprime)
 
 
 def test_kernel_source_materialization_errors_use_raw_field_names() -> None:

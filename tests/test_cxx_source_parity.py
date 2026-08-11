@@ -266,6 +266,58 @@ def test_cxx_and_numba_share_canonical_pressure_source_contract(
     )
 
 
+@pytest.mark.parametrize(("route", "coordinate", "nodes"), SOURCE_ROUTE_CASES)
+def test_cxx_and_numba_preserve_finite_irregular_axis_samples(
+    route: str,
+    coordinate: str,
+    nodes: str,
+    cxx_cache_root: Path,
+) -> None:
+    topology = _parity_topology(route, coordinate, nodes)
+    _, regular_source = _pressure_sources(topology)
+    pprime = np.array(regular_source.pprime, copy=True)
+    driver = np.array(regular_source.driver_profile, copy=True)
+    if coordinate == "rho":
+        pprime[0] = 0.2 * np.max(np.abs(pprime))
+    else:
+        pprime[0] = 1.2 * pprime[1]
+    driver[0] = 1.2 * driver[1]
+    source = KernelSource(
+        pprime=pprime,
+        p0=regular_source.p0,
+        **{regular_source.driver_name: driver},
+    )
+    kernels = {
+        "numba": Kernel(
+            topology=topology,
+            recipe=KernelRecipe(backend="numba"),
+        ),
+        "cxx": Kernel(
+            topology=topology,
+            recipe=KernelRecipe(backend="cxx"),
+            cache_root=cxx_cache_root,
+        ),
+    }
+    try:
+        x = np.linspace(-2.0e-3, 2.0e-3, topology.x_size, dtype=np.float64)
+        residuals = {
+            backend: kernel.residual(x, _boundary(), source)
+            for backend, kernel in kernels.items()
+        }
+    finally:
+        for kernel in kernels.values():
+            kernel.close()
+
+    assert np.all(np.isfinite(residuals["numba"]))
+    assert np.all(np.isfinite(residuals["cxx"]))
+    assert_allclose(
+        residuals["cxx"],
+        residuals["numba"],
+        rtol=2.0e-9,
+        atol=5.0e-10,
+    )
+
+
 @pytest.mark.parametrize(
     ("route", "coordinate", "nodes", "constraint"),
     SOURCE_CONSTRAINT_CASES + SOURCE_ALTERNATE_COORDINATE_CASES,

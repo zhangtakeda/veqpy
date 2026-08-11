@@ -4,19 +4,22 @@ import numpy as np
 import pytest
 from numpy.testing import assert_allclose
 
-from veqpy import KernelSource, KernelTopology
+from veqpy import (
+    Kernel,
+    KernelBoundary,
+    KernelRecipe,
+    KernelSource,
+    KernelTopology,
+)
 from veqpy.kernels.abi.enums import SOURCE_DRIVER_BY_ROUTE
 from veqpy.kernels.abi.source_semantics import MU0, materialize_kernel_source
 from veqpy.numerics import make_quadrature
 
-SOURCE_ROUTE_CASES = (
-    ("PF", "rho", "uniform"),
-    ("PP", "psin", "uniform"),
-    ("PI", "rho", "uniform"),
-    ("PJ1", "psin", "uniform"),
-    ("PJ2", "psin", "uniform"),
-    ("PJ3", "rho", "grid"),
-    ("PQ", "rho", "grid"),
+SOURCE_ROUTE_CASES = tuple(
+    (route, coordinate, nodes)
+    for route in ("PF", "PP", "PI", "PJ1", "PJ2", "PJ3", "PQ")
+    for coordinate in ("rho", "psin")
+    for nodes in ("uniform", "grid")
 )
 
 
@@ -85,6 +88,35 @@ def _route_source_profiles(topology: KernelTopology) -> tuple[np.ndarray, np.nda
     return pprime.astype(np.float64), driver.astype(np.float64)
 
 
+def _irregular_route_source_profiles(
+    topology: KernelTopology,
+) -> tuple[np.ndarray, np.ndarray]:
+    pprime, driver = _route_source_profiles(topology)
+    if topology.coordinate == "rho":
+        pprime[0] = 0.2 * np.max(np.abs(pprime))
+    else:
+        pprime[0] = 1.2 * pprime[1]
+
+    if topology.route in {"PF", "PP"} and topology.coordinate == "rho":
+        driver[0] = 0.2 * np.max(np.abs(driver))
+    elif topology.route == "PI":
+        driver[0] = 0.2 * np.max(np.abs(driver))
+    else:
+        driver[0] = 1.2 * driver[1]
+    return pprime, driver
+
+
+def _boundary() -> KernelBoundary:
+    return KernelBoundary(
+        a=0.5,
+        R0=1.0,
+        Z0=0.0,
+        B0=3.0,
+        ka=1.7,
+        s_offsets=(float(np.arcsin(0.2)),),
+    )
+
+
 @pytest.mark.parametrize(("route", "coordinate", "nodes"), SOURCE_ROUTE_CASES)
 def test_route_source_lowering_preserves_raw_user_physics(
     route: str,
@@ -92,7 +124,7 @@ def test_route_source_lowering_preserves_raw_user_physics(
     nodes: str,
 ) -> None:
     topology = _topology(route, coordinate, nodes)
-    pprime, driver = _route_source_profiles(topology)
+    pprime, driver = _irregular_route_source_profiles(topology)
     source = KernelSource(
         pprime=pprime,
         **{SOURCE_DRIVER_BY_ROUTE[route]: driver},
@@ -111,6 +143,35 @@ def test_route_source_lowering_preserves_raw_user_physics(
         assert_allclose(materialized.scaled_driver, driver * MU0)
     else:
         assert_allclose(materialized.scaled_driver, driver)
+
+
+@pytest.mark.parametrize(("route", "coordinate", "nodes"), SOURCE_ROUTE_CASES)
+def test_numba_route_residual_accepts_finite_irregular_axis_samples(
+    route: str,
+    coordinate: str,
+    nodes: str,
+) -> None:
+    topology = _topology(route, coordinate, nodes)
+    pprime, driver = _irregular_route_source_profiles(topology)
+    source = KernelSource(
+        pprime=pprime,
+        **{SOURCE_DRIVER_BY_ROUTE[route]: driver},
+        Ip=3.0e6,
+    )
+    kernel = Kernel(
+        topology=topology,
+        recipe=KernelRecipe(backend="numba"),
+    )
+    try:
+        residual = kernel.residual(
+            np.zeros(topology.x_size, dtype=np.float64),
+            _boundary(),
+            source,
+        )
+    finally:
+        kernel.close()
+
+    assert np.all(np.isfinite(residual))
 
 
 def test_source_lowering_accepts_large_physical_profiles_when_constraints_are_valid() -> None:
