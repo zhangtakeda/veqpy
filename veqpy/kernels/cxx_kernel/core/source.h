@@ -282,7 +282,6 @@ namespace source::detail
                     Pn_psin[i]  = materialized_pprime_input[i] * source_scale / psin_r[i];
                     FFn_psin[i] = materialized_driver_input[i] * source_scale / psin_r[i];
                 }
-                regularize_ffn_psin(n_axis_fix);
                 (void)Ip;
                 (void)beta;
                 (void)B0;
@@ -317,7 +316,6 @@ namespace source::detail
                 Pn_psin[i]  = materialized_pprime_input[i] * psi_square_sign / psin_r[i];
                 FFn_psin[i] = materialized_driver_input[i] * psi_square_sign / psin_r[i];
             }
-            regularize_ffn_psin(n_axis_fix);
         }
 
         template <int SourceConstraintCode, typename GeometryRuntime>
@@ -1336,7 +1334,8 @@ namespace source::detail
             }
 
             fill_pp_ffn_psin(FFn_psin, psin_r, psin_rr, geometry, alpha2 / alpha1);
-            regularize_ffn_psin(n_axis_fix);
+            if constexpr (!RhoCoordinate)
+                regularize_ffn_psin(n_axis_fix);
         }
 
         template <int SourceConstraintCode, bool RhoCoordinate, typename GeometryRuntime>
@@ -1447,7 +1446,8 @@ namespace source::detail
             }
 
             fill_pi_ffn_psin(FFn_psin, Itor_r, geometry, inv_two_pi / alpha1);
-            regularize_ffn_psin(n_axis_fix);
+            if constexpr (!RhoCoordinate)
+                regularize_ffn_psin(n_axis_fix);
         }
 
         template <int SourceConstraintCode, bool RhoCoordinate, typename GeometryRuntime>
@@ -1493,7 +1493,8 @@ namespace source::detail
                 (void)Ip;
             }
 
-            enforce_axis_even_profile(jtor);
+            if constexpr (!RhoCoordinate)
+                enforce_axis_even_profile(jtor);
             floor_signed_current_primitive(I_tor, current_edge * source_scale);
 
             constexpr double inv_two_pi = 1.0 / (2.0 * geometry::detail::pi);
@@ -1572,7 +1573,8 @@ namespace source::detail
             }
 
             fill_pj_ffn_psin(FFn_psin, jtor, geometry, inv_two_pi / alpha1);
-            regularize_ffn_psin(n_axis_fix);
+            if constexpr (!RhoCoordinate)
+                regularize_ffn_psin(n_axis_fix);
         }
 
         template <int SourceConstraintCode,
@@ -1704,7 +1706,8 @@ namespace source::detail
             const double ffn_scale = 1.0 / (alpha1 * alpha2);
             for (size_t i = 0; i < radial_nodes; ++i)
                 FFn_psin[i] = active_F[i] * active_F_r[i] * ffn_scale / psin_r[i];
-            regularize_ffn_psin(n_axis_fix);
+            if constexpr (!RhoCoordinate)
+                regularize_ffn_psin(n_axis_fix);
         }
 
         static constexpr void solve_pq_linear_system(RadialVector&          solution,

@@ -1509,7 +1509,6 @@ def _update_pf_from_rho_inputs_with_scratch(
         source_scale = psi_square_sign / (alpha1 * alpha2)
         scaled_ratio_into(out_Pn_psin, pprime_input, out_psin_r, source_scale)
         scaled_ratio_into(out_FFn_psin, driver_input, out_psin_r, source_scale)
-        _regularize_ffn_psin(out_FFn_psin, rho, n_axis_fix)
         return alpha1, alpha2
     c2 = integral_prof * integral_prof
     if has_Ip and (not has_beta):
@@ -1539,7 +1538,6 @@ def _update_pf_from_rho_inputs_with_scratch(
     alpha2 = c2 * alpha1
     scaled_ratio_into(out_Pn_psin, pprime_input, out_psin_r, psi_square_sign)
     scaled_ratio_into(out_FFn_psin, driver_input, out_psin_r, psi_square_sign)
-    _regularize_ffn_psin(out_FFn_psin, rho, n_axis_fix)
     return alpha1, alpha2
 
 
@@ -1826,7 +1824,6 @@ def _update_pp_from_rho_inputs_with_scratch(
         Ln_r,
         alpha2 / alpha1,
     )
-    _regularize_ffn_psin(out_FFn_psin, rho, n_axis_fix)
     return alpha1, alpha2
 
 
@@ -2096,7 +2093,6 @@ def _update_pi_from_rho_inputs_with_scratch(
         )
         scaled_ratio_into(out_Pn_psin, scratch_Pr, out_psin_r, 1.0 / (alpha1 * alpha2))
     _fill_pi_ffn_psin(out_FFn_psin, Itor_r, V_r, out_Pn_psin, Ln_r, 1.0 / (2.0 * np.pi * alpha1))
-    _regularize_ffn_psin(out_FFn_psin, rho, n_axis_fix)
     return alpha1, alpha2
 
 
@@ -2317,7 +2313,6 @@ def _update_pj1_from_rho_inputs_with_scratch(
     else:
         copy_into(I_tor, I_tor_prof)
         copy_into(jtor, driver_input)
-    _enforce_axis_even_profile(jtor, rho)
     _floor_signed_current_primitive(I_tor, current_edge * source_scale)
     itor_over_kn = array_scratch[_SLOT_INTEGRAND]
     scaled_ratio_into(itor_over_kn, I_tor, Kn, 1.0 / (2.0 * np.pi))
@@ -2365,7 +2360,6 @@ def _update_pj1_from_rho_inputs_with_scratch(
         Ln_r,
         1.0 / (2.0 * np.pi * alpha1),
     )
-    _regularize_ffn_psin(out_FFn_psin, rho, n_axis_fix)
     return alpha1, alpha2
 
 
@@ -2841,7 +2835,6 @@ def _update_pj2_from_rho_inputs_with_scratch(
         scaled_ratio_into(out_Pn_psin, scratch_Pr, out_psin_r, 1.0 / (alpha1 * alpha2))
     scaled_product_into(out_FFn_psin, F, F_r, 1.0 / (alpha1 * alpha2))
     scaled_ratio_into(out_FFn_psin, out_FFn_psin, out_psin_r, 1.0)
-    _regularize_ffn_psin(out_FFn_psin, rho, n_axis_fix)
     return alpha1, alpha2
 
 

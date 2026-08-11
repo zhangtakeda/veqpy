@@ -83,9 +83,22 @@ topology or switch to uniform psin samples.
 Source lowering preserves every finite `pprime` and route-driver sample exactly
 apart from documented unit scaling. It does not impose magnetic-axis parity or
 rewrite an inner radial interval. Route closures may still regularize their own
-derived quantities, such as reconstructed `psin_r` or `FFn_psin`, before an
-internal division; those backend-local limits never modify the public source
-arrays.
+derived quantities before an internal division; those backend-local limits
+never modify the public source arrays.
+
+For `coordinate="rho"`, the route stage follows a stricter ownership rule. PF,
+PP, PI, PJ1, PJ2, and PJ3 preserve the `FFn_psin` implied by the route equation;
+they do not apply a second generic even-axis fit after closing the route. PI
+still reconstructs the axis limit of `dItor/drho`, because differentiating the
+current primitive is ill-conditioned there. Every route reconstructs and floors
+`psin_r` before using it as a flux coordinate or denominator. PQ additionally
+retains its `FFn_psin` axis limit because its strict q closure differentiates a
+reconstructed F profile and is otherwise ill-conditioned. These are limits of
+derived coordinates or differentiated quantities, not edits to the authoritative
+source profile.
+
+The route-by-route ablation and convergence evidence is recorded in
+[`source-axis-policy.md`](source-axis-policy.md).
 
 `KernelSource.p0` is the pressure at the LCFS in Pa; `Ip` and `beta` are the
 optional global constraints. The runtime reconstructs the complete pressure

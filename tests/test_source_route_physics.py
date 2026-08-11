@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 import pytest
 from numpy.testing import assert_allclose
 
+from benchmarks._common import RouteBenchmarkSpec, route_kernel_case
 from veqpy import (
     Kernel,
     KernelBoundary,
@@ -196,3 +199,54 @@ def test_source_lowering_rejects_nonfinite_route_profiles() -> None:
             topology,
             KernelSource(pprime=pprime, itor=itor, Ip=3.0e6),
         )
+
+
+@pytest.mark.parametrize("nodes", ("grid", "uniform"))
+@pytest.mark.parametrize("perturbed_profile", ("pressure", "driver"))
+def test_pj1_rho_preserves_materialized_current_pointwise(
+    nodes: str,
+    perturbed_profile: str,
+) -> None:
+    case = route_kernel_case(RouteBenchmarkSpec("PJ1", "rho", nodes, "ip"))
+    source = case.source
+    pressure = np.asarray(source.pressure_profile, dtype=np.float64).copy()
+    driver = np.asarray(source.driver_profile, dtype=np.float64).copy()
+    if nodes == "grid":
+        rho, _ = make_quadrature(case.topology.Nr, scheme=case.topology.quadrature)
+        source_rho = np.asarray(rho, dtype=np.float64)
+    else:
+        source_rho = np.linspace(0.0, 1.0, case.topology.sample_count, dtype=np.float64)
+    envelope = np.exp(-((source_rho / 0.05) ** 4))
+    if perturbed_profile == "pressure":
+        pressure += 0.2 * np.max(np.abs(pressure)) * envelope
+    else:
+        driver += 0.2 * np.max(np.abs(driver)) * (source_rho / 0.05) * envelope
+    case = replace(
+        case,
+        source=KernelSource(
+            pprime=pressure,
+            jtor=driver,
+            p0=source.p0,
+            Ip=source.Ip,
+            beta=source.beta,
+            case_name=source.case_name,
+        ),
+    )
+    kernel = Kernel(
+        topology=case.topology,
+        recipe=KernelRecipe(backend="numba"),
+        config=case.config,
+    )
+    try:
+        result = kernel.solve(case.boundary, case.source)
+        equilibrium = kernel.build_equilibrium()
+        runtime = kernel._impl._solver.runtime
+        target = runtime.source_workspace.materialized_driver_input.copy()
+        current_integral = float(np.dot(target * equilibrium.S_r, equilibrium.grid.weights))
+        target *= runtime.plan.source_plan.scaled_Ip / current_integral
+        actual = MU0 * np.asarray(equilibrium.jtor, dtype=np.float64)
+    finally:
+        kernel.close()
+
+    assert result.success
+    assert_allclose(actual, target, rtol=2.0e-12, atol=2.0e-14)
