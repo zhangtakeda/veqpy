@@ -59,6 +59,7 @@ It also requires exactly one driver selected by the topology route:
 | `PI` | `itor` |
 | `PJ1` | `jtor` |
 | `PJ2` | `jpara` |
+| `PJ3` | `jtotal` |
 | `PQ` | `q` |
 
 For example, a PQ case can be constructed as either
@@ -105,6 +106,20 @@ therefore remains a public input convenience implemented once by shared
 lowering; it is not a second backend-specific source mode.
 Route-dependent scaling and internal materialized source arrays are backend
 runtime details, not user-facing data fields.
+
+PJ2 and PJ3 share the same F-coupled current closure but not the same public
+physics. PJ2 accepts
+`jpara = <J·B> / (F <R^-2>)`; PJ3 accepts the IMAS convention
+`jtotal = <J·B> / B0`. PJ3 evaluates
+
+```text
+jpara = B0 * jtotal / (F * gm1),    gm1 = <R^-2> = (2*pi)^2 * Ln_r / V_r
+```
+
+inside every source evaluation using the current geometry and active F profile.
+It is therefore not a setup-time alias or a frozen conversion. Both routes
+require an active F profile and use the same fixed-point ownership for uniform
+psin samples.
 
 ## Radial Endpoints
 

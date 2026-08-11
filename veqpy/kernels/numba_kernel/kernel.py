@@ -571,7 +571,7 @@ def _prepare_boundary(topology: KernelTopology) -> KernelBoundary:
 def _prepare_source(topology: KernelTopology) -> KernelSource:
     sample_count = int(topology.sample_count)
     pprime = np.full(sample_count, 1.0e6, dtype=np.float64)
-    driver_value = 1.0e6 if topology.route in {"PI", "PJ1", "PJ2"} else 1.0
+    driver_value = 1.0e6 if topology.route in {"PI", "PJ1", "PJ2", "PJ3"} else 1.0
     driver = np.full(sample_count, driver_value, dtype=np.float64)
     return KernelSource(
         pprime=pprime,

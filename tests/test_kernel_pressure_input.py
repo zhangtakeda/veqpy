@@ -21,6 +21,7 @@ P_ROUTE_CASES = (
     ("PI", "rho", "uniform"),
     ("PJ1", "psin", "uniform"),
     ("PJ2", "psin", "uniform"),
+    ("PJ3", "rho", "grid"),
     ("PQ", "rho", "grid"),
 )
 
@@ -40,8 +41,12 @@ def _topology(
         h_count=1,
         v_count=0,
         kappa_count=0,
-        psin_count=2 if coordinate == "psin" and nodes == "uniform" and route != "PJ2" else 0,
-        F_count=2 if route == "PJ2" else 0,
+        psin_count=(
+            2
+            if coordinate == "psin" and nodes == "uniform" and route not in {"PJ2", "PJ3"}
+            else 0
+        ),
+        F_count=2 if route in {"PJ2", "PJ3"} else 0,
         c_counts=(),
         s_counts=(1,),
         Nr=nr,
@@ -67,7 +72,7 @@ def _driver_kwargs(
         driver = rho * (1.0 + 0.2 * rho * rho)
     elif route == "PI":
         driver = rho * rho * (1.0e6 + 0.2e6 * rho * rho)
-    elif route in {"PJ1", "PJ2"}:
+    elif route in {"PJ1", "PJ2", "PJ3"}:
         driver = 1.0e6 + 0.2e6 * rho * rho
     else:
         driver = 1.7 + 0.1 * rho * rho

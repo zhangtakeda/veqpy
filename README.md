@@ -41,7 +41,7 @@ and easier to reuse than full solver-native equilibrium or reconstruction pipeli
 - **Compact equilibrium representation**: fixed-boundary flux surfaces, shaping profiles,
   and source-related radial profiles are represented by coefficients, with a continuous
   `Equilibrium` snapshot produced after the solve.
-- **Unified source route layer**: PF, PP, PI, PJ1, PJ2, and PQ routes map pressure-gradient,
+- **Unified source route layer**: PF, PP, PI, PJ1, PJ2, PJ3, and PQ routes map pressure-gradient,
   toroidal-field, flux-gradient, current-related, or safety-factor information to one
   finite-dimensional residual assembly.
 - **Explicit Kernel runtime boundary**:
@@ -175,7 +175,7 @@ handle-level default solve policy, and `KernelRecipe` remains the shared backend
 recipe type. `KernelSource` stores exactly one raw pressure representation:
 either `p`, or `pprime` with an optional edge pressure `p0`. It also stores `Ip`
 and `beta` plus exactly one route-specific driver: `ffprime` (PF), `psi_r` (PP),
-`itor` (PI), `jtor` (PJ1), `jpara` (PJ2), or `q` (PQ). The selected driver must
+`itor` (PI), `jtor` (PJ1), `jpara` (PJ2), `jtotal` (PJ3), or `q` (PQ). The selected driver must
 match `KernelTopology.route`; the Kernel runtime derives `pprime`/`p0` from `p`
 when needed and materializes route-dependent `mu0` scaling before calling
 backend kernels. Sine-family Kernel

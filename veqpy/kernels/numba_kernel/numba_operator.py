@@ -11,9 +11,9 @@ Public API:
 
 Notes:
 - Only common routes are covered here.
-- PJ2-psin-uniform fixed-point psin is handled locally inside that route.
+- PJ2/PJ3-psin-uniform fixed-point psin is handled locally inside those routes.
 - Fused residual binding has three ownership modes:
-  single-pass source-owned psin, profile-owned psin, and PJ2 fixed-point psin.
+  single-pass source-owned psin, profile-owned psin, and F-current fixed-point psin.
   Each mode refreshes profile/geometry first, then writes root fields, alpha_state,
   residual surface fields, and finally the packed residual.
 """
@@ -43,6 +43,7 @@ from veqpy.kernels.numba_kernel.numba_source import (
     _update_fixed_point_psin_query_and_spline_uniform_inputs_impl,
     _update_fourier_family_fields_impl,
     _update_pj2_from_psin_uniform_inputs_with_scratch,
+    _update_pj3_from_psin_uniform_inputs_with_scratch,
     finalize_pressure_normalization,
     uniform_barycentric_weights,
 )
@@ -180,6 +181,80 @@ def _pack_residual_output_into(
 
 
 @njit(cache=True, nogil=True)
+def _update_f_current_from_psin_uniform_inputs_with_scratch(
+    out_root_fields: np.ndarray,
+    out_FFn_psin: np.ndarray,
+    out_Pn_psin: np.ndarray,
+    pprime_input: np.ndarray,
+    driver_input: np.ndarray,
+    coordinate_code: int,
+    R0: float,
+    B0: float,
+    weights: np.ndarray,
+    differentiator: np.ndarray,
+    accumulator: np.ndarray,
+    grid_radial_fields: np.ndarray,
+    n_axis_fix: int,
+    radial_fields: np.ndarray,
+    surface_fields: np.ndarray,
+    f_profile_fields: np.ndarray,
+    scaled_p0: float,
+    Ip: float,
+    beta: float,
+    array_scratch: np.ndarray,
+    matrix_scratch: np.ndarray,
+    use_jtotal_semantics: bool,
+) -> tuple[float, float]:
+    if use_jtotal_semantics:
+        return _update_pj3_from_psin_uniform_inputs_with_scratch(
+            out_root_fields,
+            out_FFn_psin,
+            out_Pn_psin,
+            pprime_input,
+            driver_input,
+            coordinate_code,
+            R0,
+            B0,
+            weights,
+            differentiator,
+            accumulator,
+            grid_radial_fields,
+            n_axis_fix,
+            radial_fields,
+            surface_fields,
+            f_profile_fields,
+            scaled_p0,
+            Ip,
+            beta,
+            array_scratch,
+            matrix_scratch,
+        )
+    return _update_pj2_from_psin_uniform_inputs_with_scratch(
+        out_root_fields,
+        out_FFn_psin,
+        out_Pn_psin,
+        pprime_input,
+        driver_input,
+        coordinate_code,
+        R0,
+        B0,
+        weights,
+        differentiator,
+        accumulator,
+        grid_radial_fields,
+        n_axis_fix,
+        radial_fields,
+        surface_fields,
+        f_profile_fields,
+        scaled_p0,
+        Ip,
+        beta,
+        array_scratch,
+        matrix_scratch,
+    )
+
+
+@njit(cache=True, nogil=True)
 def _run_pj2_psin_uniform_spline_with_scratch_impl(
     source_psin_query: np.ndarray,
     psin: np.ndarray,
@@ -208,6 +283,7 @@ def _run_pj2_psin_uniform_spline_with_scratch_impl(
     beta: float,
     array_scratch: np.ndarray,
     matrix_scratch: np.ndarray,
+    use_jtotal_semantics: bool,
 ) -> tuple[float, float]:
     # Materialize the first source sample on the previous psin query, then let
     # each fixed-point pass updates psin and remaps pprime/driver onto the new query.
@@ -221,7 +297,7 @@ def _run_pj2_psin_uniform_spline_with_scratch_impl(
     alpha1 = np.nan
     alpha2 = np.nan
     for _ in range(PJ2_PSIN_UNIFORM_FIXED_POINT_MAX_ITER):
-        alpha1, alpha2 = _update_pj2_from_psin_uniform_inputs_with_scratch(
+        alpha1, alpha2 = _update_f_current_from_psin_uniform_inputs_with_scratch(
             root_fields,
             FFn_psin,
             Pn_psin,
@@ -243,6 +319,7 @@ def _run_pj2_psin_uniform_spline_with_scratch_impl(
             beta,
             array_scratch,
             matrix_scratch,
+            use_jtotal_semantics,
         )
         if _update_fixed_point_psin_query_and_spline_uniform_inputs_impl(
             source_psin_query,
@@ -287,6 +364,7 @@ def _run_pj2_psin_uniform_barycentric_with_scratch_impl(
     beta: float,
     array_scratch: np.ndarray,
     matrix_scratch: np.ndarray,
+    use_jtotal_semantics: bool,
 ) -> tuple[float, float]:
     # Same fixed-point contract as the spline path, but interpolation uses a
     # small local barycentric stencil to avoid building dense remap matrices.
@@ -301,7 +379,7 @@ def _run_pj2_psin_uniform_barycentric_with_scratch_impl(
     alpha1 = np.nan
     alpha2 = np.nan
     for _ in range(PJ2_PSIN_UNIFORM_FIXED_POINT_MAX_ITER):
-        alpha1, alpha2 = _update_pj2_from_psin_uniform_inputs_with_scratch(
+        alpha1, alpha2 = _update_f_current_from_psin_uniform_inputs_with_scratch(
             root_fields,
             FFn_psin,
             Pn_psin,
@@ -323,6 +401,7 @@ def _run_pj2_psin_uniform_barycentric_with_scratch_impl(
             beta,
             array_scratch,
             matrix_scratch,
+            use_jtotal_semantics,
         )
         if _update_fixed_point_psin_query_and_local_barycentric_inputs_impl(
             source_psin_query,
@@ -435,9 +514,9 @@ def bind_fused_residual_runner_into(
         B0=B0,
     )
 
-    if route_key == ("PJ2", "psin", "uniform"):
-        # PJ2/psin/uniform is the only fused route whose source query is itself
-        # part of the solution, so it needs a dedicated fixed-point runner.
+    if route_key[0] in {"PJ2", "PJ3"} and route_key[1:] == ("psin", "uniform"):
+        # F-coupled current routes query sources in the psin produced by the
+        # same route, so they need a dedicated fixed-point runner.
         return _bind_pj2_psin_uniform_residual_runner_core(
             source_plan=source_plan,
             grid_workspace=grid_workspace,
@@ -673,6 +752,7 @@ def _bind_pj2_psin_uniform_residual_runner_core(
     scaled_p0 = float(source_plan.scaled_p0)
     Ip = float(source_plan.scaled_Ip)
     beta = float(source_plan.beta)
+    use_jtotal_semantics = bool(source_plan.route == "PJ3")
     has_Ip = bool(np.isfinite(Ip))
     use_local_barycentric = bool(source_plan.uses_barycentric_interpolation)
     # PJ2 fixed-point can use allocation-free local barycentric updates in the
@@ -731,6 +811,7 @@ def _bind_pj2_psin_uniform_residual_runner_core(
                 beta,
                 array_scratch,
                 matrix_scratch,
+                use_jtotal_semantics,
             )
         else:
             # Spline coefficients are reused across the loop; only query values
@@ -763,6 +844,7 @@ def _bind_pj2_psin_uniform_residual_runner_core(
                 beta,
                 array_scratch,
                 matrix_scratch,
+                use_jtotal_semantics,
             )
         alpha1 = finalize_pressure_normalization(
             FFn_psin,

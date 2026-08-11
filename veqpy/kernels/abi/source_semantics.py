@@ -29,7 +29,7 @@ SETUP_NORMALIZED_ABS_MIN = 1.0e-3
 SETUP_NORMALIZED_ABS_MAX = 1.0e3
 SETUP_PHYSICAL_ABS_MIN = SETUP_NORMALIZED_ABS_MIN / MU0
 SETUP_PHYSICAL_ABS_MAX = SETUP_NORMALIZED_ABS_MAX / MU0
-MU0_SCALED_DRIVER_ROUTES = frozenset({"PI", "PJ1", "PJ2"})
+MU0_SCALED_DRIVER_ROUTES = frozenset({"PI", "PJ1", "PJ2", "PJ3"})
 KERNEL_SOURCE_ADVICE = (
     "Pass raw case values to KernelSource; source lowering applies mu0 scaling once."
 )
@@ -441,7 +441,7 @@ def _source_regularity_kinds(route: str, coordinate: str) -> tuple[str, str]:
         driver_kind = "linear"
     elif route == "PI":
         driver_kind = "quadratic"
-    elif route in {"PJ1", "PJ2", "PQ"}:
+    elif route in {"PJ1", "PJ2", "PJ3", "PQ"}:
         driver_kind = "even"
     else:
         driver_kind = "even"

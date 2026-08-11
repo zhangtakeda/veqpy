@@ -100,7 +100,9 @@ def refresh_source_runtime(
                 psin,
                 source_plan.uses_barycentric_interpolation,
             )
-    elif tuple(source_execution.route_key) == ("PJ2", "psin", "uniform"):
-        # PJ2/psin/uniform updates psin by fixed point during the source stage;
+    elif source_execution.route_key[0] in {"PJ2", "PJ3"} and tuple(
+        source_execution.route_key[1:]
+    ) == ("psin", "uniform"):
+        # F-coupled current routes update psin by fixed point during the source stage;
         # the negative sentinel forces a fresh query seed on the next run.
         source_workspace.psin_query.fill(-1.0)

@@ -520,9 +520,10 @@ class KernelSource:
 
     The driver keyword is selected by the topology route: ``ffprime`` for PF,
     ``psi_r`` for PP, ``itor`` for PI, ``jtor`` for PJ1, ``jpara`` for PJ2,
-    and ``q`` for PQ. Pressure is supplied either as ``p`` or as ``pprime``
-    with an optional LCFS value ``p0``. The PJ2 ``jpara`` driver has VEQ's
-    ``<J·B> / (F * <R^-2>)`` semantics, not IMAS ``<J·B> / B0`` semantics.
+    ``jtotal`` for PJ3, and ``q`` for PQ. Pressure is supplied either as ``p``
+    or as ``pprime`` with an optional LCFS value ``p0``. The PJ2 ``jpara``
+    driver has VEQ's ``<J·B> / (F * <R^-2>)`` semantics; PJ3 accepts the IMAS
+    total parallel-current convention ``<J·B> / B0`` directly.
     """
 
     p: np.ndarray | list[float] | tuple[float, ...] | None = None
@@ -532,6 +533,7 @@ class KernelSource:
     itor: np.ndarray | list[float] | tuple[float, ...] | None = None
     jtor: np.ndarray | list[float] | tuple[float, ...] | None = None
     jpara: np.ndarray | list[float] | tuple[float, ...] | None = None
+    jtotal: np.ndarray | list[float] | tuple[float, ...] | None = None
     q: np.ndarray | list[float] | tuple[float, ...] | None = None
     p0: float | None = None
     Ip: float = np.nan
@@ -771,7 +773,7 @@ def _normalize_backend(value: str) -> str:
 
 
 def _source_active_family(route: str, coordinate: str, nodes: str) -> str:
-    if route == "PJ2":
+    if route in {"PJ2", "PJ3"}:
         return "F"
     if coordinate == "psin" and nodes == "uniform":
         return "psin"
@@ -793,7 +795,7 @@ def _validate_source_active_family(
     if source_active_family == "psin" and psin_count <= 0:
         raise TopologyError("psin/uniform source topology requires psin_count > 0")
     if source_active_family == "F" and f_count <= 0:
-        raise TopologyError("PJ2 source topology requires F_count > 0")
+        raise TopologyError("PJ2/PJ3 source topology requires F_count > 0")
 
 
 def _supported_constraint_labels(route: str) -> tuple[str, ...]:

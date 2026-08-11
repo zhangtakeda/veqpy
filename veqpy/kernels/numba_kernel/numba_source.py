@@ -57,8 +57,8 @@ from veqpy.numerics import (
     build_uniform_source_interpolation_matrix,
 )
 
-# PJ2-psin-uniform is the only route that materializes psin by a
-# fixed-point loop. Keep these as route constants instead of user-facing
+# F-coupled PJ2/PJ3 psin-uniform routes materialize psin by a fixed-point
+# loop. Keep these as route constants instead of user-facing
 # source-plan parameters.
 PJ2_PSIN_UNIFORM_FIXED_POINT_MAX_ITER = 16
 PJ2_PSIN_UNIFORM_FIXED_POINT_MAX_RESIDUAL = 1.0e-10
@@ -87,7 +87,7 @@ SOURCE_PARAMETERIZATION_SQRT_PSIN = "sqrt_psin"
 SOURCE_PARAMETERIZATION_CODE_IDENTITY = 0
 SOURCE_PARAMETERIZATION_CODE_SQRT_PSIN = 1
 
-# Scratch slot indices into SourceWorkspace.array_scratch (7 + Nr rows × Nr).  These
+# Scratch slot indices into SourceWorkspace.array_scratch (8 + Nr rows × Nr).  These
 # symbolic names are part of the hot-kernel ABI with SourceWorkspace; changing
 # the row order requires updating the allocator at the same time.
 _SLOT_INTEGRAND = 0
@@ -97,7 +97,8 @@ _SLOT_AUX2 = 3
 _SLOT_PNr = 4
 _SLOT_Pr = 5
 _SLOT_Fr = 6
-_SLOT_PQ_MATRIX = 7
+_SLOT_EFFECTIVE_DRIVER = 7
+_SLOT_PQ_MATRIX = 8
 
 RouteKey = tuple[str, str, str]
 
@@ -122,6 +123,10 @@ SOURCE_ROUTE_KEYS: tuple[RouteKey, ...] = (
     ("PJ2", "rho", "grid"),
     ("PJ2", "psin", "uniform"),
     ("PJ2", "psin", "grid"),
+    ("PJ3", "rho", "uniform"),
+    ("PJ3", "rho", "grid"),
+    ("PJ3", "psin", "uniform"),
+    ("PJ3", "psin", "grid"),
     ("PQ", "rho", "uniform"),
     ("PQ", "rho", "grid"),
     ("PQ", "psin", "uniform"),
@@ -1426,7 +1431,7 @@ def _resolve_source_inputs_prepared(
 # Docs-facing route meanings in compact form:
 # - PF: pprime is paired with ffprime.
 # - PP: pprime is paired with psi_r.
-# - PI/PJ1/PJ2: pprime is paired with itor/jtor/jpara respectively.
+# - PI/PJ1/PJ2/PJ3: pprime is paired with itor/jtor/jpara/jtotal respectively.
 # - PQ: pprime is paired with q, so F or F**2 is solved from q and edge F.
 
 
@@ -2838,6 +2843,208 @@ def _update_pj2_from_rho_inputs_with_scratch(
     scaled_ratio_into(out_FFn_psin, out_FFn_psin, out_psin_r, 1.0)
     _regularize_ffn_psin(out_FFn_psin, rho, n_axis_fix)
     return alpha1, alpha2
+
+
+@njit(cache=True, fastmath=True, nogil=True)
+def _materialize_pj3_effective_jpara(
+    out: np.ndarray,
+    jtotal_input: np.ndarray,
+    B0: float,
+    V_r: np.ndarray,
+    Ln_r: np.ndarray,
+    F: np.ndarray,
+) -> np.ndarray:
+    """Convert IMAS ``<J·B>/B0`` to PJ2 current using the current geometry/F.
+
+    The conversion is deliberately performed inside every source evaluation:
+    ``gm1=<R^-2>=(2*pi)^2*Ln_r/V_r`` and
+    ``jpara=B0*jtotal/(F*gm1)``.  PJ3 therefore remains coupled to the active
+    F profile instead of freezing a setup-time PJ2 approximation.
+    """
+
+    gm1_scale = (2.0 * np.pi) ** 2
+    for i in range(out.shape[0]):
+        denominator = gm1_scale * F[i] * Ln_r[i]
+        if not np.isfinite(denominator) or abs(denominator) <= 1.0e-14:
+            raise ValueError("PJ3 source received invalid F*Ln_r geometry factor")
+        out[i] = B0 * jtotal_input[i] * V_r[i] / denominator
+        if not np.isfinite(out[i]):
+            raise ValueError("PJ3 source produced non-finite effective jpara")
+    return out
+
+
+@register_source_route(("PJ3", "psin", "uniform"))
+@njit(cache=True, nogil=True)
+def _update_pj3_from_psin_uniform_inputs_with_scratch(
+    out_root_fields: np.ndarray,
+    out_FFn_psin: np.ndarray,
+    out_Pn_psin: np.ndarray,
+    pprime_input: np.ndarray,
+    driver_input: np.ndarray,
+    coordinate_code: int,
+    R0: float,
+    B0: float,
+    weights: np.ndarray,
+    differentiator: np.ndarray,
+    accumulator: np.ndarray,
+    grid_radial_fields: np.ndarray,
+    n_axis_fix: int,
+    radial_fields: np.ndarray,
+    surface_fields: np.ndarray,
+    F_fields: np.ndarray,
+    scaled_p0: float,
+    Ip: float,
+    beta: float,
+    array_scratch: np.ndarray,
+    matrix_scratch: np.ndarray,
+) -> tuple[float, float]:
+    V_r, _, _, Ln_r, _, _, _ = _source_geometry_workspace_views(
+        radial_fields, surface_fields
+    )
+    effective_jpara = array_scratch[_SLOT_EFFECTIVE_DRIVER]
+    _materialize_pj3_effective_jpara(
+        effective_jpara, driver_input, B0, V_r, Ln_r, F_fields[0]
+    )
+    return _update_pj2_from_psin_uniform_inputs_with_scratch(
+        out_root_fields,
+        out_FFn_psin,
+        out_Pn_psin,
+        pprime_input,
+        effective_jpara,
+        coordinate_code,
+        R0,
+        B0,
+        weights,
+        differentiator,
+        accumulator,
+        grid_radial_fields,
+        n_axis_fix,
+        radial_fields,
+        surface_fields,
+        F_fields,
+        scaled_p0,
+        Ip,
+        beta,
+        array_scratch,
+        matrix_scratch,
+    )
+
+
+@register_source_route(("PJ3", "psin", "grid"))
+@njit(cache=True, nogil=True)
+def _update_pj3_from_psin_grid_inputs_with_scratch(
+    out_root_fields: np.ndarray,
+    out_FFn_psin: np.ndarray,
+    out_Pn_psin: np.ndarray,
+    pprime_input: np.ndarray,
+    driver_input: np.ndarray,
+    coordinate_code: int,
+    R0: float,
+    B0: float,
+    weights: np.ndarray,
+    differentiator: np.ndarray,
+    accumulator: np.ndarray,
+    grid_radial_fields: np.ndarray,
+    n_axis_fix: int,
+    radial_fields: np.ndarray,
+    surface_fields: np.ndarray,
+    F_fields: np.ndarray,
+    scaled_p0: float,
+    Ip: float,
+    beta: float,
+    array_scratch: np.ndarray,
+    matrix_scratch: np.ndarray,
+) -> tuple[float, float]:
+    V_r, _, _, Ln_r, _, _, _ = _source_geometry_workspace_views(
+        radial_fields, surface_fields
+    )
+    effective_jpara = array_scratch[_SLOT_EFFECTIVE_DRIVER]
+    _materialize_pj3_effective_jpara(
+        effective_jpara, driver_input, B0, V_r, Ln_r, F_fields[0]
+    )
+    return _update_pj2_from_psin_grid_inputs_with_scratch(
+        out_root_fields,
+        out_FFn_psin,
+        out_Pn_psin,
+        pprime_input,
+        effective_jpara,
+        coordinate_code,
+        R0,
+        B0,
+        weights,
+        differentiator,
+        accumulator,
+        grid_radial_fields,
+        n_axis_fix,
+        radial_fields,
+        surface_fields,
+        F_fields,
+        scaled_p0,
+        Ip,
+        beta,
+        array_scratch,
+        matrix_scratch,
+    )
+
+
+@register_source_route(
+    ("PJ3", "rho", "uniform"),
+    ("PJ3", "rho", "grid"),
+)
+@njit(cache=True, nogil=True)
+def _update_pj3_from_rho_inputs_with_scratch(
+    out_root_fields: np.ndarray,
+    out_FFn_psin: np.ndarray,
+    out_Pn_psin: np.ndarray,
+    pprime_input: np.ndarray,
+    driver_input: np.ndarray,
+    coordinate_code: int,
+    R0: float,
+    B0: float,
+    weights: np.ndarray,
+    differentiator: np.ndarray,
+    accumulator: np.ndarray,
+    grid_radial_fields: np.ndarray,
+    n_axis_fix: int,
+    radial_fields: np.ndarray,
+    surface_fields: np.ndarray,
+    F_fields: np.ndarray,
+    scaled_p0: float,
+    Ip: float,
+    beta: float,
+    array_scratch: np.ndarray,
+    matrix_scratch: np.ndarray,
+) -> tuple[float, float]:
+    V_r, _, _, Ln_r, _, _, _ = _source_geometry_workspace_views(
+        radial_fields, surface_fields
+    )
+    effective_jpara = array_scratch[_SLOT_EFFECTIVE_DRIVER]
+    _materialize_pj3_effective_jpara(
+        effective_jpara, driver_input, B0, V_r, Ln_r, F_fields[0]
+    )
+    return _update_pj2_from_rho_inputs_with_scratch(
+        out_root_fields,
+        out_FFn_psin,
+        out_Pn_psin,
+        pprime_input,
+        effective_jpara,
+        coordinate_code,
+        R0,
+        B0,
+        weights,
+        differentiator,
+        accumulator,
+        grid_radial_fields,
+        n_axis_fix,
+        radial_fields,
+        surface_fields,
+        F_fields,
+        scaled_p0,
+        Ip,
+        beta,
+        array_scratch,
+        matrix_scratch,
+    )
 
 
 @register_source_route(("PQ", "psin", "uniform"))

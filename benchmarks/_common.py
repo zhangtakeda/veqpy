@@ -58,7 +58,7 @@ def benchmark_result_path(name: str, filename: str | None = None) -> Path:
 
 MU0 = 4.0e-7 * np.pi
 
-ROUTE_BENCHMARK_MODES = ("PF", "PP", "PI", "PJ1", "PJ2", "PQ")
+ROUTE_BENCHMARK_MODES = ("PF", "PP", "PI", "PJ1", "PJ2", "PJ3", "PQ")
 # Route performance qualification follows the public geometric-rho contract.
 # psin remains supported and is covered by focused physics/API tests, but is
 # not mixed into route timing or pass-rate summaries.
@@ -70,6 +70,7 @@ ROUTE_BENCHMARK_CONSTRAINTS = {
     "PI": ("both", "ip", "beta", "none"),
     "PJ1": ("both", "ip", "beta", "none"),
     "PJ2": ("both", "ip", "beta", "none"),
+    "PJ3": ("both", "ip", "beta", "none"),
     "PQ": ("both", "ip", "beta", "none"),
 }
 DEFAULT_ROUTE_SCOPE = "ip-uniform"
@@ -595,7 +596,7 @@ def profile_counts_for_route(
 ) -> dict[str, Any]:
     psin_count = 0
     f_count = 0
-    if route == "PJ2":
+    if route in {"PJ2", "PJ3"}:
         f_count = active_count
     elif coordinate == "psin" and nodes == "uniform":
         psin_count = active_count
@@ -620,9 +621,9 @@ def profile_counts_from_signature(
 ) -> dict[str, Any]:
     psin_count = int(signature.get("psin", 0))
     f_count = int(signature.get("F", 0))
-    if route == "PJ2" and f_count <= 0:
+    if route in {"PJ2", "PJ3"} and f_count <= 0:
         f_count = int(pj2_f_count)
-    if route == "PJ2":
+    if route in {"PJ2", "PJ3"}:
         psin_count = 0
     elif not (coordinate == "psin" and nodes == "uniform"):
         psin_count = 0
@@ -761,6 +762,7 @@ def build_route_reference_profiles(equilibrium: Any) -> dict[str, np.ndarray | f
     itor = np.asarray(equilibrium.Itor, dtype=np.float64)
     jtor = np.asarray(equilibrium.jtor, dtype=np.float64)
     jpara = np.asarray(equilibrium.jpara, dtype=np.float64)
+    jtotal = np.asarray(equilibrium.jtotal, dtype=np.float64)
     q = np.asarray(equilibrium.q, dtype=np.float64)
     mu0_p_r = MU0 * p_r
     return {
@@ -787,6 +789,9 @@ def build_route_reference_profiles(equilibrium: Any) -> dict[str, np.ndarray | f
         "jparan": MU0 * jpara,
         "jpara": jpara,
         "mu0_jpara": MU0 * jpara,
+        "jtotaln": MU0 * jtotal,
+        "jtotal": jtotal,
+        "mu0_jtotal": MU0 * jtotal,
         "qn": q * 0.1,
         "q": q,
         "Ip_constraint": float(equilibrium.Ip),
@@ -830,6 +835,7 @@ def build_route_mode_inputs(
         "PI": ("Itor", "Itor"),
         "PJ1": ("jtor", "jtor"),
         "PJ2": ("jpara", "jpara"),
+        "PJ3": ("jtotal", "jtotal"),
         "PQ": ("qn", "q"),
     }[mode]
     driver_input = pick_ref_profile(
@@ -1095,7 +1101,7 @@ def source_profiles_from_geqdsk(
     if coordinate == "rho":
         pprime = pprime * (2.0 * np.maximum(axis, 1.0e-12))
         driver = driver * (2.0 * np.maximum(axis, 1.0e-12))
-    if route in {"PI", "PJ1", "PJ2"}:
+    if route in {"PI", "PJ1", "PJ2", "PJ3"}:
         driver = driver / MU0
     return pprime.astype(np.float64), driver.astype(np.float64)
 

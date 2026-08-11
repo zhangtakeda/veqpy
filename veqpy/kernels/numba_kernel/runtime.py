@@ -270,7 +270,7 @@ class NumbaRuntime:
 
     def set_case(self, boundary: KernelBoundary, source: KernelSource) -> None:
         materialized = materialize_kernel_source(self.topology, source)
-        driver_scale = MU0 if self.topology.route in {"PI", "PJ1", "PJ2"} else 1.0
+        driver_scale = MU0 if self.topology.route in {"PI", "PJ1", "PJ2", "PJ3"} else 1.0
         case = KernelRuntimeCase(
             self.topology,
             boundary,
@@ -489,7 +489,8 @@ class NumbaRuntime:
         return target_root_fields[0]
 
     def invalidate_source_state(self) -> None:
-        if tuple(self.plan.source_execution.route_key) == ("PJ2", "psin", "uniform"):
+        route_key = tuple(self.plan.source_execution.route_key)
+        if route_key[0] in {"PJ2", "PJ3"} and route_key[1:] == ("psin", "uniform"):
             self.source_workspace.psin_query.fill(-1.0)
 
     def _require_case(self) -> KernelRuntimeCase:

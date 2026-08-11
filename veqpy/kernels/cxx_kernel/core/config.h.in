@@ -15,6 +15,7 @@ namespace config
             SourceRoutePJ1 = 4,
             SourceRoutePJ2 = 5,
             SourceRoutePQ  = 6,
+            SourceRoutePJ3 = 7,
         };
 
         enum SourceCoordinateCode : int

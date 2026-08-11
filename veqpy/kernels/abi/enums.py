@@ -14,6 +14,7 @@ SOURCE_ROUTE_CODES = {
     "PJ1": 4,
     "PJ2": 5,
     "PQ": 6,
+    "PJ3": 7,
 }
 SOURCE_DRIVER_BY_ROUTE = {
     "PF": "ffprime",
@@ -22,6 +23,7 @@ SOURCE_DRIVER_BY_ROUTE = {
     "PJ1": "jtor",
     "PJ2": "jpara",
     "PQ": "q",
+    "PJ3": "jtotal",
 }
 SOURCE_COORDINATE_CODES = {"rho": 1, "psin": 2}
 SOURCE_CONSTRAINT_CODES_BY_FLAGS = {
@@ -53,6 +55,7 @@ SOURCE_CONSTRAINT_FLAGS_BY_ROUTE = {
     "PJ1": frozenset(SOURCE_CONSTRAINT_CODES_BY_FLAGS),
     "PJ2": frozenset(SOURCE_CONSTRAINT_CODES_BY_FLAGS),
     "PQ": frozenset(SOURCE_CONSTRAINT_CODES_BY_FLAGS),
+    "PJ3": frozenset(SOURCE_CONSTRAINT_CODES_BY_FLAGS),
 }
 LAYOUT_CODES = {"degree": 0, "family": 1}
 SUPPORTED_BACKENDS = frozenset({"cxx", "numba"})

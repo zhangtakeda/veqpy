@@ -447,6 +447,7 @@ def test_kernel_topology_constraint_api_rejects_invalid_values() -> None:
         ("PI", np.array([0.0, 3.75e5, 3.0e6]), np.array([0.0, 3.75e5, 3.0e6]) * MU0),
         ("PJ1", np.array([1.0e6, 1.5e6, 3.0e6]), np.array([1.0e6, 1.5e6, 3.0e6]) * MU0),
         ("PJ2", np.array([1.0e6, 1.5e6, 3.0e6]), np.array([1.0e6, 1.5e6, 3.0e6]) * MU0),
+        ("PJ3", np.array([1.0e6, 1.5e6, 3.0e6]), np.array([1.0e6, 1.5e6, 3.0e6]) * MU0),
         ("PQ", np.array([1.0, 1.5, 3.0], dtype=np.float64), np.array([1.0, 1.5, 3.0])),
     ],
 )
@@ -462,7 +463,7 @@ def test_kernel_source_materialization_locks_route_scaling(
         sample_count=3,
         constraint="none",
         psin_count=0,
-        F_count=1 if route == "PJ2" else 0,
+        F_count=1 if route in {"PJ2", "PJ3"} else 0,
         h_count=1,
         kappa_count=0,
         s_counts=(),

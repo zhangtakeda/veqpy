@@ -32,7 +32,7 @@ def build_bound_source_stage_runner(
 ) -> Callable:
     """Bind the source stage runner selected by the source route key."""
     route_key = tuple(plan.source_execution.route_key)
-    if route_key == ("PJ2", "psin", "uniform"):
+    if route_key[0] in {"PJ2", "PJ3"} and route_key[1:] == ("psin", "uniform"):
         # This route is stateful because source samples are queried in the psin
         # produced by the same route.  It needs a fixed-point wrapper around the
         # normal source kernel instead of the shared single-pass runner.

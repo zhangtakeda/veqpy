@@ -133,12 +133,12 @@ def build_source_execution_abi(
     if F_active_length > 0 and F_active_slot < 0:
         raise ValueError("F is active but has no active profile slot")
     requires_optimized_psin_profile = route_key in PROFILE_OWNED_PSIN_ROUTE_KEYS
-    requires_optimized_f_profile = route_key[0] == "PJ2"
+    requires_optimized_f_profile = route_key[0] in {"PJ2", "PJ3"}
 
     if F_active_length > 0 and not requires_optimized_f_profile:
         raise ValueError(
             f"{route_key[0]} does not accept an active F profile; "
-            "active F is only supported for PJ2"
+            "active F is only supported for PJ2/PJ3"
         )
     if requires_optimized_f_profile and F_active_length <= 0:
         raise ValueError(f"{route_key[0]} requires an active F profile")
@@ -158,18 +158,25 @@ def build_source_execution_abi(
             "profile"
         )
 
-    is_pj2_psin_uniform = route_key == ("PJ2", "psin", "uniform")
+    is_f_current_psin_uniform = route_key[0] in {"PJ2", "PJ3"} and route_key[1:] == (
+        "psin",
+        "uniform",
+    )
     return SourceExecutionABI(
         route_key=route_key,
         psin_active_length=psin_active_length,
         f_active_length=F_active_length,
         requires_optimized_psin_profile=requires_optimized_psin_profile,
         requires_optimized_f_profile=requires_optimized_f_profile,
-        requires_psin_query_workspace=(requires_optimized_psin_profile or is_pj2_psin_uniform),
+        requires_psin_query_workspace=(
+            requires_optimized_psin_profile or is_f_current_psin_uniform
+        ),
         requires_source_parameter_query=bool(
             source_plan.coordinate == "psin" and source_plan.parameterization != "identity"
         ),
-        requires_target_root_fields=(requires_optimized_psin_profile or is_pj2_psin_uniform),
+        requires_target_root_fields=(
+            requires_optimized_psin_profile or is_f_current_psin_uniform
+        ),
     )
 
 

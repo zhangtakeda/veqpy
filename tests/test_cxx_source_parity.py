@@ -25,6 +25,7 @@ SOURCE_ROUTE_CASES = (
     ("PI", "rho", "uniform"),
     ("PJ1", "psin", "uniform"),
     ("PJ2", "psin", "uniform"),
+    ("PJ3", "rho", "grid"),
     ("PQ", "rho", "grid"),
 )
 
@@ -43,6 +44,9 @@ SOURCE_CONSTRAINT_CASES = (
     ("PJ2", "psin", "uniform", "ip"),
     ("PJ2", "psin", "uniform", "beta"),
     ("PJ2", "psin", "uniform", "both"),
+    ("PJ3", "rho", "grid", "ip"),
+    ("PJ3", "rho", "grid", "beta"),
+    ("PJ3", "rho", "grid", "both"),
     ("PQ", "rho", "grid", "ip"),
     ("PQ", "rho", "grid", "beta"),
     ("PQ", "rho", "grid", "both"),
@@ -54,6 +58,7 @@ SOURCE_ALTERNATE_COORDINATE_CASES = (
     ("PI", "psin", "grid", "beta"),
     ("PJ1", "rho", "grid", "beta"),
     ("PJ2", "rho", "grid", "beta"),
+    ("PJ3", "psin", "uniform", "beta"),
     ("PQ", "psin", "uniform", "beta"),
 )
 
@@ -79,9 +84,11 @@ def _parity_topology(
         v_count=0,
         kappa_count=2,
         psin_count=(
-            2 if coordinate == "psin" and nodes == "uniform" and route != "PJ2" else 0
+            2
+            if coordinate == "psin" and nodes == "uniform" and route not in {"PJ2", "PJ3"}
+            else 0
         ),
-        F_count=2 if route == "PJ2" else 0,
+        F_count=2 if route in {"PJ2", "PJ3"} else 0,
         c_counts=(),
         s_counts=(2,),
         Nr=nr,
@@ -134,7 +141,7 @@ def _pressure_sources(
         driver = rho * (1.0 + 0.2 * rho * rho)
     elif topology.route == "PI":
         driver = rho * rho * (1.0e6 + 0.2e6 * rho * rho)
-    elif topology.route in {"PJ1", "PJ2"}:
+    elif topology.route in {"PJ1", "PJ2", "PJ3"}:
         driver = 1.0e6 + 0.2e6 * rho * rho
     else:
         driver = 1.71 + 0.16 * rho * rho

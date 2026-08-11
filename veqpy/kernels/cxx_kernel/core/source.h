@@ -206,7 +206,7 @@ namespace source::detail
 
             static_assert(ProfileGrid::radial_nodes == radial_nodes, "source/profile radial grids must match");
             static_assert(Shape::slot_for_profile_id(Shape::F_profile_id).optimized(),
-                          "PJ2 source materialization requires an active F profile");
+                          "PJ2/PJ3 source materialization requires an active F profile");
 
             for (size_t i = 0; i < radial_nodes; ++i)
             {
@@ -502,7 +502,7 @@ namespace source::detail
                                       double                 B0,
                                       size_t                 n_axis_fix) noexcept
         {
-            update_pj2<SourceConstraintCode, true>(geometry, R0, p0, Ip, beta, B0, n_axis_fix);
+            update_pj2<SourceConstraintCode, true, false>(geometry, R0, p0, Ip, beta, B0, n_axis_fix);
         }
 
         template <int SourceConstraintCode, typename GeometryRuntime>
@@ -514,7 +514,7 @@ namespace source::detail
                                        double                 B0,
                                        size_t                 n_axis_fix) noexcept
         {
-            update_pj2<SourceConstraintCode, false>(geometry, R0, p0, Ip, beta, B0, n_axis_fix);
+            update_pj2<SourceConstraintCode, false, false>(geometry, R0, p0, Ip, beta, B0, n_axis_fix);
         }
 
         template <int SourceConstraintCode, typename GeometryRuntime>
@@ -543,6 +543,64 @@ namespace source::detail
                     local_polynomial_interpolate_pair();
 
                 update_pj2_psin<SourceConstraintCode>(geometry, R0, p0, Ip, beta, B0, n_axis_fix);
+                if (update_fixed_point_psin_query())
+                    break;
+            }
+
+            for (size_t i = 0; i < radial_nodes; ++i)
+                source_psin_query[i] = source_target_root_fields(root_psin, i);
+        }
+
+        template <int SourceConstraintCode, typename GeometryRuntime>
+        constexpr void update_pj3_rho(const GeometryRuntime& geometry,
+                                      double                 R0,
+                                      double                 p0,
+                                      double                 Ip,
+                                      double                 beta,
+                                      double                 B0,
+                                      size_t                 n_axis_fix) noexcept
+        {
+            update_pj2<SourceConstraintCode, true, true>(geometry, R0, p0, Ip, beta, B0, n_axis_fix);
+        }
+
+        template <int SourceConstraintCode, typename GeometryRuntime>
+        constexpr void update_pj3_psin(const GeometryRuntime& geometry,
+                                       double                 R0,
+                                       double                 p0,
+                                       double                 Ip,
+                                       double                 beta,
+                                       double                 B0,
+                                       size_t                 n_axis_fix) noexcept
+        {
+            update_pj2<SourceConstraintCode, false, true>(geometry, R0, p0, Ip, beta, B0, n_axis_fix);
+        }
+
+        template <int SourceConstraintCode, typename GeometryRuntime>
+        constexpr void update_pj3_psin_uniform_fixed_point(const GeometryRuntime& geometry,
+                                                           double                 R0,
+                                                           double                 p0,
+                                                           double                 Ip,
+                                                           double                 beta,
+                                                           double                 B0,
+                                                           size_t                 n_axis_fix) noexcept
+        {
+            static_assert(GeometryRuntime::radial_nodes == radial_nodes, "source/geometry radial grids must match");
+
+            if (!source_materialization_initialized)
+            {
+                seed_psin_query_from_passive_psin_profile();
+                source_materialization_initialized = true;
+            }
+            for (size_t iter = 0; iter < pj2_psin_uniform_fixed_point_max_iter; ++iter)
+            {
+                for (size_t i = 0; i < radial_nodes; ++i)
+                    source_parameter_query[i] = source_psin_query[i];
+                if constexpr (SourceConstraintCode == 1 || SourceConstraintCode == 3)
+                    local_barycentric_interpolate_pair();
+                else
+                    local_polynomial_interpolate_pair();
+
+                update_pj3_psin<SourceConstraintCode>(geometry, R0, p0, Ip, beta, B0, n_axis_fix);
                 if (update_fixed_point_psin_query())
                     break;
             }
@@ -1517,7 +1575,10 @@ namespace source::detail
             regularize_ffn_psin(n_axis_fix);
         }
 
-        template <int SourceConstraintCode, bool RhoCoordinate, typename GeometryRuntime>
+        template <int SourceConstraintCode,
+                  bool RhoCoordinate,
+                  bool JtotalSemantic,
+                  typename GeometryRuntime>
         constexpr void update_pj2(const GeometryRuntime& geometry,
                                   double                 R0,
                                   double                 p0,
@@ -1529,15 +1590,25 @@ namespace source::detail
             static_assert(GeometryRuntime::radial_nodes == radial_nodes, "source/geometry radial grids must match");
             static_assert(SourceConstraintCode == 0 || SourceConstraintCode == 1 || SourceConstraintCode == 2 ||
                               SourceConstraintCode == 3,
-                          "PJ2 source supports null, Ip, beta, or Ip_beta constraints");
+                          "PJ2/PJ3 source supports null, Ip, beta, or Ip_beta constraints");
             (void)R0;
-            (void)B0;
 
             RadialVector integrand{uninitialized};
             for (size_t i = 0; i < radial_nodes; ++i)
             {
-                integrand[i] = geometry.radial_field(geometry::radial_Ln_r, i) *
-                               materialized_driver_input[i] / active_F[i];
+                if constexpr (JtotalSemantic)
+                {
+                    constexpr double inverse_gm1_scale =
+                        1.0 / ((2.0 * geometry::detail::pi) * (2.0 * geometry::detail::pi));
+                    integrand[i] = B0 * geometry.radial_field(geometry::radial_V_r, i) *
+                                   materialized_driver_input[i] * inverse_gm1_scale /
+                                   (active_F[i] * active_F[i]);
+                }
+                else
+                {
+                    integrand[i] = geometry.radial_field(geometry::radial_Ln_r, i) *
+                                   materialized_driver_input[i] / active_F[i];
+                }
             }
 
             RadialVector integral_val{uninitialized};

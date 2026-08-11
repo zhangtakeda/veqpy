@@ -427,6 +427,8 @@ namespace cxx_python
             return "PJ2";
         case Topology::SourceRoutePQ:
             return "PQ";
+        case Topology::SourceRoutePJ3:
+            return "PJ3";
         default:
             return "unknown";
         }

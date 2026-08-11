@@ -189,7 +189,7 @@ def validate_source_plan_profile_support(
     if has_active_F and not requires_active_F:
         raise ValueError(
             f"{case.route} expects no active F profile; "
-            "active F is only supported for PJ2"
+            "active F is only supported for PJ2/PJ3"
         )
     if requires_active_F and not has_active_F:
         raise ValueError(f"{case.route} requires an active F profile")

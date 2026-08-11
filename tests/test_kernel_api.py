@@ -29,6 +29,7 @@ ROUTE_PARITY_CASES = (
     ("PI", "rho", "uniform"),
     ("PJ1", "psin", "uniform"),
     ("PJ2", "psin", "uniform"),
+    ("PJ3", "rho", "grid"),
     ("PQ", "rho", "grid"),
 )
 
@@ -92,7 +93,7 @@ def route_kernel_topology(route: str, coordinate: str, nodes: str) -> KernelTopo
         "constraint": "ip",
         "sample_count": 8 if nodes == "grid" else 9,
     }
-    if route == "PJ2":
+    if route in {"PJ2", "PJ3"}:
         params["F_count"] = 2
     elif coordinate == "psin" and nodes == "uniform":
         params["psin_count"] = 2
@@ -117,7 +118,7 @@ def route_kernel_source(
     pprime = rho * (1.0e6 + 0.4e6 * rho * rho) if coordinate == "rho" else 1.0e6 + 0.4e6 * rho * rho
     if route == "PI":
         driver = rho * rho * (1.0e6 + 2.0e6 * rho * rho)
-    elif route in {"PJ1", "PJ2"}:
+    elif route in {"PJ1", "PJ2", "PJ3"}:
         driver = 1.0e6 + 2.0e6 * rho * rho
     elif route == "PP":
         driver = rho * (1.0 + 2.0 * rho * rho)
@@ -272,7 +273,7 @@ def test_kernel_source_materialization_route_matrix(
     assert materialized.scaled_driver.shape == (topology.sample_count,)
     assert source.driver_name == SOURCE_DRIVER_BY_ROUTE[route]
     assert_allclose(materialized.scaled_pprime, source.pprime * MU0)
-    if route in {"PI", "PJ1", "PJ2"}:
+    if route in {"PI", "PJ1", "PJ2", "PJ3"}:
         assert_allclose(materialized.scaled_driver, source.driver_profile * MU0)
     else:
         assert_allclose(materialized.scaled_driver, source.driver_profile)
@@ -280,6 +281,37 @@ def test_kernel_source_materialization_route_matrix(
     assert_allclose([materialized.beta], [source.beta], equal_nan=True)
     assert not materialized.scaled_pprime.flags.writeable
     assert not materialized.scaled_driver.flags.writeable
+
+
+def test_pj3_jtotal_is_physically_equivalent_to_pj2_jpara_at_same_state() -> None:
+    pj2_topology = route_kernel_topology("PJ2", "rho", "grid")
+    pj3_topology = route_kernel_topology("PJ3", "rho", "grid")
+    pj2_source = route_kernel_source(
+        "PJ2",
+        pj2_topology.sample_count,
+        coordinate="rho",
+        nodes="grid",
+        nr=pj2_topology.Nr,
+    )
+    boundary = tiny_kernel_boundary()
+    x = np.zeros(pj2_topology.x_size, dtype=np.float64)
+
+    pj2_kernel = numba_kernel(topology=pj2_topology)
+    pj2_residual = pj2_kernel.residual(x, boundary, pj2_source)
+    pj2_equilibrium = pj2_kernel.build_equilibrium(x)
+    equivalent_jtotal = (
+        pj2_source.jpara * pj2_equilibrium.F * pj2_equilibrium.gm1 / boundary.B0
+    )
+    pj3_source = KernelSource(
+        pprime=pj2_source.pprime,
+        jtotal=equivalent_jtotal,
+        Ip=pj2_source.Ip,
+    )
+
+    pj3_kernel = numba_kernel(topology=pj3_topology)
+    pj3_residual = pj3_kernel.residual(x, boundary, pj3_source)
+
+    assert_allclose(pj3_residual, pj2_residual, rtol=2.0e-12, atol=2.0e-12)
 
 
 def test_kernel_source_materializes_p0_and_rejects_zero_complete_pressure() -> None:

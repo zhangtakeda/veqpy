@@ -15,6 +15,7 @@ SOURCE_ROUTE_CASES = (
     ("PI", "rho", "uniform"),
     ("PJ1", "psin", "uniform"),
     ("PJ2", "psin", "uniform"),
+    ("PJ3", "rho", "grid"),
     ("PQ", "rho", "grid"),
 )
 
@@ -32,7 +33,7 @@ def _topology(route: str, coordinate: str, nodes: str, *, sample_count: int = 9)
         "c_counts": (),
         "s_counts": (2,),
     }
-    if route == "PJ2":
+    if route in {"PJ2", "PJ3"}:
         profile_counts["F_count"] = 2
     elif coordinate == "psin" and nodes == "uniform":
         profile_counts["psin_count"] = 2
@@ -69,7 +70,7 @@ def _route_source_profiles(topology: KernelTopology) -> tuple[np.ndarray, np.nda
     )
     if topology.route == "PI":
         driver = rho * rho * (1.0e6 + 0.8e6 * rho * rho)
-    elif topology.route in {"PJ1", "PJ2"}:
+    elif topology.route in {"PJ1", "PJ2", "PJ3"}:
         driver = 1.0e6 + 0.8e6 * rho * rho
     elif topology.route == "PP":
         driver = rho * (1.0e6 + 0.8e6 * rho * rho)
@@ -106,7 +107,7 @@ def test_route_source_lowering_preserves_raw_user_physics(
     assert_allclose(materialized.scaled_pprime, pprime * MU0)
     assert materialized.scaled_Ip == pytest.approx(3.0e6 * MU0)
     assert materialized.beta == pytest.approx(0.02)
-    if route in {"PI", "PJ1", "PJ2"}:
+    if route in {"PI", "PJ1", "PJ2", "PJ3"}:
         assert_allclose(materialized.scaled_driver, driver * MU0)
     else:
         assert_allclose(materialized.scaled_driver, driver)

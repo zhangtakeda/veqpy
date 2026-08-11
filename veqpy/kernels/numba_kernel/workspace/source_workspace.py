@@ -81,7 +81,7 @@ class SourceWorkspace:
         self.materialized_driver_input = np.empty(nr, dtype=np.float64)
         # The extra ``nr`` rows after the named scratch slots are reserved for
         # route-local dense systems such as strict PQ solves.
-        self.array_scratch = np.empty((7 + nr, nr), dtype=np.float64)
+        self.array_scratch = np.empty((8 + nr, nr), dtype=np.float64)
         self.matrix_scratch = np.empty((1, nr, nt), dtype=np.float64)
 
         self.target_root_fields = (
