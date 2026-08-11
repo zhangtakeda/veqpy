@@ -133,15 +133,14 @@ def build_source_execution_abi(
     if F_active_length > 0 and F_active_slot < 0:
         raise ValueError("F is active but has no active profile slot")
     requires_optimized_psin_profile = route_key in PROFILE_OWNED_PSIN_ROUTE_KEYS
-    requires_optimized_f_profile = route_key[0] in {"PJ2", "PJ3"}
+    supports_optimized_f_profile = route_key[0] in {"PJ2", "PJ3"}
+    requires_optimized_f_profile = supports_optimized_f_profile and F_active_length > 0
 
-    if F_active_length > 0 and not requires_optimized_f_profile:
+    if F_active_length > 0 and not supports_optimized_f_profile:
         raise ValueError(
             f"{route_key[0]} does not accept an active F profile; "
             "active F is only supported for PJ2/PJ3"
         )
-    if requires_optimized_f_profile and F_active_length <= 0:
-        raise ValueError(f"{route_key[0]} requires an active F profile")
     if F_active_length > 0 and psin_active_length > 0:
         raise ValueError("Active F and active psin profiles are mutually exclusive")
 

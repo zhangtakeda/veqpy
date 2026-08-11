@@ -1084,6 +1084,47 @@ def benchmark_route_case_diagnostics(
     }
 
 
+def benchmark_pj23_closure_diagnostics(
+    kernel: Any,
+    equilibrium: Any,
+    spec: RouteBenchmarkSpec,
+) -> dict[str, float]:
+    """Measure strong prescribed-current and global-constraint closure."""
+
+    if spec.mode not in {"PJ2", "PJ3"}:
+        return {}
+    runtime = kernel._impl._solver.runtime
+    target = np.asarray(
+        runtime.source_workspace.materialized_driver_input,
+        dtype=np.float64,
+    ).copy()
+    current_name = "jpara" if spec.mode == "PJ2" else "jtotal"
+    actual = MU0 * np.asarray(getattr(equilibrium, current_name), dtype=np.float64)
+    current_scale = 1.0
+    if spec.constraint in {"both", "ip"}:
+        denominator = float(np.dot(target, target))
+        if denominator > 1.0e-28:
+            current_scale = float(np.dot(actual, target) / denominator)
+            target *= current_scale
+    target_norm = max(float(np.linalg.norm(target)), 1.0e-14)
+    diagnostics = {
+        "current_driver_scale": current_scale,
+        "current_driver_rel_l2_error": float(np.linalg.norm(actual - target) / target_norm),
+    }
+    if spec.constraint in {"both", "ip"}:
+        target_Ip = float(runtime.plan.source_plan.scaled_Ip / MU0)
+        diagnostics["Ip_relative_error"] = abs(float(equilibrium.Ip) - target_Ip) / max(
+            abs(target_Ip),
+            1.0,
+        )
+    if spec.constraint in {"both", "beta"}:
+        target_beta = float(runtime.plan.source_plan.beta)
+        diagnostics["beta_relative_error"] = abs(
+            float(equilibrium.beta_t) - target_beta
+        ) / max(abs(target_beta), 1.0e-14)
+    return diagnostics
+
+
 def source_profiles_from_geqdsk(
     geqdsk: Geqdsk,
     *,
@@ -1123,12 +1164,13 @@ def route_kernel_case(
     method: str = SYNTHETIC_SOLVER_METHOD,
     max_residual: float = SYNTHETIC_SOLVER_MAX_RESIDUAL,
     max_evaluations: int | None = SYNTHETIC_SOLVER_MAX_EVALUATIONS,
-    pj2_f_count: int = 6,
+    pj2_f_count: int = 0,
     initial: str = "cold",
     norm: str = "fast",
 ) -> KernelCase:
     count = int(nr if spec.nodes == "grid" else (sample_count or DEFAULT_ROUTE_SAMPLE_COUNT))
     uses_ip, uses_beta = constraint_flags(spec.constraint)
+    reference = synthetic_route_reference()
     pprime, driver = source_profiles_for_route(
         spec,
         nr=nr,
@@ -1162,8 +1204,8 @@ def route_kernel_case(
     source = KernelSource(
         pprime=pprime,
         **{SOURCE_DRIVER_BY_ROUTE[spec.mode]: driver},
-        Ip=3.0e6 if uses_ip else np.nan,
-        beta=0.02 if uses_beta else np.nan,
+        Ip=float(reference.ref_profiles["Ip_constraint"]) if uses_ip else np.nan,
+        beta=float(reference.ref_profiles["beta_constraint"]) if uses_beta else np.nan,
         case_name=spec.case_name,
     )
     config = KernelConfig(

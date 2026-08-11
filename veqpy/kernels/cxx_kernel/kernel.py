@@ -60,7 +60,7 @@ class _CxxKernelImpl:
         pin_cpu: bool | int | None = None,
     ) -> None:
         self.topology = topology
-        self.recipe = KernelRecipe() if recipe is None else recipe
+        self.recipe = KernelRecipe(backend="cxx") if recipe is None else recipe
         if not isinstance(self.recipe, KernelRecipe):
             raise TypeError(f"recipe must be KernelRecipe, got {type(self.recipe).__name__}")
         self._validate_native_recipe(self.recipe)

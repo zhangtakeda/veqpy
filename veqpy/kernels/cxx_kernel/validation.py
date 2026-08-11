@@ -26,6 +26,8 @@ def validate_supported_for_cxx_backend(topology: KernelTopology) -> None:
         mismatches.append("F_count > 0 outside PJ2/PJ3")
     if topology.source_active_family == "F" and topology.F_count <= 0:
         mismatches.append("PJ2/PJ3 requires F_count > 0")
+    if topology.route in {"PJ2", "PJ3"} and topology.F_count == 0:
+        mismatches.append("strict rho PJ2/PJ3 closure is currently Numba-only")
     if topology.source_active_family != "psin" and topology.psin_count > 0:
         mismatches.append("source-owned topology does not accept psin_count > 0")
     inferred_l_max = _infer_l_max(

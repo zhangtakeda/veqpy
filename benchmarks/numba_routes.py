@@ -28,6 +28,7 @@ from benchmarks._common import (
     SYNTHETIC_SOLVER_MAX_EVALUATIONS,
     SYNTHETIC_SOLVER_MAX_RESIDUAL,
     SYNTHETIC_SOLVER_METHOD,
+    benchmark_pj23_closure_diagnostics,
     benchmark_result_path,
     benchmark_route_case_diagnostics,
     cpu_affinity,
@@ -75,6 +76,7 @@ def _measure_row(args: argparse.Namespace, spec) -> dict[str, Any]:
         method=args.method,
         max_residual=SYNTHETIC_SOLVER_MAX_RESIDUAL,
         max_evaluations=args.max_evaluations,
+        pj2_f_count=int(getattr(args, "pj2_f_count", 0)),
         initial=args.initial,
         norm=args.norm,
     )
@@ -88,10 +90,18 @@ def _measure_row(args: argparse.Namespace, spec) -> dict[str, Any]:
             repeat=args.repeat,
         )
         kernel = measure["kernel"]
+        equilibrium = kernel.build_equilibrium()
         diagnostics = benchmark_route_case_diagnostics(
             synthetic_route_reference(),
-            kernel.build_equilibrium(),
+            equilibrium,
             extract_shape_x(case.topology, measure["result"].x),
+        )
+        diagnostics.update(
+            benchmark_pj23_closure_diagnostics(
+                kernel,
+                equilibrium,
+                spec,
+            )
         )
         shape_ok = float(diagnostics["shape_error"]) <= ROUTE_SHAPE_MATCH_TOL
         status = "passed" if measure["success"] and shape_ok else "failed"
@@ -147,6 +157,8 @@ def _print_timing_table(console, rows: list[dict[str, Any]]) -> None:
     table.add_column("shape", justify="right")
     table.add_column("psi_r", justify="right")
     table.add_column("FF_psi", justify="right")
+    table.add_column("current", justify="right")
+    table.add_column("Ip", justify="right")
     for row in rows:
         runtime = row["runtime"]
         engine = runtime_engine_payload(runtime, SYNTHETIC_SOLVER_LABEL)
@@ -161,6 +173,8 @@ def _print_timing_table(console, rows: list[dict[str, Any]]) -> None:
             format_optional_sci(diagnostics.get("shape_error")),
             format_optional_sci(diagnostics.get("psi_r_rel_rms_error")),
             format_optional_sci(diagnostics.get("ff_psi_rel_rms_error")),
+            format_optional_sci(diagnostics.get("current_driver_rel_l2_error")),
+            format_optional_sci(diagnostics.get("Ip_relative_error")),
         )
     console.print(table)
 
@@ -179,6 +193,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--initial", default="cold")
     parser.add_argument("--norm", default="fast")
     parser.add_argument("--max-evaluations", type=int, default=SYNTHETIC_SOLVER_MAX_EVALUATIONS)
+    parser.add_argument(
+        "--pj2-f-count",
+        type=int,
+        default=0,
+        help="PJ2/PJ3 optimized-F coefficient count; 0 selects strict rho closure",
+    )
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--no-run", action="store_true")
     parser.add_argument("--no-write", action="store_true")
@@ -187,6 +207,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.warmup < 0 or args.repeat <= 0:
         raise ValueError("--warmup must be >= 0 and --repeat must be > 0")
+    if args.pj2_f_count < 0:
+        raise ValueError("--pj2-f-count must be >= 0")
 
     console = reporting_console()
     specs = filter_route_specs(iter_route_specs(args.scope), args.case)
@@ -230,6 +252,8 @@ def main(argv: list[str] | None = None) -> int:
         "engine": SYNTHETIC_SOLVER_LABEL,
         "repeat": int(args.repeat),
         "warmup": int(args.warmup),
+        "pj23_closure": "strict" if args.pj2_f_count == 0 else "optimized-F",
+        "pj2_f_count": int(args.pj2_f_count),
         "timing_note": (
             "Kernel solve elapsed time after runtime case setup; "
             "Kernel handle construction is excluded per repeat"

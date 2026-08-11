@@ -64,6 +64,13 @@ def test_l_max_accepts_capacity_values() -> None:
         make_topology(L_max=1)
 
 
+def test_kernel_defaults_to_numba_backend() -> None:
+    kernel = Kernel(topology=make_topology())
+
+    assert kernel.recipe.backend == "numba"
+    assert type(kernel._impl).__module__ == "veqpy.kernels.numba_kernel.kernel"
+
+
 def test_kernel_variant_is_count_only_and_returns_self() -> None:
     topology = make_topology(L_max=5, M_max=3, K_max=3)
     kernel = Kernel(topology=topology, recipe=KernelRecipe(backend="numba"))
@@ -148,7 +155,7 @@ def test_kernel_variant_reuses_numba_workspace_for_contained_counts() -> None:
     assert runtime_after._case is None
 
 
-def test_kernel_variant_rejects_source_family_invalid_counts() -> None:
+def test_kernel_variant_switches_pj2_to_strict_closure_and_rejects_missing_psin() -> None:
     pj2 = Kernel(
         topology=make_topology(
             route="PJ2",
@@ -160,8 +167,9 @@ def test_kernel_variant_rejects_source_family_invalid_counts() -> None:
         ),
         recipe=KernelRecipe(backend="numba"),
     )
-    with pytest.raises(ValueError, match="F_count"):
-        pj2.variant(F_count=0)
+    pj2.variant(F_count=0)
+    assert pj2.topology.F_count == 0
+    assert pj2.topology.source_active_family == "none"
 
     psin = Kernel(
         topology=make_topology(psin_count=2, L_max=5),

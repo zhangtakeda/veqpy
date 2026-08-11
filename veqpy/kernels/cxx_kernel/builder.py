@@ -103,7 +103,7 @@ def prepare(
     CMake. It is the fast validation path used before the nanobind production API is finalized.
     """
 
-    recipe = Recipe() if recipe is None else recipe
+    recipe = Recipe(backend="cxx") if recipe is None else recipe
     if not isinstance(recipe, Recipe):
         raise TypeError(f"recipe must be KernelRecipe, got {type(recipe).__name__}")
     if recipe.backend != "cxx":

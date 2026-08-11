@@ -26,8 +26,9 @@ shape-error frontier samples.
 ## Scripts
 
 - `numba_routes.py`: Numba backend geometric-rho synthetic route matrix through
-  `veqpy.Kernel`; psin routes remain focused physics/API tests rather than
-  performance qualification rows.
+  `veqpy.Kernel`; `--pj2-f-count 0` (the default) selects strict rho PJ2/PJ3,
+  while a positive value retains the optimized-F comparison. psin routes remain
+  focused physics/API tests rather than performance qualification rows.
 - `numba_variant_sweep.py`: Numba `Kernel.variant()` construction-cost comparison.
 - `numba_pareto.py`: Numba `Kernel.pareto()` reduced-candidate screening benchmark.
 - `cxx_routes.py`: Cxx backend geometric-rho route matrix compared with the
@@ -41,6 +42,7 @@ shape-error frontier samples.
 
 ```bash
 .venv/bin/python benchmarks/numba_routes.py --quiet-progress
+.venv/bin/python benchmarks/numba_routes.py --case PJ2 --case PJ3 --pj2-f-count 6 --no-write
 .venv/bin/python benchmarks/numba_variant_sweep.py --quiet-progress
 .venv/bin/python benchmarks/numba_pareto.py --sweep-mode partial --no-write
 .venv/bin/python benchmarks/cxx_routes.py --quiet-progress

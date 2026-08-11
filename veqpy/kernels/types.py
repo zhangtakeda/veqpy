@@ -87,7 +87,7 @@ _DEFAULT_ENZYME_JACOBIAN_BATCH_WIDTH = 0
 class KernelRecipe:
     """Artifact recipe and packed-layout configuration for one Kernel."""
 
-    backend: str = "cxx"
+    backend: str = "numba"
     layout: str = "degree"
     build: str = "fastmath"
     cmake_build_type: str | None = None
@@ -461,7 +461,12 @@ class KernelTopology:
         )
         m_max = _canonical_at_least(self.M_max, _infer_m_max(c_counts, s_counts), "M_max")
         k_max = _canonical_at_least(self.K_max, max(2, m_max), "K_max")
-        source_active_family = _source_active_family(route, coordinate, nodes)
+        source_active_family = _source_active_family(
+            route,
+            coordinate,
+            nodes,
+            f_count=profile_counts["F_count"],
+        )
         _validate_source_active_family(
             source_active_family,
             psin_count=profile_counts["psin_count"],
@@ -772,8 +777,19 @@ def _normalize_backend(value: str) -> str:
     raise TopologyError("backend must be cxx or numba")
 
 
-def _source_active_family(route: str, coordinate: str, nodes: str) -> str:
-    if route in {"PJ2", "PJ3"}:
+def _source_active_family(
+    route: str,
+    coordinate: str,
+    nodes: str,
+    *,
+    f_count: int,
+) -> str:
+    # Geometric-rho PJ2/PJ3 can close F and enclosed current directly in the
+    # source stage.  F_count=0 selects that strict closure; a positive F_count
+    # retains the legacy outer optimized-F approximation.  psin-coordinate
+    # routes still require the optimized-F representation because their source
+    # samples must be remapped through the evolving flux coordinate.
+    if route in {"PJ2", "PJ3"} and (coordinate == "psin" or f_count > 0):
         return "F"
     if coordinate == "psin" and nodes == "uniform":
         return "psin"
@@ -796,6 +812,10 @@ def _validate_source_active_family(
         raise TopologyError("psin/uniform source topology requires psin_count > 0")
     if source_active_family == "F" and f_count <= 0:
         raise TopologyError("PJ2/PJ3 source topology requires F_count > 0")
+    if source_active_family != "psin" and psin_count > 0:
+        raise TopologyError("source-owned topology does not accept psin_count > 0")
+    if source_active_family != "F" and f_count > 0:
+        raise TopologyError("F_count > 0 is only valid for optimized-F PJ2/PJ3")
 
 
 def _supported_constraint_labels(route: str) -> tuple[str, ...]:

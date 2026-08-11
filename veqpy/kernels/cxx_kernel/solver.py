@@ -40,7 +40,7 @@ class CxxSolver:
     ) -> None:
         validate_supported_for_cxx_backend(topology)
         self.topology = topology
-        self.recipe = Recipe() if recipe is None else recipe
+        self.recipe = Recipe(backend="cxx") if recipe is None else recipe
         if not isinstance(self.recipe, Recipe):
             raise TypeError(f"recipe must be KernelRecipe, got {type(self.recipe).__name__}")
         self.registry = registry or KernelRegistry(

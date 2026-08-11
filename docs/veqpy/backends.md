@@ -10,6 +10,10 @@ KernelRecipe(backend="numba")
 KernelRecipe(backend="cxx")
 ```
 
+`KernelRecipe()`, `Kernel(..., recipe=None)`, and the function-style build/solve
+entrypoints default to Numba. Cxx imports, artifact preparation, and native
+dependencies are reached only after explicitly selecting `backend="cxx"`.
+
 The Numba backend is the direct Python runtime used for development, route
 coverage, and pure-Python deployment. It owns packed layout metadata, source
 runtime arrays, residual workspaces, finite-difference JVP/Jacobian calls, and

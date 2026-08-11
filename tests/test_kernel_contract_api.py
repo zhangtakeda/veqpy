@@ -329,13 +329,14 @@ def test_veqpy_root_exports_kernel_surface() -> None:
 def test_kernel_topology_and_runtime_source_is_user_facing_contract() -> None:
     topology = make_kernel_topology(c_counts=(0, 0), s_counts=(2, 0, 0), K_max=None)
     same_shape = make_kernel_topology(c_counts=(), s_counts=(2,), L_max=2, M_max=1, K_max=2)
-    family_recipe = KernelRecipe(layout="family", build="release")
+    family_recipe = KernelRecipe(backend="cxx", layout="family", build="release")
     kernel_source = tiny_kernel_source(case_name="tiny")
     materialized_source = materialize_kernel_source(topology, kernel_source)
     kernel_boundary = tiny_kernel_boundary()
 
     assert topology_identity_payload(topology) == topology_identity_payload(same_shape)
     assert topology.key == same_shape.key
+    assert KernelRecipe().backend == "numba"
     assert family_recipe.backend == "cxx"
     assert family_recipe.layout == "family"
     assert family_recipe.layout_profile_first is True
@@ -564,7 +565,11 @@ def test_kernel_source_materialization_errors_use_raw_field_names() -> None:
 def test_kernel_runtime_case_must_match_topology_before_native() -> None:
     topology = make_kernel_topology()
     recorder = RecordingSolver()
-    handle = Kernel(topology=topology, registry=RecordingRegistry(recorder))  # type: ignore[arg-type]
+    handle = Kernel(
+        topology=topology,
+        recipe=KernelRecipe(backend="cxx"),
+        registry=RecordingRegistry(recorder),  # type: ignore[arg-type]
+    )
 
     bad_source_length = KernelSource(
         pprime=np.ones(topology.sample_count - 1, dtype=np.float64),
@@ -629,6 +634,7 @@ def test_kernel_solve_uses_handle_default_config_with_per_call_overrides() -> No
     recorder = RecordingSolver(x_size=topology.x_size)
     handle = Kernel(
         topology=topology,
+        recipe=KernelRecipe(backend="cxx"),
         config=default_config,
         registry=RecordingRegistry(recorder),  # type: ignore[arg-type]
     )
@@ -688,7 +694,7 @@ def test_explicit_named_initial_state_overrides_native_continuation(
     recorder = RecordingSolver(x_size=topology.x_size)
     handle = Kernel(
         topology=topology,
-        recipe=KernelRecipe(layout=layout),
+        recipe=KernelRecipe(backend="cxx", layout=layout),
         config=KernelConfig(continuation="warm"),
         registry=RecordingRegistry(recorder),  # type: ignore[arg-type]
     )
@@ -708,7 +714,11 @@ def test_explicit_named_initial_state_overrides_native_continuation(
 def test_kernel_build_equilibrium_uses_last_runtime_case() -> None:
     topology = make_kernel_topology()
     recorder = RecordingSolver(x_size=topology.x_size)
-    handle = Kernel(topology=topology, registry=RecordingRegistry(recorder))  # type: ignore[arg-type]
+    handle = Kernel(
+        topology=topology,
+        recipe=KernelRecipe(backend="cxx"),
+        registry=RecordingRegistry(recorder),  # type: ignore[arg-type]
+    )
     boundary = tiny_kernel_boundary()
     source = tiny_kernel_source()
     x = np.zeros(handle.x_size, dtype=np.float64)
@@ -741,7 +751,7 @@ def test_kernel_build_equilibrium_uses_last_runtime_case() -> None:
 
 def test_kernel_dry_run_and_python_owned_result_snapshot(tmp_path: Path) -> None:
     topology = make_kernel_topology()
-    recipe = KernelRecipe(build="release", layout="family")
+    recipe = KernelRecipe(backend="cxx", build="release", layout="family")
     kernel_config = KernelConfig(max_residual=4.0e-6)
     handle = build(
         topology=topology,
@@ -753,7 +763,7 @@ def test_kernel_dry_run_and_python_owned_result_snapshot(tmp_path: Path) -> None
     artifact = prepare(topology, recipe=recipe, cache_root=tmp_path, dry_run=True)
     default_artifact = prepare(
         topology,
-        recipe=KernelRecipe(build="fastmath", layout="degree"),
+        recipe=KernelRecipe(backend="cxx", build="fastmath", layout="degree"),
         cache_root=tmp_path,
         dry_run=True,
     )
@@ -793,7 +803,7 @@ def test_kernel_dry_run_and_python_owned_result_snapshot(tmp_path: Path) -> None
 
 def test_kernel_artifact_identity_excludes_runtime_case_and_solver_config(tmp_path: Path) -> None:
     topology = make_kernel_topology()
-    recipe = KernelRecipe(build="release", layout="degree")
+    recipe = KernelRecipe(backend="cxx", build="release", layout="degree")
     first = Kernel(
         topology=topology,
         recipe=recipe,
@@ -838,7 +848,7 @@ def test_kernel_python_build_and_solve_native_flow(tmp_path: Path) -> None:
     topology = make_kernel_topology()
     handle = Kernel(
         topology=topology,
-        recipe=KernelRecipe(build="fastmath"),
+        recipe=KernelRecipe(backend="cxx", build="fastmath"),
         cache_root=tmp_path,
     )
 

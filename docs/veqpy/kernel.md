@@ -92,10 +92,13 @@ equation. PI still reconstructs the zero-value axis limit of `dItor/drho`,
 because differentiating the current primitive is ill-conditioned there. PQ
 solves a first-order equation for `Y = F**2`; it reconstructs the odd
 zero-value limit of `dY/drho` before dividing by `psin_r`, instead of fitting
-the resulting `FFn_psin`. Every route reconstructs and floors `psin_r` before
-using it as a flux coordinate or denominator. These are limits of derived
-coordinates or odd differentiated quantities, not edits to the authoritative
-source profile and not generic zero-derivative parity constraints.
+the resulting `FFn_psin`. Source-owned algebraic routes reconstruct and floor
+`psin_r` before using it as a flux coordinate or denominator. Strict rho
+PJ2/PJ3 instead construct the axis-anchored primitive
+`C=K_n*dpsi/drho` directly; they do not post-fit or floor that accepted closure.
+These are limits of derived coordinates or odd differentiated quantities, not
+edits to the authoritative source profile and not generic zero-derivative
+parity constraints.
 
 The route-by-route ablation and convergence evidence is recorded in
 [`source-axis-policy.md`](source-axis-policy.md).
@@ -125,10 +128,19 @@ physics. PJ2 accepts
 jpara = B0 * jtotal / (F * gm1),    gm1 = <R^-2> = (2*pi)^2 * Ln_r / V_r
 ```
 
-inside every source evaluation using the current geometry and active F profile.
-It is therefore not a setup-time alias or a frozen conversion. Both routes
-require an active F profile and use the same fixed-point ownership for uniform
-psin samples.
+inside every source evaluation using the current geometry and F profile. It is
+therefore not a setup-time alias or a frozen conversion.
+
+For `coordinate="rho"`, `F_count=0` selects the Numba strict closure. The source
+stage solves the coupled radial equations for enclosed current and
+`u=log(F**2/F_edge**2)`, certifies a dimensionless fixed-point defect below
+`1e-8`, and publishes F and normalized flux without adding F coefficients to
+the outer Grad-Shafranov solve. A positive `F_count` retains the optimized-F
+approximation for controlled comparisons and Cxx parity. `coordinate="psin"`
+still requires positive `F_count`, because those samples must be remapped
+through the evolving flux coordinate. The strict equations, iteration budgets,
+and benchmark evidence are recorded in
+[`pj23-strict-closure.md`](pj23-strict-closure.md).
 
 ## Radial Endpoints
 

@@ -65,6 +65,16 @@ PJ2_PSIN_UNIFORM_FIXED_POINT_MAX_RESIDUAL = 1.0e-10
 PJ2_PSIN_UNIFORM_FIXED_POINT_FINALIZE_ITER = 8
 PJ2_PSIN_UNIFORM_BARYCENTRIC_ORDER_CAP = 8
 
+# Geometric-rho PJ2/PJ3 strict closures use a deterministic number of Picard
+# sweeps, then certify the dimensionless fixed-point defect.  The gate is two
+# orders tighter than the default outer VEQ residual tolerance (1e-6), so the
+# source closure cannot become the outer solve's residual floor.
+PJ23_STRICT_FIXED_POINT_MAX_RESIDUAL = 1.0e-8
+PJ2_STRICT_FIXED_POINT_IP_ITER = 5
+PJ2_STRICT_FIXED_POINT_ABSOLUTE_ITER = 8
+PJ3_STRICT_FIXED_POINT_IP_ITER = 9
+PJ3_STRICT_FIXED_POINT_ABSOLUTE_ITER = 14
+
 RHO_COORDINATE = 0
 PSIN_COORDINATE = 1
 
@@ -2836,6 +2846,389 @@ def _update_pj2_from_rho_inputs_with_scratch(
     scaled_product_into(out_FFn_psin, F, F_r, 1.0 / (alpha1 * alpha2))
     scaled_ratio_into(out_FFn_psin, out_FFn_psin, out_psin_r, 1.0)
     return alpha1, alpha2
+
+
+@njit(cache=True, nogil=True)
+def _fill_pj23_strict_rhs(
+    ru0: np.ndarray,
+    ru1: np.ndarray,
+    rc0: np.ndarray,
+    rc1: np.ndarray,
+    F: np.ndarray,
+    u: np.ndarray,
+    C: np.ndarray,
+    pprime_input: np.ndarray,
+    driver_input: np.ndarray,
+    pressure_multiplier: float,
+    B0: float,
+    F_edge: float,
+    Kn: np.ndarray,
+    Ln_r: np.ndarray,
+    V_r: np.ndarray,
+    use_jtotal_semantics: bool,
+) -> None:
+    """Build the affine-in-current-scale strict PJ2/PJ3 radial RHS."""
+
+    four_pi2 = 4.0 * np.pi * np.pi
+    for i in range(u.shape[0]):
+        F_i = F_edge * np.exp(0.5 * u[i])
+        F[i] = F_i
+        x_i = C[i] / Kn[i]
+        g1_i = four_pi2 * Ln_r[i] / V_r[i]
+        H_i = four_pi2 * Kn[i] / V_r[i]
+        g5_i = F_i * F_i * g1_i + x_i * x_i * H_i
+        if not np.isfinite(g5_i) or g5_i <= 1.0e-20:
+            raise ValueError("strict PJ2/PJ3 closure produced invalid g5")
+
+        ru0_i = -2.0 * pressure_multiplier * pprime_input[i] / g5_i
+        if use_jtotal_semantics:
+            if not np.isfinite(F_i) or abs(F_i) <= 1.0e-14:
+                raise ValueError("strict PJ3 closure produced invalid F")
+            ru1_i = -2.0 * x_i * B0 * driver_input[i] / (F_i * g5_i)
+            rc1_i = Ln_r[i] * B0 * driver_input[i] / (F_i * g1_i)
+        else:
+            ru1_i = -2.0 * x_i * g1_i * driver_input[i] / g5_i
+            rc1_i = Ln_r[i] * driver_input[i]
+
+        ru0[i] = ru0_i
+        ru1[i] = ru1_i
+        rc0[i] = 0.5 * C[i] * ru0_i
+        rc1[i] = rc1_i + 0.5 * C[i] * ru1_i
+
+
+@njit(cache=True, nogil=True)
+def _strict_current_scale_and_combine_rhs(
+    ru0: np.ndarray,
+    ru1: np.ndarray,
+    rc0: np.ndarray,
+    rc1: np.ndarray,
+    weights: np.ndarray,
+    scaled_Ip: float,
+) -> float:
+    current_multiplier = 1.0
+    if not np.isnan(scaled_Ip):
+        edge0 = dot(rc0, weights)
+        edge1 = dot(rc1, weights)
+        if not np.isfinite(edge1) or abs(edge1) <= 1.0e-20:
+            raise ValueError("strict PJ2/PJ3 closure cannot enforce Ip: zero current response")
+        current_multiplier = (scaled_Ip / (2.0 * np.pi) - edge0) / edge1
+        if not np.isfinite(current_multiplier):
+            raise ValueError("strict PJ2/PJ3 closure produced invalid current multiplier")
+    for i in range(ru0.shape[0]):
+        ru0[i] += current_multiplier * ru1[i]
+        rc0[i] += current_multiplier * rc1[i]
+    return current_multiplier
+
+
+@njit(cache=True, nogil=True)
+def _strict_fixed_point_map(
+    out_u: np.ndarray,
+    out_C: np.ndarray,
+    ru0: np.ndarray,
+    ru1: np.ndarray,
+    rc0: np.ndarray,
+    rc1: np.ndarray,
+    F: np.ndarray,
+    u: np.ndarray,
+    C: np.ndarray,
+    pprime_input: np.ndarray,
+    driver_input: np.ndarray,
+    pressure_multiplier: float,
+    B0: float,
+    F_edge: float,
+    Kn: np.ndarray,
+    Ln_r: np.ndarray,
+    V_r: np.ndarray,
+    weights: np.ndarray,
+    accumulator: np.ndarray,
+    scaled_Ip: float,
+    use_jtotal_semantics: bool,
+) -> float:
+    _fill_pj23_strict_rhs(
+        ru0,
+        ru1,
+        rc0,
+        rc1,
+        F,
+        u,
+        C,
+        pprime_input,
+        driver_input,
+        pressure_multiplier,
+        B0,
+        F_edge,
+        Kn,
+        Ln_r,
+        V_r,
+        use_jtotal_semantics,
+    )
+    current_multiplier = _strict_current_scale_and_combine_rhs(
+        ru0,
+        ru1,
+        rc0,
+        rc1,
+        weights,
+        scaled_Ip,
+    )
+    full_integration(out_C, rc0, accumulator)
+    full_integration(out_u, ru0, accumulator)
+    edge_u = dot(ru0, weights)
+    for i in range(out_u.shape[0]):
+        out_u[i] -= edge_u
+    return current_multiplier
+
+
+@njit(cache=True, nogil=True)
+def _strict_fixed_point_defect(
+    u: np.ndarray,
+    C: np.ndarray,
+    mapped_u: np.ndarray,
+    mapped_C: np.ndarray,
+    scaled_Ip: float,
+) -> float:
+    u_scale = 1.0
+    C_scale = 1.0e-14
+    if not np.isnan(scaled_Ip):
+        C_scale = max(C_scale, abs(scaled_Ip / (2.0 * np.pi)))
+    for i in range(u.shape[0]):
+        u_scale = max(u_scale, abs(u[i]))
+        C_scale = max(C_scale, abs(C[i]))
+    defect = 0.0
+    for i in range(u.shape[0]):
+        defect = max(defect, abs(mapped_u[i] - u[i]) / u_scale)
+        defect = max(defect, abs(mapped_C[i] - C[i]) / C_scale)
+    return defect
+
+
+@njit(cache=True, nogil=True)
+def _update_pj23_strict_from_rho_inputs_with_scratch(
+    out_root_fields: np.ndarray,
+    out_FFn_psin: np.ndarray,
+    out_Pn_psin: np.ndarray,
+    pprime_input: np.ndarray,
+    driver_input: np.ndarray,
+    coordinate_code: int,
+    R0: float,
+    B0: float,
+    weights: np.ndarray,
+    differentiator: np.ndarray,
+    accumulator: np.ndarray,
+    grid_radial_fields: np.ndarray,
+    n_axis_fix: int,
+    radial_fields: np.ndarray,
+    surface_fields: np.ndarray,
+    F_fields: np.ndarray,
+    scaled_p0: float,
+    Ip: float,
+    beta: float,
+    array_scratch: np.ndarray,
+    matrix_scratch: np.ndarray,
+    use_jtotal_semantics: bool,
+    iteration_count: int,
+) -> tuple[float, float]:
+    out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
+    V_r, Kn, _, Ln_r, _, _, _ = _source_geometry_workspace_views(
+        radial_fields, surface_fields
+    )
+
+    # beta scales the complete rho-coordinate pressure profile by one scalar;
+    # unlike the flux/current closure, this multiplier is algebraic and does
+    # not depend on the Picard state.
+    pressure_multiplier = 1.0
+    if not np.isnan(beta):
+        relative_pressure = array_scratch[_SLOT_AUX2]
+        _compute_Pn_out(relative_pressure, pprime_input, accumulator, weights)
+        pressure_denominator = _rho_beta_pressure_denominator(
+            relative_pressure,
+            V_r,
+            weights,
+            scaled_p0,
+        )
+        if not np.isfinite(pressure_denominator) or abs(pressure_denominator) <= 1.0e-20:
+            raise ValueError("strict PJ2/PJ3 beta closure received zero pressure response")
+        pressure_multiplier = (
+            0.5 * beta * B0 * B0 * dot(V_r, weights) / pressure_denominator
+        )
+
+    u = array_scratch[_SLOT_INTEGRAND]
+    C = array_scratch[_SLOT_AUX0]
+    mapped_u = array_scratch[_SLOT_AUX1]
+    mapped_C = array_scratch[_SLOT_AUX2]
+    ru0 = array_scratch[_SLOT_PNr]
+    ru1 = array_scratch[_SLOT_Pr]
+    rc0 = array_scratch[_SLOT_Fr]
+    rc1 = array_scratch[_SLOT_EFFECTIVE_DRIVER]
+    u.fill(0.0)
+    C.fill(0.0)
+    F = F_fields[0]
+    F.fill(R0 * B0)
+
+    for _ in range(iteration_count):
+        _strict_fixed_point_map(
+            mapped_u,
+            mapped_C,
+            ru0,
+            ru1,
+            rc0,
+            rc1,
+            F,
+            u,
+            C,
+            pprime_input,
+            driver_input,
+            pressure_multiplier,
+            B0,
+            R0 * B0,
+            Kn,
+            Ln_r,
+            V_r,
+            weights,
+            accumulator,
+            Ip,
+            use_jtotal_semantics,
+        )
+        copy_into(u, mapped_u)
+        copy_into(C, mapped_C)
+
+    # One non-mutating map certifies the state that will actually be published.
+    _strict_fixed_point_map(
+        mapped_u,
+        mapped_C,
+        ru0,
+        ru1,
+        rc0,
+        rc1,
+        F,
+        u,
+        C,
+        pprime_input,
+        driver_input,
+        pressure_multiplier,
+        B0,
+        R0 * B0,
+        Kn,
+        Ln_r,
+        V_r,
+        weights,
+        accumulator,
+        Ip,
+        use_jtotal_semantics,
+    )
+    defect = _strict_fixed_point_defect(u, C, mapped_u, mapped_C, Ip)
+    if not np.isfinite(defect) or defect > PJ23_STRICT_FIXED_POINT_MAX_RESIDUAL:
+        raise ValueError("strict PJ2/PJ3 fixed-point closure did not reach 1e-8")
+
+    # The final map has refreshed F and ru0 at the accepted (u, C) state.
+    F_r = F_fields[1]
+    F_rr = F_fields[2]
+    for i in range(F.shape[0]):
+        F_r[i] = 0.5 * F[i] * ru0[i]
+        out_psin_r[i] = C[i] / Kn[i]
+    alpha2 = dot(out_psin_r, weights)
+    if not np.isfinite(alpha2) or abs(alpha2) <= 1.0e-14:
+        raise ValueError("strict PJ2/PJ3 closure produced invalid flux scale")
+    out_psin_r /= alpha2
+    full_differentiation(out_psin_rr, out_psin_r, differentiator)
+    _update_psin_coordinate(out_psin, out_psin_r, accumulator, weights)
+    full_differentiation(F_rr, F_r, differentiator)
+
+    if not np.isnan(beta):
+        alpha1 = pressure_multiplier / alpha2
+    else:
+        alpha1 = -dot(pprime_input, weights) / alpha2
+        alpha1 = _ensure_pressure_alpha1(
+            alpha1,
+            pprime_input,
+            RHO_COORDINATE,
+            scaled_p0,
+            alpha2,
+            out_psin_r,
+            accumulator,
+            weights,
+            array_scratch,
+        )
+    for i in range(out_Pn_psin.shape[0]):
+        x_i = alpha2 * out_psin_r[i]
+        denominator = alpha1 * x_i
+        if not np.isfinite(denominator) or abs(denominator) <= 1.0e-20:
+            raise ValueError("strict PJ2/PJ3 closure produced invalid source normalization")
+        out_Pn_psin[i] = pressure_multiplier * pprime_input[i] / denominator
+        out_FFn_psin[i] = F[i] * F_r[i] / denominator
+    return alpha1, alpha2
+
+
+@njit(cache=True, nogil=True)
+def _update_pj2_strict_from_rho_inputs_with_scratch(
+    out_root_fields: np.ndarray,
+    out_FFn_psin: np.ndarray,
+    out_Pn_psin: np.ndarray,
+    pprime_input: np.ndarray,
+    driver_input: np.ndarray,
+    coordinate_code: int,
+    R0: float,
+    B0: float,
+    weights: np.ndarray,
+    differentiator: np.ndarray,
+    accumulator: np.ndarray,
+    grid_radial_fields: np.ndarray,
+    n_axis_fix: int,
+    radial_fields: np.ndarray,
+    surface_fields: np.ndarray,
+    F_fields: np.ndarray,
+    scaled_p0: float,
+    Ip: float,
+    beta: float,
+    array_scratch: np.ndarray,
+    matrix_scratch: np.ndarray,
+) -> tuple[float, float]:
+    iteration_count = (
+        PJ2_STRICT_FIXED_POINT_ABSOLUTE_ITER
+        if np.isnan(Ip)
+        else PJ2_STRICT_FIXED_POINT_IP_ITER
+    )
+    return _update_pj23_strict_from_rho_inputs_with_scratch(
+        out_root_fields, out_FFn_psin, out_Pn_psin, pprime_input, driver_input,
+        coordinate_code, R0, B0, weights, differentiator, accumulator,
+        grid_radial_fields, n_axis_fix, radial_fields, surface_fields, F_fields,
+        scaled_p0, Ip, beta, array_scratch, matrix_scratch, False, iteration_count,
+    )
+
+
+@njit(cache=True, nogil=True)
+def _update_pj3_strict_from_rho_inputs_with_scratch(
+    out_root_fields: np.ndarray,
+    out_FFn_psin: np.ndarray,
+    out_Pn_psin: np.ndarray,
+    pprime_input: np.ndarray,
+    driver_input: np.ndarray,
+    coordinate_code: int,
+    R0: float,
+    B0: float,
+    weights: np.ndarray,
+    differentiator: np.ndarray,
+    accumulator: np.ndarray,
+    grid_radial_fields: np.ndarray,
+    n_axis_fix: int,
+    radial_fields: np.ndarray,
+    surface_fields: np.ndarray,
+    F_fields: np.ndarray,
+    scaled_p0: float,
+    Ip: float,
+    beta: float,
+    array_scratch: np.ndarray,
+    matrix_scratch: np.ndarray,
+) -> tuple[float, float]:
+    iteration_count = (
+        PJ3_STRICT_FIXED_POINT_ABSOLUTE_ITER
+        if np.isnan(Ip)
+        else PJ3_STRICT_FIXED_POINT_IP_ITER
+    )
+    return _update_pj23_strict_from_rho_inputs_with_scratch(
+        out_root_fields, out_FFn_psin, out_Pn_psin, pprime_input, driver_input,
+        coordinate_code, R0, B0, weights, differentiator, accumulator,
+        grid_radial_fields, n_axis_fix, radial_fields, surface_fields, F_fields,
+        scaled_p0, Ip, beta, array_scratch, matrix_scratch, True, iteration_count,
+    )
 
 
 @njit(cache=True, fastmath=True, nogil=True)

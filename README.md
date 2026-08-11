@@ -71,6 +71,12 @@ python3.12 -m venv .venv
 .venv/bin/python -m pip install veqpy
 ```
 
+The PyPI installation is ready to use with the default Numba backend. It does not
+provision the native toolchain and libraries required by `backend="cxx"`, so
+`pip install veqpy` alone does not provide a usable Cxx backend. Missing Cxx
+components do not affect imports or solves unless the Cxx backend is selected
+explicitly.
+
 For development, install VEQPy from a source checkout in editable mode. The `dev` extra
 installs the runtime dependencies together with `pytest`, `ruff`, `build`, `twine`,
 `nanobind`, and other development helpers into the same environment.
@@ -157,10 +163,12 @@ family.
 | D-shaped(5)     |     0.214899 |      2.136862 |      9.944x |      3.14e-12 |
 | **D-shaped(9)** | **0.229824** |  **2.547320** | **11.084x** |  **8.04e-12** |
 | D-shaped(75)    |     1.000413 |      7.288244 |      7.285x |      1.48e-10 |
+|                 |              |               |             |               |
 | H-mode(27)      |     0.707322 |      5.654250 |      7.994x |      3.12e-11 |
 | H-mode(36)      |     0.844900 |      7.095212 |      8.398x |      2.75e-11 |
 | **H-mode(60)**  | **1.705001** | **15.468430** |  **9.072x** |  **1.26e-08** |
 | H-mode(130)     |     8.265414 |     43.981732 |      5.321x |      1.29e-08 |
+|                 |              |               |             |               |
 | X-point(19)     |     0.374766 |      3.517772 |      9.387x |      1.55e-11 |
 | X-point(29)     |     0.549881 |      4.886525 |      8.887x |      3.92e-11 |
 | **X-point(94)** | **1.975305** | **11.051075** |  **5.595x** |  **8.39e-11** |
@@ -181,9 +189,9 @@ when needed and materializes route-dependent `mu0` scaling before calling
 backend kernels. Sine-family Kernel
 inputs are s1-started: `KernelTopology.s_counts=(n1, n2, ...)` and
 `KernelBoundary.s_offsets=(s1, s2, ...)`; backend runtime lowering adds the
-structural s0=0 slot. `KernelRecipe` selects `backend="numba"` for the direct
-Numba runtime or `backend="cxx"` for the native backend. Both backends use the
-same public `Kernel` type and method surface, including residuals, solves,
+structural s0=0 slot. `KernelRecipe` defaults to `backend="numba"` for the direct
+Numba runtime; `backend="cxx"` explicitly selects the native backend. Both backends
+use the same public `Kernel` type and method surface, including residuals, solves,
 finite-difference JVP/Jacobian calls, and `build_equilibrium()`.
 `build(topology=..., recipe=None, config=None)` creates a reusable `Kernel` and
 caches that default policy on the handle; `Kernel.solve(...)` can use it as-is,

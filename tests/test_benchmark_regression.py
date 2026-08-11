@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
+import numpy as np
 import pytest
 from _helpers import (
     assert_finite,
@@ -18,12 +21,16 @@ from benchmarks._common import (
     RouteBenchmarkSpec,
     geqdsk_kernel_case,
     geqdsk_signature,
+    route_kernel_case,
+    solve_numba_case,
 )
+from veqpy import KernelSource
 
 ROUTE_REGRESSION_CASES = (
     RouteBenchmarkSpec("PF", "rho", "uniform", "ip"),
     RouteBenchmarkSpec("PP", "rho", "uniform", "ip"),
     RouteBenchmarkSpec("PJ2", "rho", "uniform", "ip"),
+    RouteBenchmarkSpec("PJ3", "rho", "uniform", "ip"),
     RouteBenchmarkSpec("PQ", "rho", "uniform", "ip"),
 )
 
@@ -80,6 +87,69 @@ def test_numba_route_benchmark_regresses_against_synthetic_reference(
     assert diagnostics["psi_r_rel_rms_error"] <= 1.0e-2
     assert diagnostics["ff_psi_rel_rms_error"] <= 7.0e-2
     assert diagnostics["mu0_p_psi_rel_rms_error"] <= 2.0e-2
+    if spec.mode in {"PJ2", "PJ3"}:
+        assert runtime["x_size"] == 12
+        assert diagnostics["current_driver_rel_l2_error"] <= 3.0e-5
+        assert diagnostics["Ip_relative_error"] <= 1.0e-12
+
+
+@pytest.mark.slow
+def test_strict_pj23_same_grid_round_trip_closes_flux_and_current() -> None:
+    seed = route_kernel_case(
+        RouteBenchmarkSpec("PJ2", "rho", "grid", "ip"),
+        pj2_f_count=0,
+    )
+    seed_result, seed_kernel = solve_numba_case(seed)
+    try:
+        assert seed_result.success
+        reference = seed_kernel.build_equilibrium()
+        reference_F = np.asarray(reference.F, dtype=np.float64).copy()
+        reference_psi_r = np.asarray(
+            reference.alpha2 * reference.psin_r,
+            dtype=np.float64,
+        ).copy()
+        reference_x = seed_result.x.copy()
+        reference_Ip = float(reference.Ip)
+        reference_pressure = np.asarray(reference.P_r, dtype=np.float64).copy()
+        route_drivers = {
+            "PJ2": np.asarray(reference.jpara, dtype=np.float64).copy(),
+            "PJ3": np.asarray(reference.jtotal, dtype=np.float64).copy(),
+        }
+    finally:
+        seed_kernel.close()
+
+    for route, driver in route_drivers.items():
+        case = route_kernel_case(
+            RouteBenchmarkSpec(route, "rho", "grid", "ip"),
+            pj2_f_count=0,
+        )
+        source = KernelSource(
+            pprime=reference_pressure,
+            **{"jpara" if route == "PJ2" else "jtotal": driver},
+            Ip=reference_Ip,
+        )
+        result, kernel = solve_numba_case(replace(case, source=source))
+        try:
+            equilibrium = kernel.build_equilibrium()
+            F_error = np.linalg.norm(equilibrium.F - reference_F) / np.linalg.norm(reference_F)
+            psi_r = equilibrium.alpha2 * equilibrium.psin_r
+            psi_r_error = np.linalg.norm(psi_r - reference_psi_r) / np.linalg.norm(
+                reference_psi_r
+            )
+            current = np.asarray(
+                equilibrium.jpara if route == "PJ2" else equilibrium.jtotal,
+                dtype=np.float64,
+            )
+            current_error = np.linalg.norm(current - driver) / np.linalg.norm(driver)
+        finally:
+            kernel.close()
+
+        assert result.success
+        assert F_error <= 5.0e-9
+        assert psi_r_error <= 5.0e-8
+        assert np.max(np.abs(result.x - reference_x)) <= 1.0e-6
+        assert abs(equilibrium.Ip - reference_Ip) / abs(reference_Ip) <= 1.0e-12
+        assert current_error <= 5.0e-7
 
 
 @pytest.mark.slow

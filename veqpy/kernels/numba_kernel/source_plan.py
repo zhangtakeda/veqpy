@@ -27,6 +27,8 @@ from veqpy.numerics import (
 
 from .numba_source import (
     COORDINATE_CODES,
+    _update_pj2_strict_from_rho_inputs_with_scratch,
+    _update_pj3_strict_from_rho_inputs_with_scratch,
     source_parameterization_for_route_key,
 )
 
@@ -96,6 +98,24 @@ SOURCE_PARAMETERIZATION_CODES = {
 }
 
 
+def source_kernel_for_topology(
+    *,
+    route: str,
+    coordinate: str,
+    f_count: int,
+    default_kernel: Callable,
+) -> Callable:
+    """Select optimized-F or strict rho PJ2/PJ3 source ownership."""
+
+    normalized_route = str(route).upper()
+    if str(coordinate).lower() == "rho" and int(f_count) == 0:
+        if normalized_route == "PJ2":
+            return _update_pj2_strict_from_rho_inputs_with_scratch
+        if normalized_route == "PJ3":
+            return _update_pj3_strict_from_rho_inputs_with_scratch
+    return default_kernel
+
+
 def build_source_plan(
     *,
     case: object,
@@ -114,7 +134,12 @@ def build_source_plan(
     )
     return SourcePlan(
         route=str(case.route).upper(),
-        kernel=source_route_spec.implementation,
+        kernel=source_kernel_for_topology(
+            route=str(case.route),
+            coordinate=str(case.coordinate),
+            f_count=int(getattr(case, "F_count", 0)),
+            default_kernel=source_route_spec.implementation,
+        ),
         coordinate=str(case.coordinate).lower(),
         nodes=str(case.nodes).lower(),
         parameterization=source_parameterization_for_route_key(route_key),

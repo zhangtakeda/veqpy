@@ -57,7 +57,7 @@ from .profile_runtime import (
     refresh_stage_a_runtime,
 )
 from .snapshot import snapshot_equilibrium_from_kernel_runtime
-from .source_plan import SourcePlan
+from .source_plan import SourcePlan, source_kernel_for_topology
 from .source_runtime import refresh_source_runtime
 
 _AUTO_CURVE_STRAIN_THRESHOLD = 0.20
@@ -606,7 +606,12 @@ def _build_kernel_source_plan(
     source_route_spec = validate_route(topology.route, topology.coordinate, topology.nodes)
     return SourcePlan(
         route=topology.route,
-        kernel=source_route_spec.implementation,
+        kernel=source_kernel_for_topology(
+            route=topology.route,
+            coordinate=topology.coordinate,
+            f_count=topology.F_count,
+            default_kernel=source_route_spec.implementation,
+        ),
         coordinate=topology.coordinate,
         nodes=topology.nodes,
         parameterization=topology.source_parameterization,
@@ -631,7 +636,12 @@ def _placeholder_source_plan(
     placeholder.setflags(write=False)
     return SourcePlan(
         route=topology.route,
-        kernel=source_route_spec.implementation,
+        kernel=source_kernel_for_topology(
+            route=topology.route,
+            coordinate=topology.coordinate,
+            f_count=topology.F_count,
+            default_kernel=source_route_spec.implementation,
+        ),
         coordinate=topology.coordinate,
         nodes=topology.nodes,
         parameterization=source_parameterization_for_route_key(topology.source_route_key),
