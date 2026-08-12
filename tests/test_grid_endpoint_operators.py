@@ -58,3 +58,58 @@ def test_equilibrium_resample_augments_physical_axis_and_edge() -> None:
     assert_allclose(resampled.psin_r, 2.0 * target_grid.rho, rtol=0.0, atol=2.0e-13)
     assert_allclose(resampled.FFn_psin, 2.0 + 3.0 * target_grid.rho, atol=2.0e-13)
     assert_allclose(resampled.Pn_psin, -1.0 + 2.0 * target_grid.rho, atol=2.0e-13)
+
+
+def test_equilibrium_resample_uses_regular_primitive_through_first_gauss_cell() -> None:
+    source_grid = Grid(Nr=12, Nt=8, quadrature_scheme="legendre")
+    rho = source_grid.rho
+    steepness = 10.0
+    normalization = np.expm1(steepness)
+    psin = np.expm1(steepness * rho**2) / normalization
+    psin_r = 2.0 * steepness * rho * np.exp(steepness * rho**2) / normalization
+    psin_rr = (
+        2.0
+        * steepness
+        * np.exp(steepness * rho**2)
+        * (1.0 + 2.0 * steepness * rho**2)
+        / normalization
+    )
+    equilibrium = Equilibrium(
+        R0=3.0,
+        Z0=0.0,
+        B0=2.0,
+        a=1.0,
+        grid=source_grid,
+        shape_profiles={},
+        psin=psin,
+        psin_r=psin_r,
+        psin_rr=psin_rr,
+        FFn_psin=np.zeros_like(rho),
+        Pn_psin=np.zeros_like(rho),
+    )
+    target_grid = Grid(Nr=129, Nt=8, quadrature_scheme="radau")
+
+    resampled = equilibrium.resample(target_grid)
+
+    axis = target_grid.rho < source_grid.rho[1]
+    target_rho = target_grid.rho[axis]
+    expected_psin = np.expm1(steepness * target_rho**2) / normalization
+    expected_psin_r = (
+        2.0
+        * steepness
+        * target_rho
+        * np.exp(steepness * target_rho**2)
+        / normalization
+    )
+    expected_psin_rr = (
+        2.0
+        * steepness
+        * np.exp(steepness * target_rho**2)
+        * (1.0 + 2.0 * steepness * target_rho**2)
+        / normalization
+    )
+    assert axis.sum() >= 2
+    assert np.all(resampled.psin_r[axis] > 0.0)
+    assert_allclose(resampled.psin[axis], expected_psin, rtol=5.0e-5, atol=0.0)
+    assert_allclose(resampled.psin_r[axis], expected_psin_r, rtol=1.0e-4, atol=0.0)
+    assert_allclose(resampled.psin_rr[axis], expected_psin_rr, rtol=5.0e-4, atol=0.0)

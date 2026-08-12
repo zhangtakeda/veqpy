@@ -1153,18 +1153,98 @@ def _resample_equilibrium_root_fields(
         psin_r_out = remap @ psin_r
         FFn_out = remap @ FFn_psin
         Pn_out = remap @ Pn_psin
+
+        # Differentiate before repairing the unresolved axis cell so the local
+        # endpoint extension cannot contaminate the resolved interior through a
+        # second global spectral operation.
+        psin_rr_out = target_grid.differentiate(psin_r_out)
+        _extend_psin_to_missing_axis(
+            source_rho,
+            target_rho,
+            psin,
+            psin_r,
+            psin_out,
+            psin_r_out,
+            psin_rr_out,
+        )
     else:
         psin_out = _resample_profile_linear(source_rho, psin, target_rho)
         psin_r_out = _resample_profile_linear(source_rho, psin_r, target_rho)
         FFn_out = _resample_profile_linear(source_rho, FFn_psin, target_rho)
         Pn_out = _resample_profile_linear(source_rho, Pn_psin, target_rho)
+        psin_rr_out = target_grid.differentiate(psin_r_out)
     return (
         psin_out,
         psin_r_out,
-        target_grid.differentiate(psin_r_out),
+        psin_rr_out,
         FFn_out,
         Pn_out,
     )
+
+
+def _extend_psin_to_missing_axis(
+    source_rho: np.ndarray,
+    target_rho: np.ndarray,
+    source_psin: np.ndarray,
+    source_psin_r: np.ndarray,
+    out_psin: np.ndarray,
+    out_psin_r: np.ndarray,
+    out_psin_rr: np.ndarray,
+) -> None:
+    """Extend a collocation flux coordinate to the axis with its regular limit.
+
+    Gauss and Radau solve grids may not own ``rho=0``.  Evaluating their global
+    nodal polynomial at a substantially closer-to-axis output node is poorly
+    conditioned for ``psin_r = O(rho)``: a tiny absolute extrapolation error is
+    amplified by diagnostics containing ``1 / psin_r``.  On only the unresolved
+    cell spanning the physical axis and the first two source nodes,
+    reconstruct the smooth even ratio ``psin_r / rho`` linearly in ``rho**2``
+    from those two resolved anchors.  Analytically integrate that representation
+    from the axis and shift the remaining primitive by one constant to keep it
+    continuous at the repaired-cell boundary.  No resolved derivative anchor or
+    source profile is filtered or overwritten.
+    """
+
+    if source_rho.size == 0 or float(source_rho[0]) <= 1.0e-14:
+        return
+    rho0 = float(source_rho[0])
+    if source_rho.size < 2:
+        return
+    rho1 = float(source_rho[1])
+    axis = target_rho < rho1
+    if not np.any(axis):
+        return
+    psin1 = float(source_psin[1])
+    psin_r0 = float(source_psin_r[0])
+    psin_r1 = float(source_psin_r[1])
+    if (
+        not np.isfinite(psin1)
+        or not np.isfinite(psin_r0)
+        or not np.isfinite(psin_r1)
+        or rho1 <= rho0
+    ):
+        return
+
+    rho0_sq = rho0 * rho0
+    rho1_sq = rho1 * rho1
+    ratio0 = psin_r0 / rho0
+    ratio1 = psin_r1 / rho1
+    ratio_gradient = (ratio1 - ratio0) / (rho1_sq - rho0_sq)
+    ratio_axis = ratio0 - ratio_gradient * rho0_sq
+    rho_axis = target_rho[axis]
+    rho_axis_sq = rho_axis * rho_axis
+    out_psin[axis] = rho_axis_sq * (
+        0.5 * ratio_axis + 0.25 * ratio_gradient * rho_axis_sq
+    )
+    out_psin_r[axis] = rho_axis * (
+        ratio_axis + ratio_gradient * rho_axis_sq
+    )
+    out_psin_rr[axis] = ratio_axis + 3.0 * ratio_gradient * rho_axis_sq
+
+    psin_at_rho1 = rho1_sq * (
+        0.5 * ratio_axis + 0.25 * ratio_gradient * rho1_sq
+    )
+    out_psin[~axis] += psin_at_rho1 - psin1
 
 
 def _resample_profile_linear(
