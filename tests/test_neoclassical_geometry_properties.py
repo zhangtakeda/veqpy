@@ -255,18 +255,22 @@ def test_signed_f_and_q_follow_the_fixed_cocos_contract(b0: float, ip: float) ->
     assert np.all(np.sign(geqdsk.q) == np.sign(b0 * ip))
     endpoint_grid = Grid(
         Nr=equilibrium.grid.Nr + 2,
-        Nt=equilibrium.grid.Nt,
+        Nt=max(equilibrium.grid.Nt, 64),
         quadrature_scheme="uniform",
         L_max=equilibrium.grid.L_max,
         M_max=equilibrium.grid.M_max,
         K_max=equilibrium.grid.K_max,
     )
     endpoint_equilibrium = equilibrium.resample(endpoint_grid)
-    np.testing.assert_allclose(
-        geqdsk.boundary,
-        np.column_stack((endpoint_equilibrium.R[-1], endpoint_equilibrium.Z[-1])),
+    endpoint_boundary = np.column_stack(
+        (endpoint_equilibrium.R[-1], endpoint_equilibrium.Z[-1])
     )
-    assert not np.allclose(geqdsk.boundary, np.column_stack((equilibrium.R[-1], equilibrium.Z[-1])))
+    np.testing.assert_allclose(
+        geqdsk.boundary[:-1],
+        endpoint_boundary,
+    )
+    np.testing.assert_array_equal(geqdsk.boundary[-1], geqdsk.boundary[0])
+    assert geqdsk.boundary.shape[0] >= 65
 
 
 def test_geqdsk_roundtrip_preserves_an_asymmetric_vertical_grid(tmp_path) -> None:
@@ -296,6 +300,8 @@ def test_geqdsk_roundtrip_preserves_an_asymmetric_vertical_grid(tmp_path) -> Non
     assert restored.Zmax == pytest.approx(z_range[1])
     np.testing.assert_allclose(restored.psi, geqdsk.psi, rtol=5.0e-10, atol=5.0e-11)
     np.testing.assert_allclose(restored.boundary, geqdsk.boundary)
+    np.testing.assert_array_equal(restored.boundary[-1], restored.boundary[0])
+    assert restored.boundary.shape[0] >= 65
 
 
 @pytest.mark.parametrize("b0", [-3.0, 3.0])

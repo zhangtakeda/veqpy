@@ -852,10 +852,15 @@ class Equilibrium(Reactive, Serial):
         # solve grid owns neither, so first lower the snapshot to an
         # endpoint-inclusive view instead of aliasing its first/last interior
         # surfaces to those physical boundaries.
-        export_equilibrium = _endpoint_inclusive_equilibrium(self)
+        export_equilibrium = _geqdsk_export_equilibrium(self)
         R = export_equilibrium.R
         Z = export_equilibrium.Z
-        boundary = np.column_stack((R[-1], Z[-1])).astype(np.float64, copy=False)
+        boundary_points = np.column_stack((R[-1], Z[-1])).astype(np.float64, copy=False)
+        # theta is sampled on [0, 2*pi), so the periodic LCFS is geometrically
+        # closed but its last sample does not repeat its first.  GEQDSK consumers
+        # commonly expect an explicitly closed polygon; append that endpoint and
+        # include it in nbound.
+        boundary = np.concatenate((boundary_points, boundary_points[:1]), axis=0)
         limiter_points = _coerce_optional_point_array(limiter, name="limiter")
 
         geqdsk = Geqdsk(
@@ -1116,19 +1121,25 @@ def _build_resampled_equilibrium(
     )
 
 
-def _endpoint_inclusive_equilibrium(equilibrium: Equilibrium) -> Equilibrium:
-    """Return a snapshot view that explicitly owns ``rho=0`` and ``rho=1``."""
+def _geqdsk_export_equilibrium(equilibrium: Equilibrium) -> Equilibrium:
+    """Return an endpoint-inclusive snapshot with at least 64 poloidal samples."""
 
     rho = np.asarray(equilibrium.rho, dtype=np.float64)
-    if abs(float(rho[0])) <= 1.0e-14 and abs(float(rho[-1]) - 1.0) <= 1.0e-14:
-        return equilibrium
+    owns_radial_endpoints = (
+        abs(float(rho[0])) <= 1.0e-14 and abs(float(rho[-1]) - 1.0) <= 1.0e-14
+    )
     source_grid = equilibrium.grid
+    target_nt = max(int(source_grid.Nt), 64)
+    if owns_radial_endpoints and target_nt == source_grid.Nt:
+        return equilibrium
     return _build_resampled_equilibrium(
         equilibrium,
         grid=Grid(
-            Nr=source_grid.Nr + 2,
-            Nt=source_grid.Nt,
-            quadrature_scheme="lobatto",
+            Nr=source_grid.Nr if owns_radial_endpoints else source_grid.Nr + 2,
+            Nt=target_nt,
+            quadrature_scheme=(
+                source_grid.quadrature_scheme if owns_radial_endpoints else "lobatto"
+            ),
             calculus_scheme=source_grid.calculus_scheme,
             L_max=source_grid.L_max,
             M_max=source_grid.M_max,

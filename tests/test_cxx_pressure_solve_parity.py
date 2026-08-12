@@ -230,7 +230,8 @@ def _assert_geqdsk_roundtrip(equilibrium, tmp_path: Path) -> None:
 
     assert (restored.NR, restored.NZ) == (129, 129)
     assert restored.psi.shape == (129, 129)
-    assert restored.boundary.shape == (32, 2)
+    assert restored.boundary.shape == (65, 2)
+    assert_allclose(restored.boundary[-1], restored.boundary[0], rtol=0.0, atol=0.0)
     assert restored.Rmin == pytest.approx(8.5)
     assert restored.Rmax == pytest.approx(11.5)
     assert restored.Zmin == pytest.approx(-1.5)

@@ -74,7 +74,8 @@ def test_geqdsk_demo_writes_geqdsk_and_comparison(tmp_path: Path) -> None:
     exported = Geqdsk(output)
     exported.check()
     assert (exported.NR, exported.NZ) == (257, 257)
-    assert exported.boundary.shape == (32, 2)
+    assert exported.boundary.shape == (65, 2)
+    assert exported.boundary[-1].tolist() == exported.boundary[0].tolist()
 
     figure = PROJECT_ROOT / "data" / "solovev-veqpy-comparison.png"
     assert figure.is_file()
