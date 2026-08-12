@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "veqpy"
-version = "1.3.1"
+version = "1.3.2"
 description = "VEQPy — Veloce EQuilibrium code"
 readme = "README.md"
 license = "BSD-3-Clause"
