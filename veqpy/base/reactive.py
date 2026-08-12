@@ -26,7 +26,7 @@ import weakref
 from collections.abc import Callable
 from copy import deepcopy
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Self
 
 import numpy as np
 
@@ -34,8 +34,9 @@ _MISSING = object()
 _SCALAR_TYPES = {type(None), bool, int, float, complex, str, bytes}
 _PICKLE_ROOTS_KEY = "__reactive_roots__"
 _PICKLE_EXTRAS_KEY = "__reactive_extras__"
+_PICKLE_FROZEN_KEY = "__reactive_frozen__"
 _PICKLE_VERSION_KEY = "__reactive_state_version__"
-_PICKLE_STATE_VERSION = 1
+_PICKLE_STATE_VERSION = 2
 _PLAN_LIST = "list"
 _PLAN_TUPLE = "tuple"
 _PLAN_DICT = "dict"
@@ -64,6 +65,8 @@ class Reactive:
 
     def __init__(self) -> None:
         if "_reactive_values" in self.__dict__:
+            if "_reactive_frozen" not in self.__dict__:
+                object.__setattr__(self, "_reactive_frozen", False)
             return
         object.__setattr__(
             self,
@@ -83,6 +86,7 @@ class Reactive:
         object.__setattr__(self, "_reactive_dirty_mask", self._reactive_all_dirty_mask)
         object.__setattr__(self, "_reactive_revision", 0)
         object.__setattr__(self, "_reactive_observers", {})
+        object.__setattr__(self, "_reactive_frozen", False)
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
@@ -121,6 +125,7 @@ class Reactive:
             "_reactive_dirty_mask",
             "_reactive_revision",
             "_reactive_observers",
+            "_reactive_frozen",
         }
         cached_roots = {f"cached_{name}" for name in cls.root_properties}
         for name, value in self.__dict__.items():
@@ -134,6 +139,31 @@ class Reactive:
 
     def __copy__(self):
         raise TypeError(f"{type(self).__name__} does not support shallow copy; use copy.deepcopy()")
+
+    @property
+    def is_frozen(self) -> bool:
+        """Whether authoritative root properties reject replacement."""
+
+        self._ensure_reactive_state()
+        return self._reactive_frozen
+
+    def freeze(self) -> Self:
+        """Freeze this object and contained reactive snapshots in place.
+
+        Root replacement is rejected after freezing. Lazy derived-property
+        evaluation and cache invalidation remain available because neither
+        changes the authoritative root state.
+        """
+
+        self._ensure_reactive_state()
+        self._freeze_recursive(set())
+        return self
+
+    def thaw(self) -> Self:
+        """Return an independent mutable root snapshot with empty caches."""
+
+        self._ensure_reactive_state()
+        return deepcopy(self)
 
     def __getstate__(self) -> dict[str, Any]:
         """Serialize authoritative roots, never caches or observer state."""
@@ -150,6 +180,7 @@ class Reactive:
             "_reactive_dirty_mask",
             "_reactive_revision",
             "_reactive_observers",
+            "_reactive_frozen",
         }
         cached_roots = {f"cached_{name}" for name in self.root_properties}
         extras = {
@@ -161,6 +192,7 @@ class Reactive:
             _PICKLE_VERSION_KEY: _PICKLE_STATE_VERSION,
             _PICKLE_ROOTS_KEY: roots,
             _PICKLE_EXTRAS_KEY: extras,
+            _PICKLE_FROZEN_KEY: self._reactive_frozen,
         }
 
     def __setstate__(self, state: dict[str, Any]) -> None:
@@ -170,15 +202,16 @@ class Reactive:
         if _PICKLE_ROOTS_KEY in state:
             roots = state[_PICKLE_ROOTS_KEY]
             extras = state.get(_PICKLE_EXTRAS_KEY, {})
+            frozen = bool(state.get(_PICKLE_FROZEN_KEY, False))
         else:
             # Best-effort support for objects pickled from the pull-based
             # implementation, whose authoritative roots lived in cached_*.
             roots = {}
+            frozen = False
             extras = {
                 name: value
                 for name, value in state.items()
-                if not name.startswith("cached_")
-                and name not in {"cache", "_version", "_revision"}
+                if not name.startswith("cached_") and name not in {"cache", "_version", "_revision"}
             }
             for name in self.root_properties:
                 cached_name = f"cached_{name}"
@@ -191,6 +224,8 @@ class Reactive:
         for name in sorted(self.root_properties):
             if name in roots:
                 setattr(self, name, roots[name])
+        if frozen:
+            self.freeze()
 
     def invalidate(self, *names: str) -> None:
         """Mark selected nodes, or every derived node, dirty."""
@@ -248,6 +283,7 @@ class Reactive:
 
         def fset(self, value):
             self._ensure_reactive_state()
+            self._require_mutable_root(name)
             value = self._prepare_root_value(name, value)
             value, plan = _prepare_reactive_value(value, path=name)
             old = self.__dict__.get(cached_name, _MISSING)
@@ -273,6 +309,7 @@ class Reactive:
 
         original_fget = attr.fget
         original_fset = attr.fset
+        original_fdel = attr.fdel
         root_slot = cls._reactive_root_indices[name]
 
         def fget(self):
@@ -289,6 +326,7 @@ class Reactive:
 
             def fset(self, value):
                 self._ensure_reactive_state()
+                self._require_mutable_root(name)
                 old = original_fget(self) if original_fget is not None else _MISSING
                 value = self._prepare_root_value(name, value)
                 value, plan = _prepare_reactive_value(value, path=name)
@@ -304,10 +342,21 @@ class Reactive:
             fset._reactive_root_wrapped = True  # type: ignore[attr-defined]
             fset.__wrapped__ = original_fset  # type: ignore[attr-defined]
 
+        if original_fdel is None:
+            fdel = None
+        else:
+
+            def fdel(self):
+                self._ensure_reactive_state()
+                self._require_mutable_root(name)
+                original_fdel(self)
+
+            fdel.__wrapped__ = original_fdel  # type: ignore[attr-defined]
+
         fget._reactive_root_wrapped = True  # type: ignore[attr-defined]
         if original_fget is not None:
             fget.__wrapped__ = original_fget  # type: ignore[attr-defined]
-        setattr(cls, name, property(fget=fget, fset=fset, fdel=attr.fdel, doc=attr.__doc__))
+        setattr(cls, name, property(fget=fget, fset=fset, fdel=fdel, doc=attr.__doc__))
 
     @classmethod
     def _wrap_derived_properties(
@@ -333,6 +382,8 @@ class Reactive:
                     value = orig(self)
                     value, plan = _prepare_reactive_value(value, path=node)
                     self._reject_nested_cycle(value, node=node)
+                    if self._reactive_frozen:
+                        _freeze_nested_reactives(value)
                     old = self._reactive_values[slot]
                     if old is not None:
                         self._unsubscribe_nested(node, old)
@@ -362,6 +413,31 @@ class Reactive:
 
     def _prepare_root_value(self, name: str, value: Any) -> Any:
         return type(self).reactive_inspections(name, value)
+
+    def _require_mutable_root(self, name: str) -> None:
+        if self._reactive_frozen:
+            raise AttributeError(
+                f"{type(self).__name__} is frozen; root property {name!r} cannot be modified"
+            )
+
+    def _freeze_recursive(self, seen: set[int]) -> None:
+        identity = id(self)
+        if identity in seen:
+            return
+        seen.add(identity)
+
+        values: list[Any] = []
+        for root in self.root_properties:
+            cached_name = f"cached_{root}"
+            if cached_name in self.__dict__:
+                values.append(self.__dict__[cached_name])
+        for index, value in enumerate(self._reactive_values):
+            if not self._reactive_dirty_mask & (1 << index):
+                values.append(value)
+        for value in values:
+            for child in _iter_nested_reactives(value):
+                child._freeze_recursive(seen)
+        object.__setattr__(self, "_reactive_frozen", True)
 
     @classmethod
     def reactive_inspections(cls, name: str, value: Any) -> Any:
@@ -601,6 +677,12 @@ def _iter_nested_reactives(value: Any):
     elif type(value) in {dict, MappingProxyType}:
         for item in value.values():
             yield from _iter_nested_reactives(item)
+
+
+def _freeze_nested_reactives(value: Any) -> None:
+    seen: set[int] = set()
+    for child in _iter_nested_reactives(value):
+        child._freeze_recursive(seen)
 
 
 def _build_reverse_adj(dependency_graph: dict[str, set[str]]) -> dict[str, set[str]]:

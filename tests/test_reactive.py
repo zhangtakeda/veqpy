@@ -54,6 +54,18 @@ class ParentGraph(Reactive):
         return self.child.total + 1.0
 
 
+class DerivedChildGraph(Reactive):
+    root_properties = {"x"}
+
+    def __init__(self, x: float) -> None:
+        super().__init__()
+        self.x = x
+
+    @property
+    def child(self) -> SplitGraph:
+        return SplitGraph(self.x, self.x + 1.0)
+
+
 class MappingGraph(Reactive):
     root_properties = {"children"}
 
@@ -270,6 +282,66 @@ def test_pickle_stores_roots_and_rebuilds_derived_state() -> None:
     restored = pickle.loads(pickle.dumps(graph))
     assert restored.x == 3.0
     assert restored.doubled == 6.0
+
+
+def test_freeze_is_in_place_and_keeps_lazy_derived_evaluation() -> None:
+    graph = SplitGraph(2.0, 5.0)
+
+    assert graph.freeze() is graph
+    assert graph.is_frozen
+    with pytest.raises(AttributeError, match="root property 'x'"):
+        graph.x = 4.0
+
+    assert graph.total == 19.0
+    assert graph.total == 19.0
+    assert (graph._left_calls, graph._right_calls, graph._total_calls) == (1, 1, 1)
+
+
+def test_freeze_recursively_freezes_nested_reactive_roots() -> None:
+    child = SplitGraph(2.0, 5.0)
+    parent = ParentGraph(child)
+
+    parent.freeze()
+    assert parent.is_frozen
+    assert child.is_frozen
+    with pytest.raises(AttributeError, match="root property 'y'"):
+        child.y = 7.0
+
+
+def test_reactive_derived_after_freeze_is_also_frozen() -> None:
+    graph = DerivedChildGraph(2.0).freeze()
+
+    child = graph.child
+    assert child.is_frozen
+    with pytest.raises(AttributeError, match="root property 'x'"):
+        child.x = 3.0
+
+
+def test_thaw_returns_an_independent_mutable_snapshot_with_empty_caches() -> None:
+    original = ParentGraph(SplitGraph(2.0, 5.0))
+    assert original.value == 20.0
+    original.freeze()
+
+    thawed = original.thaw()
+    assert thawed is not original
+    assert thawed.child is not original.child
+    assert not thawed.is_frozen
+    assert not thawed.child.is_frozen
+    assert thawed._value_calls == 1
+
+    thawed.child.x = 6.0
+    assert thawed.value == 28.0
+    assert original.value == 20.0
+
+
+def test_pickle_preserves_frozen_state_without_persisting_caches() -> None:
+    graph = PickleGraph(3.0).freeze()
+
+    restored = pickle.loads(pickle.dumps(graph))
+    assert restored.is_frozen
+    assert restored.doubled == 6.0
+    with pytest.raises(AttributeError, match="root property 'x'"):
+        restored.x = 4.0
 
 
 def test_pull_reactive_pickle_state_remains_readable() -> None:
