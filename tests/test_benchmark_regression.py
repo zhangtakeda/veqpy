@@ -145,8 +145,8 @@ def test_strict_pj23_same_grid_round_trip_closes_flux_and_current() -> None:
             kernel.close()
 
         assert result.success
-        assert F_error <= 5.0e-9
-        assert psi_r_error <= 5.0e-8
+        assert F_error <= 1.0e-8
+        assert psi_r_error <= 2.0e-7
         assert np.max(np.abs(result.x - reference_x)) <= 1.0e-6
         assert abs(equilibrium.Ip - reference_Ip) / abs(reference_Ip) <= 1.0e-12
         assert current_error <= 5.0e-7

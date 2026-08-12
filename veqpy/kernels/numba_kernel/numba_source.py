@@ -65,15 +65,11 @@ PJ2_PSIN_UNIFORM_FIXED_POINT_MAX_RESIDUAL = 1.0e-10
 PJ2_PSIN_UNIFORM_FIXED_POINT_FINALIZE_ITER = 8
 PJ2_PSIN_UNIFORM_BARYCENTRIC_ORDER_CAP = 8
 
-# Geometric-rho PJ2/PJ3 strict closures use a deterministic number of Picard
-# sweeps, then certify the dimensionless fixed-point defect.  The gate is two
-# orders tighter than the default outer VEQ residual tolerance (1e-6), so the
-# source closure cannot become the outer solve's residual floor.
-PJ23_STRICT_FIXED_POINT_MAX_RESIDUAL = 1.0e-8
-PJ2_STRICT_FIXED_POINT_IP_ITER = 5
-PJ2_STRICT_FIXED_POINT_ABSOLUTE_ITER = 8
-PJ3_STRICT_FIXED_POINT_IP_ITER = 9
-PJ3_STRICT_FIXED_POINT_ABSOLUTE_ITER = 14
+# Geometric-rho PJ2/PJ3 strict closures stop as soon as their dimensionless
+# Picard defect reaches the default outer VEQ residual scale.  A shared cap keeps
+# source materialization bounded without paying route-specific fixed sweep counts.
+PJ23_STRICT_FIXED_POINT_MAX_ITER = 10
+PJ23_STRICT_FIXED_POINT_MAX_RESIDUAL = 1.0e-6
 
 RHO_COORDINATE = 0
 PSIN_COORDINATE = 1
@@ -3024,7 +3020,6 @@ def _update_pj23_strict_from_rho_inputs_with_scratch(
     array_scratch: np.ndarray,
     matrix_scratch: np.ndarray,
     use_jtotal_semantics: bool,
-    iteration_count: int,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
     V_r, Kn, _, Ln_r, _, _, _ = _source_geometry_workspace_views(
@@ -3063,7 +3058,8 @@ def _update_pj23_strict_from_rho_inputs_with_scratch(
     F = F_fields[0]
     F.fill(R0 * B0)
 
-    for _ in range(iteration_count):
+    defect = np.inf
+    for _ in range(PJ23_STRICT_FIXED_POINT_MAX_ITER):
         _strict_fixed_point_map(
             mapped_u,
             mapped_C,
@@ -3087,38 +3083,19 @@ def _update_pj23_strict_from_rho_inputs_with_scratch(
             Ip,
             use_jtotal_semantics,
         )
+        defect = _strict_fixed_point_defect(u, C, mapped_u, mapped_C, Ip)
+        if np.isfinite(defect) and defect <= PJ23_STRICT_FIXED_POINT_MAX_RESIDUAL:
+            break
         copy_into(u, mapped_u)
         copy_into(C, mapped_C)
 
-    # One non-mutating map certifies the state that will actually be published.
-    _strict_fixed_point_map(
-        mapped_u,
-        mapped_C,
-        ru0,
-        ru1,
-        rc0,
-        rc1,
-        F,
-        u,
-        C,
-        pprime_input,
-        driver_input,
-        pressure_multiplier,
-        B0,
-        R0 * B0,
-        Kn,
-        Ln_r,
-        V_r,
-        weights,
-        accumulator,
-        Ip,
-        use_jtotal_semantics,
-    )
-    defect = _strict_fixed_point_defect(u, C, mapped_u, mapped_C, Ip)
     if not np.isfinite(defect) or defect > PJ23_STRICT_FIXED_POINT_MAX_RESIDUAL:
-        raise ValueError("strict PJ2/PJ3 fixed-point closure did not reach 1e-8")
+        raise ValueError(
+            "strict PJ2/PJ3 fixed-point closure did not reach 1e-6 within 10 iterations"
+        )
 
-    # The final map has refreshed F and ru0 at the accepted (u, C) state.
+    # The accepted non-mutating map has refreshed F and ru0 at the published
+    # (u, C) state; mapped_u/mapped_C differ from it by at most the gate above.
     F_r = F_fields[1]
     F_rr = F_fields[2]
     for i in range(F.shape[0]):
@@ -3181,16 +3158,11 @@ def _update_pj2_strict_from_rho_inputs_with_scratch(
     array_scratch: np.ndarray,
     matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
-    iteration_count = (
-        PJ2_STRICT_FIXED_POINT_ABSOLUTE_ITER
-        if np.isnan(Ip)
-        else PJ2_STRICT_FIXED_POINT_IP_ITER
-    )
     return _update_pj23_strict_from_rho_inputs_with_scratch(
         out_root_fields, out_FFn_psin, out_Pn_psin, pprime_input, driver_input,
         coordinate_code, R0, B0, weights, differentiator, accumulator,
         grid_radial_fields, n_axis_fix, radial_fields, surface_fields, F_fields,
-        scaled_p0, Ip, beta, array_scratch, matrix_scratch, False, iteration_count,
+        scaled_p0, Ip, beta, array_scratch, matrix_scratch, False,
     )
 
 
@@ -3218,16 +3190,11 @@ def _update_pj3_strict_from_rho_inputs_with_scratch(
     array_scratch: np.ndarray,
     matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
-    iteration_count = (
-        PJ3_STRICT_FIXED_POINT_ABSOLUTE_ITER
-        if np.isnan(Ip)
-        else PJ3_STRICT_FIXED_POINT_IP_ITER
-    )
     return _update_pj23_strict_from_rho_inputs_with_scratch(
         out_root_fields, out_FFn_psin, out_Pn_psin, pprime_input, driver_input,
         coordinate_code, R0, B0, weights, differentiator, accumulator,
         grid_radial_fields, n_axis_fix, radial_fields, surface_fields, F_fields,
-        scaled_p0, Ip, beta, array_scratch, matrix_scratch, True, iteration_count,
+        scaled_p0, Ip, beta, array_scratch, matrix_scratch, True,
     )
 
 
