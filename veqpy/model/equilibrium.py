@@ -863,7 +863,13 @@ class Equilibrium(Reactive, Serial):
             NR=int(NR),
             NZ=int(Z_nodes.size),
             R0=float(self.R0),
-            Z0=float(self.Z0),
+            # GEQDSK's zdim/rleft/zmid geometry tuple describes the
+            # rectilinear psi grid.  Equilibrium.Z0, on the other hand, is the
+            # vertical reference of the fitted plasma boundary.  They coincide
+            # for a vertically symmetric case but are independent in general.
+            # Keep zmid consistent with the Z nodes used to rasterize psi so a
+            # write/read round trip does not translate the internal surfaces.
+            Z0=0.5 * (Zmin + Zmax),
             Rmin=Rmin,
             Rmax=Rmax,
             Zmin=Zmin,

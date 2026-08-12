@@ -36,15 +36,15 @@ source = veq.KernelSource(
     case_name="solovev-geqdsk",
 )
 
-# This compact Solovev topology has nine active profile coefficients.
+# Use enough vertical-shift and Fourier freedom for vertically asymmetric g-files.
 topology = veq.KernelTopology(
-    h_count=2,
-    v_count=0,
-    kappa_count=2,
-    psin_count=3,
+    h_count=10,
+    v_count=10,
+    kappa_count=10,
+    psin_count=10,
     F_count=0,
-    c_counts=(),
-    s_counts=(2,),
+    c_counts=(5, 5, 5, 5, 5, 5, 5, 5, 5),
+    s_counts=(5, 5, 5, 5, 5, 5, 5, 5, 5),
     Nr=32,
     Nt=32,
     route="PF",

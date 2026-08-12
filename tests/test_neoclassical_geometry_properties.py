@@ -269,6 +269,35 @@ def test_signed_f_and_q_follow_the_fixed_cocos_contract(b0: float, ip: float) ->
     assert not np.allclose(geqdsk.boundary, np.column_stack((equilibrium.R[-1], equilibrium.Z[-1])))
 
 
+def test_geqdsk_roundtrip_preserves_an_asymmetric_vertical_grid(tmp_path) -> None:
+    equilibrium = _demo_equilibrium()
+    equilibrium.Z0 = 0.25
+    z_range = (-1.7, 1.1)
+
+    geqdsk = equilibrium.to_geqdsk(
+        R_range=(0.2, 2.0),
+        Z_range=z_range,
+        NR=17,
+        NZ=19,
+    )
+
+    # GEQDSK Z0 is zmid for the rectangular psi grid, not the equilibrium's
+    # fitted plasma-boundary reference height.
+    expected_zmid = 0.5 * sum(z_range)
+    assert geqdsk.Z0 == pytest.approx(expected_zmid)
+    assert geqdsk.Zaxis == pytest.approx(float(equilibrium.Z[0, 0]))
+
+    output = tmp_path / "asymmetric-z-grid.geqdsk"
+    geqdsk.write(output)
+    restored = veq.Geqdsk(output)
+
+    assert restored.Z0 == pytest.approx(expected_zmid)
+    assert restored.Zmin == pytest.approx(z_range[0])
+    assert restored.Zmax == pytest.approx(z_range[1])
+    np.testing.assert_allclose(restored.psi, geqdsk.psi, rtol=5.0e-10, atol=5.0e-11)
+    np.testing.assert_allclose(restored.boundary, geqdsk.boundary)
+
+
 @pytest.mark.parametrize("b0", [-3.0, 3.0])
 def test_pj2_jpara_reconstructs_imas_jtotal_with_gm1(b0: float) -> None:
     equilibrium = _demo_equilibrium(b0=b0)
