@@ -73,7 +73,8 @@ def test_geqdsk_demo_writes_geqdsk_and_comparison(tmp_path: Path) -> None:
     assert output.is_file()
     exported = Geqdsk(output)
     exported.check()
-    assert (exported.NR, exported.NZ) == (257, 257)
+    reference = Geqdsk(PROJECT_ROOT / "data" / "TEST.geqdsk")
+    assert (exported.NR, exported.NZ) == (reference.NR, reference.NZ)
     assert exported.boundary.shape == (65, 2)
     assert exported.boundary[-1].tolist() == exported.boundary[0].tolist()
 
