@@ -21,6 +21,8 @@ from typing import TYPE_CHECKING, Self
 
 import numpy as np
 from numba import njit
+from scipy.sparse import csr_matrix
+from scipy.sparse.linalg import spsolve
 
 from veqpy.base import Reactive, Serial
 from veqpy.model.geqdsk import Geqdsk
@@ -832,7 +834,15 @@ class Equilibrium(Reactive, Serial):
         psi_axis: float = 0.0,
         psi_outside: float | None = None,
     ) -> Geqdsk:
-        """Export a GEQDSK snapshot written in physical psi."""
+        """Export a GEQDSK snapshot written in physical psi.
+
+        By default, the rectangular region outside the LCFS is continued by a
+        vacuum Grad--Shafranov solve.  Its outer-box Dirichlet data has one
+        excitation side and a low positive window on the other sides, producing
+        a last closed surface near the LCFS without connecting ``psi_bound`` to
+        the box.  Passing ``psi_outside`` explicitly retains the fixed-value
+        override.
+        """
         R_nodes, Z_nodes, Rmin, Rmax, Zmin, Zmax = _build_geqdsk_rectilinear_grid(
             R_range=R_range,
             Z_range=Z_range,
@@ -847,7 +857,7 @@ class Equilibrium(Reactive, Serial):
         # GEQDSK stores physical psi on a rectangular R/Z grid.  Internally this
         # snapshot carries normalized psin, so alpha2 supplies the physical span.
         psi_bound = psi_axis + psi_scale
-        psi_outside_value = psi_bound if psi_outside is None else float(psi_outside)
+        psi_outside_value = None if psi_outside is None else float(psi_outside)
         # GEQDSK owns the magnetic axis and LCFS explicitly.  A native Legendre
         # solve grid owns neither, so first lower the snapshot to an
         # endpoint-inclusive view instead of aliasing its first/last interior
@@ -1356,7 +1366,7 @@ def _interpolate_psin_to_rectilinear_grid(
     Z_nodes: np.ndarray,
     psi_axis: float,
     psi_scale: float,
-    psi_outside: float,
+    psi_outside: float | None,
 ) -> np.ndarray:
     R_surfaces = np.asarray(R_surfaces, dtype=np.float64)
     Z_surfaces = np.asarray(Z_surfaces, dtype=np.float64)
@@ -1382,7 +1392,7 @@ def _interpolate_psin_to_rectilinear_grid(
         Z_grid,
     )
 
-    psi_grid = np.full(R_grid.shape, float(psi_outside), dtype=np.float64)
+    psi_grid = np.empty(R_grid.shape, dtype=np.float64)
     inside = np.isfinite(rho2_grid)
     if np.any(inside):
         # First locate each R/Z cell in the flux-surface mesh, then convert the
@@ -1390,7 +1400,226 @@ def _interpolate_psin_to_rectilinear_grid(
         psi_grid[inside] = float(psi_axis) + float(psi_scale) * np.interp(
             rho2_grid[inside], rho2_src, psin
         )
+    outside = ~inside
+    if np.any(outside):
+        if psi_outside is None:
+            exterior_psin = _vacuum_exterior_psin(
+                R_grid,
+                Z_grid,
+                inside,
+                R_surfaces[-1],
+                Z_surfaces[-1],
+            )
+            psi_grid[outside] = float(psi_axis) + float(psi_scale) * exterior_psin[outside]
+        else:
+            psi_grid[outside] = float(psi_outside)
     return psi_grid
+
+
+def _vacuum_exterior_psin(
+    R_grid: np.ndarray,
+    Z_grid: np.ndarray,
+    inside: np.ndarray,
+    boundary_R: np.ndarray,
+    boundary_Z: np.ndarray,
+) -> np.ndarray:
+    """Solve the current-free Grad--Shafranov equation outside the LCFS.
+
+    The normalized exterior increment is zero on the exact polygonal LCFS and
+    positive on the rectangular box.  Most of the box is held at a small floor;
+    a smooth excitation is placed on the side opposite the shortest LCFS-to-box
+    clearance.  This boundary control opens the far exterior while the positive
+    floor keeps the ``psin == 1`` LCFS disconnected from the box.
+
+    A closed regular level curve wholly in the exterior cannot be contractible:
+    otherwise uniqueness for the elliptic Dirichlet problem would make its
+    interior constant.  Thus every closed exterior contour surrounds the LCFS.
+    Once a sublevel path joins the LCFS to the box, every higher contour is open
+    because a surrounding curve would have to cross that path.  The near-LCFS
+    closed collar is therefore compatible with a rigorously open far exterior.
+    """
+
+    R_grid = np.asarray(R_grid, dtype=np.float64)
+    Z_grid = np.asarray(Z_grid, dtype=np.float64)
+    inside = np.asarray(inside, dtype=bool)
+    boundary_R = np.asarray(boundary_R, dtype=np.float64).reshape(-1)
+    boundary_Z = np.asarray(boundary_Z, dtype=np.float64).reshape(-1)
+    if R_grid.shape != Z_grid.shape or R_grid.shape != inside.shape:
+        raise ValueError(
+            "R_grid, Z_grid, and inside must share a shape, got "
+            f"{R_grid.shape}, {Z_grid.shape}, and {inside.shape}"
+        )
+    if boundary_R.shape != boundary_Z.shape or boundary_R.size < 3:
+        raise ValueError("LCFS boundary must contain at least three R/Z points")
+
+    boundary = np.column_stack((boundary_R, boundary_Z))
+    if np.array_equal(boundary[0], boundary[-1]):
+        boundary = boundary[:-1]
+    if not np.all(np.isfinite(boundary)):
+        raise ValueError("LCFS boundary must contain only finite R/Z points")
+
+    R_nodes = np.asarray(R_grid[:, 0], dtype=np.float64)
+    Z_nodes = np.asarray(Z_grid[0, :], dtype=np.float64)
+    nr, nz = R_grid.shape
+    if nr < 2 or nz < 2:
+        raise ValueError("GEQDSK exterior solve requires at least a 2 x 2 R/Z grid")
+    dR = float(R_nodes[1] - R_nodes[0])
+    dZ = float(Z_nodes[1] - Z_nodes[0])
+    if dR <= 0.0 or dZ <= 0.0:
+        raise ValueError("GEQDSK R/Z nodes must be strictly increasing")
+    if np.any(R_nodes <= 0.0):
+        raise ValueError("Vacuum Grad-Shafranov continuation requires R > 0")
+
+    outside = ~inside
+    exterior_psin = np.full(R_grid.shape, np.nan, dtype=np.float64)
+    exterior_psin[inside] = 1.0
+    if not np.any(outside):
+        return exterior_psin
+
+    box = np.zeros(R_grid.shape, dtype=bool)
+    box[0, :] = True
+    box[-1, :] = True
+    box[:, 0] = True
+    box[:, -1] = True
+    fixed_box = box & outside
+
+    Rspan = float(R_nodes[-1] - R_nodes[0])
+    Zspan = float(Z_nodes[-1] - Z_nodes[0])
+    boundary_clearances = (
+        np.min((boundary[:, 0] - R_nodes[0]) / Rspan),
+        np.min((R_nodes[-1] - boundary[:, 0]) / Rspan),
+        np.min((boundary[:, 1] - Z_nodes[0]) / Zspan),
+        np.min((Z_nodes[-1] - boundary[:, 1]) / Zspan),
+    )
+    closest_side = int(np.argmin(boundary_clearances))
+    excitation_side = (1, 0, 3, 2)[closest_side]
+    increment = np.full(R_grid.shape, 1.0e-9, dtype=np.float64)
+    if excitation_side in (0, 1):
+        angular = (Z_nodes - Z_nodes[0]) / Zspan
+        boundary_values = 1.0e-9 + 1.0e-1 * np.sin(np.pi * angular) ** 2
+        side_index = 0 if excitation_side == 0 else nr - 1
+        increment[side_index, :] = boundary_values
+    else:
+        angular = (R_nodes - R_nodes[0]) / Rspan
+        boundary_values = 1.0e-9 + 1.0e-1 * np.sin(np.pi * angular) ** 2
+        side_index = 0 if excitation_side == 2 else nz - 1
+        increment[:, side_index] = boundary_values
+
+    unknown = outside & ~fixed_box
+    if not np.any(unknown):
+        exterior_psin[outside] = 1.0 + increment[outside]
+        return exterior_psin
+
+    indices = np.full(R_grid.shape, -1, dtype=np.int64)
+    indices[unknown] = np.arange(np.count_nonzero(unknown), dtype=np.int64)
+    rows: list[int] = []
+    columns: list[int] = []
+    matrix_values: list[float] = []
+    rhs = np.zeros(np.count_nonzero(unknown), dtype=np.float64)
+
+    for i, j in np.argwhere(unknown):
+        row = int(indices[i, j])
+        center = np.array([R_grid[i, j], Z_grid[i, j]], dtype=np.float64)
+        h_left = _cut_edge_distance(
+            center,
+            np.array([R_grid[i - 1, j], Z_grid[i - 1, j]]),
+            bool(inside[i - 1, j]),
+            boundary,
+        )
+        h_right = _cut_edge_distance(
+            center,
+            np.array([R_grid[i + 1, j], Z_grid[i + 1, j]]),
+            bool(inside[i + 1, j]),
+            boundary,
+        )
+        h_down = _cut_edge_distance(
+            center,
+            np.array([R_grid[i, j - 1], Z_grid[i, j - 1]]),
+            bool(inside[i, j - 1]),
+            boundary,
+        )
+        h_up = _cut_edge_distance(
+            center,
+            np.array([R_grid[i, j + 1], Z_grid[i, j + 1]]),
+            bool(inside[i, j + 1]),
+            boundary,
+        )
+
+        radius = float(R_grid[i, j])
+        coefficients = (
+            2.0 / (h_left * (h_left + h_right))
+            + h_right / (radius * h_left * (h_left + h_right)),
+            2.0 / (h_right * (h_left + h_right))
+            - h_left / (radius * h_right * (h_left + h_right)),
+            2.0 / (h_down * (h_down + h_up)),
+            2.0 / (h_up * (h_down + h_up)),
+        )
+        neighbors = ((i - 1, j), (i + 1, j), (i, j - 1), (i, j + 1))
+        diagonal = 0.0
+        for coefficient, (ni, nj) in zip(coefficients, neighbors, strict=True):
+            if coefficient <= 0.0 or not np.isfinite(coefficient):
+                raise ValueError("Invalid exterior Grad-Shafranov stencil coefficient")
+            diagonal += coefficient
+            neighbor_index = int(indices[ni, nj])
+            if neighbor_index >= 0:
+                rows.append(row)
+                columns.append(neighbor_index)
+                matrix_values.append(-coefficient)
+            elif fixed_box[ni, nj]:
+                rhs[row] += coefficient * float(increment[ni, nj])
+            # An inside neighbor is replaced by the exact zero-increment LCFS
+            # intersection located through the shortened stencil distance.
+
+        rows.append(row)
+        columns.append(row)
+        matrix_values.append(diagonal)
+
+    matrix = csr_matrix((matrix_values, (rows, columns)), shape=(rhs.size, rhs.size))
+    solution = np.asarray(spsolve(matrix, rhs), dtype=np.float64)
+    if solution.shape != rhs.shape or not np.all(np.isfinite(solution)):
+        raise ValueError("Exterior Grad-Shafranov continuation did not produce a finite solution")
+    if np.min(solution) < -1.0e-12:
+        raise ValueError("Exterior Grad-Shafranov continuation violated its positive boundary data")
+    increment[unknown] = np.maximum(solution, 0.0)
+    exterior_psin[outside] = 1.0 + increment[outside]
+    return exterior_psin
+
+
+def _cut_edge_distance(
+    start: np.ndarray,
+    end: np.ndarray,
+    end_is_inside: bool,
+    boundary: np.ndarray,
+) -> float:
+    """Return grid-edge distance, shortened to its LCFS intersection."""
+
+    edge = end - start
+    full_distance = float(np.hypot(edge[0], edge[1]))
+    if not end_is_inside:
+        return full_distance
+
+    fractions: list[float] = []
+    for segment_start, segment_end in zip(
+        boundary,
+        np.roll(boundary, -1, axis=0),
+        strict=True,
+    ):
+        segment = segment_end - segment_start
+        denominator = edge[0] * segment[1] - edge[1] * segment[0]
+        if abs(denominator) <= 1.0e-18:
+            continue
+        offset = segment_start - start
+        edge_fraction = (offset[0] * segment[1] - offset[1] * segment[0]) / denominator
+        segment_fraction = (offset[0] * edge[1] - offset[1] * edge[0]) / denominator
+        if -1.0e-12 <= edge_fraction <= 1.0 + 1.0e-12 and (
+            -1.0e-12 <= segment_fraction <= 1.0 + 1.0e-12
+        ):
+            fractions.append(float(np.clip(edge_fraction, 0.0, 1.0)))
+
+    if not fractions:
+        raise ValueError("Could not locate the LCFS intersection on a cut GEQDSK grid edge")
+    distance = min(fractions) * full_distance
+    return float(np.clip(distance, full_distance * 1.0e-8, full_distance))
 
 
 def _interpolate_rho2_to_rectilinear_grid(

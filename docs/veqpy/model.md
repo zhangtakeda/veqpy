@@ -23,6 +23,15 @@ GEQDSK LCFS points remain passive data in `Geqdsk.boundary`. Runtime boundary
 parameters and boundary-point fitting belong to `KernelBoundary`, not to a
 separate model object.
 
+`Equilibrium.to_geqdsk()` rasterizes the solved closed surfaces inside the LCFS.
+Its default exterior solves the current-free Grad-Shafranov equation with zero
+flux increment on the LCFS and positive controlled Dirichlet data on the
+rectangular box. The boundary control leaves a narrow collar of closed surfaces
+near the LCFS and opens the far exterior without joining the `psi_bound` LCFS to
+the box. `Geqdsk.boundary` retains the exact, explicitly closed LCFS polygon.
+Supplying `psi_outside` explicitly instead requests the legacy scalar exterior
+value.
+
 `Profile` represents a one-dimensional radial profile with scale, power,
 envelope, offset, and optional Chebyshev coefficients. Its persistent state is
 only those root parameters. When a `Grid` is bound, it lazily materializes
