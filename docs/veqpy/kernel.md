@@ -189,7 +189,39 @@ initial-state policy, continuation policy, residual acceptance threshold, and
 evaluation limits. `SolveResult` records the final packed state, raw residual,
 scaled residual, source `alpha` values, function/iteration counters, success
 flag, and elapsed time. `Kernel.jvp(...)` and `Kernel.jacobian(...)` are
-finite-difference numerical queries over the same residual runtime.
+finite-difference numerical queries over the same residual runtime: they
+differentiate the residual with respect to the internal packed state while the
+boundary and source stay fixed.
+
+`Kernel.solve_jvp(...)` instead differentiates the complete converged solve map
+with respect to continuous `KernelBoundary` and `KernelSource` fields. Tangents
+use mappings with the corresponding dataclass field names. The default output
+is the converged packed state; an output callback can encode fixed-shape
+`Equilibrium` fields or downstream diagnostics:
+
+```python
+def equilibrium_output(kernel, result):
+    equilibrium = kernel.build_equilibrium(result.x)
+    return np.concatenate([equilibrium.q, equilibrium.jtor, [equilibrium.Ip]])
+
+d_output = kernel.solve_jvp(
+    boundary,
+    source,
+    source_tangent={"pprime": d_pprime, "ffprime": d_ffprime},
+    output=equilibrium_output,
+    base_result=result,
+)
+```
+
+The initial implementation supports the Numba backend and uses two converged
+perturbation solves about the same base solution. It is therefore a
+forward-only, matrix-free numerical JVP, not an assembled Jacobian or reverse
+VJP. It transactionally restores Kernel history, result, runtime case, and
+Numba continuation state after the query. The Cxx backend is rejected until its
+native continuation workspace can provide equivalent transactional snapshots.
+OpenMDAO `ExplicitComponent` wrappers can call `solve_jvp` from
+`compute_jacvec_product(..., mode="fwd")`; fixed topology, coordinates, route,
+and solver choices remain discrete metadata rather than differentiable inputs.
 
 Warm continuation is handle-local: after a solve, the next `Kernel.solve(...)`
 can reuse the previous solution when the continuation policy is warm. Use

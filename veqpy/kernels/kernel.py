@@ -10,7 +10,7 @@ Notes:
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -19,6 +19,7 @@ import numpy as np
 
 from veqpy.kernels.initial import KernelInitial
 from veqpy.kernels.pareto import ParetoResult
+from veqpy.kernels.solve_map import solve_jvp as solve_map_jvp
 from veqpy.kernels.types import (
     KernelBoundary,
     KernelConfig,
@@ -176,6 +177,50 @@ class Kernel:
         source: KernelSource,
     ) -> None:
         self._impl.jvp_into(out, x, v, boundary, source)
+
+    def solve_jvp(
+        self,
+        boundary: KernelBoundary,
+        source: KernelSource,
+        *,
+        boundary_tangent: Mapping[str, Any] | None = None,
+        source_tangent: Mapping[str, Any] | None = None,
+        output: Callable[["Kernel", SolveResult], Any] | None = None,
+        base_result: SolveResult | None = None,
+        relative_step: float = 1.0e-5,
+        config: KernelConfig | None = None,
+        case_name: str | None = None,
+        x0: KernelInitial | None = None,
+        **config_overrides: Any,
+    ) -> np.ndarray:
+        """Evaluate a numerical JVP of the converged solve map.
+
+        This method differentiates runtime ``boundary`` and ``source`` inputs,
+        unlike :meth:`jvp`, which applies the residual Jacobian only to an
+        internal packed-state direction. Tangent mappings use the corresponding
+        dataclass field names. By default the output is ``SolveResult.x``; an
+        ``output`` callable may instead encode any fixed-shape numeric result,
+        including fields materialized through :meth:`build_equilibrium`.
+
+        The central finite difference uses the same converged base state as the
+        initial guess for both perturbations. Public result, history, and last
+        runtime-case state are restored before returning.
+        """
+
+        return solve_map_jvp(
+            self,
+            boundary,
+            source,
+            boundary_tangent=boundary_tangent,
+            source_tangent=source_tangent,
+            output=output,
+            base_result=base_result,
+            relative_step=relative_step,
+            config=config,
+            case_name=case_name,
+            x0=x0,
+            **config_overrides,
+        )
 
     def jacobian(self, x: Any, boundary: KernelBoundary, source: KernelSource) -> np.ndarray:
         return self._impl.jacobian(x, boundary, source)

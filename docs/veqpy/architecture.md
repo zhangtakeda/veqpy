@@ -71,7 +71,8 @@ The function-style helpers are short-lived wrappers:
 | `variant(...)` | Mutate active counts within the fixed capacity topology and return the same handle. |
 | `solve(boundary, source, ...)` | Solve one runtime case. |
 | `pareto(boundary, source, candidates=..., ...)` | Evaluate explicit reduced topology candidates against the active Numba capacity topology. |
-| `residual`, `residual_into`, `jvp`, `jvp_into`, `jacobian`, `jacobian_into` | Low-level numerical diagnostics for a supplied packed state. |
+| `residual`, `residual_into`, `jvp`, `jvp_into`, `jacobian`, `jacobian_into` | Low-level residual diagnostics for a supplied packed state. |
+| `solve_jvp(...)` | Forward JVP of the complete runtime-input-to-converged-output solve map. |
 | `build_equilibrium(x=None, *, grid=None)` | Build a model `Equilibrium` from the latest or supplied packed state, optionally on a requested output grid. |
 | `clear()`, `close()`, `pinned()` | Manage handle state, backend resources, and optional CPU pinning context. |
 

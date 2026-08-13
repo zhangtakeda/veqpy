@@ -47,6 +47,7 @@ dev = [
     "ruff>=0.4",
     "twine>=6.2",
     "nanobind>=2.0",
+    "openmdao>=3.45,<4",
 ]
 
 [project.urls]
