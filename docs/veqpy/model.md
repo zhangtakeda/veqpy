@@ -35,7 +35,7 @@ value.
 `Profile` represents a one-dimensional radial profile with scale, power,
 envelope, offset, and optional Chebyshev coefficients. Its persistent state is
 only those root parameters. When a `Grid` is bound, it lazily materializes
-`value`, `derivative`, and `second_derivative` on `grid.rho`; without a bound
+`value`, `derivative`, and `second_derivative` on `grid.r`; without a bound
 grid those fields are unavailable. Kernel runtime setup lowers active profile
 topology to flat arrays; `Profile` remains on the model side for
 `Equilibrium.shape_profiles` and other serializable snapshots.
@@ -55,10 +55,23 @@ These fields are sufficient to reconstruct common physical quantities without
 retaining solver-hot-path memory. When the user reads properties such as `R`,
 `Z`, `F`, `P`, `q`, `Ip`, `beta_t`, `jtor`, `jpara`, `jtotal`, `jphi`, `Psi`, or
 `Phi`, a self-contained Numba kernel materializes a new result and `Reactive`
-caches it until a direct dependency changes. The snapshot also exposes the IMAS
-toroidal-flux derivative `Phi_r`, coordinates `rho_tor`, `rho_tor_norm`, and
-their VEQ-`rho` derivatives, together with the IMAS properties `gm1` through
+caches it until a direct dependency changes. The integration grid is explicitly
+`(r, theta)`: `r` is VEQ's normalized
+geometric radius and `theta` is the poloidal angle. The snapshot also exposes
+the IMAS toroidal-flux derivative `Phi_r`, coordinates `rho_tor`, `rho`, and
+their VEQ-`r` derivatives, together with the IMAS properties `gm1` through
 `gm9`.
+
+Pressure derivatives are named by their actual independent variable:
+`P_r=dP/dr`, `P_rho=dP/drho`, and `P_psin=dP/dpsin`. `P_psi` is the conventional
+Grad-Shafranov derivative with respect to the unnormalized poloidal flux per
+radian `psi = Psi/(2*pi)`; hence `P_psin = alpha2 * P_psi` in VEQ's flux
+normalization. It is not an alias for `P_psin`.
+
+The toroidal-field source follows the same naming rule:
+`FF_r=F*dF/dr`, `FF_rho=F*dF/drho`, and `FF_psin=F*dF/dpsin`.
+`FF_psi=F*dF/dpsi` is the conventional GEQDSK quantity, so
+`FF_psin = alpha2 * FF_psi`. The model exposes all four explicitly.
 
 `F` retains the sign of `R0 * B0`. The PJ2 diagnostic `jpara` denotes
 `<J·B> / (F <R^-2>)`, while `jtotal` directly exposes the IMAS convention
@@ -81,7 +94,7 @@ remain in the Kernel runtime layer and do not become public snapshot API.
 `<...>` is the Jacobian-weighted flux-surface average and
 `rho_tor = sqrt(Phi / (pi B0))` is the physical toroidal-flux coordinate in
 metres. It must not be replaced by the normalized coordinate
-`rho_tor_norm` when calculating gradient-bearing coefficients.
+`rho` when calculating gradient-bearing coefficients.
 
 | Property | Definition | Unit |
 | -------- | ---------- | ---- |
@@ -127,19 +140,19 @@ invalidates grid-dependent descendants through the ordinary Reactive graph.
 
 ### Magnetic-axis limits
 
-On grids that contain `rho=0`, the public coordinate Jacobian is the raw
+On grids that contain `r=0`, the public coordinate Jacobian is the raw
 Jacobian produced by the surface map. It is not floored or clamped. Consequently
 `J`, `S`, `V`, `S_r`, `V_r`, and `Ln_r` vanish at the magnetic axis through their
 defining formulas. The model repairs only removable singularities in quantities
 that divide these primitives:
 
-- the local `gttdivJR` row uses its leading `rho*(A + O(rho))` form; its radial
+- the local `gttdivJR` row uses its leading `r*(A + O(r))` form; its radial
   derivative and the finite mixed metric coefficient use the corresponding
-  first-order-in-`rho` local limit (local fixed-angle geometry is not generally
-  even in `rho`);
-- flux functions `q`, `jtor`, `jpara`, and `jtotal` use an even-in-`rho^2`
+  first-order-in-`r` local limit (local fixed-angle geometry is not generally
+  even in `r`);
+- flux functions `q`, `jtor`, `jpara`, and `jtotal` use an even-in-`r^2`
   limit reconstructed from the first two off-axis surfaces;
-- `ftrap` follows its leading `sqrt(rho)*(A + O(rho))` behavior, and the local
+- `ftrap` follows its leading `sqrt(r)*(A + O(r))` behavior, and the local
   `jphi` formula is evaluated directly at the axis rather than extrapolated
   independently for every poloidal angle.
 

@@ -1,5 +1,16 @@
 # Kernel
 
+Source-coordinate semantics and ownership are specified separately in
+[`source-coordinate-ownership.md`](source-coordinate-ownership.md). All Kernel
+routes retain geometric `r` as the GS operator grid; `coordinate` identifies
+the parameterization of source data rather than replacing the operator grid.
+
+The coordinate vocabulary is intentionally unambiguous: geometric VEQ `rho`
+from the earlier API is now `r`, while the earlier `sqrt-phi` source coordinate
+is now `rho = sqrt(Phi_N)`. There are no compatibility aliases for either old
+name, because accepting them would make a valid-looking profile carry the wrong
+derivative semantics.
+
 The public runtime entrypoint is the Kernel API:
 
 ```python
@@ -10,7 +21,9 @@ from veqpy import Kernel, KernelBoundary, KernelConfig, KernelRecipe, KernelSour
 route, coordinate system, node semantics, source constraints, and capacity
 limits. Active count fields determine the public packed vector size. `L_max`,
 `M_max`, and `K_max` are setup/capacity limits: explicit values may exceed the
-minimal active-count requirement, but may not be smaller. `KernelBoundary` and
+minimal active-count requirement, but may not be smaller. For
+`nodes="explicit"`, source count and node positions belong to `KernelSource`
+and `KernelTopology.sample_count` is `None`. `KernelBoundary` and
 `KernelSource` carry per-case physical inputs. `KernelConfig` carries nonlinear
 solve policy. `Kernel.solve(...)` returns a shared `SolveResult`, and
 `Kernel.build_equilibrium(grid=...)` materializes the current `Equilibrium`
@@ -47,14 +60,17 @@ Public source inputs stay raw. Every `KernelSource` requires exactly one pressur
 representation:
 
 - `p=p`: absolute pressure samples; `p0` is derived and must not be supplied.
-- `pprime=pprime, p0=p0`: pressure-derivative samples plus the optional LCFS
-  pressure, which defaults to zero.
+- one coordinate-explicit derivative plus the optional LCFS pressure `p0`,
+  which defaults to zero: `P_r=dP/dr`, `P_rho=dP/drho`, or
+  `P_psin=dP/dpsin`. The field must match `KernelTopology.coordinate`; the
+  Kernel rejects a mismatched derivative before backend execution and applies
+  any later chain rule internally.
 
 It also requires exactly one driver selected by the topology route:
 
 | route | required driver |
 | --- | --- |
-| `PF` | `ffprime` |
+| `PF` | coordinate-matched `FF_r`, `FF_rho`, or `FF_psin` |
 | `PP` | `psi_r` |
 | `PI` | `itor` |
 | `PJ1` | `jtor` |
@@ -64,38 +80,65 @@ It also requires exactly one driver selected by the topology route:
 
 For example, a PQ case can be constructed as either
 `KernelSource(p=p, q=q, beta=beta)` or
-`KernelSource(pprime=pprime, p0=p0, q=q, beta=beta)`. Supplying both pressure
+`KernelSource(P_r=P_r, p0=p0, q=q, beta=beta)` for an `r` topology. Supplying both pressure
 representations, neither pressure representation, more than one driver, no
 driver, or a driver that does not match `KernelTopology.route` is rejected
-before backend execution. The old generic
+before backend execution. The old generic `pprime`, `ffprime`, and
 `heat_profile`/`current_profile` keywords are not accepted.
 
 For uniform `p` samples, the final sample is the LCFS pressure and the
 differentiation matrix acts in the selected source coordinate. The PP
 `sqrt_psin` parameterization applies the chain rule without differentiating on
-an ill-conditioned squared node grid. For Legendre grid samples in `rho`, the
-runtime uses the grid differentiation matrix and interpolates `p` to `rho=1`
+an ill-conditioned squared node grid. For Legendre grid samples in `r`, the
+runtime uses the grid differentiation matrix and interpolates `p` to `r=1`
 because Gauss-Legendre nodes exclude the edge. `p` is intentionally rejected for
-`coordinate="psin", nodes="grid"`: those nodes are fixed in `rho`, while
-`psin(rho)` is part of the unknown equilibrium. Use explicit `pprime` for that
+`coordinate="psin", nodes="grid"`: those nodes are fixed in `r`, while
+`psin(r)` is part of the unknown equilibrium. Use explicit `P_psin` for that
 topology or switch to uniform psin samples.
 
-Source lowering preserves every finite `pprime` and route-driver sample exactly
-apart from documented unit scaling. It does not impose magnetic-axis parity or
+`P_psin` and `FF_psin` are not the conventional Grad-Shafranov `P_psi` and
+`FF_psi`. The materialized equilibrium obeys `psi = alpha2 * psin`,
+`P_psin = alpha2 * P_psi`, and `FF_psin = alpha2 * FF_psi`. The PF backend
+closes the required source scale in an allocation-free scalar iteration. Its
+fixed equal-weight Picard average removes
+the reciprocal PF map's otherwise neutral two-cycle; it is not a runtime solver
+parameter. PF closes the magnitude of `alpha2` because `psin` remains oriented
+from axis to edge; an `Ip` constraint retains ownership of the physical flux
+direction. This keeps both public derivatives tied to
+their stated normalized coordinate without adding a profile unknown to the
+outer nonlinear solve.
+
+For arbitrary `explicit` samples, `p` and `dp/dcoordinate` are evaluated from
+one retained shape-preserving PCHIP. Static `r` evaluates the derivative on
+the operator grid; dynamic `psin` and `rho` evaluate it at the current
+nonlinear query. PP likewise evaluates `psi_r` and its outer
+radial derivative from one PCHIP, while deriving the inner derivative
+analytically from its existing odd axis extension. PI evaluates `itor` and
+`dItor/dr` from one PCHIP instead of differentiating remapped Gauss-grid
+values. These paths preserve the mathematical identity between a supplied
+field and the derivative consumed by the route. Coefficients and derivative
+arrays are built once per numerical source snapshot. Dynamic-coordinate routes
+already query their retained sources in the nonlinear residual loop, so
+differentiating that same local cubic adds no extra interval search.
+
+Source lowering preserves every finite coordinate-explicit pressure derivative
+and route-driver sample exactly apart from documented unit scaling. In
+particular, PF retains `FF_r`, `FF_rho`, or `FF_psin` on its native source
+coordinate before applying the required chain rule. It does not impose magnetic-axis parity or
 rewrite an inner radial interval. Route closures may still regularize their own
 derived quantities before an internal division; those backend-local limits
 never modify the public source arrays.
 
-For `coordinate="rho"`, the route stage follows a stricter ownership rule. No
+For `coordinate="r"`, the route stage follows a stricter ownership rule. No
 route applies a generic even-axis fit to `FFn_psin` after closing its defining
-equation. PI still reconstructs the zero-value axis limit of `dItor/drho`,
+equation. PI still reconstructs the zero-value axis limit of `dItor/dr`,
 because differentiating the current primitive is ill-conditioned there. PQ
 solves a first-order equation for `Y = F**2`; it reconstructs the odd
-zero-value limit of `dY/drho` before dividing by `psin_r`, instead of fitting
+zero-value limit of `dY/dr` before dividing by `psin_r`, instead of fitting
 the resulting `FFn_psin`. Source-owned algebraic routes reconstruct and floor
-`psin_r` before using it as a flux coordinate or denominator. Strict rho
+`psin_r` before using it as a flux coordinate or denominator. Strict r
 PJ2/PJ3 instead construct the axis-anchored primitive
-`C=K_n*dpsi/drho` directly; they do not post-fit or floor that accepted closure.
+`C=K_n*dpsi/dr` directly; they do not post-fit or floor that accepted closure.
 These are limits of derived coordinates or odd differentiated quantities, not
 edits to the authoritative source profile and not generic zero-derivative
 parity constraints.
@@ -103,21 +146,42 @@ parity constraints.
 The route-by-route ablation and convergence evidence is recorded in
 [`source-axis-policy.md`](source-axis-policy.md).
 
+For `coordinate="rho"`, source samples are functions of the normalized
+toroidal-flux radius `s = sqrt(Phi_N) = rho`, while geometric `r`
+remains the operator coordinate. The Numba source stage cold-starts from the
+deterministic toroidal-flux map obtained with `F=F_edge` and the current
+`Ln_r`, remaps the source profiles, applies the derivative chain rule, runs the
+corresponding r closure, and rebuilds `s` from `F*Ln_r` until a bounded local
+fixed point reaches the internal, non-configurable tolerance `1e-6`. Invalid
+trial geometry falls back to `s=r` rather than shrinking the nonlinear
+solver's previous trial-state domain.
+PJ2/PJ3 advance `(s, ds/dr, u, C)` in one joint Picard map rather than
+nesting their current closure inside a coordinate loop. This coordinate adds
+neither `psin` nor `F`
+coefficients to the outer packed state. Its equations, node semantics,
+convergence scan, and timing evidence are recorded in
+[`rho-source-closure.md`](rho-source-closure.md).
+
 `KernelSource.p0` is the pressure at the LCFS in Pa; `Ip` and `beta` are the
 optional global constraints. The runtime reconstructs the complete pressure
-from `pprime` and `p0`; a beta constraint scales both pieces, including `p0`, by
-one common factor. After route constraints have been applied, the source stage
+from the selected coordinate derivative and `p0`; a beta constraint scales both pieces,
+including `p0`, by one common factor. After route constraints have been applied, the source stage
 fixes the alpha gauge from `max(abs(mu0*p))` and inversely rescales `Pn` and
-`FFn`, preserving the physical Grad-Shafranov sources. Consequently
-`pprime=0, p0!=0` is a valid constant-pressure input, while a completely zero
+`FFn`, preserving the physical Grad-Shafranov sources. Consequently a zero
+`P_r`, `P_rho`, or `P_psin` with `p0!=0` is a valid constant-pressure input,
+while a completely zero
 pressure remains rejected.
 
-Numba and Cxx consume the same canonical materialized tuple
+Numba and Cxx share canonical lowering for
 `(scaled_pprime, scaled_driver, scaled_p0, scaled_Ip, beta)`. Absolute `p`
-therefore remains a public input convenience implemented once by shared
-lowering; it is not a second backend-specific source mode.
+therefore remains one public input representation rather than a second
+backend-specific source mode. For the Numba-only `explicit` contract, the same
+lowering additionally retains the scaled pressure primitive so the runtime can
+differentiate its PCHIP representation at the current source-coordinate query.
 Route-dependent scaling and internal materialized source arrays are backend
-runtime details, not user-facing data fields.
+runtime details, not user-facing data fields. Native `rho` coordinate
+closure is currently Numba-only; requesting it from Cxx raises an explicit
+unsupported-backend error.
 
 PJ2 and PJ3 share the same F-coupled current closure but not the same public
 physics. PJ2 accepts
@@ -131,10 +195,11 @@ jpara = B0 * jtotal / (F * gm1),    gm1 = <R^-2> = (2*pi)^2 * Ln_r / V_r
 inside every source evaluation using the current geometry and F profile. It is
 therefore not a setup-time alias or a frozen conversion.
 
-For `coordinate="rho"`, `F_count=0` selects the Numba strict closure. The source
+For `coordinate="r"`, `F_count=0` selects the Numba strict closure. The source
 stage solves the coupled radial equations for enclosed current and
 `u=log(F**2/F_edge**2)`, certifies a dimensionless fixed-point defect below
-`1e-8`, and publishes F and normalized flux without adding F coefficients to
+the internal, non-configurable tolerance `1e-6`, and publishes F and normalized
+flux without adding F coefficients to
 the outer Grad-Shafranov solve. A positive `F_count` retains the optimized-F
 approximation for controlled comparisons and Cxx parity. `coordinate="psin"`
 still requires positive `F_count`, because those samples must be remapped
@@ -148,8 +213,8 @@ The default Legendre grid is open: its first and last nodes are interior to
 ``(0, 1)`` and therefore are not the magnetic axis or LCFS. The shared grid
 contract exposes three distinct operations:
 
-- ``grid.axis_eval(profile)`` evaluates a nodal field at ``rho=0``;
-- ``grid.edge_eval(profile)`` evaluates it at ``rho=1``;
+- ``grid.axis_eval(profile)`` evaluates a nodal field at ``r=0``;
+- ``grid.edge_eval(profile)`` evaluates it at ``r=1``;
 - ``grid.full_integral(profile)`` integrates it over the complete ``[0, 1]``
   interval.
 
@@ -165,7 +230,7 @@ set by the full integral of ``psin_r``. Consequently ``axis_eval(psin)=0`` and
 
 ``Equilibrium.resample()`` evaluates a native polynomial-collocation snapshot
 at the target nodes, including true axis and LCFS values when the target grid
-owns them. The IMAS coordinate ``rho_tor_norm`` is normalized by the complete
+owns them. The IMAS coordinate ``rho`` is normalized by the complete
 toroidal-flux integral rather than the first and last stored samples. GEQDSK
 export similarly materializes explicit axis and LCFS surfaces before building
 its boundary, one-dimensional profiles, and two-dimensional flux mesh.
@@ -207,7 +272,7 @@ def equilibrium_output(kernel, result):
 d_output = kernel.solve_jvp(
     boundary,
     source,
-    source_tangent={"pprime": d_pprime, "ffprime": d_ffprime},
+    source_tangent={"P_psin": d_P_psin, "FF_psin": d_FF_psin},
     output=equilibrium_output,
     base_result=result,
 )

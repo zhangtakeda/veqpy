@@ -37,31 +37,31 @@ MU0 = 4e-7 * np.pi
 
 def _regularize_axis_linear_profile(
     values: np.ndarray,
-    rho: np.ndarray,
+    r: np.ndarray,
     *,
     copy: bool = False,
 ) -> np.ndarray:
     values = np.array(values, dtype=np.float64, copy=copy)
-    rho = np.asarray(rho, dtype=np.float64)
-    if values.ndim != 1 or rho.ndim != 1 or values.shape != rho.shape:
+    r = np.asarray(r, dtype=np.float64)
+    if values.ndim != 1 or r.ndim != 1 or values.shape != r.shape:
         raise ValueError(
-            f"Expected values/rho to share a 1D shape, got {values.shape} and {rho.shape}"
+            f"Expected values/r to share a 1D shape, got {values.shape} and {r.shape}"
         )
-    if values.size < 3 or abs(rho[0]) >= 1e-10:
+    if values.size < 3 or abs(r[0]) >= 1e-10:
         return values
 
-    # Diagnostics such as q and j are singular-looking at rho=0 even when the
+    # Diagnostics such as q and j are singular-looking at r=0 even when the
     # physical limit is finite.  Reconstruct only the axis sample from the first
     # two off-axis values so plotted/exported profiles stay regular.
-    rho1 = float(rho[1])
-    rho2 = float(rho[2])
-    if abs(rho2 - rho1) < 1e-14:
+    r1 = float(r[1])
+    r2 = float(r[2])
+    if abs(r2 - r1) < 1e-14:
         return values
     if not np.isfinite(values[1]) or not np.isfinite(values[2]):
         return values
 
-    slope = (values[2] - values[1]) / (rho2 - rho1)
-    values[0] = values[1] + slope * (rho[0] - rho1)
+    slope = (values[2] - values[1]) / (r2 - r1)
+    values[0] = values[1] + slope * (r[0] - r1)
     return values
 
 
@@ -117,8 +117,8 @@ class Equilibrium(Reactive, Serial):
         # Source profiles are stored as derivatives with respect to psin.  Their
         # axis values are used by diagnostics/export, so repair only the snapshot
         # copy and leave the solver root arrays untouched.
-        self.FFn_psin = _regularize_axis_linear_profile(FFn_psin, grid.rho, copy=True)
-        self.Pn_psin = _regularize_axis_linear_profile(Pn_psin, grid.rho, copy=True)
+        self.FFn_psin = _regularize_axis_linear_profile(FFn_psin, grid.r, copy=True)
+        self.Pn_psin = _regularize_axis_linear_profile(Pn_psin, grid.r, copy=True)
         self.psin_r = np.asarray(psin_r, dtype=np.float64)
         self.psin_rr = np.asarray(psin_rr, dtype=np.float64)
         self.p0 = float(p0)
@@ -160,9 +160,9 @@ class Equilibrium(Reactive, Serial):
         return attrs
 
     @property
-    def rho(self) -> np.ndarray:
+    def r(self) -> np.ndarray:
         """Radial grid nodes inherited from ``grid``."""
-        return self.grid.rho
+        return self.grid.r
 
     @property
     def theta(self) -> np.ndarray:
@@ -197,12 +197,12 @@ class Equilibrium(Reactive, Serial):
 
     @property
     def h(self) -> np.ndarray:
-        """Normalized horizontal/Shafranov-shift profile on ``rho``."""
+        """Normalized horizontal/Shafranov-shift profile on ``r``."""
         return self._h_fields[0]
 
     @property
     def v(self) -> np.ndarray:
-        """Normalized vertical-shift profile on ``rho``."""
+        """Normalized vertical-shift profile on ``r``."""
         return self._v_fields[0]
 
     @property
@@ -213,21 +213,21 @@ class Equilibrium(Reactive, Serial):
     @property
     def Rc(self) -> np.ndarray:
         """Flux-surface major-radius center in metres."""
-        out = np.empty_like(self.rho)
+        out = np.empty_like(self.r)
         update_rc(out, self.R0, self.a, self.h)
         return _readonly_owned(out)
 
     @property
     def epsilon(self) -> np.ndarray:
-        """Local inverse aspect ratio ``a*rho/Rc``."""
-        out = np.empty_like(self.rho)
-        update_epsilon(out, self.a, self.rho, self.Rc)
+        """Local inverse aspect ratio ``a*r/Rc``."""
+        out = np.empty_like(self.r)
+        update_epsilon(out, self.a, self.r, self.Rc)
         return _readonly_owned(out)
 
     @property
     def ftrap(self) -> np.ndarray:
         """Trapped-particle fraction from the full flux-surface magnetic field."""
-        out = np.empty_like(self.rho)
+        out = np.empty_like(self.r)
         invalid = update_ftrap(
             out,
             self.R,
@@ -236,7 +236,7 @@ class Equilibrium(Reactive, Serial):
             self.F,
             _validated_radial_root(self.psin_r, self.grid, "psin_r"),
             self.alpha2,
-            self.rho,
+            self.r,
         )
         if invalid:
             raise ValueError("trapped-particle fraction contains non-finite values")
@@ -252,7 +252,7 @@ class Equilibrium(Reactive, Serial):
             out,
             self.a,
             self.R0,
-            grid.rho,
+            grid.r,
             grid.theta,
             grid.cos_mtheta,
             grid.sin_mtheta,
@@ -275,7 +275,7 @@ class Equilibrium(Reactive, Serial):
             out,
             self.a,
             self.Z0,
-            grid.rho,
+            grid.r,
             grid.sin_mtheta[1],
             grid.cos_mtheta[1],
             self._v_fields,
@@ -288,7 +288,7 @@ class Equilibrium(Reactive, Serial):
         surface, radial, invalid = materialize_metric_geometry(
             self._R_geometry_fields,
             self._Z_geometry_fields,
-            self.rho,
+            self.r,
         )
         if invalid:
             raise ValueError(
@@ -304,7 +304,7 @@ class Equilibrium(Reactive, Serial):
 
     @property
     def surface_fields(self) -> np.ndarray:
-        """Packed two-dimensional geometry fields on ``(rho, theta)``."""
+        """Packed two-dimensional geometry fields on ``(r, theta)``."""
         return self._metric_geometry[0]
 
     @property
@@ -314,12 +314,12 @@ class Equilibrium(Reactive, Serial):
 
     @property
     def R(self) -> np.ndarray:
-        """Major-radius surface coordinates on ``(rho, theta)``."""
+        """Major-radius surface coordinates on ``(r, theta)``."""
         return self._R_geometry_fields[R]
 
     @property
     def Z(self) -> np.ndarray:
-        """Vertical surface coordinates on ``(rho, theta)``."""
+        """Vertical surface coordinates on ``(r, theta)``."""
         return self._Z_geometry_fields[Z]
 
     @property
@@ -355,7 +355,7 @@ class Equilibrium(Reactive, Serial):
     @property
     def S(self) -> np.ndarray:
         """Flux-surface area S = -int R*Z_t dtheta."""
-        out = np.empty_like(self.rho)
+        out = np.empty_like(self.r)
         update_surface_area(out, self.R, self.Z_t)
         return _readonly_owned(out)
 
@@ -367,7 +367,7 @@ class Equilibrium(Reactive, Serial):
     @property
     def V(self) -> np.ndarray:
         """Flux-surface volume V = -pi*int R**2*Z_t dtheta."""
-        out = np.empty_like(self.rho)
+        out = np.empty_like(self.r)
         update_volume(out, self.R, self.Z_t)
         return _readonly_owned(out)
 
@@ -393,15 +393,36 @@ class Equilibrium(Reactive, Serial):
 
     @property
     def FF_r(self) -> np.ndarray:
-        """Physical F*F' profile, model-side diagnostic."""
-        out = np.empty_like(self.rho)
+        """Physical ``F*dF/dr`` on the geometric grid."""
+        out = np.empty_like(self.r)
         update_scaled_copy(out, self.FFn_r, self.alpha1 * self.alpha2)
+        return _readonly_owned(out)
+
+    @property
+    def FF_rho(self) -> np.ndarray:
+        """Physical ``F*dF/drho`` for ``rho=sqrt(Phi_N)``."""
+        out = np.empty_like(self.r)
+        np.divide(self.FF_r, self.rho_r, out=out)
+        return _readonly_owned(out)
+
+    @property
+    def FF_psin(self) -> np.ndarray:
+        """Physical ``F*dF/dpsin`` for normalized poloidal flux."""
+        out = np.empty_like(self.r)
+        update_scaled_copy(out, self.FFn_psin, self.alpha1 * self.alpha2)
+        return _readonly_owned(out)
+
+    @property
+    def FF_psi(self) -> np.ndarray:
+        """Conventional ``F*dF/dpsi`` for ``psi=Psi/(2*pi)``."""
+        out = np.empty_like(self.r)
+        update_scaled_copy(out, self.FFn_psin, self.alpha1)
         return _readonly_owned(out)
 
     @property
     def FFn_r(self) -> np.ndarray:
         """Radial derivative of the normalized ``F*F'`` source profile."""
-        out = np.empty_like(self.rho)
+        out = np.empty_like(self.r)
         update_scaled_product(
             out,
             _validated_radial_root(self.FFn_psin, self.grid, "FFn_psin"),
@@ -413,7 +434,7 @@ class Equilibrium(Reactive, Serial):
     @property
     def F2(self) -> np.ndarray:
         """Physical F^2 profile."""
-        out = np.empty_like(self.rho)
+        out = np.empty_like(self.r)
         update_f2(
             out,
             self.FF_r,
@@ -426,7 +447,7 @@ class Equilibrium(Reactive, Serial):
     @property
     def F(self) -> np.ndarray:
         """Signed poloidal current function ``F = R * B_phi``."""
-        out = np.empty_like(self.rho)
+        out = np.empty_like(self.r)
         invalid = update_f(out, self.F2, self.R0 * self.B0)
         if invalid:
             raise ValueError("Negative F2 encountered, cannot compute F")
@@ -434,15 +455,36 @@ class Equilibrium(Reactive, Serial):
 
     @property
     def P_r(self) -> np.ndarray:
-        """Physical pressure gradient P', model-side diagnostic."""
-        out = np.empty_like(self.rho)
+        """Physical pressure derivative ``dP/dr`` on the geometric grid."""
+        out = np.empty_like(self.r)
         update_scaled_copy(out, self.Pn_r, self.alpha1 * self.alpha2 / MU0)
+        return _readonly_owned(out)
+
+    @property
+    def P_rho(self) -> np.ndarray:
+        """Physical pressure derivative with respect to ``rho=sqrt(Phi_N)``."""
+        out = np.empty_like(self.r)
+        np.divide(self.P_r, self.rho_r, out=out)
+        return _readonly_owned(out)
+
+    @property
+    def P_psin(self) -> np.ndarray:
+        """Physical pressure derivative with respect to normalized ``psin``."""
+        out = np.empty_like(self.r)
+        update_scaled_copy(out, self.Pn_psin, self.alpha1 * self.alpha2 / MU0)
+        return _readonly_owned(out)
+
+    @property
+    def P_psi(self) -> np.ndarray:
+        """Grad-Shafranov derivative for ``psi = Psi/(2*pi)`` [Pa/(Wb/rad)]."""
+        out = np.empty_like(self.r)
+        update_scaled_copy(out, self.Pn_psin, self.alpha1 / MU0)
         return _readonly_owned(out)
 
     @property
     def Pn_r(self) -> np.ndarray:
         """Radial derivative of the normalized pressure source profile."""
-        out = np.empty_like(self.rho)
+        out = np.empty_like(self.r)
         update_scaled_product(
             out,
             _validated_radial_root(self.Pn_psin, self.grid, "Pn_psin"),
@@ -454,7 +496,7 @@ class Equilibrium(Reactive, Serial):
     @property
     def P(self) -> np.ndarray:
         """Physical pressure profile P."""
-        out = np.empty_like(self.rho)
+        out = np.empty_like(self.r)
         update_pressure(
             out,
             self.P_r,
@@ -517,14 +559,14 @@ class Equilibrium(Reactive, Serial):
     @property
     def q(self) -> np.ndarray:
         """Safety factor q, model-side diagnostic."""
-        out = np.empty_like(self.rho)
+        out = np.empty_like(self.r)
         invalid = update_q(
             out,
             self.F,
             self.Ln_r,
             self.alpha2,
             _validated_radial_root(self.psin_r, self.grid, "psin_r"),
-            self.rho,
+            self.r,
         )
         if invalid:
             raise ValueError(
@@ -536,19 +578,19 @@ class Equilibrium(Reactive, Serial):
     @property
     def s(self) -> np.ndarray:
         """Magnetic shear s, model-side diagnostic."""
-        out = np.empty_like(self.rho)
+        out = np.empty_like(self.r)
         update_shear(
             out,
             self.q,
-            self.rho,
+            self.r,
             self.grid.differentiator,
         )
         return _readonly_owned(out)
 
     @property
     def Itor(self) -> np.ndarray:
-        """Toroidal current distribution I_tor(rho), model-side diagnostic."""
-        out = np.empty_like(self.rho)
+        """Toroidal current distribution I_tor(r), model-side diagnostic."""
+        out = np.empty_like(self.r)
         update_itor(
             out,
             self.Kn,
@@ -560,7 +602,7 @@ class Equilibrium(Reactive, Serial):
     @property
     def jtor(self) -> np.ndarray:
         """Toroidal current density j_phi, model-side diagnostic."""
-        out = np.empty_like(self.rho)
+        out = np.empty_like(self.r)
         invalid = update_jtor(
             out,
             _validated_radial_root(self.FFn_psin, self.grid, "FFn_psin"),
@@ -571,7 +613,7 @@ class Equilibrium(Reactive, Serial):
             self.Itor,
             self.S,
             self.alpha1,
-            self.rho,
+            self.r,
         )
         if invalid:
             raise ValueError(
@@ -588,7 +630,7 @@ class Equilibrium(Reactive, Serial):
         With ``gm1 = <R^-2> = (2*pi)^2 * Ln_r / V_r``, the corresponding
         IMAS total-current profile is ``jpara * F * gm1 / B0``.
         """
-        out = np.empty_like(self.rho)
+        out = np.empty_like(self.r)
         invalid = update_jpara(
             out,
             self.F,
@@ -598,7 +640,7 @@ class Equilibrium(Reactive, Serial):
             _validated_radial_root(self.psin_r, self.grid, "psin_r"),
             _validated_radial_root(self.psin_rr, self.grid, "psin_rr"),
             self.alpha2,
-            self.rho,
+            self.r,
             self.grid.differentiator,
         )
         if invalid:
@@ -617,7 +659,7 @@ class Equilibrium(Reactive, Serial):
         callers can compare directly with ``equilibrium.time_slice[].profiles_1d.j_total``.
         """
 
-        out = np.empty_like(self.rho)
+        out = np.empty_like(self.r)
         invalid = update_jtotal(
             out,
             self.jpara,
@@ -625,7 +667,7 @@ class Equilibrium(Reactive, Serial):
             self.Ln_r,
             self.V_r,
             self.B0,
-            self.rho,
+            self.r,
         )
         if invalid:
             raise ValueError(
@@ -650,7 +692,7 @@ class Equilibrium(Reactive, Serial):
     @property
     def Psi(self) -> np.ndarray:
         """Physical poloidal flux Psi."""
-        out = np.empty_like(self.rho)
+        out = np.empty_like(self.r)
         update_scaled_copy(
             out,
             _validated_radial_root(self.psin, self.grid, "psin"),
@@ -660,15 +702,15 @@ class Equilibrium(Reactive, Serial):
 
     @property
     def Phi_r(self) -> np.ndarray:
-        """Derivative of toroidal flux ``Phi`` with respect to VEQ ``rho``."""
-        out = np.empty_like(self.rho)
+        """Derivative of toroidal flux ``Phi`` with respect to VEQ ``r``."""
+        out = np.empty_like(self.r)
         update_scaled_product(out, self.F, self.Ln_r, 2.0 * np.pi)
         return _readonly_owned(out)
 
     @property
     def Phi(self) -> np.ndarray:
         """Toroidal flux Phi."""
-        out = np.empty_like(self.rho)
+        out = np.empty_like(self.r)
         update_phi(
             out,
             self.F,
@@ -691,7 +733,7 @@ class Equilibrium(Reactive, Serial):
             self.Ln_r,
             self.B0,
             np.sqrt(rho_tor_edge_squared),
-            self.rho,
+            self.r,
         )
         if invalid:
             raise ValueError(
@@ -706,18 +748,18 @@ class Equilibrium(Reactive, Serial):
         return self._toroidal_flux_coordinates[RHO_TOR]
 
     @property
-    def rho_tor_norm(self) -> np.ndarray:
+    def rho(self) -> np.ndarray:
         """IMAS toroidal-flux coordinate normalized from axis to boundary."""
         return self._toroidal_flux_coordinates[RHO_TOR_NORM]
 
     @property
     def rho_tor_r(self) -> np.ndarray:
-        """Derivative of physical ``rho_tor`` with respect to VEQ ``rho`` [m]."""
+        """Derivative of physical ``rho_tor`` with respect to VEQ ``r`` [m]."""
         return self._toroidal_flux_coordinates[RHO_TOR_R]
 
     @property
-    def rho_tor_norm_r(self) -> np.ndarray:
-        """Derivative of ``rho_tor_norm`` with respect to VEQ ``rho``."""
+    def rho_r(self) -> np.ndarray:
+        """Derivative of ``rho`` with respect to VEQ ``r``."""
         return self._toroidal_flux_coordinates[RHO_TOR_NORM_R]
 
     @property
@@ -735,7 +777,7 @@ class Equilibrium(Reactive, Serial):
             self.V_r,
             self.rho_tor_r,
             self.alpha2,
-            self.rho,
+            self.r,
         )
         if invalid:
             raise ValueError(
@@ -895,7 +937,7 @@ class Equilibrium(Reactive, Serial):
             psi_axis=psi_axis,
             psi_bound=psi_bound,
             # Profile arrays in GEQDSK are sampled on uniform normalized psin,
-            # not on the solver's rho grid.  Sorting/deduplicating psin below
+            # not on the solver's r grid.  Sorting/deduplicating psin below
             # protects exports from slightly nonuniform optimized psin profiles.
             F=_sample_profile_on_uniform_psin(
                 export_equilibrium.psin,
@@ -909,7 +951,7 @@ class Equilibrium(Reactive, Serial):
             ),
             FF_psi=_sample_profile_on_uniform_psin(
                 export_equilibrium.psin,
-                export_equilibrium.alpha1 * export_equilibrium.FFn_psin,
+                export_equilibrium.FF_psi,
                 psin_uniform,
             ),
             P_psi=_sample_profile_on_uniform_psin(
@@ -926,7 +968,7 @@ class Equilibrium(Reactive, Serial):
                 R,
                 Z,
                 export_equilibrium.psin,
-                np.square(np.asarray(export_equilibrium.rho, dtype=np.float64)),
+                np.square(np.asarray(export_equilibrium.r, dtype=np.float64)),
                 R_nodes=R_nodes,
                 Z_nodes=Z_nodes,
                 psi_axis=psi_axis,
@@ -963,7 +1005,7 @@ def _validate_equilibrium_grid_tables(grid: Grid) -> None:
     expected_radial_matrix = (grid.Nr, grid.Nr)
     expected_basis = (grid.L_max + 1, grid.Nr)
     expected_trig = (grid.M_max + 1, grid.Nt)
-    for name in ("rho", "weights"):
+    for name in ("r", "weights"):
         value = getattr(grid, name)
         if value.shape != expected_radial:
             raise ValueError(f"grid.{name} must have shape {expected_radial}, got {value.shape}")
@@ -1031,7 +1073,7 @@ def _materialize_profile_fields(
         offset = profile.offset
     update_profile_fields(
         out,
-        grid.rho,
+        grid.r,
         grid.T,
         grid.T_r,
         grid.T_rr,
@@ -1131,9 +1173,9 @@ def _build_resampled_equilibrium(
 def _geqdsk_export_equilibrium(equilibrium: Equilibrium) -> Equilibrium:
     """Return an endpoint-inclusive snapshot with at least 64 poloidal samples."""
 
-    rho = np.asarray(equilibrium.rho, dtype=np.float64)
+    r = np.asarray(equilibrium.r, dtype=np.float64)
     owns_radial_endpoints = (
-        abs(float(rho[0])) <= 1.0e-14 and abs(float(rho[-1]) - 1.0) <= 1.0e-14
+        abs(float(r[0])) <= 1.0e-14 and abs(float(r[-1]) - 1.0) <= 1.0e-14
     )
     source_grid = equilibrium.grid
     target_nt = max(int(source_grid.Nt), 64)
@@ -1166,13 +1208,13 @@ def _resample_equilibrium_root_fields(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Resample snapshot-owned radial fields without materializing geometry."""
 
-    source_rho = source_grid.rho
-    target_rho = target_grid.rho
-    if float(source_rho[0]) > 1.0e-14 or float(source_rho[-1]) < 1.0 - 1.0e-14:
+    source_r = source_grid.r
+    target_r = target_grid.r
+    if float(source_r[0]) > 1.0e-14 or float(source_r[-1]) < 1.0 - 1.0e-14:
         # Native solve grids are polynomial collocation grids.  Their physical
         # endpoint values are evaluations of the same nodal polynomial, not
         # constant extensions of the first/last interior samples.
-        remap = interpolation_matrix(source_rho, target_rho)
+        remap = interpolation_matrix(source_r, target_r)
         psin_out = remap @ psin
         psin_r_out = remap @ psin_r
         FFn_out = remap @ FFn_psin
@@ -1183,8 +1225,8 @@ def _resample_equilibrium_root_fields(
         # second global spectral operation.
         psin_rr_out = target_grid.differentiate(psin_r_out)
         _extend_psin_to_missing_axis(
-            source_rho,
-            target_rho,
+            source_r,
+            target_r,
             psin,
             psin_r,
             psin_out,
@@ -1192,10 +1234,10 @@ def _resample_equilibrium_root_fields(
             psin_rr_out,
         )
     else:
-        psin_out = _resample_profile_linear(source_rho, psin, target_rho)
-        psin_r_out = _resample_profile_linear(source_rho, psin_r, target_rho)
-        FFn_out = _resample_profile_linear(source_rho, FFn_psin, target_rho)
-        Pn_out = _resample_profile_linear(source_rho, Pn_psin, target_rho)
+        psin_out = _resample_profile_linear(source_r, psin, target_r)
+        psin_r_out = _resample_profile_linear(source_r, psin_r, target_r)
+        FFn_out = _resample_profile_linear(source_r, FFn_psin, target_r)
+        Pn_out = _resample_profile_linear(source_r, Pn_psin, target_r)
         psin_rr_out = target_grid.differentiate(psin_r_out)
     return (
         psin_out,
@@ -1207,8 +1249,8 @@ def _resample_equilibrium_root_fields(
 
 
 def _extend_psin_to_missing_axis(
-    source_rho: np.ndarray,
-    target_rho: np.ndarray,
+    source_r: np.ndarray,
+    target_r: np.ndarray,
     source_psin: np.ndarray,
     source_psin_r: np.ndarray,
     out_psin: np.ndarray,
@@ -1217,25 +1259,25 @@ def _extend_psin_to_missing_axis(
 ) -> None:
     """Extend a collocation flux coordinate to the axis with its regular limit.
 
-    Gauss and Radau solve grids may not own ``rho=0``.  Evaluating their global
+    Gauss and Radau solve grids may not own ``r=0``.  Evaluating their global
     nodal polynomial at a substantially closer-to-axis output node is poorly
-    conditioned for ``psin_r = O(rho)``: a tiny absolute extrapolation error is
+    conditioned for ``psin_r = O(r)``: a tiny absolute extrapolation error is
     amplified by diagnostics containing ``1 / psin_r``.  On only the unresolved
     cell spanning the physical axis and the first two source nodes,
-    reconstruct the smooth even ratio ``psin_r / rho`` linearly in ``rho**2``
+    reconstruct the smooth even ratio ``psin_r / r`` linearly in ``r**2``
     from those two resolved anchors.  Analytically integrate that representation
     from the axis and shift the remaining primitive by one constant to keep it
     continuous at the repaired-cell boundary.  No resolved derivative anchor or
     source profile is filtered or overwritten.
     """
 
-    if source_rho.size == 0 or float(source_rho[0]) <= 1.0e-14:
+    if source_r.size == 0 or float(source_r[0]) <= 1.0e-14:
         return
-    rho0 = float(source_rho[0])
-    if source_rho.size < 2:
+    r0 = float(source_r[0])
+    if source_r.size < 2:
         return
-    rho1 = float(source_rho[1])
-    axis = target_rho < rho1
+    r1 = float(source_r[1])
+    axis = target_r < r1
     if not np.any(axis):
         return
     psin1 = float(source_psin[1])
@@ -1245,48 +1287,48 @@ def _extend_psin_to_missing_axis(
         not np.isfinite(psin1)
         or not np.isfinite(psin_r0)
         or not np.isfinite(psin_r1)
-        or rho1 <= rho0
+        or r1 <= r0
     ):
         return
 
-    rho0_sq = rho0 * rho0
-    rho1_sq = rho1 * rho1
-    ratio0 = psin_r0 / rho0
-    ratio1 = psin_r1 / rho1
-    ratio_gradient = (ratio1 - ratio0) / (rho1_sq - rho0_sq)
-    ratio_axis = ratio0 - ratio_gradient * rho0_sq
-    rho_axis = target_rho[axis]
-    rho_axis_sq = rho_axis * rho_axis
-    out_psin[axis] = rho_axis_sq * (
-        0.5 * ratio_axis + 0.25 * ratio_gradient * rho_axis_sq
+    r0_sq = r0 * r0
+    r1_sq = r1 * r1
+    ratio0 = psin_r0 / r0
+    ratio1 = psin_r1 / r1
+    ratio_gradient = (ratio1 - ratio0) / (r1_sq - r0_sq)
+    ratio_axis = ratio0 - ratio_gradient * r0_sq
+    r_axis = target_r[axis]
+    r_axis_sq = r_axis * r_axis
+    out_psin[axis] = r_axis_sq * (
+        0.5 * ratio_axis + 0.25 * ratio_gradient * r_axis_sq
     )
-    out_psin_r[axis] = rho_axis * (
-        ratio_axis + ratio_gradient * rho_axis_sq
+    out_psin_r[axis] = r_axis * (
+        ratio_axis + ratio_gradient * r_axis_sq
     )
-    out_psin_rr[axis] = ratio_axis + 3.0 * ratio_gradient * rho_axis_sq
+    out_psin_rr[axis] = ratio_axis + 3.0 * ratio_gradient * r_axis_sq
 
-    psin_at_rho1 = rho1_sq * (
-        0.5 * ratio_axis + 0.25 * ratio_gradient * rho1_sq
+    psin_at_r1 = r1_sq * (
+        0.5 * ratio_axis + 0.25 * ratio_gradient * r1_sq
     )
-    out_psin[~axis] += psin_at_rho1 - psin1
+    out_psin[~axis] += psin_at_r1 - psin1
 
 
 def _resample_profile_linear(
-    rho_src: np.ndarray,
+    r_src: np.ndarray,
     y_src: np.ndarray,
-    rho_eval: np.ndarray,
+    r_eval: np.ndarray,
     *,
     left: float | None = None,
     right: float | None = None,
 ) -> np.ndarray:
-    rho_src = np.asarray(rho_src, dtype=np.float64)
+    r_src = np.asarray(r_src, dtype=np.float64)
     y_src = np.asarray(y_src, dtype=np.float64)
-    rho_eval = np.asarray(rho_eval, dtype=np.float64)
-    if rho_src.ndim != 1 or y_src.ndim != 1 or rho_eval.ndim != 1 or rho_src.shape != y_src.shape:
-        raise ValueError("Expected 1D rho_src/y_src/rho_eval with matching source shape")
+    r_eval = np.asarray(r_eval, dtype=np.float64)
+    if r_src.ndim != 1 or y_src.ndim != 1 or r_eval.ndim != 1 or r_src.shape != y_src.shape:
+        raise ValueError("Expected 1D r_src/y_src/r_eval with matching source shape")
     left_val = float(y_src[0]) if left is None else float(left)
     right_val = float(y_src[-1]) if right is None else float(right)
-    return np.interp(rho_eval, rho_src, y_src, left=left_val, right=right_val)
+    return np.interp(r_eval, r_src, y_src, left=left_val, right=right_val)
 
 
 def _build_geqdsk_rectilinear_grid(
@@ -1357,7 +1399,7 @@ def _interpolate_psin_to_rectilinear_grid(
     R_surfaces: np.ndarray,
     Z_surfaces: np.ndarray,
     psin: np.ndarray,
-    rho2_src: np.ndarray,
+    r2_src: np.ndarray,
     *,
     R_nodes: np.ndarray,
     Z_nodes: np.ndarray,
@@ -1368,34 +1410,34 @@ def _interpolate_psin_to_rectilinear_grid(
     R_surfaces = np.asarray(R_surfaces, dtype=np.float64)
     Z_surfaces = np.asarray(Z_surfaces, dtype=np.float64)
     psin = np.asarray(psin, dtype=np.float64)
-    rho2_src = np.asarray(rho2_src, dtype=np.float64)
+    r2_src = np.asarray(r2_src, dtype=np.float64)
     if R_surfaces.shape != Z_surfaces.shape:
         raise ValueError(
             f"Equilibrium R/Z shape mismatch: {R_surfaces.shape} vs {Z_surfaces.shape}"
         )
     if psin.ndim != 1 or psin.shape[0] != R_surfaces.shape[0]:
         raise ValueError(f"psin must have shape ({R_surfaces.shape[0]},), got {psin.shape}")
-    if rho2_src.ndim != 1 or rho2_src.shape[0] != R_surfaces.shape[0]:
-        raise ValueError(f"rho2_src must have shape ({R_surfaces.shape[0]},), got {rho2_src.shape}")
+    if r2_src.ndim != 1 or r2_src.shape[0] != R_surfaces.shape[0]:
+        raise ValueError(f"r2_src must have shape ({R_surfaces.shape[0]},), got {r2_src.shape}")
 
     R_grid, Z_grid = np.meshgrid(R_nodes, Z_nodes, indexing="ij")
-    # The flux mesh is monotone in rho**2, which gives a better-conditioned
-    # interpolation coordinate near the magnetic axis than rho itself.
-    rho2_grid = _interpolate_rho2_to_rectilinear_grid(
+    # The flux mesh is monotone in r**2, which gives a better-conditioned
+    # interpolation coordinate near the magnetic axis than r itself.
+    r2_grid = _interpolate_r2_to_rectilinear_grid(
         R_surfaces,
         Z_surfaces,
-        rho2_src,
+        r2_src,
         R_grid,
         Z_grid,
     )
 
     psi_grid = np.empty(R_grid.shape, dtype=np.float64)
-    inside = np.isfinite(rho2_grid)
+    inside = np.isfinite(r2_grid)
     if np.any(inside):
         # First locate each R/Z cell in the flux-surface mesh, then convert the
-        # recovered rho**2 back to the solver's psin profile.
+        # recovered r**2 back to the solver's psin profile.
         psi_grid[inside] = float(psi_axis) + float(psi_scale) * np.interp(
-            rho2_grid[inside], rho2_src, psin
+            r2_grid[inside], r2_src, psin
         )
     outside = ~inside
     if np.any(outside):
@@ -1571,10 +1613,10 @@ def _ray_polygon_radii(
     return radii
 
 
-def _interpolate_rho2_to_rectilinear_grid(
+def _interpolate_r2_to_rectilinear_grid(
     R_surfaces: np.ndarray,
     Z_surfaces: np.ndarray,
-    rho2_surfaces: np.ndarray,
+    r2_surfaces: np.ndarray,
     R_grid: np.ndarray,
     Z_grid: np.ndarray,
 ) -> np.ndarray:
@@ -1583,16 +1625,16 @@ def _interpolate_rho2_to_rectilinear_grid(
             f"Expected R_surfaces/Z_surfaces to share a 2D shape, "
             f"got {R_surfaces.shape} and {Z_surfaces.shape}"
         )
-    if rho2_surfaces.ndim != 1 or rho2_surfaces.shape[0] != R_surfaces.shape[0]:
+    if r2_surfaces.ndim != 1 or r2_surfaces.shape[0] != R_surfaces.shape[0]:
         raise ValueError(
-            f"rho2_surfaces must have shape ({R_surfaces.shape[0]},), got {rho2_surfaces.shape}"
+            f"r2_surfaces must have shape ({R_surfaces.shape[0]},), got {r2_surfaces.shape}"
         )
 
     points_R, points_Z, point_values, triangles = _build_flux_mesh_triangulation(
-        R_surfaces, Z_surfaces, rho2_surfaces
+        R_surfaces, Z_surfaces, r2_surfaces
     )
     triangle_mask = _build_degenerate_triangle_mask(points_R, points_Z, triangles)
-    rho2_grid = np.full(R_grid.shape, np.nan, dtype=np.float64)
+    r2_grid = np.full(R_grid.shape, np.nan, dtype=np.float64)
     R_nodes = np.asarray(R_grid[:, 0], dtype=np.float64)
     Z_nodes = np.asarray(Z_grid[0, :], dtype=np.float64)
 
@@ -1600,7 +1642,7 @@ def _interpolate_rho2_to_rectilinear_grid(
         if bool(masked):
             continue
         _rasterize_triangle_to_grid(
-            rho2_grid,
+            r2_grid,
             R_grid,
             Z_grid,
             R_nodes,
@@ -1609,13 +1651,13 @@ def _interpolate_rho2_to_rectilinear_grid(
             points_Z[tri],
             point_values[tri],
         )
-    return rho2_grid
+    return r2_grid
 
 
 def _build_flux_mesh_triangulation(
     R_surfaces: np.ndarray,
     Z_surfaces: np.ndarray,
-    rho2_surfaces: np.ndarray,
+    r2_surfaces: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     nr, nt = R_surfaces.shape
     if nr < 2 or nt < 3:
@@ -1630,14 +1672,14 @@ def _build_flux_mesh_triangulation(
     # then index later rings with periodic theta wrapping.
     points_R[0] = float(R_surfaces[0, 0])
     points_Z[0] = float(Z_surfaces[0, 0])
-    point_values[0] = float(rho2_surfaces[0])
+    point_values[0] = float(r2_surfaces[0])
 
     for i in range(1, nr):
         start = 1 + (i - 1) * nt
         end = start + nt
         points_R[start:end] = R_surfaces[i]
         points_Z[start:end] = Z_surfaces[i]
-        point_values[start:end] = float(rho2_surfaces[i])
+        point_values[start:end] = float(r2_surfaces[i])
 
     triangle_count = nt + 2 * (nr - 2) * nt
     triangles = np.empty((triangle_count, 3), dtype=np.int32)
@@ -1696,7 +1738,7 @@ def _build_degenerate_triangle_mask(
 
 
 def _rasterize_triangle_to_grid(
-    rho2_grid: np.ndarray,
+    r2_grid: np.ndarray,
     R_grid: np.ndarray,
     Z_grid: np.ndarray,
     R_nodes: np.ndarray,
@@ -1734,9 +1776,9 @@ def _rasterize_triangle_to_grid(
         return
 
     values = l0 * float(tri_values[0]) + l1 * float(tri_values[1]) + l2 * float(tri_values[2])
-    target = rho2_grid[i0:i1, j0:j1]
+    target = r2_grid[i0:i1, j0:j1]
     # Later triangles may touch the same grid node on shared edges.  The
-    # interpolated rho**2 is identical up to roundoff, so last writer is fine.
+    # interpolated r**2 is identical up to roundoff, so last writer is fine.
     target[inside] = values[inside]
 
 
@@ -1804,26 +1846,26 @@ RHO_TOR_NORM_R = 3
 
 
 @njit(cache=True, nogil=True, inline="always")
-def _power_terms_at(rho: float, power: int) -> tuple[float, float, float]:
+def _power_terms_at(r: float, power: int) -> tuple[float, float, float]:
     if power == 0:
         return 1.0, 0.0, 0.0
-    value = rho**power
-    first = power * rho ** (power - 1)
-    second = 0.0 if power == 1 else power * (power - 1) * rho ** (power - 2)
+    value = r**power
+    first = power * r ** (power - 1)
+    second = 0.0 if power == 1 else power * (power - 1) * r ** (power - 2)
     return value, first, second
 
 
 @njit(cache=True, nogil=True, inline="always")
-def _envelope_terms_at(rho: float, envelope_power: int) -> tuple[float, float, float]:
+def _envelope_terms_at(r: float, envelope_power: int) -> tuple[float, float, float]:
     if envelope_power == 0:
         return 1.0, 0.0, 0.0
-    y = 1.0 - rho * rho
+    y = 1.0 - r * r
     if envelope_power == 1:
-        return y, -2.0 * rho, -2.0
+        return y, -2.0 * r, -2.0
     value = y**envelope_power
-    first = -2.0 * envelope_power * rho * y ** (envelope_power - 1)
+    first = -2.0 * envelope_power * r * y ** (envelope_power - 1)
     second = -2.0 * envelope_power * y ** (envelope_power - 1)
-    second += 4.0 * envelope_power * (envelope_power - 1) * rho * rho * y ** (envelope_power - 2)
+    second += 4.0 * envelope_power * (envelope_power - 1) * r * r * y ** (envelope_power - 2)
     return value, first, second
 
 
@@ -1857,7 +1899,7 @@ def _amplitude_terms(
 @njit(cache=True, nogil=True)
 def update_profile_fields(
     out: np.ndarray,
-    rho: np.ndarray,
+    r: np.ndarray,
     T: np.ndarray,
     T_r: np.ndarray,
     T_rr: np.ndarray,
@@ -1871,8 +1913,8 @@ def update_profile_fields(
 ) -> None:
     """Evaluate one profile and two radial derivatives without temporaries."""
 
-    for i in range(rho.shape[0]):
-        rp, rp_r, rp_rr = _power_terms_at(rho[i], power)
+    for i in range(r.shape[0]):
+        rp, rp_r, rp_rr = _power_terms_at(r[i], power)
         if coeff_count == 0:
             amp, amp_r, amp_rr = _amplitude_terms(offset, 0.0, 0.0, amplitude_power)
         else:
@@ -1884,7 +1926,7 @@ def update_profile_fields(
                 series += coefficient * T[k, i]
                 series_r += coefficient * T_r[k, i]
                 series_rr += coefficient * T_rr[k, i]
-            env, env_r, env_rr = _envelope_terms_at(rho[i], envelope_power)
+            env, env_r, env_rr = _envelope_terms_at(r[i], envelope_power)
             base = env * series
             base_r = env_r * series + env * series_r
             base_rr = env_rr * series + 2.0 * env_r * series_r + env * series_rr
@@ -1900,7 +1942,7 @@ def update_r_coordinates(
     surface: np.ndarray,
     a: float,
     R0: float,
-    rho: np.ndarray,
+    r: np.ndarray,
     theta: np.ndarray,
     cos_mtheta: np.ndarray,
     sin_mtheta: np.ndarray,
@@ -1914,8 +1956,8 @@ def update_r_coordinates(
 ) -> None:
     c_limit = min(c.shape[0], cos_mtheta.shape[0])
     s_limit = min(s.shape[0], sin_mtheta.shape[0])
-    for i in range(rho.shape[0]):
-        rho_i = rho[i]
+    for i in range(r.shape[0]):
+        r_i = r[i]
         for j in range(theta.shape[0]):
             tb = theta[j] + c[0, 0, i]
             tb_r = c[0, 1, i]
@@ -1946,20 +1988,20 @@ def update_r_coordinates(
 
             cos_tb = np.cos(tb)
             sin_tb = np.sin(tb)
-            radius = R0 + a * (h[0, i] + rho_i * cos_tb)
+            radius = R0 + a * (h[0, i] + r_i * cos_tb)
             if radius < 1.0e-6:
                 radius = 1.0e-6
             surface[SIN_TB, i, j] = sin_tb
             surface[R, i, j] = radius
-            surface[R_R, i, j] = a * (h[1, i] + cos_tb - rho_i * sin_tb * tb_r)
-            surface[R_T, i, j] = -a * rho_i * sin_tb * tb_t
+            surface[R_R, i, j] = a * (h[1, i] + cos_tb - r_i * sin_tb * tb_r)
+            surface[R_T, i, j] = -a * r_i * sin_tb * tb_t
             surface[R_RR, i, j] = a * (
-                h[2, i] - 2.0 * sin_tb * tb_r - rho_i * (cos_tb * tb_r * tb_r + sin_tb * tb_rr)
+                h[2, i] - 2.0 * sin_tb * tb_r - r_i * (cos_tb * tb_r * tb_r + sin_tb * tb_rr)
             )
             surface[R_RT, i, j] = -a * (
-                sin_tb * tb_t + rho_i * (cos_tb * tb_r * tb_t + sin_tb * tb_rt)
+                sin_tb * tb_t + r_i * (cos_tb * tb_r * tb_t + sin_tb * tb_rt)
             )
-            surface[R_TT, i, j] = -a * rho_i * (cos_tb * tb_t * tb_t + sin_tb * tb_tt)
+            surface[R_TT, i, j] = -a * r_i * (cos_tb * tb_t * tb_t + sin_tb * tb_tt)
 
 
 @njit(cache=True, nogil=True)
@@ -1967,32 +2009,32 @@ def update_z_coordinates(
     surface: np.ndarray,
     a: float,
     Z0: float,
-    rho: np.ndarray,
+    r: np.ndarray,
     sin_theta: np.ndarray,
     cos_theta: np.ndarray,
     v: np.ndarray,
     kappa: np.ndarray,
 ) -> None:
-    for i in range(rho.shape[0]):
-        rho_i = rho[i]
+    for i in range(r.shape[0]):
+        r_i = r[i]
         for j in range(sin_theta.shape[0]):
             sin_t = sin_theta[j]
             cos_t = cos_theta[j]
-            surface[Z, i, j] = Z0 + a * (v[0, i] - rho_i * kappa[0, i] * sin_t)
-            surface[Z_R, i, j] = a * (v[1, i] - (kappa[0, i] + rho_i * kappa[1, i]) * sin_t)
-            surface[Z_T, i, j] = -a * rho_i * kappa[0, i] * cos_t
-            surface[Z_RR, i, j] = a * (v[2, i] - (2.0 * kappa[1, i] + rho_i * kappa[2, i]) * sin_t)
-            surface[Z_RT, i, j] = -a * (kappa[0, i] + rho_i * kappa[1, i]) * cos_t
-            surface[Z_TT, i, j] = a * rho_i * kappa[0, i] * sin_t
+            surface[Z, i, j] = Z0 + a * (v[0, i] - r_i * kappa[0, i] * sin_t)
+            surface[Z_R, i, j] = a * (v[1, i] - (kappa[0, i] + r_i * kappa[1, i]) * sin_t)
+            surface[Z_T, i, j] = -a * r_i * kappa[0, i] * cos_t
+            surface[Z_RR, i, j] = a * (v[2, i] - (2.0 * kappa[1, i] + r_i * kappa[2, i]) * sin_t)
+            surface[Z_RT, i, j] = -a * (kappa[0, i] + r_i * kappa[1, i]) * cos_t
+            surface[Z_TT, i, j] = a * r_i * kappa[0, i] * sin_t
 
 
 @njit(cache=True, nogil=True, inline="always")
-def _axis_even_rho2_limit(value_1: float, value_2: float, rho: np.ndarray) -> float:
+def _axis_even_r2_limit(value_1: float, value_2: float, r: np.ndarray) -> float:
     """Extrapolate an even finite scalar from the first two off-axis rows."""
 
-    x0 = rho[0] * rho[0]
-    x1 = rho[1] * rho[1]
-    x2 = rho[2] * rho[2]
+    x0 = r[0] * r[0]
+    x1 = r[1] * r[1]
+    x2 = r[2] * r[2]
     denominator = x2 - x1
     if denominator == 0.0 or not np.isfinite(value_1) or not np.isfinite(value_2):
         return np.nan
@@ -2000,33 +2042,33 @@ def _axis_even_rho2_limit(value_1: float, value_2: float, rho: np.ndarray) -> fl
 
 
 @njit(cache=True, nogil=True, inline="always")
-def _axis_linear_rho_limit(value_1: float, value_2: float, rho: np.ndarray) -> float:
-    """Extrapolate a local surface quantity linearly in ``rho``."""
+def _axis_linear_r_limit(value_1: float, value_2: float, r: np.ndarray) -> float:
+    """Extrapolate a local surface quantity linearly in ``r``."""
 
-    denominator = rho[2] - rho[1]
+    denominator = r[2] - r[1]
     if denominator == 0.0 or not np.isfinite(value_1) or not np.isfinite(value_2):
         return np.nan
-    return value_1 + (value_2 - value_1) / denominator * (rho[0] - rho[1])
+    return value_1 + (value_2 - value_1) / denominator * (r[0] - r[1])
 
 
 @njit(cache=True, nogil=True, inline="always")
-def _axis_leading_rho_coefficient(value_1: float, value_2: float, rho: np.ndarray) -> float:
-    """Recover the leading coefficient of ``value = rho*(A + O(rho))``."""
+def _axis_leading_r_coefficient(value_1: float, value_2: float, r: np.ndarray) -> float:
+    """Recover the leading coefficient of ``value = r*(A + O(r))``."""
 
-    if rho[1] == 0.0 or rho[2] == 0.0:
+    if r[1] == 0.0 or r[2] == 0.0:
         return np.nan
-    return _axis_linear_rho_limit(value_1 / rho[1], value_2 / rho[2], rho)
+    return _axis_linear_r_limit(value_1 / r[1], value_2 / r[2], r)
 
 
 @njit(cache=True, nogil=True)
 def update_metric_geometry(
     surface: np.ndarray,
     radial: np.ndarray,
-    rho: np.ndarray,
+    r: np.ndarray,
 ) -> int:
     nr = surface.shape[1]
     nt = surface.shape[2]
-    has_axis = nr >= 3 and abs(rho[0]) < 1.0e-10
+    has_axis = nr >= 3 and abs(r[0]) < 1.0e-10
     theta_scale = 2.0 * np.pi / nt
     mean_scale = 1.0 / nt
     for i in range(nr):
@@ -2094,17 +2136,17 @@ def update_metric_geometry(
 
     if has_axis:
         for j in range(nt):
-            leading_gtt = _axis_leading_rho_coefficient(
+            leading_gtt = _axis_leading_r_coefficient(
                 surface[GTTDIVJR, 1, j],
                 surface[GTTDIVJR, 2, j],
-                rho,
+                r,
             )
-            surface[GTTDIVJR, 0, j] = rho[0] * leading_gtt
+            surface[GTTDIVJR, 0, j] = r[0] * leading_gtt
             surface[GTTDIVJR_R, 0, j] = leading_gtt
-            surface[GRTDIVJR_T, 0, j] = _axis_linear_rho_limit(
+            surface[GRTDIVJR_T, 0, j] = _axis_linear_r_limit(
                 surface[GRTDIVJR_T, 1, j],
                 surface[GRTDIVJR_T, 2, j],
-                rho,
+                r,
             )
         sum_gtt = 0.0
         sum_gtt_r = 0.0
@@ -2136,12 +2178,12 @@ def update_metric_geometry(
 def materialize_metric_geometry(
     r_surface: np.ndarray,
     z_surface: np.ndarray,
-    rho: np.ndarray,
+    r: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray, int]:
     """Combine independent coordinate stages and materialize metric outputs."""
 
     surface = np.empty_like(r_surface)
-    radial = np.empty((5, rho.shape[0]), dtype=np.float64)
+    radial = np.empty((5, r.shape[0]), dtype=np.float64)
     r_rows = (SIN_TB, R, R_R, R_T, R_RR, R_RT, R_TT)
     z_rows = (Z, Z_R, Z_T, Z_RR, Z_RT, Z_TT)
     for row in r_rows:
@@ -2152,7 +2194,7 @@ def materialize_metric_geometry(
         for i in range(surface.shape[1]):
             for j in range(surface.shape[2]):
                 surface[row, i, j] = z_surface[row, i, j]
-    invalid = update_metric_geometry(surface, radial, rho)
+    invalid = update_metric_geometry(surface, radial, r)
     return surface[:9], radial, invalid
 
 
@@ -2163,9 +2205,9 @@ def update_rc(out: np.ndarray, R0: float, a: float, h: np.ndarray) -> None:
 
 
 @njit(cache=True, nogil=True)
-def update_epsilon(out: np.ndarray, a: float, rho: np.ndarray, rc: np.ndarray) -> None:
+def update_epsilon(out: np.ndarray, a: float, r: np.ndarray, rc: np.ndarray) -> None:
     for i in range(out.shape[0]):
-        out[i] = a * rho[i] / rc[i]
+        out[i] = a * r[i] / rc[i]
 
 
 @njit(cache=True, nogil=True)
@@ -2314,27 +2356,27 @@ def update_ip(gn1: np.ndarray, weights: np.ndarray, alpha1: float) -> float:
 
 
 @njit(cache=True, nogil=True, inline="always")
-def _regularize_axis_rho2_1d(values: np.ndarray, rho: np.ndarray) -> None:
-    if values.shape[0] < 3 or abs(rho[0]) >= 1.0e-10:
+def _regularize_axis_r2_1d(values: np.ndarray, r: np.ndarray) -> None:
+    if values.shape[0] < 3 or abs(r[0]) >= 1.0e-10:
         return
-    values[0] = _axis_even_rho2_limit(values[1], values[2], rho)
+    values[0] = _axis_even_r2_limit(values[1], values[2], r)
 
 
 @njit(cache=True, nogil=True, inline="always")
-def _regularize_axis_sqrt_rho_1d(values: np.ndarray, rho: np.ndarray) -> None:
-    """Recover a quantity with leading ``sqrt(rho)`` axis behavior."""
+def _regularize_axis_sqrt_r_1d(values: np.ndarray, r: np.ndarray) -> None:
+    """Recover a quantity with leading ``sqrt(r)`` axis behavior."""
 
-    if values.shape[0] < 3 or abs(rho[0]) >= 1.0e-10:
+    if values.shape[0] < 3 or abs(r[0]) >= 1.0e-10:
         return
-    if rho[1] <= 0.0 or rho[2] <= 0.0:
+    if r[1] <= 0.0 or r[2] <= 0.0:
         values[0] = np.nan
         return
-    coefficient = _axis_linear_rho_limit(
-        values[1] / np.sqrt(rho[1]),
-        values[2] / np.sqrt(rho[2]),
-        rho,
+    coefficient = _axis_linear_r_limit(
+        values[1] / np.sqrt(r[1]),
+        values[2] / np.sqrt(r[2]),
+        r,
     )
-    values[0] = np.sqrt(rho[0]) * coefficient
+    values[0] = np.sqrt(r[0]) * coefficient
 
 
 @njit(cache=True, nogil=True, inline="always")
@@ -2352,12 +2394,12 @@ def update_q(
     ln_r: np.ndarray,
     alpha2: float,
     psin_r: np.ndarray,
-    rho: np.ndarray,
+    r: np.ndarray,
 ) -> int:
     for i in range(out.shape[0]):
         denominator = alpha2 * psin_r[i]
         out[i] = np.nan if denominator == 0.0 else f[i] * ln_r[i] / denominator
-    _regularize_axis_rho2_1d(out, rho)
+    _regularize_axis_r2_1d(out, r)
     return _first_nonfinite_1d(out)
 
 
@@ -2365,14 +2407,14 @@ def update_q(
 def update_shear(
     out: np.ndarray,
     q: np.ndarray,
-    rho: np.ndarray,
+    r: np.ndarray,
     differentiator: np.ndarray,
 ) -> None:
     for i in range(out.shape[0]):
         derivative = 0.0
         for k in range(out.shape[0]):
             derivative += differentiator[i, k] * q[k]
-        out[i] = rho[i] * derivative / q[i]
+        out[i] = r[i] * derivative / q[i]
 
 
 @njit(cache=True, nogil=True)
@@ -2393,7 +2435,7 @@ def update_jtor(
     itor: np.ndarray,
     surface_area: np.ndarray,
     alpha1: float,
-    rho: np.ndarray,
+    r: np.ndarray,
 ) -> int:
     for i in range(out.shape[0]):
         if s_r[i] == 0.0:
@@ -2404,19 +2446,19 @@ def update_jtor(
                 / (MU0 * s_r[i])
                 * (2.0 * np.pi * ffn_psin[i] * ln_r[i] + v_r[i] * pn_psin[i] / (2.0 * np.pi))
             )
-    if out.shape[0] >= 3 and abs(rho[0]) < 1.0e-10:
+    if out.shape[0] >= 3 and abs(r[0]) < 1.0e-10:
         # Close the removable axis limit with the two conservative primitives
         # owned by this Equilibrium.  Both I_tor and poloidal cross-section S
-        # vanish as rho**2, so I_tor/S tends to dI_tor/dS = j_phi.  Extrapolating
-        # this finite ratio in rho**2 is much better conditioned than either the
+        # vanish as r**2, so I_tor/S tends to dI_tor/dS = j_phi.  Extrapolating
+        # this finite ratio in r**2 is much better conditioned than either the
         # source-form 0/0 quotient or a second spectral derivative at the axis.
         if surface_area[1] == 0.0 or surface_area[2] == 0.0:
             out[0] = np.nan
         else:
-            out[0] = _axis_even_rho2_limit(
+            out[0] = _axis_even_r2_limit(
                 itor[1] / surface_area[1],
                 itor[2] / surface_area[2],
-                rho,
+                r,
             )
     return _first_nonfinite_1d(out)
 
@@ -2431,7 +2473,7 @@ def update_jpara(
     psin_r: np.ndarray,
     psin_rr: np.ndarray,
     alpha2: float,
-    rho: np.ndarray,
+    r: np.ndarray,
     differentiator: np.ndarray,
 ) -> int:
     for i in range(out.shape[0]):
@@ -2445,7 +2487,7 @@ def update_jpara(
             term += kn[i] * psin_rr[i] / f[i]
             term -= kn[i] * psin_r[i] * derivative / (f[i] * f[i])
             out[i] = alpha2 / MU0 * f[i] / ln_r[i] * term
-    _regularize_axis_rho2_1d(out, rho)
+    _regularize_axis_r2_1d(out, r)
     return _first_nonfinite_1d(out)
 
 
@@ -2457,7 +2499,7 @@ def update_jtotal(
     ln_r: np.ndarray,
     volume_r: np.ndarray,
     B0: float,
-    rho: np.ndarray,
+    r: np.ndarray,
 ) -> int:
     """Write the IMAS convention ``<J·B>/B0`` from the PJ2 current."""
 
@@ -2468,7 +2510,7 @@ def update_jtotal(
         else:
             gm1 = gm1_scale * ln_r[i] / volume_r[i]
             out[i] = jpara[i] * f[i] * gm1 / B0
-    _regularize_axis_rho2_1d(out, rho)
+    _regularize_axis_r2_1d(out, r)
     return _first_nonfinite_1d(out)
 
 
@@ -2508,7 +2550,7 @@ def update_toroidal_flux_coordinates(
     ln_r: np.ndarray,
     B0: float,
     rho_tor_edge: float,
-    rho: np.ndarray,
+    r: np.ndarray,
 ) -> int:
     """Materialize IMAS ``rho_tor`` coordinates and radial derivatives."""
 
@@ -2526,7 +2568,7 @@ def update_toroidal_flux_coordinates(
         else:
             out[RHO_TOR_R, i] = f[i] * ln_r[i] / (B0 * rho_tor)
 
-    _regularize_axis_rho2_1d(out[RHO_TOR_R], rho)
+    _regularize_axis_r2_1d(out[RHO_TOR_R], r)
     for i in range(phi.shape[0]):
         out[RHO_TOR_NORM, i] = out[RHO_TOR, i] / rho_tor_edge
         out[RHO_TOR_NORM_R, i] = out[RHO_TOR_R, i] / rho_tor_edge
@@ -2551,11 +2593,11 @@ def update_gm(
     volume_r: np.ndarray,
     rho_tor_r: np.ndarray,
     alpha2: float,
-    rho: np.ndarray,
+    r: np.ndarray,
 ) -> int:
     """Materialize the IMAS gm1--gm9 flux-surface geometry coefficients."""
 
-    has_axis = out.shape[1] >= 3 and abs(rho[0]) < 1.0e-10
+    has_axis = out.shape[1] >= 3 and abs(r[0]) < 1.0e-10
     gm1_scale = (2.0 * np.pi) ** 2
     gm9_scale = 2.0 * np.pi
     for i in range(out.shape[1]):
@@ -2575,15 +2617,17 @@ def update_gm(
         gm7_sum = 0.0
         gm8_sum = 0.0
         for j in range(radius.shape[1]):
-            r = radius[i, j]
+            major_radius = radius[i, j]
             jac = jacobian[i, j]
-            jr = jac * r
-            if r == 0.0 or jac == 0.0 or not np.isfinite(jr):
+            jr = jac * major_radius
+            if major_radius == 0.0 or jac == 0.0 or not np.isfinite(jr):
                 return i + 1
 
-            bphi2 = (f[i] / r) ** 2
+            bphi2 = (f[i] / major_radius) ** 2
             bp2 = (alpha2 * psin_r[i]) ** 2 * gttdivjr[i, j] / jr
-            grad_rho_tor2 = rho_tor_r[i] * rho_tor_r[i] * gttdivjr[i, j] * r / jac
+            grad_rho_tor2 = (
+                rho_tor_r[i] * rho_tor_r[i] * gttdivjr[i, j] * major_radius / jac
+            )
             b2 = bphi2 + bp2
             if (
                 b2 <= 0.0
@@ -2594,13 +2638,13 @@ def update_gm(
                 return i + 1
 
             weight_sum += jr
-            gm2_sum += jr * grad_rho_tor2 / (r * r)
+            gm2_sum += jr * grad_rho_tor2 / (major_radius * major_radius)
             gm3_sum += jr * grad_rho_tor2
             gm4_sum += jr / b2
             gm5_sum += jr * b2
             gm6_sum += jr * grad_rho_tor2 / b2
             gm7_sum += jr * np.sqrt(grad_rho_tor2)
-            gm8_sum += jr * r
+            gm8_sum += jr * major_radius
 
         if weight_sum == 0.0 or not np.isfinite(weight_sum):
             return i + 1
@@ -2617,7 +2661,7 @@ def update_gm(
 
     if has_axis:
         for field in range(out.shape[0]):
-            _regularize_axis_rho2_1d(out[field], rho)
+            _regularize_axis_r2_1d(out[field], r)
 
     for field in range(out.shape[0]):
         invalid = _first_nonfinite_1d(out[field])
@@ -2635,9 +2679,9 @@ def update_ftrap(
     f: np.ndarray,
     psin_r: np.ndarray,
     alpha2: float,
-    rho: np.ndarray,
+    r: np.ndarray,
 ) -> int:
-    has_axis = out.shape[0] >= 3 and abs(rho[0]) < 1.0e-10
+    has_axis = out.shape[0] >= 3 and abs(r[0]) < 1.0e-10
     for i in range(out.shape[0]):
         if has_axis and i == 0:
             out[i] = np.nan
@@ -2647,12 +2691,12 @@ def update_ftrap(
         b2_sum = 0.0
         bmax = 0.0
         for j in range(radius.shape[1]):
-            r = radius[i, j]
+            major_radius = radius[i, j]
             jac = jacobian[i, j]
-            bphi2 = (f[i] / r) ** 2
-            bp2 = (alpha2 * psin_r[i]) ** 2 * gttdivjr[i, j] / (jac * r)
+            bphi2 = (f[i] / major_radius) ** 2
+            bp2 = (alpha2 * psin_r[i]) ** 2 * gttdivjr[i, j] / (jac * major_radius)
             magnetic = np.sqrt(bphi2 + bp2)
-            weight = jac * r
+            weight = jac * major_radius
             weight_sum += weight
             b_sum += magnetic * weight
             b2_sum += magnetic * magnetic * weight
@@ -2664,10 +2708,10 @@ def update_ftrap(
         h2 = b2_sum / (weight_sum * bmax * bmax)
         hf_sum = 0.0
         for j in range(radius.shape[1]):
-            r = radius[i, j]
+            major_radius = radius[i, j]
             jac = jacobian[i, j]
-            bphi2 = (f[i] / r) ** 2
-            bp2 = (alpha2 * psin_r[i]) ** 2 * gttdivjr[i, j] / (jac * r)
+            bphi2 = (f[i] / major_radius) ** 2
+            bp2 = (alpha2 * psin_r[i]) ** 2 * gttdivjr[i, j] / (jac * major_radius)
             x = np.sqrt(bphi2 + bp2) / bmax
             one_minus_x = 1.0 - x
             if one_minus_x < 0.0 and one_minus_x > -1.0e-14:
@@ -2676,10 +2720,10 @@ def update_ftrap(
                 hf_sum = np.nan
                 break
             integrand = (1.0 - np.sqrt(one_minus_x) * (1.0 + 0.5 * x)) / (x * x)
-            hf_sum += integrand * jac * r
+            hf_sum += integrand * jac * major_radius
         hf = hf_sum / weight_sum
         ftu = 1.0 - h2 / (h * h) * (1.0 - np.sqrt(1.0 - h) * (1.0 + 0.5 * h))
         ftl = 1.0 - h2 * hf
         out[i] = 0.75 * ftu + 0.25 * ftl
-    _regularize_axis_sqrt_rho_1d(out, rho)
+    _regularize_axis_sqrt_r_1d(out, r)
     return _first_nonfinite_1d(out)

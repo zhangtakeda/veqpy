@@ -36,7 +36,7 @@ from veqpy.kernels.numba_kernel.workspace.field_rows import (
     GEOMETRY_SURFACE_SIN_TB,
     GEOMETRY_SURFACE_Z_T,
     GRID_POLOIDAL_COS_MTHETA_START,
-    GRID_RADIAL_RHO_POWERS_START,
+    GRID_RADIAL_R_POWERS_START,
     GRID_RADIAL_Y,
     RESIDUAL_ROOT_FFN_PSIN,
     RESIDUAL_ROOT_PN_PSIN,
@@ -55,12 +55,12 @@ def _residual_grid_radial_views(
     grid_k_max: int,
     grid_l_max: int,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    rho_start = GRID_RADIAL_RHO_POWERS_START
-    rho_powers = grid_radial_fields[rho_start : rho_start + grid_k_max + 2]
-    T_start = rho_start + grid_k_max + 2
+    r_start = GRID_RADIAL_R_POWERS_START
+    r_powers = grid_radial_fields[r_start : r_start + grid_k_max + 2]
+    T_start = r_start + grid_k_max + 2
     T = grid_radial_fields[T_start : T_start + grid_l_max + 1]
     y = grid_radial_fields[GRID_RADIAL_Y]
-    return rho_powers, y, T
+    return r_powers, y, T
 
 
 @njit(cache=True, inline="always")
@@ -192,13 +192,13 @@ def run_residual_blocks_packed_precomputed(
     Gpsin_R = residual_workspace[RESIDUAL_SURFACE_GPSIN_R]
     Gpsin_Z = residual_workspace[RESIDUAL_SURFACE_GPSIN_Z]
     Gpsin_R_sin_tb = residual_workspace[RESIDUAL_SURFACE_GPSIN_R_SIN_TB]
-    rho_powers, y, T = _residual_grid_radial_views(
+    r_powers, y, T = _residual_grid_radial_views(
         grid_radial_fields, grid_k_max, grid_l_max
     )
     sin_mtheta, cos_mtheta = _residual_grid_poloidal_views(grid_poloidal_fields)
     sin_theta = sin_mtheta[1]
-    rho = rho_powers[1]
-    rho2 = rho_powers[2]
+    r = r_powers[1]
+    r2 = r_powers[2]
     nt = G.shape[1]
     base_scale = 2.0 * np.pi / nt
     for slot in range(block_codes.shape[0]):
@@ -217,30 +217,30 @@ def run_residual_blocks_packed_precomputed(
             rowwise_sum_into(scratch, Gpsin_Z)
             _project_scaled2(out_packed, coeff_indices, T, scratch, y, weights, base_scale * a)
         elif code == 2:
-            # k modifies vertical elongation through rho*sin(theta), hence the
-            # extra radial rho factor and theta sine weighting.
+            # k modifies vertical elongation through r*sin(theta), hence the
+            # extra radial r factor and theta sine weighting.
             rowwise_weighted_sum_into(scratch, Gpsin_Z, sin_theta)
             _project_scaled3(
-                out_packed, coeff_indices, T, scratch, rho, y, weights, base_scale * (-a)
+                out_packed, coeff_indices, T, scratch, r, y, weights, base_scale * (-a)
             )
         elif code == 3:
             # c0 is the axisymmetric theta_bar shift.  It uses the c-family
             # residual form but no explicit Fourier cosine factor.
             rowwise_sum_into(scratch, Gpsin_R_sin_tb)
             _project_scaled3(
-                out_packed, coeff_indices, T, scratch, rho, y, weights, base_scale * (-a)
+                out_packed, coeff_indices, T, scratch, r, y, weights, base_scale * (-a)
             )
         elif code == 4:
             # Higher cosine/sine shape modes carry their regularity power through
             # block_radial_powers; residual projection uses power+1 because the
-            # boundary variation contributes one additional rho factor.
+            # boundary variation contributes one additional r factor.
             rowwise_weighted_sum_into(scratch, Gpsin_R_sin_tb, cos_mtheta[order])
             _project_scaled3(
                 out_packed,
                 coeff_indices,
                 T,
                 scratch,
-                rho_powers[radial_power + 1],
+                r_powers[radial_power + 1],
                 y,
                 weights,
                 base_scale * (-a),
@@ -252,16 +252,16 @@ def run_residual_blocks_packed_precomputed(
                 coeff_indices,
                 T,
                 scratch,
-                rho_powers[radial_power + 1],
+                r_powers[radial_power + 1],
                 y,
                 weights,
                 base_scale * (-a),
             )
         elif code == 6:
             # psin coefficients project the strong-form G block itself, with
-            # rho**2 regularity matching the psin profile convention.
+            # r**2 regularity matching the psin profile convention.
             rowwise_sum_into(scratch, G)
-            _project_scaled3(out_packed, coeff_indices, T, scratch, rho2, y, weights, base_scale)
+            _project_scaled3(out_packed, coeff_indices, T, scratch, r2, y, weights, base_scale)
         elif code == 7:
             # F is represented by normalized F**2 profile coefficients.  The
             # projection scale restores the physical edge magnitude (R0*B0)**2.
@@ -347,13 +347,13 @@ def run_residual_blocks_packed_precomputed_auto(
     Gpsin_R = residual_workspace[RESIDUAL_SURFACE_GPSIN_R]
     Gpsin_Z = residual_workspace[RESIDUAL_SURFACE_GPSIN_Z]
     Gpsin_R_sin_tb = residual_workspace[RESIDUAL_SURFACE_GPSIN_R_SIN_TB]
-    rho_powers, y, T = _residual_grid_radial_views(
+    r_powers, y, T = _residual_grid_radial_views(
         grid_radial_fields, grid_k_max, grid_l_max
     )
     sin_mtheta, cos_mtheta = _residual_grid_poloidal_views(grid_poloidal_fields)
     sin_theta = sin_mtheta[1]
-    rho = rho_powers[1]
-    rho2 = rho_powers[2]
+    r = r_powers[1]
+    r2 = r_powers[2]
     nt = G.shape[1]
     base_scale = 2.0 * np.pi / nt
 
@@ -389,12 +389,12 @@ def run_residual_blocks_packed_precomputed_auto(
         elif code == 2:
             _copy_row_into(scratch, scratch_rows[2])
             _project_scaled3(
-                out_packed, coeff_indices, T, scratch, rho, y, weights, base_scale * (-a)
+                out_packed, coeff_indices, T, scratch, r, y, weights, base_scale * (-a)
             )
         elif code == 3:
             _copy_row_into(scratch, scratch_rows[3])
             _project_scaled3(
-                out_packed, coeff_indices, T, scratch, rho, y, weights, base_scale * (-a)
+                out_packed, coeff_indices, T, scratch, r, y, weights, base_scale * (-a)
             )
         elif code == 4:
             _copy_row_into(scratch, scratch_rows[5 + slot])
@@ -403,7 +403,7 @@ def run_residual_blocks_packed_precomputed_auto(
                 coeff_indices,
                 T,
                 scratch,
-                rho_powers[radial_power + 1],
+                r_powers[radial_power + 1],
                 y,
                 weights,
                 base_scale * (-a),
@@ -415,14 +415,14 @@ def run_residual_blocks_packed_precomputed_auto(
                 coeff_indices,
                 T,
                 scratch,
-                rho_powers[radial_power + 1],
+                r_powers[radial_power + 1],
                 y,
                 weights,
                 base_scale * (-a),
             )
         elif code == 6:
             _copy_row_into(scratch, scratch_rows[4])
-            _project_scaled3(out_packed, coeff_indices, T, scratch, rho2, y, weights, base_scale)
+            _project_scaled3(out_packed, coeff_indices, T, scratch, r2, y, weights, base_scale)
         elif code == 7:
             _copy_row_into(scratch, scratch_rows[4])
             _project_scaled3(

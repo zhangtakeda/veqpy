@@ -109,7 +109,7 @@ COLORBAR_Y0_FRACTION = 0.16
 
 R_LABEL = r"$R$ [m]"
 Z_LABEL = r"$Z$ [m]"
-RHO_LABEL = r"$\rho$"
+RADIAL_LABEL = r"$r$"
 PROFILE_LABEL = "value"
 SOURCE_LABEL = "source"
 CURRENT_LABEL = "current [MA]"
@@ -368,20 +368,20 @@ def _build_equilibrium_plot_grids(fig: Figure, *, blocks: int) -> tuple[GridSpec
 def _build_surface_panel_data(equilibrium: Equilibrium) -> dict:
     R = equilibrium.R
     Z = equilibrium.Z
-    rho = equilibrium.rho
+    r = equilibrium.r
     Nt = equilibrium.grid.Nt
 
-    sample_rho = np.linspace(0.0, 1.0, 12)
+    sample_r = np.linspace(0.0, 1.0, 12)
     surfaces = []
-    for rho_value in sample_rho:
-        idx = int(np.argmin(np.abs(rho - rho_value)))
-        if rho[idx] <= 0.0:
+    for r_value in sample_r:
+        idx = int(np.argmin(np.abs(r - r_value)))
+        if r[idx] <= 0.0:
             continue
         # Close only at plotting data level; R/Z storage stays Nt-periodic
         # without duplicating theta=0 in the model arrays.
         surfaces.append(
             {
-                "rho": float(rho[idx]),
+                "r": float(r[idx]),
                 "R": _close_periodic_curve(R[idx, :]),
                 "Z": _close_periodic_curve(Z[idx, :]),
             }
@@ -419,7 +419,7 @@ def _build_shape_panel_data(equilibrium: Equilibrium) -> dict:
         for key, profile in equilibrium.shape_profiles.items()
         if _include_shape_panel_profile(key)
     }
-    return {"shape": {"rho": equilibrium.rho, "values": values}}
+    return {"shape": {"r": equilibrium.r, "values": values}}
 
 def _include_shape_panel_profile(name: str) -> bool:
     if name in SHAPE_PROFILE_PLOT_META:
@@ -434,8 +434,8 @@ def _build_source_panel_data(equilibrium: Equilibrium) -> dict:
     # alpha1 converts normalized source derivatives into the physical GEQDSK-like
     # source convention used in the summary panel.
     return {
-        "rho": equilibrium.rho,
-        "FF_psi": equilibrium.alpha1 * equilibrium.FFn_psin.copy(),
+        "r": equilibrium.r,
+        "FF_psi": equilibrium.FF_psi.copy(),
         "mu0_P_psi": equilibrium.alpha1 * equilibrium.Pn_psin.copy(),
     }
 
@@ -459,7 +459,7 @@ def _build_gs_residual_panel_data(surface_equilibrium: Equilibrium) -> dict:
 
 def _build_current_panel_data(equilibrium: Equilibrium) -> dict:
     return {
-        "rho": equilibrium.rho,
+        "r": equilibrium.r,
         "itor": equilibrium.Itor.copy() / 1e6,
         "jtor": equilibrium.jtor.copy() / 1e6,
         "jpara": equilibrium.jpara.copy() / 1e6,
@@ -467,7 +467,7 @@ def _build_current_panel_data(equilibrium: Equilibrium) -> dict:
     }
 
 def _build_safety_panel_data(equilibrium: Equilibrium) -> dict:
-    return {"rho": equilibrium.rho, "q": equilibrium.q.copy(), "s": equilibrium.s.copy()}
+    return {"r": equilibrium.r, "q": equilibrium.q.copy(), "s": equilibrium.s.copy()}
 
 def _evaluate_profile_fields(profile: Profile, grid: Grid) -> np.ndarray:
     return profile.with_grid(grid).fields
@@ -596,7 +596,7 @@ def _render_panel_a_surfaces(ax: plt.Axes, fig: plt.Figure, data: dict):
         cmap=_get_trunc_inferno(), norm=mcolors.Normalize(vmin=0.0, vmax=1.0)
     )
     cbar = fig.colorbar(sm, cax=cbar_ax)
-    _style_colorbar(cbar, label=RHO_LABEL)
+    _style_colorbar(cbar, label=RADIAL_LABEL)
     cbar.locator = ticker.MaxNLocator(nbins=SURFACE_COLORBAR_NBINS)
     cbar.update_ticks()
 
@@ -619,7 +619,7 @@ def _render_panel_b_shape_families(axes: list[plt.Axes], data: dict) -> None:
     for index, (ax, keys) in enumerate(zip(axes, groups, strict=True)):
         _style_axis(
             ax,
-            xlabel=RHO_LABEL,
+            xlabel=RADIAL_LABEL,
             ylabel=PROFILE_LABEL if index == 0 else "",
             title=PANEL_B_TITLE,
         )
@@ -641,7 +641,7 @@ def _plot_shape_profile_group(
         vals = shape["values"][key]
         meta = _shape_profile_plot_meta(key)
         ax.plot(
-            shape["rho"],
+            shape["r"],
             vals,
             linestyle=meta["linestyle"] if linestyle is None else linestyle,
             marker=meta["marker"],
@@ -651,10 +651,10 @@ def _plot_shape_profile_group(
         )
 
 def _render_panel_c_sources(ax: plt.Axes, data: dict):
-    _style_axis(ax, xlabel=RHO_LABEL, ylabel=SOURCE_LABEL, title=PANEL_C_TITLE)
-    rho = data["rho"]
+    _style_axis(ax, xlabel=RADIAL_LABEL, ylabel=SOURCE_LABEL, title=PANEL_C_TITLE)
+    r = data["r"]
     ax.plot(
-        rho,
+        r,
         data["FF_psi"],
         SOURCE_FF_STYLE,
         color=SOURCE_FF_COLOR,
@@ -662,7 +662,7 @@ def _render_panel_c_sources(ax: plt.Axes, data: dict):
         label=r"$FF_\psi$",
     )
     ax.plot(
-        rho,
+        r,
         data["mu0_P_psi"],
         SOURCE_PRESSURE_STYLE,
         color=SOURCE_PRESSURE_COLOR,
@@ -725,8 +725,8 @@ def _render_panel_g_gs_residual(ax: plt.Axes, fig: plt.Figure, data: dict, bound
     cbar.update_ticks()
 
 def _render_panel_e_current_1d(ax: plt.Axes, data: dict):
-    _style_axis(ax, xlabel=RHO_LABEL, ylabel=CURRENT_LABEL, title=PANEL_E_TITLE)
-    rho = data["rho"]
+    _style_axis(ax, xlabel=RADIAL_LABEL, ylabel=CURRENT_LABEL, title=PANEL_E_TITLE)
+    r = data["r"]
     ax.axhline(
         data["Ip"],
         xmin=CURRENT_IP_XMIN,
@@ -737,7 +737,7 @@ def _render_panel_e_current_1d(ax: plt.Axes, data: dict):
         label=r"$I_p$",
     )
     ax.plot(
-        rho,
+        r,
         data["itor"],
         CURRENT_ITOR_STYLE,
         color=CURRENT_ITOR_COLOR,
@@ -745,7 +745,7 @@ def _render_panel_e_current_1d(ax: plt.Axes, data: dict):
         label=r"$I_{\mathrm{tor}}$",
     )
     ax.plot(
-        rho,
+        r,
         data["jtor"],
         CURRENT_JTOR_STYLE,
         color=CURRENT_JTOR_COLOR,
@@ -753,7 +753,7 @@ def _render_panel_e_current_1d(ax: plt.Axes, data: dict):
         label=r"$j_{\mathrm{tor}}$",
     )
     ax.plot(
-        rho,
+        r,
         data["jpara"],
         color=CURRENT_JPARA_COLOR,
         linestyle=CURRENT_JPARA_STYLE,
@@ -765,10 +765,10 @@ def _render_panel_e_current_1d(ax: plt.Axes, data: dict):
     _style_legend(ax, loc=CURRENT_LEGEND_LOC, ncols=CURRENT_LEGEND_NCOLS)
 
 def _render_panel_f_safety(ax: plt.Axes, data: dict):
-    _style_axis(ax, xlabel=RHO_LABEL, ylabel=PROFILE_LABEL, title=PANEL_F_TITLE)
-    rho = data["rho"]
+    _style_axis(ax, xlabel=RADIAL_LABEL, ylabel=PROFILE_LABEL, title=PANEL_F_TITLE)
+    r = data["r"]
     ax.plot(
-        rho,
+        r,
         data["q"],
         SAFETY_Q_STYLE,
         color=SAFETY_Q_COLOR,
@@ -776,7 +776,7 @@ def _render_panel_f_safety(ax: plt.Axes, data: dict):
         label=r"$q$",
     )
     ax.plot(
-        rho,
+        r,
         data["s"],
         SAFETY_S_STYLE,
         color=SAFETY_S_COLOR,

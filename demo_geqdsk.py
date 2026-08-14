@@ -29,9 +29,9 @@ boundary = veq.KernelBoundary(
     method="least-square",
 ).fit(backend="numba")
 source = veq.KernelSource(
-    pprime=reference.P_psi,
+    P_psin=(reference.psi_bound - reference.psi_axis) * reference.P_psi,
     p0=float(reference.P[-1]),
-    ffprime=reference.FF_psi,
+    FF_psin=(reference.psi_bound - reference.psi_axis) * reference.FF_psi,
     Ip=abs(reference.Ip),
     case_name="solovev-geqdsk",
 )

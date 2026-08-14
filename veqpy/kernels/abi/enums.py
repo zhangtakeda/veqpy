@@ -17,7 +17,6 @@ SOURCE_ROUTE_CODES = {
     "PJ3": 7,
 }
 SOURCE_DRIVER_BY_ROUTE = {
-    "PF": "ffprime",
     "PP": "psi_r",
     "PI": "itor",
     "PJ1": "jtor",
@@ -25,7 +24,18 @@ SOURCE_DRIVER_BY_ROUTE = {
     "PQ": "q",
     "PJ3": "jtotal",
 }
-SOURCE_COORDINATE_CODES = {"rho": 1, "psin": 2}
+FF_DERIVATIVE_BY_COORDINATE = {
+    "r": "FF_r",
+    "rho": "FF_rho",
+    "psin": "FF_psin",
+}
+SOURCE_DRIVER_NAMES = (*FF_DERIVATIVE_BY_COORDINATE.values(), *SOURCE_DRIVER_BY_ROUTE.values())
+SOURCE_COORDINATE_CODES = {"r": 1, "psin": 2, "rho": 3}
+PRESSURE_DERIVATIVE_BY_COORDINATE = {
+    "r": "P_r",
+    "rho": "P_rho",
+    "psin": "P_psin",
+}
 SOURCE_CONSTRAINT_CODES_BY_FLAGS = {
     (False, False): 0,
     (True, False): 1,
@@ -45,7 +55,7 @@ SOURCE_CONSTRAINT_LABELS_BY_FLAGS = {
     (True, True): "Ip_beta",
 }
 SOURCE_CONSTRAINT_FLAG_ORDER = ((True, True), (True, False), (False, True), (False, False))
-SOURCE_NODES_CODES = {"uniform": 1, "grid": 2}
+SOURCE_NODES_CODES = {"uniform": 1, "grid": 2, "explicit": 3}
 SOURCE_ACTIVE_FAMILY_CODES = {"none": 0, "psin": 1, "F": 2}
 SOURCE_PARAMETERIZATION_CODES = {"identity": 0, "sqrt_psin": 1}
 SOURCE_CONSTRAINT_FLAGS_BY_ROUTE = {
@@ -59,3 +69,12 @@ SOURCE_CONSTRAINT_FLAGS_BY_ROUTE = {
 }
 LAYOUT_CODES = {"degree": 0, "family": 1}
 SUPPORTED_BACKENDS = frozenset({"cxx", "numba"})
+
+
+def source_driver_for(route: str, coordinate: str) -> str:
+    """Return the public source-driver keyword for one route and coordinate."""
+
+    route_key = str(route).upper()
+    if route_key == "PF":
+        return FF_DERIVATIVE_BY_COORDINATE[str(coordinate).lower()]
+    return SOURCE_DRIVER_BY_ROUTE[route_key]

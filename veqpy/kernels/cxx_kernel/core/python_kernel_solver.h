@@ -304,14 +304,14 @@ namespace cxx_python
                     else if (i + 1 == CompiledGrid::radial_nodes)
                         normalized = 1.0;
 
-                    const double rho     = CompiledGrid::nodes[i];
+                    const double r     = CompiledGrid::nodes[i];
                     const double y       = CompiledGrid::y[i];
-                    const double rho2    = rho * rho;
-                    const double base    = rho2;
-                    const double basis   = rho2 * y;
+                    const double r2    = r * r;
+                    const double base    = r2;
+                    const double basis   = r2 * y;
                     const double weight  = CompiledGrid::weights[i];
-                    const double base_r  = 2.0 * rho;
-                    const double basis_r = 2.0 * rho * y - 2.0 * rho * rho2;
+                    const double base_r  = 2.0 * r;
+                    const double basis_r = 2.0 * r * y - 2.0 * r * r2;
                     const double rhs     = radial_derivative_tol - base_r;
 
                     denominator += weight * basis * basis;
@@ -349,11 +349,11 @@ namespace cxx_python
                 double previous = 0.0;
                 for (size_t i = 0; i < CompiledGrid::radial_nodes; ++i)
                 {
-                    const double rho               = CompiledGrid::nodes[i];
+                    const double r               = CompiledGrid::nodes[i];
                     const double y                 = CompiledGrid::y[i];
-                    const double rho2              = rho * rho;
-                    const double value             = rho2 + coeff * rho2 * y;
-                    const double radial_derivative = 2.0 * rho + coeff * (2.0 * rho * y - 2.0 * rho * rho2);
+                    const double r2              = r * r;
+                    const double value             = r2 + coeff * r2 * y;
+                    const double radial_derivative = 2.0 * r + coeff * (2.0 * r * y - 2.0 * r * r2);
                     if (radial_derivative <= radial_derivative_tol)
                         return false;
                     if (value < -value_margin || value > 1.0 + value_margin)
@@ -438,8 +438,8 @@ namespace cxx_python
     {
         switch (Topology::source_coordinate_code)
         {
-        case Topology::SourceCoordinateRho:
-            return "rho";
+        case Topology::SourceCoordinateR:
+            return "r";
         case Topology::SourceCoordinatePsin:
             return "psin";
         default:

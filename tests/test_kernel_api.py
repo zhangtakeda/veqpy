@@ -18,7 +18,7 @@ from veqpy import (
     KernelSource,
     KernelTopology,
 )
-from veqpy.kernels.abi.enums import SOURCE_DRIVER_BY_ROUTE
+from veqpy.kernels.abi.enums import PRESSURE_DERIVATIVE_BY_COORDINATE, source_driver_for
 from veqpy.kernels.abi.source_semantics import materialize_kernel_source
 from veqpy.kernels.numba_kernel.residual_scale import make_residual_scale
 from veqpy.numerics import make_quadrature
@@ -26,11 +26,11 @@ from veqpy.numerics import make_quadrature
 ROUTE_PARITY_CASES = (
     ("PF", "psin", "uniform"),
     ("PP", "psin", "uniform"),
-    ("PI", "rho", "uniform"),
+    ("PI", "r", "uniform"),
     ("PJ1", "psin", "uniform"),
     ("PJ2", "psin", "uniform"),
-    ("PJ3", "rho", "grid"),
-    ("PQ", "rho", "grid"),
+    ("PJ3", "r", "grid"),
+    ("PQ", "r", "grid"),
 )
 
 
@@ -68,10 +68,10 @@ def tiny_kernel_boundary() -> KernelBoundary:
 
 def tiny_kernel_source() -> KernelSource:
     psin = np.linspace(0.0, 1.0, 9, dtype=np.float64)
-    ffprime, scaled_pprime = pf_reference_profiles(psin)
+    ff_psin, scaled_pprime = pf_reference_profiles(psin)
     return KernelSource(
-        pprime=scaled_pprime / MU0,
-        ffprime=ffprime,
+        P_psin=scaled_pprime / MU0,
+        FF_psin=ff_psin,
         Ip=3.0e6,
     )
 
@@ -108,32 +108,40 @@ def route_kernel_source(
     nodes: str = "uniform",
     nr: int = 8,
 ) -> KernelSource:
-    rho = route_source_rho_axis(
+    r = route_source_r_axis(
         route=route,
         coordinate=coordinate,
         nodes=nodes,
         sample_count=sample_count,
         nr=nr,
     )
-    pprime = rho * (1.0e6 + 0.4e6 * rho * rho) if coordinate == "rho" else 1.0e6 + 0.4e6 * rho * rho
+    pprime = (
+        r * (1.0e6 + 0.4e6 * r * r)
+        if coordinate == "r"
+        else -(1.0e6 + 0.4e6 * r * r)
+    )
     if route == "PI":
-        driver = rho * rho * (1.0e6 + 2.0e6 * rho * rho)
+        driver = r * r * (1.0e6 + 2.0e6 * r * r)
     elif route in {"PJ1", "PJ2", "PJ3"}:
-        driver = 1.0e6 + 2.0e6 * rho * rho
+        driver = 1.0e6 + 2.0e6 * r * r
     elif route == "PP":
-        driver = rho * (1.0 + 2.0 * rho * rho)
+        driver = r * (1.0 + 2.0 * r * r)
     elif route == "PF":
-        driver = rho * (1.0 + 2.0 * rho * rho) if coordinate == "rho" else 1.0 + 2.0 * rho * rho
+        driver = (
+            r * (1.0 + 2.0 * r * r)
+            if coordinate == "r"
+            else -(1.0 + 2.0 * r * r)
+        )
     else:
-        driver = 1.0 + 2.0 * rho * rho
+        driver = 1.0 + 2.0 * r * r
     return KernelSource(
-        pprime=pprime,
-        **{SOURCE_DRIVER_BY_ROUTE[route]: driver},
+        **{PRESSURE_DERIVATIVE_BY_COORDINATE[coordinate]: pprime},
+        **{source_driver_for(route, coordinate): driver},
         Ip=3.0e6,
     )
 
 
-def route_source_rho_axis(
+def route_source_r_axis(
     *,
     route: str,
     coordinate: str,
@@ -142,8 +150,8 @@ def route_source_rho_axis(
     nr: int,
 ) -> np.ndarray:
     if nodes == "grid":
-        rho, _ = make_quadrature(nr, scheme="legendre")
-        return np.asarray(rho, dtype=np.float64)
+        r, _ = make_quadrature(nr, scheme="legendre")
+        return np.asarray(r, dtype=np.float64)
     axis = np.linspace(0.0, 1.0, sample_count, dtype=np.float64)
     if route == "PP" and coordinate == "psin" and nodes == "uniform":
         return axis
@@ -271,8 +279,8 @@ def test_kernel_source_materialization_route_matrix(
     assert topology.source_route_key == (route, coordinate, nodes)
     assert materialized.scaled_pprime.shape == (topology.sample_count,)
     assert materialized.scaled_driver.shape == (topology.sample_count,)
-    assert source.driver_name == SOURCE_DRIVER_BY_ROUTE[route]
-    assert_allclose(materialized.scaled_pprime, source.pprime * MU0)
+    assert source.driver_name == source_driver_for(route, coordinate)
+    assert_allclose(materialized.scaled_pprime, source.pressure_profile * MU0)
     if route in {"PI", "PJ1", "PJ2", "PJ3"}:
         assert_allclose(materialized.scaled_driver, source.driver_profile * MU0)
     else:
@@ -284,12 +292,12 @@ def test_kernel_source_materialization_route_matrix(
 
 
 def test_pj3_jtotal_is_physically_equivalent_to_pj2_jpara_at_same_state() -> None:
-    pj2_topology = route_kernel_topology("PJ2", "rho", "grid")
-    pj3_topology = route_kernel_topology("PJ3", "rho", "grid")
+    pj2_topology = route_kernel_topology("PJ2", "r", "grid")
+    pj3_topology = route_kernel_topology("PJ3", "r", "grid")
     pj2_source = route_kernel_source(
         "PJ2",
         pj2_topology.sample_count,
-        coordinate="rho",
+        coordinate="r",
         nodes="grid",
         nr=pj2_topology.Nr,
     )
@@ -303,7 +311,7 @@ def test_pj3_jtotal_is_physically_equivalent_to_pj2_jpara_at_same_state() -> Non
         pj2_source.jpara * pj2_equilibrium.F * pj2_equilibrium.gm1 / boundary.B0
     )
     pj3_source = KernelSource(
-        pprime=pj2_source.pprime,
+        P_r=pj2_source.pressure_profile,
         jtotal=equivalent_jtotal,
         Ip=pj2_source.Ip,
     )
@@ -317,20 +325,20 @@ def test_pj3_jtotal_is_physically_equivalent_to_pj2_jpara_at_same_state() -> Non
 def test_kernel_source_materializes_p0_and_rejects_zero_complete_pressure() -> None:
     topology = make_kernel_topology(
         route="PQ",
-        coordinate="rho",
+        coordinate="r",
         nodes="grid",
         constraint="none",
         sample_count=8,
         psin_count=0,
     )
-    rho, _ = make_quadrature(topology.Nr, scheme=topology.quadrature)
-    q = 1.71 + 0.16 * rho * rho
+    r, _ = make_quadrature(topology.Nr, scheme=topology.quadrature)
+    q = 1.71 + 0.16 * r * r
     pressure = 6408.706536
 
     materialized = materialize_kernel_source(
         topology,
         KernelSource(
-            pprime=np.zeros(topology.Nr),
+            P_r=np.zeros(topology.Nr),
             q=q,
             p0=pressure,
         ),
@@ -341,7 +349,7 @@ def test_kernel_source_materializes_p0_and_rejects_zero_complete_pressure() -> N
         materialize_kernel_source(
             topology,
             KernelSource(
-                pprime=np.zeros(topology.Nr),
+                P_r=np.zeros(topology.Nr),
                 q=q,
             ),
         )
@@ -350,7 +358,7 @@ def test_kernel_source_materializes_p0_and_rejects_zero_complete_pressure() -> N
             materialize_kernel_source(
                 topology,
                 KernelSource(
-                    pprime=np.zeros(topology.Nr),
+                    P_r=np.zeros(topology.Nr),
                     q=q,
                     p0=np.nan,
                 ),
@@ -372,12 +380,12 @@ def _constant_pressure_pq_case(
         Nr=nr,
         Nt=16,
         route="PQ",
-        coordinate="rho",
+        coordinate="r",
         nodes="grid",
         constraint=constraint,
         sample_count=nr,
     )
-    rho, _ = make_quadrature(nr, scheme=topology.quadrature)
+    r, _ = make_quadrature(nr, scheme=topology.quadrature)
     kernel = numba_kernel(topology=topology)
     boundary = KernelBoundary(
         a=1.0,
@@ -388,15 +396,15 @@ def _constant_pressure_pq_case(
         s_offsets=(0.0,),
     )
     source = KernelSource(
-        pprime=np.zeros(nr),
-        q=1.71 + 0.16 * rho * rho,
+        P_r=np.zeros(nr),
+        q=1.71 + 0.16 * r * r,
         p0=6408.706536,
         beta=beta,
     )
     return kernel, boundary, source, np.zeros(kernel.x_size)
 
 
-def test_pq_rho_constant_pressure_uses_full_p_for_alpha_normalization() -> None:
+def test_pq_r_constant_pressure_uses_full_p_for_alpha_normalization() -> None:
     kernel, boundary, source, x = _constant_pressure_pq_case(constraint="none")
 
     residual = kernel.residual(x, boundary, source)
@@ -411,11 +419,11 @@ def test_pq_rho_constant_pressure_uses_full_p_for_alpha_normalization() -> None:
     assert equilibrium.resample(Grid(Nr=24, Nt=24)).p0 == pytest.approx(source.p0)
 
 
-def test_pq_rho_ip_constraint_closes_total_current_on_open_radial_grid() -> None:
+def test_pq_r_ip_constraint_closes_total_current_on_open_radial_grid() -> None:
     kernel, boundary, source, x = _constant_pressure_pq_case(constraint="ip")
     target_ip = 1.0e6
     constrained_source = KernelSource(
-        pprime=source.pprime,
+        P_r=source.pressure_profile,
         q=source.q,
         p0=source.p0,
         Ip=target_ip,
@@ -424,7 +432,7 @@ def test_pq_rho_ip_constraint_closes_total_current_on_open_radial_grid() -> None
     kernel.residual(x, boundary, constrained_source)
     equilibrium = kernel.build_equilibrium(x)
 
-    assert equilibrium.grid.rho[-1] < 1.0
+    assert equilibrium.grid.r[-1] < 1.0
     assert equilibrium.Ip == pytest.approx(target_ip, rel=1.0e-7)
 
 
@@ -491,7 +499,7 @@ def test_kernel_numba_backend_build_equilibrium_runtime_state_rules() -> None:
     direct = kernel.build_equilibrium(x, grid=output_grid)
     expected = equilibrium.resample(output_grid)
     assert direct.grid is output_grid
-    assert_allclose(direct.rho, output_grid.rho)
+    assert_allclose(direct.r, output_grid.r)
     assert_allclose(direct.psin, expected.psin)
     assert_allclose(direct.psin_r, expected.psin_r)
     assert_allclose(direct.psin_rr, expected.psin_rr)

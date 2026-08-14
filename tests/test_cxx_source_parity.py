@@ -13,7 +13,7 @@ from veqpy import (
     KernelSource,
     KernelTopology,
 )
-from veqpy.kernels.abi.enums import SOURCE_DRIVER_BY_ROUTE
+from veqpy.kernels.abi.enums import PRESSURE_DERIVATIVE_BY_COORDINATE, source_driver_for
 from veqpy.kernels.abi.source_semantics import materialize_kernel_source
 from veqpy.numerics import make_quadrature
 
@@ -22,11 +22,11 @@ pytestmark = pytest.mark.slow
 SOURCE_ROUTE_CASES = (
     ("PF", "psin", "uniform"),
     ("PP", "psin", "uniform"),
-    ("PI", "rho", "uniform"),
+    ("PI", "r", "uniform"),
     ("PJ1", "psin", "uniform"),
     ("PJ2", "psin", "uniform"),
-    ("PJ3", "rho", "grid"),
-    ("PQ", "rho", "grid"),
+    ("PJ3", "r", "grid"),
+    ("PQ", "r", "grid"),
 )
 
 SOURCE_CONSTRAINT_CASES = (
@@ -35,29 +35,29 @@ SOURCE_CONSTRAINT_CASES = (
     ("PP", "psin", "uniform", "ip"),
     ("PP", "psin", "uniform", "beta"),
     ("PP", "psin", "uniform", "both"),
-    ("PI", "rho", "uniform", "ip"),
-    ("PI", "rho", "uniform", "beta"),
-    ("PI", "rho", "uniform", "both"),
+    ("PI", "r", "uniform", "ip"),
+    ("PI", "r", "uniform", "beta"),
+    ("PI", "r", "uniform", "both"),
     ("PJ1", "psin", "uniform", "ip"),
     ("PJ1", "psin", "uniform", "beta"),
     ("PJ1", "psin", "uniform", "both"),
     ("PJ2", "psin", "uniform", "ip"),
     ("PJ2", "psin", "uniform", "beta"),
     ("PJ2", "psin", "uniform", "both"),
-    ("PJ3", "rho", "grid", "ip"),
-    ("PJ3", "rho", "grid", "beta"),
-    ("PJ3", "rho", "grid", "both"),
-    ("PQ", "rho", "grid", "ip"),
-    ("PQ", "rho", "grid", "beta"),
-    ("PQ", "rho", "grid", "both"),
+    ("PJ3", "r", "grid", "ip"),
+    ("PJ3", "r", "grid", "beta"),
+    ("PJ3", "r", "grid", "both"),
+    ("PQ", "r", "grid", "ip"),
+    ("PQ", "r", "grid", "beta"),
+    ("PQ", "r", "grid", "both"),
 )
 
 SOURCE_ALTERNATE_COORDINATE_CASES = (
-    ("PF", "rho", "grid", "beta"),
-    ("PP", "rho", "grid", "beta"),
+    ("PF", "r", "grid", "beta"),
+    ("PP", "r", "grid", "beta"),
     ("PI", "psin", "grid", "beta"),
-    ("PJ1", "rho", "grid", "beta"),
-    ("PJ2", "rho", "grid", "beta"),
+    ("PJ1", "r", "grid", "beta"),
+    ("PJ2", "r", "grid", "beta"),
     ("PJ3", "psin", "uniform", "beta"),
     ("PQ", "psin", "uniform", "beta"),
 )
@@ -112,19 +112,19 @@ def _pressure_sources(
         else np.linspace(0.0, 1.0, topology.sample_count, dtype=np.float64)
     )
     if topology.nodes == "grid":
-        rho = parameter
-        physical_coordinate = rho * rho if topology.coordinate == "psin" else rho
+        r = parameter
+        physical_coordinate = r * r if topology.coordinate == "psin" else r
     elif topology.source_parameterization == "sqrt_psin":
-        rho = parameter
-        physical_coordinate = rho * rho
+        r = parameter
+        physical_coordinate = r * r
     elif topology.coordinate == "psin":
         physical_coordinate = parameter
-        rho = np.sqrt(physical_coordinate)
+        r = np.sqrt(physical_coordinate)
     else:
         physical_coordinate = parameter
-        rho = physical_coordinate
+        r = physical_coordinate
     edge_pressure = 6410.0
-    if topology.coordinate == "rho":
+    if topology.coordinate == "r":
         pressure = edge_pressure + amplitude * (1.0 - physical_coordinate**2)
         pprime = -2.0 * amplitude * physical_coordinate
     else:
@@ -133,20 +133,22 @@ def _pressure_sources(
 
     if topology.route == "PF":
         driver = (
-            rho * (1.0 + 0.2 * rho * rho)
-            if topology.coordinate == "rho"
-            else 1.0 + 0.2 * rho * rho
+            r * (1.0 + 0.2 * r * r)
+            if topology.coordinate == "r"
+            else -(1.0 + 0.2 * r * r)
         )
     elif topology.route == "PP":
-        driver = rho * (1.0 + 0.2 * rho * rho)
+        driver = r * (1.0 + 0.2 * r * r)
     elif topology.route == "PI":
-        driver = rho * rho * (1.0e6 + 0.2e6 * rho * rho)
+        driver = r * r * (1.0e6 + 0.2e6 * r * r)
     elif topology.route in {"PJ1", "PJ2", "PJ3"}:
-        driver = 1.0e6 + 0.2e6 * rho * rho
+        driver = 1.0e6 + 0.2e6 * r * r
     else:
-        driver = 1.71 + 0.16 * rho * rho
+        driver = 1.71 + 0.16 * r * r
     driver_kwargs = {
-        SOURCE_DRIVER_BY_ROUTE[topology.route]: np.asarray(driver, dtype=np.float64)
+        source_driver_for(topology.route, topology.coordinate): np.asarray(
+            driver, dtype=np.float64
+        )
     }
     if topology.source_uses_ip_constraint:
         driver_kwargs["Ip"] = 1.0e6
@@ -155,7 +157,7 @@ def _pressure_sources(
     return (
         KernelSource(p=pressure, **driver_kwargs),
         KernelSource(
-            pprime=pprime,
+            **{PRESSURE_DERIVATIVE_BY_COORDINATE[topology.coordinate]: pprime},
             p0=edge_pressure,
             **driver_kwargs,
         ),
@@ -209,7 +211,7 @@ def test_cxx_and_numba_share_canonical_pressure_source_contract(
     materialized_p = materialize_kernel_source(topology, source_from_p)
     materialized_pprime = materialize_kernel_source(topology, source_from_pprime)
 
-    assert source_from_p.driver_name == SOURCE_DRIVER_BY_ROUTE[route]
+    assert source_from_p.driver_name == source_driver_for(route, topology.coordinate)
     assert_allclose(
         materialized_p.scaled_pprime,
         materialized_pprime.scaled_pprime,
@@ -275,15 +277,15 @@ def test_cxx_and_numba_preserve_finite_irregular_axis_samples(
 ) -> None:
     topology = _parity_topology(route, coordinate, nodes)
     _, regular_source = _pressure_sources(topology)
-    pprime = np.array(regular_source.pprime, copy=True)
+    pprime = np.array(regular_source.pressure_profile, copy=True)
     driver = np.array(regular_source.driver_profile, copy=True)
-    if coordinate == "rho":
+    if coordinate == "r":
         pprime[0] = 0.2 * np.max(np.abs(pprime))
     else:
         pprime[0] = 1.2 * pprime[1]
     driver[0] = 1.2 * driver[1]
     source = KernelSource(
-        pprime=pprime,
+        **{PRESSURE_DERIVATIVE_BY_COORDINATE[topology.coordinate]: pprime},
         p0=regular_source.p0,
         **{regular_source.driver_name: driver},
     )
@@ -383,6 +385,42 @@ def test_cxx_and_numba_share_constrained_pressure_state(
     )
     if topology.source_uses_beta_constraint:
         assert cxx_state[3] != pytest.approx(1.0)
+
+
+def test_pf_psin_reversed_current_closes_flux_scale_magnitude_in_both_backends(
+    cxx_cache_root: Path,
+) -> None:
+    topology = _parity_topology("PF", "psin", "uniform", constraint="ip")
+    _, reference = _pressure_sources(topology)
+    source = KernelSource(
+        P_psin=reference.pressure_profile,
+        p0=reference.p0,
+        FF_psin=reference.driver_profile,
+        Ip=-1.0e6,
+    )
+    kernels = {
+        "numba": Kernel(topology=topology, recipe=KernelRecipe(backend="numba")),
+        "cxx": Kernel(
+            topology=topology,
+            recipe=KernelRecipe(backend="cxx"),
+            cache_root=cxx_cache_root,
+        ),
+    }
+    try:
+        x = np.linspace(-2.0e-3, 2.0e-3, topology.x_size, dtype=np.float64)
+        residuals = {
+            backend: kernel.residual(x, _boundary(), source)
+            for backend, kernel in kernels.items()
+        }
+        states = {backend: _runtime_source_state(kernel) for backend, kernel in kernels.items()}
+    finally:
+        for kernel in kernels.values():
+            kernel.close()
+
+    assert states["numba"][1] < 0.0
+    assert states["cxx"][1] < 0.0
+    assert_allclose(residuals["cxx"], residuals["numba"], rtol=2.0e-9, atol=5.0e-10)
+    assert_allclose(states["cxx"], states["numba"], rtol=2.0e-9, atol=5.0e-12)
 
 
 @pytest.mark.parametrize(("route", "coordinate", "nodes"), SOURCE_ROUTE_CASES)

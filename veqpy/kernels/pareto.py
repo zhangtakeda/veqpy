@@ -97,11 +97,11 @@ def normalize_pareto_strategy(value: str) -> str:
     return _normalize_option(value, PARETO_STRATEGY_OPTIONS, "strategy")
 
 
-def normalize_pareto_neighborhood_size(value: int) -> int:
+def normalize_pareto_neighborod_size(value: int) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
-        raise TypeError("neighborhood_size must be an integer")
+        raise TypeError("neighborod_size must be an integer")
     if value < 0:
-        raise ValueError("neighborhood_size must be non-negative")
+        raise ValueError("neighborod_size must be non-negative")
     return int(value)
 
 
@@ -258,9 +258,9 @@ def generate_adaptive_refinement_signatures(
     *,
     frontier: Sequence[ParetoSample],
     seen_signatures: set[KernelParetoSignature],
-    neighborhood_size: int,
+    neighborod_size: int,
 ) -> tuple[KernelParetoSignature, ...]:
-    radius = normalize_pareto_neighborhood_size(neighborhood_size)
+    radius = normalize_pareto_neighborod_size(neighborod_size)
     if radius == 0:
         return ()
     axes = _refinement_count_axes(capacity_topology)

@@ -36,7 +36,7 @@ from veqpy.kernels.numba_kernel.workspace.field_rows import (
     GEOMETRY_SURFACE_Z_T,
     GRID_POLOIDAL_COS_MTHETA_START,
     GRID_POLOIDAL_THETA,
-    GRID_RADIAL_RHO,
+    GRID_RADIAL_R,
     PROFILE_R,
     PROFILE_RR,
     PROFILE_VALUE,
@@ -47,7 +47,7 @@ from veqpy.kernels.numba_kernel.workspace.field_rows import (
 def _geometry_grid_radial_views(
     grid_radial_fields: np.ndarray,
 ) -> np.ndarray:
-    return grid_radial_fields[GRID_RADIAL_RHO]
+    return grid_radial_fields[GRID_RADIAL_R]
 
 
 @njit(cache=True, inline="always")
@@ -119,7 +119,7 @@ def update_geometry_hot(
     s_active_order: int,
 ) -> None:
     """Materialize only the geometry fields and integrals required by the fused solve hot path."""
-    rho = _geometry_grid_radial_views(grid_radial_fields)
+    r = _geometry_grid_radial_views(grid_radial_fields)
     (
         theta,
         cos_mtheta,
@@ -143,7 +143,7 @@ def update_geometry_hot(
     Kn = radial_fields[GEOMETRY_RADIAL_KN]
     Kn_r = radial_fields[GEOMETRY_RADIAL_KN_R]
     Ln_r = radial_fields[GEOMETRY_RADIAL_LN_R]
-    nr = rho.shape[0]
+    nr = r.shape[0]
     nt = theta.shape[0]
     theta_scale = 2.0 * np.pi / nt
     mean_scale = 1.0 / nt
@@ -151,7 +151,7 @@ def update_geometry_hot(
     c_limit = min(c_active_order + 1, c_fields.shape[0], cos_mtheta.shape[0])
     s_limit = min(s_active_order + 1, s_fields.shape[0], sin_mtheta.shape[0])
     for i in range(nr):
-        rho_i = rho[i]
+        r_i = r[i]
         h_i = h_fields[PROFILE_VALUE, i]
         h_r_i = h_fields[PROFILE_R, i]
         h_rr_i = h_fields[PROFILE_RR, i]
@@ -216,29 +216,29 @@ def update_geometry_hot(
             cos_tb_ij = np.cos(tb_ij)
             sin_tb_ij = np.sin(tb_ij)
 
-            R_ij = R0 + a * (h_i + rho_i * cos_tb_ij)
+            R_ij = R0 + a * (h_i + r_i * cos_tb_ij)
             if R_ij < 1e-6:
                 # Downstream source/residual formulas divide by R and J; clamp
                 # only the singular denominator, not the user-facing profile.
                 R_ij = 1e-6
 
-            R_r_ij = a * (h_r_i + cos_tb_ij - rho_i * sin_tb_ij * tb_r_ij)
-            R_t_ij = -a * rho_i * sin_tb_ij * tb_t_ij
+            R_r_ij = a * (h_r_i + cos_tb_ij - r_i * sin_tb_ij * tb_r_ij)
+            R_t_ij = -a * r_i * sin_tb_ij * tb_t_ij
             R_rr_ij = a * (
                 h_rr_i
                 - 2.0 * sin_tb_ij * tb_r_ij
-                - rho_i * (cos_tb_ij * tb_r_ij * tb_r_ij + sin_tb_ij * tb_rr_ij)
+                - r_i * (cos_tb_ij * tb_r_ij * tb_r_ij + sin_tb_ij * tb_rr_ij)
             )
             R_rt_ij = -a * (
-                sin_tb_ij * tb_t_ij + rho_i * (cos_tb_ij * tb_r_ij * tb_t_ij + sin_tb_ij * tb_rt_ij)
+                sin_tb_ij * tb_t_ij + r_i * (cos_tb_ij * tb_r_ij * tb_t_ij + sin_tb_ij * tb_rt_ij)
             )
-            R_tt_ij = -a * rho_i * (cos_tb_ij * tb_t_ij * tb_t_ij + sin_tb_ij * tb_tt_ij)
+            R_tt_ij = -a * r_i * (cos_tb_ij * tb_t_ij * tb_t_ij + sin_tb_ij * tb_tt_ij)
 
-            Z_r_ij = a * (v_r_i - (k_i + rho_i * k_r_i) * sin_t)
-            Z_t_ij = -a * rho_i * k_i * cos_t
-            Z_rr_ij = a * (v_rr_i - (2.0 * k_r_i + rho_i * k_rr_i) * sin_t)
-            Z_rt_ij = -a * (k_i + rho_i * k_r_i) * cos_t
-            Z_tt_ij = a * rho_i * k_i * sin_t
+            Z_r_ij = a * (v_r_i - (k_i + r_i * k_r_i) * sin_t)
+            Z_t_ij = -a * r_i * k_i * cos_t
+            Z_rr_ij = a * (v_rr_i - (2.0 * k_r_i + r_i * k_rr_i) * sin_t)
+            Z_rt_ij = -a * (k_i + r_i * k_r_i) * cos_t
+            Z_tt_ij = a * r_i * k_i * sin_t
 
             J_ij = R_t_ij * Z_r_ij - R_r_ij * Z_t_ij
             if J_ij < 1e-6:
@@ -308,8 +308,8 @@ def update_geometry_hot_c0(
     c_active_order: int,
     s_active_order: int,
 ) -> None:
-    """Specialized exact geometry update for theta_bar = theta + c0(rho)."""
-    rho = _geometry_grid_radial_views(grid_radial_fields)
+    """Specialized exact geometry update for theta_bar = theta + c0(r)."""
+    r = _geometry_grid_radial_views(grid_radial_fields)
     (
         _theta,
         cos_mtheta,
@@ -333,13 +333,13 @@ def update_geometry_hot_c0(
     Kn = radial_fields[GEOMETRY_RADIAL_KN]
     Kn_r = radial_fields[GEOMETRY_RADIAL_KN_R]
     Ln_r = radial_fields[GEOMETRY_RADIAL_LN_R]
-    nr = rho.shape[0]
+    nr = r.shape[0]
     nt = cos_mtheta.shape[1]
     theta_scale = 2.0 * np.pi / nt
     mean_scale = 1.0 / nt
     two_pi = 2.0 * np.pi
     for i in range(nr):
-        rho_i = rho[i]
+        r_i = r[i]
         h_i = h_fields[PROFILE_VALUE, i]
         h_r_i = h_fields[PROFILE_R, i]
         h_rr_i = h_fields[PROFILE_RR, i]
@@ -366,25 +366,25 @@ def update_geometry_hot_c0(
             sin_tb_ij = sin_t * cos_c0 + cos_t * sin_c0
             cos_tb_ij = cos_t * cos_c0 - sin_t * sin_c0
 
-            R_ij = R0 + a * (h_i + rho_i * cos_tb_ij)
+            R_ij = R0 + a * (h_i + r_i * cos_tb_ij)
             if R_ij < 1e-6:
                 R_ij = 1e-6
 
-            R_r_ij = a * (h_r_i + cos_tb_ij - rho_i * sin_tb_ij * c0_r_i)
-            R_t_ij = -a * rho_i * sin_tb_ij
+            R_r_ij = a * (h_r_i + cos_tb_ij - r_i * sin_tb_ij * c0_r_i)
+            R_t_ij = -a * r_i * sin_tb_ij
             R_rr_ij = a * (
                 h_rr_i
                 - 2.0 * sin_tb_ij * c0_r_i
-                - rho_i * (cos_tb_ij * c0_r_i * c0_r_i + sin_tb_ij * c0_rr_i)
+                - r_i * (cos_tb_ij * c0_r_i * c0_r_i + sin_tb_ij * c0_rr_i)
             )
-            R_rt_ij = -a * sin_tb_ij - a * rho_i * cos_tb_ij * c0_r_i
-            R_tt_ij = -a * rho_i * cos_tb_ij
+            R_rt_ij = -a * sin_tb_ij - a * r_i * cos_tb_ij * c0_r_i
+            R_tt_ij = -a * r_i * cos_tb_ij
 
-            Z_r_ij = a * (v_r_i - (k_i + rho_i * k_r_i) * sin_t)
-            Z_t_ij = -a * rho_i * k_i * cos_t
-            Z_rr_ij = a * (v_rr_i - (2.0 * k_r_i + rho_i * k_rr_i) * sin_t)
-            Z_rt_ij = -a * (k_i + rho_i * k_r_i) * cos_t
-            Z_tt_ij = a * rho_i * k_i * sin_t
+            Z_r_ij = a * (v_r_i - (k_i + r_i * k_r_i) * sin_t)
+            Z_t_ij = -a * r_i * k_i * cos_t
+            Z_rr_ij = a * (v_rr_i - (2.0 * k_r_i + r_i * k_rr_i) * sin_t)
+            Z_rt_ij = -a * (k_i + r_i * k_r_i) * cos_t
+            Z_tt_ij = a * r_i * k_i * sin_t
 
             J_ij = R_t_ij * Z_r_ij - R_r_ij * Z_t_ij
             if J_ij < 1e-6:
@@ -455,8 +455,8 @@ def update_geometry_hot_s1(
     c_active_order: int,
     s_active_order: int,
 ) -> None:
-    """Specialized exact update for theta_bar = theta + c0(rho) + s1(rho)sin(theta)."""
-    rho = _geometry_grid_radial_views(grid_radial_fields)
+    """Specialized exact update for theta_bar = theta + c0(r) + s1(r)sin(theta)."""
+    r = _geometry_grid_radial_views(grid_radial_fields)
     (
         _theta,
         cos_mtheta,
@@ -480,13 +480,13 @@ def update_geometry_hot_s1(
     Kn = radial_fields[GEOMETRY_RADIAL_KN]
     Kn_r = radial_fields[GEOMETRY_RADIAL_KN_R]
     Ln_r = radial_fields[GEOMETRY_RADIAL_LN_R]
-    nr = rho.shape[0]
+    nr = r.shape[0]
     nt = cos_mtheta.shape[1]
     theta_scale = 2.0 * np.pi / nt
     mean_scale = 1.0 / nt
     two_pi = 2.0 * np.pi
     for i in range(nr):
-        rho_i = rho[i]
+        r_i = r[i]
         h_i = h_fields[PROFILE_VALUE, i]
         h_r_i = h_fields[PROFILE_R, i]
         h_rr_i = h_fields[PROFILE_RR, i]
@@ -522,30 +522,30 @@ def update_geometry_hot_s1(
             tb_rt_ij = s1_r_i * cos_t
             tb_tt_ij = -s1_i * sin_t
 
-            R_ij = R0 + a * (h_i + rho_i * cos_tb_ij)
+            R_ij = R0 + a * (h_i + r_i * cos_tb_ij)
             if R_ij < 1e-6:
                 R_ij = 1e-6
 
-            R_r_ij = a * (h_r_i + cos_tb_ij - rho_i * sin_tb_ij * tb_r_ij)
-            R_t_ij = -a * rho_i * sin_tb_ij * tb_t_ij
+            R_r_ij = a * (h_r_i + cos_tb_ij - r_i * sin_tb_ij * tb_r_ij)
+            R_t_ij = -a * r_i * sin_tb_ij * tb_t_ij
             R_rr_ij = a * (
                 h_rr_i
                 - 2.0 * sin_tb_ij * tb_r_ij
-                - rho_i * (cos_tb_ij * tb_r_ij * tb_r_ij + sin_tb_ij * tb_rr_ij)
+                - r_i * (cos_tb_ij * tb_r_ij * tb_r_ij + sin_tb_ij * tb_rr_ij)
             )
             R_rt_ij = -a * (
                 sin_tb_ij * tb_t_ij
-                + rho_i * (cos_tb_ij * tb_r_ij * tb_t_ij + sin_tb_ij * tb_rt_ij)
+                + r_i * (cos_tb_ij * tb_r_ij * tb_t_ij + sin_tb_ij * tb_rt_ij)
             )
-            R_tt_ij = -a * rho_i * (
+            R_tt_ij = -a * r_i * (
                 cos_tb_ij * tb_t_ij * tb_t_ij + sin_tb_ij * tb_tt_ij
             )
 
-            Z_r_ij = a * (v_r_i - (k_i + rho_i * k_r_i) * sin_t)
-            Z_t_ij = -a * rho_i * k_i * cos_t
-            Z_rr_ij = a * (v_rr_i - (2.0 * k_r_i + rho_i * k_rr_i) * sin_t)
-            Z_rt_ij = -a * (k_i + rho_i * k_r_i) * cos_t
-            Z_tt_ij = a * rho_i * k_i * sin_t
+            Z_r_ij = a * (v_r_i - (k_i + r_i * k_r_i) * sin_t)
+            Z_t_ij = -a * r_i * k_i * cos_t
+            Z_rr_ij = a * (v_rr_i - (2.0 * k_r_i + r_i * k_rr_i) * sin_t)
+            Z_rt_ij = -a * (k_i + r_i * k_r_i) * cos_t
+            Z_tt_ij = a * r_i * k_i * sin_t
 
             J_ij = R_t_ij * Z_r_ij - R_r_ij * Z_t_ij
             if J_ij < 1e-6:

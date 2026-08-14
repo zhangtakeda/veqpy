@@ -14,14 +14,17 @@ from veqpy import (
     KernelSource,
     KernelTopology,
 )
-from veqpy.kernels.abi.enums import SOURCE_DRIVER_BY_ROUTE
+from veqpy.kernels.abi.enums import (
+    PRESSURE_DERIVATIVE_BY_COORDINATE,
+    source_driver_for,
+)
 from veqpy.kernels.abi.source_semantics import MU0, materialize_kernel_source
 from veqpy.numerics import make_quadrature
 
 SOURCE_ROUTE_CASES = tuple(
     (route, coordinate, nodes)
     for route in ("PF", "PP", "PI", "PJ1", "PJ2", "PJ3", "PQ")
-    for coordinate in ("rho", "psin")
+    for coordinate in ("r", "psin")
     for nodes in ("uniform", "grid")
 )
 
@@ -55,10 +58,10 @@ def _topology(route: str, coordinate: str, nodes: str, *, sample_count: int = 9)
     )
 
 
-def _source_rho_axis(topology: KernelTopology) -> np.ndarray:
+def _source_r_axis(topology: KernelTopology) -> np.ndarray:
     if topology.nodes == "grid":
-        rho, _ = make_quadrature(topology.Nr, scheme=topology.quadrature)
-        return np.asarray(rho, dtype=np.float64)
+        r, _ = make_quadrature(topology.Nr, scheme=topology.quadrature)
+        return np.asarray(r, dtype=np.float64)
     axis = np.linspace(0.0, 1.0, topology.sample_count, dtype=np.float64)
     if topology.route == "PP" and topology.coordinate == "psin" and topology.nodes == "uniform":
         return axis
@@ -68,26 +71,26 @@ def _source_rho_axis(topology: KernelTopology) -> np.ndarray:
 
 
 def _route_source_profiles(topology: KernelTopology) -> tuple[np.ndarray, np.ndarray]:
-    rho = _source_rho_axis(topology)
+    r = _source_r_axis(topology)
     pprime = (
-        rho * (1.0e6 + 0.4e6 * rho * rho)
-        if topology.coordinate == "rho"
-        else 1.0e6 + 0.4e6 * rho * rho
+        r * (1.0e6 + 0.4e6 * r * r)
+        if topology.coordinate == "r"
+        else 1.0e6 + 0.4e6 * r * r
     )
     if topology.route == "PI":
-        driver = rho * rho * (1.0e6 + 0.8e6 * rho * rho)
+        driver = r * r * (1.0e6 + 0.8e6 * r * r)
     elif topology.route in {"PJ1", "PJ2", "PJ3"}:
-        driver = 1.0e6 + 0.8e6 * rho * rho
+        driver = 1.0e6 + 0.8e6 * r * r
     elif topology.route == "PP":
-        driver = rho * (1.0e6 + 0.8e6 * rho * rho)
+        driver = r * (1.0e6 + 0.8e6 * r * r)
     elif topology.route == "PF":
         driver = (
-            rho * (1.0e6 + 0.8e6 * rho * rho)
-            if topology.coordinate == "rho"
-            else 1.0e6 + 0.8e6 * rho * rho
+            r * (1.0e6 + 0.8e6 * r * r)
+            if topology.coordinate == "r"
+            else -(1.0e6 + 0.8e6 * r * r)
         )
     else:
-        driver = 1.0e6 + 0.8e6 * rho * rho
+        driver = 1.0e6 + 0.8e6 * r * r
     return pprime.astype(np.float64), driver.astype(np.float64)
 
 
@@ -95,12 +98,12 @@ def _irregular_route_source_profiles(
     topology: KernelTopology,
 ) -> tuple[np.ndarray, np.ndarray]:
     pprime, driver = _route_source_profiles(topology)
-    if topology.coordinate == "rho":
+    if topology.coordinate == "r":
         pprime[0] = 0.2 * np.max(np.abs(pprime))
     else:
         pprime[0] = 1.2 * pprime[1]
 
-    if topology.route in {"PF", "PP"} and topology.coordinate == "rho":
+    if topology.route in {"PF", "PP"} and topology.coordinate == "r":
         driver[0] = 0.2 * np.max(np.abs(driver))
     elif topology.route == "PI":
         driver[0] = 0.2 * np.max(np.abs(driver))
@@ -129,8 +132,8 @@ def test_route_source_lowering_preserves_raw_user_physics(
     topology = _topology(route, coordinate, nodes)
     pprime, driver = _irregular_route_source_profiles(topology)
     source = KernelSource(
-        pprime=pprime,
-        **{SOURCE_DRIVER_BY_ROUTE[route]: driver},
+        **{PRESSURE_DERIVATIVE_BY_COORDINATE[coordinate]: pprime},
+        **{source_driver_for(route, coordinate): driver},
         Ip=3.0e6,
         beta=0.02,
     )
@@ -157,8 +160,8 @@ def test_numba_route_residual_accepts_finite_irregular_axis_samples(
     topology = _topology(route, coordinate, nodes)
     pprime, driver = _irregular_route_source_profiles(topology)
     source = KernelSource(
-        pprime=pprime,
-        **{SOURCE_DRIVER_BY_ROUTE[route]: driver},
+        **{PRESSURE_DERIVATIVE_BY_COORDINATE[coordinate]: pprime},
+        **{source_driver_for(route, coordinate): driver},
         Ip=3.0e6,
     )
     kernel = Kernel(
@@ -180,51 +183,51 @@ def test_numba_route_residual_accepts_finite_irregular_axis_samples(
 def test_source_lowering_accepts_large_physical_profiles_when_constraints_are_valid() -> None:
     topology = _topology("PF", "psin", "uniform")
     pprime = np.full(topology.sample_count, 1.0e12, dtype=np.float64)
-    ffprime = np.full(topology.sample_count, -1.0e12, dtype=np.float64)
-    source = KernelSource(pprime=pprime, ffprime=ffprime, Ip=3.0e6)
+    ff_psin = np.full(topology.sample_count, -1.0e12, dtype=np.float64)
+    source = KernelSource(P_psin=pprime, FF_psin=ff_psin, Ip=3.0e6)
 
     materialized = materialize_kernel_source(topology, source)
 
     assert_allclose(materialized.scaled_pprime, pprime * MU0)
-    assert_allclose(materialized.scaled_driver, ffprime)
+    assert_allclose(materialized.scaled_driver, ff_psin)
 
 
 def test_source_lowering_rejects_nonfinite_route_profiles() -> None:
-    topology = _topology("PI", "rho", "uniform")
+    topology = _topology("PI", "r", "uniform")
     pprime, itor = _route_source_profiles(topology)
     itor[-1] = np.nan
 
     with pytest.raises(ValueError, match="itor must contain only finite values"):
         materialize_kernel_source(
             topology,
-            KernelSource(pprime=pprime, itor=itor, Ip=3.0e6),
+            KernelSource(P_r=pprime, itor=itor, Ip=3.0e6),
         )
 
 
 @pytest.mark.parametrize("nodes", ("grid", "uniform"))
 @pytest.mark.parametrize("perturbed_profile", ("pressure", "driver"))
-def test_pj1_rho_preserves_materialized_current_pointwise(
+def test_pj1_r_preserves_materialized_current_pointwise(
     nodes: str,
     perturbed_profile: str,
 ) -> None:
-    case = route_kernel_case(RouteBenchmarkSpec("PJ1", "rho", nodes, "ip"))
+    case = route_kernel_case(RouteBenchmarkSpec("PJ1", "r", nodes, "ip"))
     source = case.source
     pressure = np.asarray(source.pressure_profile, dtype=np.float64).copy()
     driver = np.asarray(source.driver_profile, dtype=np.float64).copy()
     if nodes == "grid":
-        rho, _ = make_quadrature(case.topology.Nr, scheme=case.topology.quadrature)
-        source_rho = np.asarray(rho, dtype=np.float64)
+        r, _ = make_quadrature(case.topology.Nr, scheme=case.topology.quadrature)
+        source_r = np.asarray(r, dtype=np.float64)
     else:
-        source_rho = np.linspace(0.0, 1.0, case.topology.sample_count, dtype=np.float64)
-    envelope = np.exp(-((source_rho / 0.05) ** 4))
+        source_r = np.linspace(0.0, 1.0, case.topology.sample_count, dtype=np.float64)
+    envelope = np.exp(-((source_r / 0.05) ** 4))
     if perturbed_profile == "pressure":
         pressure += 0.2 * np.max(np.abs(pressure)) * envelope
     else:
-        driver += 0.2 * np.max(np.abs(driver)) * (source_rho / 0.05) * envelope
+        driver += 0.2 * np.max(np.abs(driver)) * (source_r / 0.05) * envelope
     case = replace(
         case,
         source=KernelSource(
-            pprime=pressure,
+            P_r=pressure,
             jtor=driver,
             p0=source.p0,
             Ip=source.Ip,

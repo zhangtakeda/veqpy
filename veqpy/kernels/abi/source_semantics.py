@@ -16,12 +16,17 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from veqpy.kernels.abi.enums import SOURCE_DRIVER_BY_ROUTE
+from veqpy.kernels.abi.enums import PRESSURE_DERIVATIVE_BY_COORDINATE
 from veqpy.kernels.types import KernelSource, KernelTopology
-from veqpy.numerics import interpolation_matrix, make_calculus, make_quadrature
+from veqpy.numerics import (
+    build_explicit_source_interpolation_coefficients,
+    interpolation_matrix,
+    make_calculus,
+    make_quadrature,
+)
 
 MU0 = 4.0e-7 * np.pi
-DEFAULT_SOURCE_FIX_RHO = 0.05
+DEFAULT_SOURCE_FIX_R = 0.05
 SETUP_NORMALIZED_ABS_MIN = 1.0e-3
 SETUP_NORMALIZED_ABS_MAX = 1.0e3
 SETUP_PHYSICAL_ABS_MIN = SETUP_NORMALIZED_ABS_MIN / MU0
@@ -41,6 +46,8 @@ class MaterializedKernelSource:
     scaled_p0: float
     scaled_Ip: float
     beta: float
+    scaled_pressure: np.ndarray | None = None
+    source_nodes: np.ndarray | None = None
     case_name: str | None = None
 
     def __post_init__(self) -> None:
@@ -49,6 +56,12 @@ class MaterializedKernelSource:
         object.__setattr__(self, "scaled_p0", float(self.scaled_p0))
         object.__setattr__(self, "scaled_Ip", float(self.scaled_Ip))
         object.__setattr__(self, "beta", float(self.beta))
+        scaled_pressure = (
+            None if self.scaled_pressure is None else _readonly_array(self.scaled_pressure)
+        )
+        object.__setattr__(self, "scaled_pressure", scaled_pressure)
+        source_nodes = None if self.source_nodes is None else _readonly_array(self.source_nodes)
+        object.__setattr__(self, "source_nodes", source_nodes)
         case_name = None if self.case_name is None else str(self.case_name)
         object.__setattr__(self, "case_name", case_name)
 
@@ -65,29 +78,31 @@ def materialize_kernel_source(
         raise TypeError(f"topology must be KernelTopology, got {type(topology).__name__}")
     if not isinstance(source, KernelSource):
         raise TypeError(f"source must be KernelSource, got {type(source).__name__}")
-    expected_driver = SOURCE_DRIVER_BY_ROUTE[topology.route]
-    if source.driver_name != expected_driver:
-        raise ValueError(
-            f"route {topology.route} requires driver {expected_driver!r}, "
-            f"got {source.driver_name!r}"
-        )
+    driver = source.driver_for(topology.route, topology.coordinate)
     _validate_source_length(topology, source)
+    pressure_derivative_name = PRESSURE_DERIVATIVE_BY_COORDINATE[topology.coordinate]
+    pressure_derivative = source.pressure_derivative_for(topology.coordinate)
     return materialize_source_inputs(
         route=topology.route,
         coordinate=topology.coordinate,
         nodes=topology.nodes,
-        sample_count=topology.sample_count,
+        sample_count=(
+            int(source.pressure_profile.size)
+            if topology.nodes == "explicit"
+            else int(topology.sample_count)
+        ),
         grid_size=topology.Nr,
         quadrature=topology.quadrature,
         calculus=topology.calculus,
         parameterization=topology.source_parameterization,
+        source_nodes=source.source_nodes,
         p=source.p,
-        pprime=source.pprime,
-        driver=source.driver_profile,
+        pprime=pressure_derivative,
+        driver=driver,
         p0=source.p0,
         Ip=source.Ip,
         beta=source.beta,
-        pprime_name="pprime",
+        pprime_name=pressure_derivative_name,
         driver_name=source.driver_name,
         advice=KERNEL_SOURCE_ADVICE,
         case_name=source.case_name if case_name is None else case_name,
@@ -95,6 +110,10 @@ def materialize_kernel_source(
 
 
 def _validate_source_length(topology: KernelTopology, source: KernelSource) -> None:
+    if topology.nodes == "explicit":
+        # KernelSource already enforces common pressure/driver/source-node
+        # shapes.  Their runtime length is deliberately absent from Topology.
+        return
     expected_samples = topology.sample_count
     pressure_length = source.pressure_profile.size
     driver_length = source.driver_profile.size
@@ -128,6 +147,7 @@ def materialize_source_inputs(
     quadrature: str = "legendre",
     calculus: str = "spectral",
     parameterization: str = "identity",
+    source_nodes: np.ndarray | None = None,
 ) -> MaterializedKernelSource:
     """Lower raw route inputs to the shared backend-internal source units."""
 
@@ -145,6 +165,7 @@ def materialize_source_inputs(
         quadrature=quadrature,
         calculus=calculus,
         parameterization=parameterization,
+        source_nodes=source_nodes,
         pprime_name=pprime_name,
         advice=advice,
     )
@@ -160,9 +181,7 @@ def materialize_source_inputs(
             "alpha fallback is implemented."
         )
     return MaterializedKernelSource(
-        scaled_pprime=_scale_pressure_like_input(
-            raw_pprime, name=pprime_name, advice=advice
-        ),
+        scaled_pprime=_scale_pressure_like_input(raw_pprime, name=pprime_name, advice=advice),
         scaled_driver=_scale_driver_input(
             driver,
             route=route_key,
@@ -172,6 +191,21 @@ def materialize_source_inputs(
         scaled_p0=scaled_p0,
         scaled_Ip=_scale_physical_constraint(Ip, name="Ip", advice=advice),
         beta=beta,
+        # Retain an explicit-node primitive in every public coordinate.  Static
+        # r routes differentiate it at the operator nodes during refresh;
+        # dynamic psin/rho routes differentiate the same PCHIP at their
+        # current nonlinear query.  Thus p and dp/dcoord never become two
+        # independently interpolated functions.
+        scaled_pressure=(
+            _scale_pressure_like_input(p, name="p", advice=advice)
+            if p is not None and nodes_key == "explicit"
+            else None
+        ),
+        source_nodes=_validate_explicit_source_nodes(
+            source_nodes,
+            nodes=nodes_key,
+            sample_count=int(sample_count),
+        ),
         case_name=case_name,
     )
 
@@ -188,6 +222,7 @@ def _lower_pressure_input(
     quadrature: str,
     calculus: str,
     parameterization: str,
+    source_nodes: np.ndarray | None,
     pprime_name: str,
     advice: str,
 ) -> tuple[np.ndarray, float, str]:
@@ -196,7 +231,7 @@ def _lower_pressure_input(
     if has_p == has_pprime:
         supplied = "both" if has_p else "neither"
         raise ValueError(
-            "Exactly one pressure input is required: p or pprime; "
+            f"Exactly one pressure input is required: p or {pprime_name}; "
             f"received {supplied}"
         )
 
@@ -213,6 +248,7 @@ def _lower_pressure_input(
             quadrature=quadrature,
             calculus=calculus,
             parameterization=parameterization,
+            source_nodes=source_nodes,
         )
         return derived_pprime, derived_p0, "p"
 
@@ -221,7 +257,7 @@ def _lower_pressure_input(
         name=pprime_name,
         sample_count=sample_count,
     )
-    return pressure_derivative, 0.0 if p0 is None else float(p0), "pprime"
+    return pressure_derivative, 0.0 if p0 is None else float(p0), pprime_name
 
 
 def _differentiate_pressure_profile(
@@ -233,6 +269,7 @@ def _differentiate_pressure_profile(
     quadrature: str,
     calculus: str,
     parameterization: str,
+    source_nodes: np.ndarray | None,
 ) -> tuple[np.ndarray, float]:
     coordinate_nodes = _pressure_coordinate_nodes(
         coordinate=coordinate,
@@ -241,8 +278,9 @@ def _differentiate_pressure_profile(
         grid_size=grid_size,
         quadrature=quadrature,
         parameterization=parameterization,
+        source_nodes=source_nodes,
     )
-    if nodes == "uniform":
+    if nodes in {"uniform", "explicit"}:
         edge_pressure = float(pressure[-1])
     else:
         edge_weights = interpolation_matrix(
@@ -254,7 +292,23 @@ def _differentiate_pressure_profile(
     if np.all(pressure == pressure[0]):
         return np.zeros_like(pressure), float(pressure[0])
 
-    if coordinate == "psin" and parameterization == "sqrt_psin":
+    if nodes == "explicit":
+        # The retained native representation is PCHIP, so its derivative must
+        # come from those same interval polynomials in r, psin, or rho.
+        # A dense global
+        # differentiator on arbitrary clustered nodes is both a different
+        # function and can be severely ill-conditioned near a pedestal grid.
+        coefficients = build_explicit_source_interpolation_coefficients(
+            coordinate_nodes,
+            pressure,
+        )
+        pressure_derivative = np.empty_like(pressure)
+        pressure_derivative[:-1] = coefficients[:, 1]
+        dx = coordinate_nodes[-1] - coordinate_nodes[-2]
+        pressure_derivative[-1] = (
+            3.0 * coefficients[-1, 3] * dx + 2.0 * coefficients[-1, 2]
+        ) * dx + coefficients[-1, 1]
+    elif coordinate == "psin" and parameterization == "sqrt_psin":
         parameter_nodes = np.linspace(
             0.0,
             1.0,
@@ -267,9 +321,7 @@ def _differentiate_pressure_profile(
         )
         derivative_by_parameter = parameter_differentiator @ pressure
         pressure_derivative = np.empty_like(pressure)
-        pressure_derivative[1:] = (
-            derivative_by_parameter[1:] / (2.0 * parameter_nodes[1:])
-        )
+        pressure_derivative[1:] = derivative_by_parameter[1:] / (2.0 * parameter_nodes[1:])
         second_derivative = parameter_differentiator @ derivative_by_parameter
         pressure_derivative[0] = 0.5 * second_derivative[0]
     else:
@@ -289,13 +341,22 @@ def _pressure_coordinate_nodes(
     grid_size: int | None,
     quadrature: str,
     parameterization: str,
+    source_nodes: np.ndarray | None,
 ) -> np.ndarray:
+    if nodes == "explicit":
+        validated = _validate_explicit_source_nodes(
+            source_nodes,
+            nodes=nodes,
+            sample_count=sample_count,
+        )
+        assert validated is not None
+        return validated
     if nodes == "grid":
         if coordinate == "psin":
             raise ValueError(
                 "p input is not defined for coordinate='psin', nodes='grid': "
-                "the grid is fixed in rho while psin(rho) is solved at runtime. "
-                "Use pprime on grid nodes or use uniform psin samples."
+                "the grid is fixed in r while psin(r) is solved at runtime. "
+                "Use P_psin on grid nodes or use uniform psin samples."
             )
         size = sample_count if grid_size is None else int(grid_size)
         if size != sample_count:
@@ -315,6 +376,33 @@ def _pressure_coordinate_nodes(
         f"unsupported pressure parameterization {parameterization!r} "
         f"for coordinate={coordinate!r}, nodes={nodes!r}"
     )
+
+
+def _validate_explicit_source_nodes(
+    source_nodes: np.ndarray | None,
+    *,
+    nodes: str,
+    sample_count: int,
+) -> np.ndarray | None:
+    if nodes != "explicit":
+        if source_nodes is not None:
+            raise ValueError("source_nodes is only valid when topology nodes='explicit'")
+        return None
+    if source_nodes is None:
+        raise ValueError("nodes='explicit' requires KernelSource.source_nodes")
+    axis = np.asarray(source_nodes, dtype=np.float64)
+    if axis.ndim != 1 or axis.size != sample_count:
+        raise ValueError(f"source_nodes must have shape ({sample_count},), got {axis.shape}")
+    if axis.size < 2:
+        raise ValueError("explicit source_nodes require at least two samples")
+    if not np.all(np.isfinite(axis)):
+        raise ValueError("source_nodes must contain only finite values")
+    if np.any(np.diff(axis) <= 0.0):
+        raise ValueError("source_nodes must be strictly increasing")
+    tolerance = 64.0 * np.finfo(np.float64).eps
+    if abs(float(axis[0])) > tolerance or abs(float(axis[-1]) - 1.0) > tolerance:
+        raise ValueError("explicit source_nodes must include normalized endpoints 0 and 1")
+    return _readonly_array(np.array(axis, dtype=np.float64, copy=True))
 
 
 def _small_polynomial_differentiator(nodes: np.ndarray) -> np.ndarray:
@@ -348,9 +436,7 @@ def _source_profile_array(
     if array.ndim != 1:
         raise ValueError(f"{name} must be 1D, got shape {array.shape}")
     if array.size != sample_count:
-        raise ValueError(
-            f"{name} must contain {sample_count} samples, got {array.size}"
-        )
+        raise ValueError(f"{name} must contain {sample_count} samples, got {array.size}")
     return array
 
 
@@ -394,10 +480,7 @@ def _scale_physical_constraint(value: float, *, name: str, advice: str) -> float
 
 def _reject_setup_magnitude(*, name: str, max_abs: float, advice: str) -> None:
     magnitude_label = f"{name} abs" if name == "Ip" else f"{name} max_abs"
-    message = (
-        f"Rejected setup input magnitude: {magnitude_label}={max_abs:.6g}. "
-        f"{advice}"
-    )
+    message = f"Rejected setup input magnitude: {magnitude_label}={max_abs:.6g}. {advice}"
     warnings.warn(message, RuntimeWarning, stacklevel=3)
     raise ValueError(message)
 

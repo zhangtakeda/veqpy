@@ -58,32 +58,32 @@ class GeometryWorkspace:
 
     @property
     def sin_tb_surface(self) -> np.ndarray:
-        """Return ``sin(theta_bar)`` samples on ``(rho, theta)`` nodes."""
+        """Return ``sin(theta_bar)`` samples on ``(r, theta)`` nodes."""
         return self.surface_fields[GEOMETRY_SURFACE_SIN_TB]
 
     @property
     def R_surface(self) -> np.ndarray:
-        """Return major-radius samples on ``(rho, theta)`` nodes."""
+        """Return major-radius samples on ``(r, theta)`` nodes."""
         return self.surface_fields[GEOMETRY_SURFACE_R]
 
     @property
     def R_t_surface(self) -> np.ndarray:
-        """Return poloidal derivatives of ``R`` on ``(rho, theta)`` nodes."""
+        """Return poloidal derivatives of ``R`` on ``(r, theta)`` nodes."""
         return self.surface_fields[GEOMETRY_SURFACE_R_T]
 
     @property
     def Z_t_surface(self) -> np.ndarray:
-        """Return poloidal derivatives of ``Z`` on ``(rho, theta)`` nodes."""
+        """Return poloidal derivatives of ``Z`` on ``(r, theta)`` nodes."""
         return self.surface_fields[GEOMETRY_SURFACE_Z_T]
 
     @property
     def J_surface(self) -> np.ndarray:
-        """Return Jacobian samples on ``(rho, theta)`` nodes."""
+        """Return Jacobian samples on ``(r, theta)`` nodes."""
         return self.surface_fields[GEOMETRY_SURFACE_J]
 
     @property
     def JdivR_surface(self) -> np.ndarray:
-        """Return ``J / R`` samples on ``(rho, theta)`` nodes."""
+        """Return ``J / R`` samples on ``(r, theta)`` nodes."""
         return self.surface_fields[GEOMETRY_SURFACE_JDIVR]
 
     @property

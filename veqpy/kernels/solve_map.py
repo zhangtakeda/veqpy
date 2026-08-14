@@ -215,11 +215,12 @@ def _perturbed_case(
     source_values: dict[str, Any] = {
         source.pressure_name: source.pressure_profile,
         source.driver_name: source.driver_profile,
+        "source_nodes": source.source_nodes,
         "Ip": source.Ip,
         "beta": source.beta,
         "case_name": source.case_name,
     }
-    if source.pressure_name == "pprime":
+    if source.pressure_name != "p":
         source_values["p0"] = source.p0
     for name, direction in source_tangent.items():
         source_values[name] = _add_direction(source_values[name], direction, scale)

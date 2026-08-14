@@ -24,8 +24,8 @@ import numpy as np
 from veqpy.kernels.numba_kernel.workspace.field_rows import (
     GRID_POLOIDAL_COS_MTHETA_START,
     GRID_POLOIDAL_THETA,
-    GRID_RADIAL_RHO,
-    GRID_RADIAL_RHO_POWERS_START,
+    GRID_RADIAL_R,
+    GRID_RADIAL_R_POWERS_START,
     GRID_RADIAL_X,
     GRID_RADIAL_Y,
 )
@@ -54,15 +54,15 @@ class GridWorkspace:
     differentiator: np.ndarray
     accumulator: np.ndarray
 
-    # rho           (Nr,)
+    # r           (Nr,)
     # x             (Nr,)
     # y             (Nr,)
-    # rho_powers    (K_max+2, Nr)
+    # r_powers    (K_max+2, Nr)
     # T             (L_max+1, Nr)
     # T_r           (L_max+1, Nr)
     # T_rr          (L_max+1, Nr)
-    # axis_weights  (Nr,): interpolation from radial nodes to rho=0
-    # edge_weights  (Nr,): interpolation from radial nodes to rho=1
+    # axis_weights  (Nr,): interpolation from radial nodes to r=0
+    # edge_weights  (Nr,): interpolation from radial nodes to r=1
     radial_fields: np.ndarray  # (10+K_max+3*L_max, Nr)
 
     # theta         (Nt,)
@@ -75,9 +75,9 @@ class GridWorkspace:
     poloidal_fields: np.ndarray  # (7+6*M_max, Nt)
 
     @property
-    def rho(self) -> np.ndarray:
+    def r(self) -> np.ndarray:
         """Radial nodes packed for runtime kernels."""
-        return self.radial_fields[GRID_RADIAL_RHO]
+        return self.radial_fields[GRID_RADIAL_R]
 
     @property
     def x(self) -> np.ndarray:
@@ -90,37 +90,37 @@ class GridWorkspace:
         return self.radial_fields[GRID_RADIAL_Y]
 
     @property
-    def rho_powers(self) -> np.ndarray:
-        """Packed powers of ``rho`` used by profile envelopes."""
-        start = GRID_RADIAL_RHO_POWERS_START
+    def r_powers(self) -> np.ndarray:
+        """Packed powers of ``r`` used by profile envelopes."""
+        start = GRID_RADIAL_R_POWERS_START
         return self.radial_fields[start : start + self.K_max + 2]
 
     @property
     def T(self) -> np.ndarray:
         """Packed Chebyshev basis values."""
-        start = GRID_RADIAL_RHO_POWERS_START + self.K_max + 2
+        start = GRID_RADIAL_R_POWERS_START + self.K_max + 2
         return self.radial_fields[start : start + self.L_max + 1]
 
     @property
     def T_r(self) -> np.ndarray:
         """Packed first derivatives of the Chebyshev basis."""
-        start = GRID_RADIAL_RHO_POWERS_START + self.K_max + self.L_max + 3
+        start = GRID_RADIAL_R_POWERS_START + self.K_max + self.L_max + 3
         return self.radial_fields[start : start + self.L_max + 1]
 
     @property
     def T_rr(self) -> np.ndarray:
         """Packed second derivatives of the Chebyshev basis."""
-        start = GRID_RADIAL_RHO_POWERS_START + self.K_max + 2 * self.L_max + 4
+        start = GRID_RADIAL_R_POWERS_START + self.K_max + 2 * self.L_max + 4
         return self.radial_fields[start : start + self.L_max + 1]
 
     @property
     def edge_interpolation_weights(self) -> np.ndarray:
-        """Weights that evaluate a radial nodal field at the LCFS, ``rho=1``."""
+        """Weights that evaluate a radial nodal field at the LCFS, ``r=1``."""
         return self.radial_fields[-1]
 
     @property
     def axis_interpolation_weights(self) -> np.ndarray:
-        """Weights that evaluate a radial nodal field at the axis, ``rho=0``."""
+        """Weights that evaluate a radial nodal field at the axis, ``r=0``."""
         return self.radial_fields[-2]
 
     @property
@@ -181,10 +181,10 @@ class GridWorkspace:
             differentiator=grid.differentiator.copy(),
             accumulator=grid.accumulator.copy(),
             radial_fields=_pack_radial_fields(
-                grid.rho,
+                grid.r,
                 grid.x,
                 grid.y,
-                grid.rho_powers,
+                grid.r_powers,
                 grid.T,
                 grid.T_r,
                 grid.T_rr,
@@ -218,37 +218,37 @@ class GridWorkspace:
 
 
 def _pack_radial_fields(
-    rho: np.ndarray,
+    r: np.ndarray,
     x: np.ndarray,
     y: np.ndarray,
-    rho_powers: np.ndarray,
+    r_powers: np.ndarray,
     T: np.ndarray,
     T_r: np.ndarray,
     T_rr: np.ndarray,
     K_max: int,
 ) -> np.ndarray:
     """Pack radial fields into a read-only (R, Nr) 2D array according to the layout contract."""
-    Nr = rho.shape[0]
+    Nr = r.shape[0]
     L_max = T.shape[0] - 1
     K_max = int(K_max)
 
     fields = np.empty((10 + K_max + 3 * L_max, Nr), dtype=np.float64)
-    fields[GRID_RADIAL_RHO] = rho
+    fields[GRID_RADIAL_R] = r
     fields[GRID_RADIAL_X] = x
     fields[GRID_RADIAL_Y] = y
 
-    rho_start = GRID_RADIAL_RHO_POWERS_START
-    rho_stop = rho_start + K_max + 2
-    T_start = rho_stop
+    r_start = GRID_RADIAL_R_POWERS_START
+    r_stop = r_start + K_max + 2
+    T_start = r_stop
     T_stop = T_start + L_max + 1
     T_r_stop = T_stop + L_max + 1
 
-    _copy_or_extend_rho_powers(fields[rho_start:rho_stop], rho, rho_powers)
+    _copy_or_extend_r_powers(fields[r_start:r_stop], r, r_powers)
     fields[T_start:T_stop] = T
     fields[T_stop:T_r_stop] = T_r
     fields[T_r_stop : T_r_stop + L_max + 1] = T_rr
     endpoint_weights = interpolation_matrix(
-        rho,
+        r,
         np.array([0.0, 1.0], dtype=np.float64),
     )
     fields[-2] = endpoint_weights[0]
@@ -257,13 +257,13 @@ def _pack_radial_fields(
     return fields
 
 
-def _copy_or_extend_rho_powers(out: np.ndarray, rho: np.ndarray, rho_powers: np.ndarray) -> None:
-    """Fill the workspace ABI's fixed rho-power block, padding powers if needed."""
+def _copy_or_extend_r_powers(out: np.ndarray, r: np.ndarray, r_powers: np.ndarray) -> None:
+    """Fill the workspace ABI's fixed r-power block, padding powers if needed."""
 
-    copied = min(out.shape[0], rho_powers.shape[0])
-    out[:copied] = rho_powers[:copied]
+    copied = min(out.shape[0], r_powers.shape[0])
+    out[:copied] = r_powers[:copied]
     for power in range(copied, out.shape[0]):
-        out[power] = rho**power
+        out[power] = r**power
 
 
 def _pack_poloidal_fields(

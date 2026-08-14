@@ -15,9 +15,9 @@ def pf_profiles(psin: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     exp_af = np.exp(alpha_f)
     den_p = 1.0 + exp_ap * (alpha_p - 1.0)
     den_f = 1.0 + exp_af * (alpha_f - 1.0)
-    pprime = beta0 * alpha_p * (np.exp(alpha_p * psin) - exp_ap) / den_p
-    ffprime = (1.0 - beta0) * alpha_f * (np.exp(alpha_f * psin) - exp_af) / den_f
-    return pprime.astype(np.float64), ffprime.astype(np.float64)
+    P_psin = beta0 * alpha_p * (np.exp(alpha_p * psin) - exp_ap) / den_p
+    FF_psin = (1.0 - beta0) * alpha_f * (np.exp(alpha_f * psin) - exp_af) / den_f
+    return P_psin.astype(np.float64), FF_psin.astype(np.float64)
 
 
 # Topology is fixed for one reusable Kernel handle.
@@ -54,10 +54,10 @@ boundary = veq.KernelBoundary(
 )
 
 source_axis = np.linspace(0.0, 1.0, topology.sample_count, dtype=np.float64)
-pprime, ffprime = pf_profiles(source_axis)
+P_psin, FF_psin = pf_profiles(source_axis)
 source = veq.KernelSource(
-    pprime=pprime,
-    ffprime=ffprime,
+    P_psin=P_psin,
+    FF_psin=FF_psin,
     Ip=3.0e6,
 )
 

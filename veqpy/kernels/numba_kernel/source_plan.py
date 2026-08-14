@@ -17,7 +17,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from veqpy.kernels.abi.enums import SOURCE_DRIVER_BY_ROUTE
+from veqpy.kernels.abi.enums import source_driver_for
 from veqpy.kernels.abi.source_semantics import materialize_source_inputs
 from veqpy.numerics import (
     SOURCE_INTERP_DEFAULT,
@@ -27,8 +27,8 @@ from veqpy.numerics import (
 
 from .numba_source import (
     COORDINATE_CODES,
-    _update_pj2_strict_from_rho_inputs_with_scratch,
-    _update_pj3_strict_from_rho_inputs_with_scratch,
+    _update_pj2_strict_from_r_inputs_with_scratch,
+    _update_pj3_strict_from_r_inputs_with_scratch,
     source_parameterization_for_route_key,
 )
 
@@ -52,8 +52,10 @@ class SourcePlan:
     nodes: str
     parameterization: str
     source_sample_count: int
+    source_nodes: np.ndarray | None
     scaled_pprime: np.ndarray
     scaled_driver: np.ndarray
+    scaled_pressure: np.ndarray | None
     scaled_p0: float
     scaled_Ip: float
     beta: float
@@ -65,9 +67,19 @@ class SourcePlan:
         return self.nodes == "grid"
 
     @property
+    def is_explicit_nodes(self) -> bool:
+        """Whether runtime source samples retain caller-provided coordinates."""
+        return self.nodes == "explicit"
+
+    @property
     def is_psin_coordinate(self) -> bool:
         """Whether source samples are parameterized by normalized flux."""
         return self.coordinate == "psin"
+
+    @property
+    def is_rho_coordinate(self) -> bool:
+        """Whether samples use normalized toroidal-flux radius sqrt(Phi_N)."""
+        return self.coordinate == "rho"
 
     @property
     def route_key(self) -> tuple[str, str, str]:
@@ -87,8 +99,10 @@ class SourcePlan:
     @property
     def uses_barycentric_interpolation(self) -> bool:
         """Whether non-grid source interpolation uses barycentric weights."""
-        return not self.is_grid_nodes and source_interpolation_kind_is_barycentric(
-            self.interpolation_kind
+        return (
+            not self.is_grid_nodes
+            and not self.is_explicit_nodes
+            and source_interpolation_kind_is_barycentric(self.interpolation_kind)
         )
 
 
@@ -105,14 +119,14 @@ def source_kernel_for_topology(
     f_count: int,
     default_kernel: Callable,
 ) -> Callable:
-    """Select optimized-F or strict rho PJ2/PJ3 source ownership."""
+    """Select optimized-F or strict r PJ2/PJ3 source ownership."""
 
     normalized_route = str(route).upper()
-    if str(coordinate).lower() == "rho" and int(f_count) == 0:
+    if str(coordinate).lower() in {"r", "rho"} and int(f_count) == 0:
         if normalized_route == "PJ2":
-            return _update_pj2_strict_from_rho_inputs_with_scratch
+            return _update_pj2_strict_from_r_inputs_with_scratch
         if normalized_route == "PJ3":
-            return _update_pj3_strict_from_rho_inputs_with_scratch
+            return _update_pj3_strict_from_r_inputs_with_scratch
     return default_kernel
 
 
@@ -144,13 +158,19 @@ def build_source_plan(
         nodes=str(case.nodes).lower(),
         parameterization=source_parameterization_for_route_key(route_key),
         source_sample_count=int(scaled_pprime.shape[0]),
+        source_nodes=(
+            None
+            if getattr(case, "source_nodes", None) is None
+            else np.asarray(case.source_nodes, dtype=np.float64)
+        ),
         scaled_pprime=scaled_pprime,
         scaled_driver=scaled_driver,
+        scaled_pressure=None,
         scaled_p0=scaled_p0,
         scaled_Ip=scaled_Ip,
         beta=beta,
         interpolation_kind=(
-            # Grid-node sources are already sampled on operator rho; leave the
+            # Grid-node sources are already sampled on operator r; leave the
             # interpolation slot empty so runtime binding cannot remap them.
             ""
             if str(case.nodes).lower() == "grid"
@@ -161,10 +181,11 @@ def build_source_plan(
 
 def _scaled_source_inputs(case: object) -> tuple[np.ndarray, np.ndarray, float, float, float]:
     route = str(case.route).upper()
-    driver_name = SOURCE_DRIVER_BY_ROUTE[route]
+    coordinate = str(case.coordinate).lower()
+    driver_name = source_driver_for(route, coordinate)
     materialized = materialize_source_inputs(
         route=route,
-        coordinate=str(case.coordinate).lower(),
+        coordinate=coordinate,
         nodes=str(case.nodes).lower(),
         sample_count=int(np.asarray(case.pprime_input, dtype=np.float64).size),
         pprime=case.pprime_input,
@@ -184,6 +205,7 @@ def _scaled_source_inputs(case: object) -> tuple[np.ndarray, np.ndarray, float, 
                 str(case.nodes).lower(),
             )
         ),
+        source_nodes=getattr(case, "source_nodes", None),
     )
     return (
         materialized.scaled_pprime,
@@ -213,8 +235,7 @@ def validate_source_plan_profile_support(
     requires_active_F = bool(getattr(source_execution, "requires_optimized_f_profile", False))
     if has_active_F and not requires_active_F:
         raise ValueError(
-            f"{case.route} expects no active F profile; "
-            "active F is only supported for PJ2/PJ3"
+            f"{case.route} expects no active F profile; active F is only supported for PJ2/PJ3"
         )
     if requires_active_F and not has_active_F:
         raise ValueError(f"{case.route} requires an active F profile")
@@ -235,9 +256,7 @@ def validate_source_plan_profile_support(
         # Source-owned psin routes reconstruct flux in the source kernel.  An
         # active psin profile would create two independent owners of the same
         # root field and stale source queries.
-        raise ValueError(
-            f"{case.route} expects no active psin profile"
-        )
+        raise ValueError(f"{case.route} expects no active psin profile")
 
 
 def validate_source_inputs(case: object, nr: int) -> None:
@@ -253,6 +272,13 @@ def validate_source_inputs(case: object, nr: int) -> None:
         raise ValueError(
             f"Expected grid inputs to have shape ({nr},), got {case.pprime_input.shape}"
         )
+    if case.nodes == "explicit":
+        source_nodes = np.asarray(getattr(case, "source_nodes", None), dtype=np.float64)
+        if source_nodes.shape != case.pprime_input.shape:
+            raise ValueError(
+                "Expected explicit source_nodes to match source inputs, "
+                f"got {source_nodes.shape} and {case.pprime_input.shape}"
+            )
     if case.pprime_input.shape[0] < 1:
         raise ValueError(
             f"Expected {case.coordinate}-coordinate inputs to contain at least one sample"

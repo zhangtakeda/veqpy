@@ -104,7 +104,7 @@ namespace profiles
     struct ProfileShape
     {
         static_assert(Lmax >= 1, "ProfileShape requires at least one stored Chebyshev row");
-        static_assert(Kmax >= 2, "ProfileShape requires rho and rho^2 rows");
+        static_assert(Kmax >= 2, "ProfileShape requires r and r^2 rows");
         static_assert(CFamilySlots.size() <= Mmax, "c-family slots exceed Mmax");
         static_assert(SFamilySlots.size() <= Mmax, "s-family slots exceed Mmax");
 
@@ -468,43 +468,43 @@ namespace profiles::detail
     }
 
     template <size_t Kmax, size_t Nr>
-    constexpr double rho_at(const Matrix<double, Kmax, Nr>& rhos, size_t i) noexcept
+    constexpr double r_at(const Matrix<double, Kmax, Nr>& rs, size_t i) noexcept
     {
-        static_assert(Kmax >= 2, "rho table must contain rho and rho^2 rows");
-        return rhos(0, i);
+        static_assert(Kmax >= 2, "r table must contain r and r^2 rows");
+        return rs(0, i);
     }
 
     template <size_t Kmax, size_t Nr>
-    constexpr double rho2_at(const Matrix<double, Kmax, Nr>& rhos, size_t i) noexcept
+    constexpr double r2_at(const Matrix<double, Kmax, Nr>& rs, size_t i) noexcept
     {
-        static_assert(Kmax >= 2, "rho table must contain rho and rho^2 rows");
-        return rhos(1, i);
+        static_assert(Kmax >= 2, "r table must contain r and r^2 rows");
+        return rs(1, i);
     }
 
     template <size_t Kmax, size_t Nr>
-    constexpr double y_at(const Matrix<double, Kmax, Nr>& rhos, size_t i) noexcept
+    constexpr double y_at(const Matrix<double, Kmax, Nr>& rs, size_t i) noexcept
     {
-        return 1.0 - rho2_at(rhos, i);
+        return 1.0 - r2_at(rs, i);
     }
 
     template <size_t Kmax, size_t Power, size_t Nr>
-    constexpr ProfileValues rho_power_rows(const Matrix<double, Kmax, Nr>& rhos, size_t i) noexcept
+    constexpr ProfileValues r_power_rows(const Matrix<double, Kmax, Nr>& rs, size_t i) noexcept
     {
-        static_assert(Power <= Kmax, "rho power exceeds shared rho table rows");
+        static_assert(Power <= Kmax, "r power exceeds shared r table rows");
 
         if constexpr (Power == 0)
             return {1.0, 0.0, 0.0};
         else if constexpr (Power == 1)
-            return {rho_at(rhos, i), 1.0, 0.0};
+            return {r_at(rs, i), 1.0, 0.0};
         else
         {
-            const double rho_pm2 = Power == 2 ? 1.0 : rhos(Power - 3, i);
-            const double rho_pm1 = rhos(Power - 2, i);
-            const double rho_p   = rhos(Power - 1, i);
+            const double r_pm2 = Power == 2 ? 1.0 : rs(Power - 3, i);
+            const double r_pm1 = rs(Power - 2, i);
+            const double r_p   = rs(Power - 1, i);
             return {
-                rho_p,
-                static_cast<double>(Power) * rho_pm1,
-                static_cast<double>(Power * (Power - 1)) * rho_pm2,
+                r_p,
+                static_cast<double>(Power) * r_pm1,
+                static_cast<double>(Power * (Power - 1)) * r_pm2,
             };
         }
     }
@@ -523,12 +523,12 @@ namespace profiles
     struct ProfileEvaluator
     {
         static_assert(Shape::L_max >= 1, "ProfileEvaluator requires at least one stored Chebyshev row");
-        static_assert(Shape::K_max >= 2, "ProfileEvaluator requires rho and rho^2 rows");
+        static_assert(Shape::K_max >= 2, "ProfileEvaluator requires r and r^2 rows");
 
         using shape = Shape;
 
         static constexpr size_t basis_rows    = Shape::L_max;
-        static constexpr size_t rho_rows      = Shape::K_max;
+        static constexpr size_t r_rows      = Shape::K_max;
         static constexpr size_t c_family_size = Shape::c_family_slot_count + 1;
         static constexpr size_t s_family_size = Shape::s_family_slot_count;
 
@@ -562,7 +562,7 @@ namespace profiles
         template <size_t Order>
         static consteval size_t fourier_power()
         {
-            return Order < rho_rows ? Order : rho_rows;
+            return Order < r_rows ? Order : r_rows;
         }
 
         template <size_t Nr>
@@ -572,21 +572,21 @@ namespace profiles
                                        const Matrix<double, basis_rows, Nr>& T,
                                        const Matrix<double, basis_rows, Nr>& T_r,
                                        const Matrix<double, basis_rows, Nr>& T_rr,
-                                       const Matrix<double, rho_rows, Nr>&   rhos) noexcept
+                                       const Matrix<double, r_rows, Nr>&   rs) noexcept
         {
             detail::update_profile_fused<basis_rows, h_count, Nr>(profile,
                                                                   coeffs,
                                                                   T,
                                                                   T_r,
                                                                   T_rr,
-                                                                  [&rhos](size_t i, detail::ProfileValues polys)
+                                                                  [&rs](size_t i, detail::ProfileValues polys)
                                                                   {
-                                                                      const double rho = detail::rho_at(rhos, i);
-                                                                      const double y   = detail::y_at(rhos, i);
+                                                                      const double r = detail::r_at(rs, i);
+                                                                      const double y   = detail::y_at(rs, i);
                                                                       return detail::ProfileValues{
                                                                           y * polys.value,
-                                                                          -2.0 * rho * polys.value + y * polys.diff,
-                                                                          -2.0 * polys.value - 4.0 * rho * polys.diff +
+                                                                          -2.0 * r * polys.value + y * polys.diff,
+                                                                          -2.0 * polys.value - 4.0 * r * polys.diff +
                                                                               y * polys.diff2,
                                                                       };
                                                                   });
@@ -599,21 +599,21 @@ namespace profiles
                                        const Matrix<double, basis_rows, Nr>& T,
                                        const Matrix<double, basis_rows, Nr>& T_r,
                                        const Matrix<double, basis_rows, Nr>& T_rr,
-                                       const Matrix<double, rho_rows, Nr>&   rhos) noexcept
+                                       const Matrix<double, r_rows, Nr>&   rs) noexcept
         {
             detail::update_profile_fused<basis_rows, v_count, Nr>(profile,
                                                                   coeffs,
                                                                   T,
                                                                   T_r,
                                                                   T_rr,
-                                                                  [&rhos](size_t i, detail::ProfileValues polys)
+                                                                  [&rs](size_t i, detail::ProfileValues polys)
                                                                   {
-                                                                      const double rho = detail::rho_at(rhos, i);
-                                                                      const double y   = detail::y_at(rhos, i);
+                                                                      const double r = detail::r_at(rs, i);
+                                                                      const double y   = detail::y_at(rs, i);
                                                                       return detail::ProfileValues{
                                                                           y * polys.value,
-                                                                          -2.0 * rho * polys.value + y * polys.diff,
-                                                                          -2.0 * polys.value - 4.0 * rho * polys.diff +
+                                                                          -2.0 * r * polys.value + y * polys.diff,
+                                                                          -2.0 * polys.value - 4.0 * r * polys.diff +
                                                                               y * polys.diff2,
                                                                       };
                                                                   });
@@ -626,7 +626,7 @@ namespace profiles
                                            const Matrix<double, basis_rows, Nr>& T,
                                            const Matrix<double, basis_rows, Nr>& T_r,
                                            const Matrix<double, basis_rows, Nr>& T_rr,
-                                           const Matrix<double, rho_rows, Nr>&   rhos,
+                                           const Matrix<double, r_rows, Nr>&   rs,
                                            double                                ka) noexcept
         {
             detail::update_profile_fused<basis_rows, kappa_count, Nr>(
@@ -635,15 +635,15 @@ namespace profiles
                 T,
                 T_r,
                 T_rr,
-                [&rhos, ka](size_t i, detail::ProfileValues polys)
+                [&rs, ka](size_t i, detail::ProfileValues polys)
                 {
-                    const double rho  = detail::rho_at(rhos, i);
-                    const double y    = detail::y_at(rhos, i);
+                    const double r  = detail::r_at(rs, i);
+                    const double y    = detail::y_at(rs, i);
                     const double base = y * polys.value;
                     return detail::ProfileValues{
                         ka + base,
-                        -2.0 * rho * polys.value + y * polys.diff,
-                        -2.0 * polys.value - 4.0 * rho * polys.diff + y * polys.diff2,
+                        -2.0 * r * polys.value + y * polys.diff,
+                        -2.0 * polys.value - 4.0 * r * polys.diff + y * polys.diff2,
                     };
                 });
         }
@@ -655,7 +655,7 @@ namespace profiles
                                           const Matrix<double, basis_rows, Nr>& T,
                                           const Matrix<double, basis_rows, Nr>& T_r,
                                           const Matrix<double, basis_rows, Nr>& T_rr,
-                                          const Matrix<double, rho_rows, Nr>&   rhos) noexcept
+                                          const Matrix<double, r_rows, Nr>&   rs) noexcept
         {
             detail::update_profile_fused<basis_rows, psin_count, Nr>(
                 profile,
@@ -663,19 +663,19 @@ namespace profiles
                 T,
                 T_r,
                 T_rr,
-                [&rhos](size_t i, detail::ProfileValues polys)
+                [&rs](size_t i, detail::ProfileValues polys)
                 {
-                    const double rho     = detail::rho_at(rhos, i);
-                    const double y       = detail::y_at(rhos, i);
+                    const double r     = detail::r_at(rs, i);
+                    const double y       = detail::y_at(rs, i);
                     const double base    = y * polys.value;
-                    const double base_r  = -2.0 * rho * polys.value + y * polys.diff;
-                    const double base_rr = -2.0 * polys.value - 4.0 * rho * polys.diff + y * polys.diff2;
+                    const double base_r  = -2.0 * r * polys.value + y * polys.diff;
+                    const double base_rr = -2.0 * polys.value - 4.0 * r * polys.diff + y * polys.diff2;
                     const double amp     = 1.0 + base;
-                    const double rp      = detail::rho2_at(rhos, i);
+                    const double rp      = detail::r2_at(rs, i);
                     return detail::ProfileValues{
                         rp * amp,
-                        2.0 * rho * amp + rp * base_r,
-                        2.0 * amp + 4.0 * rho * base_r + rp * base_rr,
+                        2.0 * r * amp + rp * base_r,
+                        2.0 * amp + 4.0 * r * base_r + rp * base_rr,
                     };
                 });
         }
@@ -687,7 +687,7 @@ namespace profiles
                                        const Matrix<double, basis_rows, Nr>& T,
                                        const Matrix<double, basis_rows, Nr>& T_r,
                                        const Matrix<double, basis_rows, Nr>& T_rr,
-                                       const Matrix<double, rho_rows, Nr>&   rhos,
+                                       const Matrix<double, r_rows, Nr>&   rs,
                                        double                                scale) noexcept
         {
             detail::update_profile_fused<basis_rows, F_count, Nr>(
@@ -696,12 +696,12 @@ namespace profiles
                 T,
                 T_r,
                 T_rr,
-                [&rhos, scale](size_t i, detail::ProfileValues polys)
+                [&rs, scale](size_t i, detail::ProfileValues polys)
                 {
-                    const double rho     = detail::rho_at(rhos, i);
-                    const double y       = detail::y_at(rhos, i);
-                    const double base_r  = -2.0 * rho * polys.value + y * polys.diff;
-                    const double base_rr = -2.0 * polys.value - 4.0 * rho * polys.diff + y * polys.diff2;
+                    const double r     = detail::r_at(rs, i);
+                    const double y       = detail::y_at(rs, i);
+                    const double base_r  = -2.0 * r * polys.value + y * polys.diff;
+                    const double base_rr = -2.0 * polys.value - 4.0 * r * polys.diff + y * polys.diff2;
                     const double amp_raw = math::max(1.0 + y * polys.value, detail::F_squared_amplitude_floor);
                     const double amp     = math::sqrt(amp_raw);
                     const double inv_amp = 1.0 / amp;
@@ -714,13 +714,13 @@ namespace profiles
         }
 
         template <size_t Order, size_t Nr>
-            requires(c_count<Order>() > 0 && basis_rows + 1 >= c_count<Order>() && rho_rows >= fourier_power<Order>())
+            requires(c_count<Order>() > 0 && basis_rows + 1 >= c_count<Order>() && r_rows >= fourier_power<Order>())
         static constexpr void update_c(std::span<double, Nr * 3>               profile,
                                        const Vector<double, c_count<Order>()>& coeffs,
                                        const Matrix<double, basis_rows, Nr>&   T,
                                        const Matrix<double, basis_rows, Nr>&   T_r,
                                        const Matrix<double, basis_rows, Nr>&   T_rr,
-                                       const Matrix<double, rho_rows, Nr>&     rhos,
+                                       const Matrix<double, r_rows, Nr>&     rs,
                                        double                                  offset) noexcept
         {
             constexpr size_t Count = c_count<Order>();
@@ -732,14 +732,14 @@ namespace profiles
                 T,
                 T_r,
                 T_rr,
-                [&rhos, offset](size_t i, detail::ProfileValues polys)
+                [&rs, offset](size_t i, detail::ProfileValues polys)
                 {
-                    const detail::ProfileValues rp      = detail::rho_power_rows<rho_rows, Power>(rhos, i);
-                    const double                rho     = detail::rho_at(rhos, i);
-                    const double                y       = detail::y_at(rhos, i);
+                    const detail::ProfileValues rp      = detail::r_power_rows<r_rows, Power>(rs, i);
+                    const double                r     = detail::r_at(rs, i);
+                    const double                y       = detail::y_at(rs, i);
                     const double                base    = y * polys.value;
-                    const double                base_r  = -2.0 * rho * polys.value + y * polys.diff;
-                    const double                base_rr = -2.0 * polys.value - 4.0 * rho * polys.diff + y * polys.diff2;
+                    const double                base_r  = -2.0 * r * polys.value + y * polys.diff;
+                    const double                base_rr = -2.0 * polys.value - 4.0 * r * polys.diff + y * polys.diff2;
                     const double                amp     = offset + base;
                     return detail::ProfileValues{
                         rp.value * amp,
@@ -750,13 +750,13 @@ namespace profiles
         }
 
         template <size_t Order, size_t Nr>
-            requires(s_count<Order>() > 0 && basis_rows + 1 >= s_count<Order>() && rho_rows >= fourier_power<Order>())
+            requires(s_count<Order>() > 0 && basis_rows + 1 >= s_count<Order>() && r_rows >= fourier_power<Order>())
         static constexpr void update_s(std::span<double, Nr * 3>               profile,
                                        const Vector<double, s_count<Order>()>& coeffs,
                                        const Matrix<double, basis_rows, Nr>&   T,
                                        const Matrix<double, basis_rows, Nr>&   T_r,
                                        const Matrix<double, basis_rows, Nr>&   T_rr,
-                                       const Matrix<double, rho_rows, Nr>&     rhos,
+                                       const Matrix<double, r_rows, Nr>&     rs,
                                        double                                  offset) noexcept
         {
             constexpr size_t Count = s_count<Order>();
@@ -768,14 +768,14 @@ namespace profiles
                 T,
                 T_r,
                 T_rr,
-                [&rhos, offset](size_t i, detail::ProfileValues polys)
+                [&rs, offset](size_t i, detail::ProfileValues polys)
                 {
-                    const detail::ProfileValues rp      = detail::rho_power_rows<rho_rows, Power>(rhos, i);
-                    const double                rho     = detail::rho_at(rhos, i);
-                    const double                y       = detail::y_at(rhos, i);
+                    const detail::ProfileValues rp      = detail::r_power_rows<r_rows, Power>(rs, i);
+                    const double                r     = detail::r_at(rs, i);
+                    const double                y       = detail::y_at(rs, i);
                     const double                base    = y * polys.value;
-                    const double                base_r  = -2.0 * rho * polys.value + y * polys.diff;
-                    const double                base_rr = -2.0 * polys.value - 4.0 * rho * polys.diff + y * polys.diff2;
+                    const double                base_r  = -2.0 * r * polys.value + y * polys.diff;
+                    const double                base_rr = -2.0 * polys.value - 4.0 * r * polys.diff + y * polys.diff2;
                     const double                amp     = offset + base;
                     return detail::ProfileValues{
                         rp.value * amp,
@@ -931,7 +931,7 @@ namespace profiles
     struct RuntimeProfiles
     {
         static_assert(Shape::L_max == GridType::basis_rows, "RuntimeProfiles requires matching basis rows");
-        static_assert(Shape::K_max == GridType::rho_power_rows, "RuntimeProfiles requires matching rho rows");
+        static_assert(Shape::K_max == GridType::r_power_rows, "RuntimeProfiles requires matching r rows");
         static_assert(Shape::M_max + 1 == GridType::harmonic_rows, "RuntimeProfiles requires matching harmonics");
 
         using shape     = Shape;
@@ -1214,27 +1214,27 @@ namespace profiles
             return order < Shape::K_max ? order : Shape::K_max;
         }
 
-        static constexpr detail::ProfileValues rho_power_rows_runtime(size_t power, size_t node) noexcept
+        static constexpr detail::ProfileValues r_power_rows_runtime(size_t power, size_t node) noexcept
         {
             if (power == 0)
                 return {1.0, 0.0, 0.0};
             if (power == 1)
-                return {GridType::rhos(0, node), 1.0, 0.0};
+                return {GridType::rs(0, node), 1.0, 0.0};
 
-            const double rho_pm2 = power == 2 ? 1.0 : GridType::rhos(power - 3, node);
-            const double rho_pm1 = GridType::rhos(power - 2, node);
-            const double rho_p   = GridType::rhos(power - 1, node);
+            const double r_pm2 = power == 2 ? 1.0 : GridType::rs(power - 3, node);
+            const double r_pm1 = GridType::rs(power - 2, node);
+            const double r_p   = GridType::rs(power - 1, node);
             return {
-                rho_p,
-                static_cast<double>(power) * rho_pm1,
-                static_cast<double>(power * (power - 1)) * rho_pm2,
+                r_p,
+                static_cast<double>(power) * r_pm1,
+                static_cast<double>(power * (power - 1)) * r_pm2,
             };
         }
 
         static constexpr void
         store_boundary_order(FamilySlab& family, size_t order, size_t node, double offset) noexcept
         {
-            const detail::ProfileValues rp = rho_power_rows_runtime(fourier_power_runtime(order), node);
+            const detail::ProfileValues rp = r_power_rows_runtime(fourier_power_runtime(order), node);
             family(order, node, 0)         = offset * rp.value;
             family(order, node, 1)         = offset * rp.diff;
             family(order, node, 2)         = offset * rp.diff2;
@@ -1370,7 +1370,7 @@ namespace profiles
                 constexpr size_t count      = evaluator::h_count;
                 const auto       coeffs     = coefficients_from_x<profile_id, count>(x);
                 evaluator::update_h(
-                    profile_span<profile_id>(), coeffs, GridType::T, GridType::T_r, GridType::T_rr, GridType::rhos);
+                    profile_span<profile_id>(), coeffs, GridType::T, GridType::T_r, GridType::T_rr, GridType::rs);
             }
         }
 
@@ -1382,7 +1382,7 @@ namespace profiles
                 constexpr size_t count      = evaluator::v_count;
                 const auto       coeffs     = coefficients_from_x<profile_id, count>(x);
                 evaluator::update_v(
-                    profile_span<profile_id>(), coeffs, GridType::T, GridType::T_r, GridType::T_rr, GridType::rhos);
+                    profile_span<profile_id>(), coeffs, GridType::T, GridType::T_r, GridType::T_rr, GridType::rs);
             }
         }
 
@@ -1399,7 +1399,7 @@ namespace profiles
                                         GridType::T,
                                         GridType::T_r,
                                         GridType::T_rr,
-                                        GridType::rhos,
+                                        GridType::rs,
                                         params.offsets[profile_id]);
             }
         }
@@ -1412,7 +1412,7 @@ namespace profiles
                 constexpr size_t count      = evaluator::psin_count;
                 const auto       coeffs     = coefficients_from_x<profile_id, count>(x);
                 evaluator::update_psin(
-                    profile_span<profile_id>(), coeffs, GridType::T, GridType::T_r, GridType::T_rr, GridType::rhos);
+                    profile_span<profile_id>(), coeffs, GridType::T, GridType::T_r, GridType::T_rr, GridType::rs);
             }
         }
 
@@ -1429,7 +1429,7 @@ namespace profiles
                                     GridType::T,
                                     GridType::T_r,
                                     GridType::T_rr,
-                                    GridType::rhos,
+                                    GridType::rs,
                                     params.scales[profile_id]);
             }
         }
@@ -1453,7 +1453,7 @@ namespace profiles
                                                             GridType::T,
                                                             GridType::T_r,
                                                             GridType::T_rr,
-                                                            GridType::rhos,
+                                                            GridType::rs,
                                                             0.0);
                     }
                 }
@@ -1480,7 +1480,7 @@ namespace profiles
                                                             GridType::T,
                                                             GridType::T_r,
                                                             GridType::T_rr,
-                                                            GridType::rhos,
+                                                            GridType::rs,
                                                             0.0);
                     }
                 }

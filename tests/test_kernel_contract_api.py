@@ -16,7 +16,7 @@ from veqpy import (
     KernelTopology,
 )
 from veqpy.api import build, fit
-from veqpy.kernels.abi.enums import SOURCE_DRIVER_BY_ROUTE
+from veqpy.kernels.abi.enums import source_driver_for
 from veqpy.kernels.abi.identity import recipe_identity_payload, topology_identity_payload
 from veqpy.kernels.abi.options import (
     RESIDUAL_NORMALIZATION_BALANCED,
@@ -27,6 +27,7 @@ from veqpy.kernels.abi.source_semantics import materialize_kernel_source
 from veqpy.kernels.boundary_materialization import materialize_kernel_boundary
 from veqpy.kernels.cxx_kernel.builder import prepare
 from veqpy.kernels.cxx_kernel.native_abi import solve_result_from_native
+from veqpy.kernels.errors import TopologyError
 from veqpy.kernels.types import kernel_boundary_has_raw_points, kernel_boundary_s_offsets_with_s0
 
 MU0 = 4.0e-7 * np.pi
@@ -91,10 +92,10 @@ def pf_reference_profiles(psin: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 
 def tiny_kernel_source(*, case_name: str | None = None) -> KernelSource:
     psin = np.linspace(0.0, 1.0, 9, dtype=np.float64)
-    ffprime, scaled_pprime = pf_reference_profiles(psin)
+    ff_psin, scaled_pprime = pf_reference_profiles(psin)
     return KernelSource(
-        pprime=scaled_pprime / MU0,
-        ffprime=ffprime,
+        P_psin=scaled_pprime / MU0,
+        FF_psin=ff_psin,
         Ip=3.0e6,
         case_name=case_name,
     )
@@ -338,6 +339,9 @@ def test_kernel_topology_and_runtime_source_is_user_facing_contract() -> None:
     assert topology.key == same_shape.key
     assert KernelRecipe().backend == "numba"
     assert family_recipe.backend == "cxx"
+
+    with pytest.raises(TopologyError, match="unsupported coordinate 'sqrt-phi'"):
+        make_kernel_topology(coordinate="sqrt-phi")
     assert family_recipe.layout == "family"
     assert family_recipe.layout_profile_first is True
     assert recipe_identity_payload(family_recipe)["preset"] == "release"
@@ -351,29 +355,29 @@ def test_kernel_topology_and_runtime_source_is_user_facing_contract() -> None:
 
     assert kernel_source.case_name == "tiny"
     assert kernel_boundary.a == 0.5
-    assert_allclose(kernel_source.pprime, tiny_kernel_source().pprime)
-    assert kernel_source.driver_name == "ffprime"
-    assert_allclose(kernel_source.ffprime, tiny_kernel_source().ffprime)
+    assert_allclose(kernel_source.pressure_profile, tiny_kernel_source().pressure_profile)
+    assert kernel_source.driver_name == "FF_psin"
+    assert_allclose(kernel_source.FF_psin, tiny_kernel_source().FF_psin)
     assert kernel_source.Ip == 3.0e6
-    assert_allclose(materialized_source.scaled_pprime, tiny_kernel_source().pprime * MU0)
-    assert_allclose(materialized_source.scaled_driver, tiny_kernel_source().ffprime)
+    assert_allclose(materialized_source.scaled_pprime, tiny_kernel_source().pressure_profile * MU0)
+    assert_allclose(materialized_source.scaled_driver, tiny_kernel_source().FF_psin)
     assert materialized_source.scaled_Ip == 3.0e6 * MU0
     assert kernel_boundary.c_offsets.flags.c_contiguous
     assert isinstance(kernel_boundary.s_offsets, tuple)
-    assert kernel_source.pprime.flags.c_contiguous
-    assert kernel_source.ffprime is not None
-    assert kernel_source.ffprime.flags.c_contiguous
+    assert kernel_source.pressure_profile.flags.c_contiguous
+    assert kernel_source.FF_psin is not None
+    assert kernel_source.FF_psin.flags.c_contiguous
     assert not kernel_boundary.c_offsets.flags.writeable
     assert_allclose(kernel_boundary.s_offsets, [np.arcsin(0.2)])
     assert_allclose(kernel_boundary_s_offsets_with_s0(kernel_boundary), [0.0, np.arcsin(0.2)])
     assert not kernel_boundary_s_offsets_with_s0(kernel_boundary).flags.writeable
-    assert not kernel_source.pprime.flags.writeable
-    assert not kernel_source.ffprime.flags.writeable
+    assert not kernel_source.pressure_profile.flags.writeable
+    assert not kernel_source.FF_psin.flags.writeable
 
-    with pytest.raises(ValueError, match="pprime must be 1D"):
+    with pytest.raises(ValueError, match="P_r must be 1D"):
         KernelSource(
-            pprime=np.ones((2, 1), dtype=np.float64),
-            ffprime=np.ones(2, dtype=np.float64),
+            P_r=np.ones((2, 1), dtype=np.float64),
+            FF_r=np.ones(2, dtype=np.float64),
         )
 
 
@@ -382,22 +386,29 @@ def test_kernel_source_requires_one_explicit_route_driver() -> None:
     driver = np.ones(3, dtype=np.float64)
 
     with pytest.raises(ValueError, match="requires exactly one route driver"):
-        KernelSource(pprime=pprime)
-    with pytest.raises(ValueError, match="got ffprime, q"):
-        KernelSource(pprime=pprime, ffprime=driver, q=driver)
+        KernelSource(P_r=pprime)
+    with pytest.raises(ValueError, match="got FF_r, q"):
+        KernelSource(P_r=pprime, FF_r=driver, q=driver)
     with pytest.raises(TypeError, match="takes 1 positional argument"):
         KernelSource(pprime, driver)  # type: ignore[misc]
+    with pytest.raises(TypeError, match="unexpected keyword argument 'pprime'"):
+        KernelSource(pprime=pprime, q=driver)  # type: ignore[call-arg]
+    with pytest.raises(TypeError, match="unexpected keyword argument 'ffprime'"):
+        KernelSource(P_r=pprime, ffprime=driver)  # type: ignore[call-arg]
     with pytest.raises(TypeError, match="unexpected keyword argument 'heat_profile'"):
         KernelSource(  # type: ignore[call-arg]
             heat_profile=pprime,
             current_profile=driver,
         )
 
-    source = KernelSource(pprime=pprime, q=driver)
-    with pytest.raises(ValueError, match="route PF requires driver 'ffprime', got 'q'"):
+    source = KernelSource(P_r=pprime, q=driver)
+    with pytest.raises(
+        ValueError,
+        match="route PF with coordinate='r' requires driver 'FF_r', got 'q'",
+    ):
         materialize_kernel_source(
             make_kernel_topology(
-                coordinate="rho",
+                coordinate="r",
                 psin_count=0,
                 sample_count=3,
                 constraint="none",
@@ -459,7 +470,7 @@ def test_kernel_source_materialization_locks_route_scaling(
 ) -> None:
     topology = make_kernel_topology(
         route=route,
-        coordinate="rho",
+        coordinate="r",
         nodes="uniform",
         sample_count=3,
         constraint="none",
@@ -471,8 +482,8 @@ def test_kernel_source_materialization_locks_route_scaling(
     )
     pprime = np.array([0.0, 5.5e5, 1.4e6], dtype=np.float64)
     source = KernelSource(
-        pprime=pprime,
-        **{SOURCE_DRIVER_BY_ROUTE[route]: driver},
+        P_r=pprime,
+        **{source_driver_for(route, topology.coordinate): driver},
         Ip=3.0e6,
     )
 
@@ -488,7 +499,7 @@ def test_kernel_source_materialization_locks_route_scaling(
 def test_kernel_source_materialization_does_not_reject_profile_magnitude() -> None:
     topology = make_kernel_topology(
         route="PP",
-        coordinate="rho",
+        coordinate="r",
         nodes="uniform",
         sample_count=3,
         constraint="beta",
@@ -501,7 +512,7 @@ def test_kernel_source_materialization_does_not_reject_profile_magnitude() -> No
     pprime = np.array([0.0, -2.0e12, 3.0e12], dtype=np.float64)
     psi_r = np.array([0.0, -5.0e9, 6.0e9], dtype=np.float64)
     source = KernelSource(
-        pprime=pprime,
+        P_r=pprime,
         psi_r=psi_r,
         beta=0.03,
     )
@@ -516,7 +527,7 @@ def test_kernel_source_materialization_does_not_reject_profile_magnitude() -> No
 def test_kernel_source_materialization_preserves_irregular_axis_profiles() -> None:
     topology = make_kernel_topology(
         route="PF",
-        coordinate="rho",
+        coordinate="r",
         nodes="uniform",
         sample_count=9,
         constraint="ip",
@@ -525,36 +536,36 @@ def test_kernel_source_materialization_preserves_irregular_axis_profiles() -> No
         kappa_count=0,
         s_counts=(),
     )
-    rho = np.linspace(0.0, 1.0, topology.sample_count, dtype=np.float64)
-    pprime = rho * (1.0e6 + 0.4e6 * rho * rho)
-    ffprime = rho * (1.0 + 2.0 * rho * rho)
+    r = np.linspace(0.0, 1.0, topology.sample_count, dtype=np.float64)
+    pprime = r * (1.0e6 + 0.4e6 * r * r)
+    ff_r = r * (1.0 + 2.0 * r * r)
     pprime[0] = 7.0e6
-    ffprime[0] = 9.0
+    ff_r[0] = 9.0
     source = KernelSource(
-        pprime=pprime,
-        ffprime=ffprime,
+        P_r=pprime,
+        FF_r=ff_r,
         Ip=3.0e6,
     )
 
     materialized = materialize_kernel_source(topology, source)
 
     assert_allclose(materialized.scaled_pprime, pprime * MU0)
-    assert_allclose(materialized.scaled_driver, ffprime)
+    assert_allclose(materialized.scaled_driver, ff_r)
 
 
 def test_kernel_source_materialization_errors_use_raw_field_names() -> None:
-    topology = make_kernel_topology(coordinate="rho", psin_count=0, sample_count=3)
+    topology = make_kernel_topology(coordinate="r", psin_count=0, sample_count=3)
     source = KernelSource(
-        pprime=np.array([1.0e6, 1.1e6], dtype=np.float64),
-        ffprime=np.ones(2, dtype=np.float64),
+        P_r=np.array([1.0e6, 1.1e6], dtype=np.float64),
+        FF_r=np.ones(2, dtype=np.float64),
     )
-    with pytest.raises(ValueError, match="pprime and ffprime"):
+    with pytest.raises(ValueError, match="P_r and FF_r"):
         materialize_kernel_source(topology, source)
 
-    rho = np.linspace(0.0, 1.0, 3, dtype=np.float64)
+    r = np.linspace(0.0, 1.0, 3, dtype=np.float64)
     prescaled_ip_source = KernelSource(
-        pprime=rho * (1.0e6 + 0.4e6 * rho * rho),
-        ffprime=rho * (1.0 + 2.0 * rho * rho),
+        P_r=r * (1.0e6 + 0.4e6 * r * r),
+        FF_r=r * (1.0 + 2.0 * r * r),
         Ip=3.0e6 * MU0,
     )
     with pytest.warns(RuntimeWarning, match="Pass raw case values"):
@@ -572,10 +583,10 @@ def test_kernel_runtime_case_must_match_topology_before_native() -> None:
     )
 
     bad_source_length = KernelSource(
-        pprime=np.ones(topology.sample_count - 1, dtype=np.float64),
-        ffprime=np.ones(topology.sample_count - 1, dtype=np.float64),
+        P_psin=np.ones(topology.sample_count - 1, dtype=np.float64),
+        FF_psin=np.ones(topology.sample_count - 1, dtype=np.float64),
     )
-    with pytest.raises(ValueError, match="case does not match kernel topology: pprime"):
+    with pytest.raises(ValueError, match="case does not match kernel topology: P_psin"):
         handle.solve(
             tiny_kernel_boundary(),
             bad_source_length,
@@ -617,8 +628,8 @@ def test_kernel_runtime_case_must_match_topology_before_native() -> None:
     )
     assert recorder.runtime_args is not None
     assert recorder.runtime_args[0] == "override"
-    assert_allclose(recorder.runtime_args[8], tiny_kernel_source().pprime * MU0)
-    assert_allclose(recorder.runtime_args[9], tiny_kernel_source().ffprime)
+    assert_allclose(recorder.runtime_args[8], tiny_kernel_source().pressure_profile * MU0)
+    assert_allclose(recorder.runtime_args[9], tiny_kernel_source().FF_psin)
     assert recorder.runtime_args[10] == 0.0
     assert recorder.runtime_args[11] == 3.0e6 * MU0
 
@@ -820,8 +831,8 @@ def test_kernel_artifact_identity_excludes_runtime_case_and_solver_config(tmp_pa
     materialize_kernel_source(
         topology,
         KernelSource(
-            pprime=tiny_kernel_source().pprime * 1.1,
-            ffprime=tiny_kernel_source().ffprime,
+            P_psin=tiny_kernel_source().pressure_profile * 1.1,
+            FF_psin=tiny_kernel_source().FF_psin,
             Ip=4.0e6,
             case_name="two",
         ),

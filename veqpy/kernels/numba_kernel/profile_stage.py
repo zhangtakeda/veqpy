@@ -21,7 +21,7 @@ from __future__ import annotations
 import numpy as np
 from numba import njit
 
-from veqpy.kernels.numba_kernel.workspace.field_rows import GRID_RADIAL_RHO_POWERS_START
+from veqpy.kernels.numba_kernel.workspace.field_rows import GRID_RADIAL_R_POWERS_START
 
 _AMPLITUDE_POWER_FLOOR = 1.0e-10
 
@@ -71,7 +71,7 @@ def _profile_basis_views(
     grid_l_max: int,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Return Chebyshev basis rows from the packed grid radial field slab."""
-    T_start = GRID_RADIAL_RHO_POWERS_START + grid_k_max + 2
+    T_start = GRID_RADIAL_R_POWERS_START + grid_k_max + 2
     T_stop = T_start + grid_l_max + 1
     T_r_stop = T_stop + grid_l_max + 1
     return (
@@ -97,7 +97,7 @@ def update_profile(
     nr = out_fields.shape[1]
 
     if coeff is None:
-        # Passive profiles are pure offset * rho_power envelopes.  They still
+        # Passive profiles are pure offset * r_power envelopes.  They still
         # need derivative rows so geometry can consume them like active profiles.
         if amplitude_power == 1.0:
             for i in range(nr):
@@ -263,7 +263,7 @@ def update_profiles_packed_bulk(
                 rp = profile_rp_fields[profile_id, 0, i]
                 rp_r = profile_rp_fields[profile_id, 1, i]
                 rp_rr = profile_rp_fields[profile_id, 2, i]
-                # Store three rows: value, rho derivative, and second rho
+                # Store three rows: value, r derivative, and second r
                 # derivative.  Later stages never recompute profile derivatives.
                 profile_fields[profile_id, 0, i] = scale * (rp * amp)
                 profile_fields[profile_id, 1, i] = scale * (rp_r * amp + rp * base_r)
@@ -335,7 +335,7 @@ def update_profiles_packed_bulk(
             rp = profile_rp_fields[profile_id, 0, i]
             rp_r = profile_rp_fields[profile_id, 1, i]
             rp_rr = profile_rp_fields[profile_id, 2, i]
-            # Store three rows: value, rho derivative, and second rho
+            # Store three rows: value, r derivative, and second r
             # derivative.  Later stages never recompute profile derivatives.
             profile_fields[profile_id, 0, i] = scale * (rp * amp)
             profile_fields[profile_id, 1, i] = scale * (rp_r * amp + rp * amp_r)

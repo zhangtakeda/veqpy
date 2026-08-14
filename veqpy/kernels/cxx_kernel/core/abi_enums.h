@@ -37,7 +37,7 @@ namespace cxx_abi
     inline constexpr int source_route_pq  = 6;
     inline constexpr int source_route_pj3 = 7;
 
-    inline constexpr int source_coordinate_rho  = 1;
+    inline constexpr int source_coordinate_r  = 1;
     inline constexpr int source_coordinate_psin = 2;
 
     inline constexpr int source_constraint_null    = 0;
@@ -91,7 +91,7 @@ namespace operators::detail
     inline constexpr int source_route_pq  = cxx_abi::source_route_pq;
     inline constexpr int source_route_pj3 = cxx_abi::source_route_pj3;
 
-    inline constexpr int source_coordinate_rho  = cxx_abi::source_coordinate_rho;
+    inline constexpr int source_coordinate_r  = cxx_abi::source_coordinate_r;
     inline constexpr int source_coordinate_psin = cxx_abi::source_coordinate_psin;
 
     inline constexpr int source_constraint_null    = cxx_abi::source_constraint_null;

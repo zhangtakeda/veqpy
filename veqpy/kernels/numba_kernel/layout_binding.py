@@ -53,7 +53,7 @@ def build_kernel_layout(
     residual_binding_layout: Any,
     c_effective_order: int,
     s_effective_order: int,
-    fix_rho: float,
+    fix_r: float,
     psin_profile_fields_available: bool,
 ) -> KernelLayout:
     """Bind a full executable ``KernelLayout`` from refreshed runtime state."""
@@ -105,7 +105,7 @@ def build_kernel_layout(
         geometry_workspace=geometry_workspace,
         source_workspace=source_workspace,
         B0=case.B0,
-        fix_rho=fix_rho,
+        fix_r=fix_r,
     )
     raw_source_stage_runner = build_bound_source_stage_runner(
         plan=plan,
@@ -113,8 +113,9 @@ def build_kernel_layout(
         grid_workspace=grid_workspace,
         source_workspace=source_workspace,
         profile_workspace=profile_workspace,
+        geometry_workspace=geometry_workspace,
         residual_workspace=residual_workspace,
-        fix_rho=fix_rho,
+        fix_r=fix_r,
         source_eval_runner=source_eval_runner,
     )
 
@@ -146,7 +147,7 @@ def build_kernel_layout(
         alpha_state=alpha_state,
         c_effective_order=c_effective_order,
         s_effective_order=s_effective_order,
-        fix_rho=fix_rho,
+        fix_r=fix_r,
         psin_profile_fields_available=psin_profile_fields_available,
         profile_stage_runner=profile_stage_runner,
         geometry_stage_runner=geometry_stage_runner,

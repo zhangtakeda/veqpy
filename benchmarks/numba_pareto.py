@@ -430,7 +430,7 @@ def _generate_d_shape_ref_pruning_signatures(
         sweep_step="d-shape-ref-prune-ref",
         signature=dict(max_lengths),
     )
-    _append_representative_neighborhood_records(
+    _append_representative_neighborod_records(
         records,
         seen,
         case_key="solovev",
@@ -535,7 +535,7 @@ def _generate_general_ref_pruning_signatures(
         sweep_step=f"{case_key}-ref-prune-ref",
         signature=dict(max_lengths),
     )
-    _append_representative_neighborhood_records(
+    _append_representative_neighborod_records(
         records,
         seen,
         case_key=case_key,
@@ -602,7 +602,7 @@ def _paired_fourier_ref_pruning_signature(
     return signature
 
 
-def _append_representative_neighborhood_records(
+def _append_representative_neighborod_records(
     records: list[SignatureRecord],
     seen: set[tuple[tuple[str, int], ...]],
     *,

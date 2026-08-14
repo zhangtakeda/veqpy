@@ -36,7 +36,7 @@ def _circular_pq_topology(constraint: str) -> KernelTopology:
         Nr=32,
         Nt=32,
         route="PQ",
-        coordinate="rho",
+        coordinate="r",
         nodes="grid",
         constraint=constraint,
         sample_count=32,
@@ -57,8 +57,8 @@ def _circular_boundary() -> KernelBoundary:
 def _constant_pressure_sources(
     topology: KernelTopology,
 ) -> tuple[KernelSource, KernelSource, np.ndarray]:
-    rho, _ = make_quadrature(topology.Nr, scheme=topology.quadrature)
-    q = 1.71 + 0.16 * rho * rho
+    r, _ = make_quadrature(topology.Nr, scheme=topology.quadrature)
+    q = 1.71 + 0.16 * r * r
     constraints: dict[str, float] = {}
     if topology.source_uses_beta_constraint:
         constraints["beta"] = _BETA
@@ -69,7 +69,7 @@ def _constant_pressure_sources(
             **constraints,
         ),
         KernelSource(
-            pprime=np.zeros(topology.Nr, dtype=np.float64),
+            P_r=np.zeros(topology.Nr, dtype=np.float64),
             p0=_PRESSURE,
             q=q,
             **constraints,

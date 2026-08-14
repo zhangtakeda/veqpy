@@ -36,18 +36,25 @@ from veqpy.kernels.numba_kernel.numba_source import (
     PJ2_PSIN_UNIFORM_BARYCENTRIC_ORDER_CAP,
     PJ2_PSIN_UNIFORM_FIXED_POINT_MAX_ITER,
     PJ2_PSIN_UNIFORM_FIXED_POINT_MAX_RESIDUAL,
+    PSIN_DERIVATIVE_FIXED_POINT_MAX_RESIDUAL,
+    _explicit_pchip_interpolate_pair_with_derivatives,
     _local_barycentric_interpolate_pair,
+    _materialize_profile_owned_psin_fields_impl,
     _materialize_profile_owned_psin_source_impl,
     _uniform_spline_interpolate_pair,
     _update_fixed_point_psin_query_and_local_barycentric_inputs_impl,
     _update_fixed_point_psin_query_and_spline_uniform_inputs_impl,
+    _update_fixed_point_psin_query_impl,
     _update_fourier_family_fields_impl,
+    _update_pi_from_r_explicit_inputs_with_scratch,
     _update_pj2_from_psin_uniform_inputs_with_scratch,
     _update_pj3_from_psin_uniform_inputs_with_scratch,
+    _update_pp_from_r_explicit_inputs_with_scratch,
     finalize_pressure_normalization,
     uniform_barycentric_weights,
 )
 from veqpy.kernels.numba_kernel.profile_stage import update_profiles_packed_bulk
+from veqpy.kernels.numba_kernel.source_binding import _evaluate_source_kernel_impl
 from veqpy.kernels.numba_kernel.workspace.grid_workspace import GridWorkspace
 from veqpy.numerics import build_uniform_source_interpolation_coefficients
 
@@ -68,19 +75,33 @@ def bind_source_eval_runner(
     geometry_workspace: GeometryWorkspace,
     source_workspace: SourceWorkspace,
     B0: float,
-    fix_rho: float,
+    fix_r: float,
 ) -> Callable:
     """Bind a Python callable around the fused-backend source evaluator."""
+    source_eval_binding = backend_abi.build_fused_source_eval_abi(
+        source_plan=source_plan,
+        grid_workspace=grid_workspace,
+        geometry_workspace=geometry_workspace,
+        source_workspace=source_workspace,
+        B0=B0,
+        fix_r=fix_r,
+    )
+    f_profile_fields = profile_workspace.fields_for("F")
+    explicit_derivative_kernel = None
+    if source_plan.route_key == ("PP", "r", "explicit"):
+        explicit_derivative_kernel = _update_pp_from_r_explicit_inputs_with_scratch
+    elif source_plan.route_key == ("PI", "r", "explicit"):
+        explicit_derivative_kernel = _update_pi_from_r_explicit_inputs_with_scratch
+    if explicit_derivative_kernel is not None:
+        return _bind_r_explicit_derivative_source_eval_runner(
+            source_eval_binding=source_eval_binding,
+            f_profile_fields=f_profile_fields,
+            driver_derivative=source_workspace.materialized_driver_derivative,
+            source_kernel=explicit_derivative_kernel,
+        )
     return _bind_source_eval_runner_for_fused_backend(
-        source_eval_binding=backend_abi.build_fused_source_eval_abi(
-            source_plan=source_plan,
-            grid_workspace=grid_workspace,
-            geometry_workspace=geometry_workspace,
-            source_workspace=source_workspace,
-            B0=B0,
-            fix_rho=fix_rho,
-        ),
-        f_profile_fields=profile_workspace.fields_for("F"),
+        source_eval_binding=source_eval_binding,
+        f_profile_fields=f_profile_fields,
     )
 
 
@@ -296,7 +317,12 @@ def _run_pj2_psin_uniform_spline_with_scratch_impl(
     )
     alpha1 = np.nan
     alpha2 = np.nan
+    alpha2_guess = 1.0
+    converged = False
     for _ in range(PJ2_PSIN_UNIFORM_FIXED_POINT_MAX_ITER):
+        if not np.isfinite(alpha2_guess) or abs(alpha2_guess) <= 1.0e-14:
+            break
+        materialized_pprime_input /= alpha2_guess
         alpha1, alpha2 = _update_f_current_from_psin_uniform_inputs_with_scratch(
             root_fields,
             FFn_psin,
@@ -321,7 +347,7 @@ def _run_pj2_psin_uniform_spline_with_scratch_impl(
             matrix_scratch,
             use_jtotal_semantics,
         )
-        if _update_fixed_point_psin_query_and_spline_uniform_inputs_impl(
+        psin_converged = _update_fixed_point_psin_query_and_spline_uniform_inputs_impl(
             source_psin_query,
             psin,
             PJ2_PSIN_UNIFORM_FIXED_POINT_MAX_RESIDUAL,
@@ -331,8 +357,20 @@ def _run_pj2_psin_uniform_spline_with_scratch_impl(
             driver_input,
             pprime_spline_coeff,
             driver_spline_coeff,
-        ):
+        )
+        pressure_converged = (
+            abs(alpha2 - alpha2_guess) / max(abs(alpha2), 1.0e-14)
+            <= PSIN_DERIVATIVE_FIXED_POINT_MAX_RESIDUAL
+        )
+        alpha2_guess = alpha2
+        if psin_converged and pressure_converged:
+            materialized_pprime_input /= alpha2
+            converged = True
             break
+    if not converged:
+        raise ValueError(
+            "PJ2/PJ3 psin-uniform spline closure did not reach 1e-10 within 16 iterations"
+        )
     return alpha1, alpha2
 
 
@@ -378,7 +416,12 @@ def _run_pj2_psin_uniform_barycentric_with_scratch_impl(
     )
     alpha1 = np.nan
     alpha2 = np.nan
+    alpha2_guess = 1.0
+    converged = False
     for _ in range(PJ2_PSIN_UNIFORM_FIXED_POINT_MAX_ITER):
+        if not np.isfinite(alpha2_guess) or abs(alpha2_guess) <= 1.0e-14:
+            break
+        materialized_pprime_input /= alpha2_guess
         alpha1, alpha2 = _update_f_current_from_psin_uniform_inputs_with_scratch(
             root_fields,
             FFn_psin,
@@ -403,7 +446,7 @@ def _run_pj2_psin_uniform_barycentric_with_scratch_impl(
             matrix_scratch,
             use_jtotal_semantics,
         )
-        if _update_fixed_point_psin_query_and_local_barycentric_inputs_impl(
+        psin_converged = _update_fixed_point_psin_query_and_local_barycentric_inputs_impl(
             source_psin_query,
             psin,
             PJ2_PSIN_UNIFORM_FIXED_POINT_MAX_RESIDUAL,
@@ -412,8 +455,127 @@ def _run_pj2_psin_uniform_barycentric_with_scratch_impl(
             pprime_input,
             driver_input,
             barycentric_weights,
-        ):
+        )
+        pressure_converged = (
+            abs(alpha2 - alpha2_guess) / max(abs(alpha2), 1.0e-14)
+            <= PSIN_DERIVATIVE_FIXED_POINT_MAX_RESIDUAL
+        )
+        alpha2_guess = alpha2
+        if psin_converged and pressure_converged:
+            materialized_pprime_input /= alpha2
+            converged = True
             break
+    if not converged:
+        raise ValueError(
+            "PJ2/PJ3 psin-uniform barycentric closure did not reach 1e-10 within 16 iterations"
+        )
+    return alpha1, alpha2
+
+
+@njit(cache=True, nogil=True)
+def _run_pj2_psin_explicit_with_scratch_impl(
+    source_psin_query: np.ndarray,
+    psin: np.ndarray,
+    root_fields: np.ndarray,
+    FFn_psin: np.ndarray,
+    Pn_psin: np.ndarray,
+    materialized_pprime_input: np.ndarray,
+    materialized_driver_input: np.ndarray,
+    source_nodes: np.ndarray,
+    pprime_spline_coeff: np.ndarray,
+    driver_spline_coeff: np.ndarray,
+    differentiate_pressure: bool,
+    coordinate_code: int,
+    R0: float,
+    B0: float,
+    weights: np.ndarray,
+    differentiator: np.ndarray,
+    accumulator: np.ndarray,
+    grid_radial_fields: np.ndarray,
+    n_axis_fix: int,
+    radial_fields: np.ndarray,
+    surface_fields: np.ndarray,
+    f_profile_fields: np.ndarray,
+    scaled_p0: float,
+    Ip: float,
+    beta: float,
+    array_scratch: np.ndarray,
+    matrix_scratch: np.ndarray,
+    use_jtotal_semantics: bool,
+) -> tuple[float, float]:
+    """Run the sampled-psin current closure from retained arbitrary nodes."""
+    _explicit_pchip_interpolate_pair_with_derivatives(
+        materialized_pprime_input,
+        materialized_driver_input,
+        materialized_pprime_input,
+        materialized_driver_input,
+        source_nodes,
+        pprime_spline_coeff,
+        driver_spline_coeff,
+        source_psin_query,
+        differentiate_pressure,
+        False,
+    )
+    alpha1 = np.nan
+    alpha2 = np.nan
+    alpha2_guess = 1.0
+    converged = False
+    for _ in range(PJ2_PSIN_UNIFORM_FIXED_POINT_MAX_ITER):
+        if not np.isfinite(alpha2_guess) or abs(alpha2_guess) <= 1.0e-14:
+            break
+        materialized_pprime_input /= alpha2_guess
+        alpha1, alpha2 = _update_f_current_from_psin_uniform_inputs_with_scratch(
+            root_fields,
+            FFn_psin,
+            Pn_psin,
+            materialized_pprime_input,
+            materialized_driver_input,
+            coordinate_code,
+            R0,
+            B0,
+            weights,
+            differentiator,
+            accumulator,
+            grid_radial_fields,
+            n_axis_fix,
+            radial_fields,
+            surface_fields,
+            f_profile_fields,
+            scaled_p0,
+            Ip,
+            beta,
+            array_scratch,
+            matrix_scratch,
+            use_jtotal_semantics,
+        )
+        psin_converged = _update_fixed_point_psin_query_impl(
+            source_psin_query,
+            psin,
+            PJ2_PSIN_UNIFORM_FIXED_POINT_MAX_RESIDUAL,
+        )
+        _explicit_pchip_interpolate_pair_with_derivatives(
+            materialized_pprime_input,
+            materialized_driver_input,
+            materialized_pprime_input,
+            materialized_driver_input,
+            source_nodes,
+            pprime_spline_coeff,
+            driver_spline_coeff,
+            source_psin_query,
+            differentiate_pressure,
+            False,
+        )
+        pressure_converged = (
+            abs(alpha2 - alpha2_guess) / max(abs(alpha2), 1.0e-14)
+            <= PSIN_DERIVATIVE_FIXED_POINT_MAX_RESIDUAL
+        )
+        alpha2_guess = alpha2
+        if psin_converged and pressure_converged:
+            materialized_pprime_input /= alpha2
+            converged = True
+            break
+    if not converged:
+        raise ValueError("PJ2/PJ3 psin-explicit closure did not reach 1e-10 within 16 iterations")
     return alpha1, alpha2
 
 
@@ -434,7 +596,7 @@ def bind_fused_residual_runner(
     R0: float,
     Z0: float,
     B0: float,
-    fix_rho: float,
+    fix_r: float,
 ) -> Callable[[np.ndarray], np.ndarray]:
     """Bind fused residual execution that returns a copied output vector."""
     runner_into = bind_fused_residual_runner_into(
@@ -453,7 +615,7 @@ def bind_fused_residual_runner(
         R0=R0,
         Z0=Z0,
         B0=B0,
-        fix_rho=fix_rho,
+        fix_r=fix_r,
     )
     packed_residual = residual_workspace.packed_residual
 
@@ -481,7 +643,7 @@ def bind_fused_residual_runner_into(
     R0: float,
     Z0: float,
     B0: float,
-    fix_rho: float,
+    fix_r: float,
 ) -> Callable[[np.ndarray, np.ndarray], None]:
     """Bind fused residual execution into a caller-provided output vector."""
     route_key = tuple(source_execution.route_key)
@@ -514,7 +676,11 @@ def bind_fused_residual_runner_into(
         B0=B0,
     )
 
-    if route_key[0] in {"PJ2", "PJ3"} and route_key[1:] == ("psin", "uniform"):
+    if (
+        route_key[0] in {"PJ2", "PJ3"}
+        and route_key[1] == "psin"
+        and route_key[2] in {"uniform", "explicit"}
+    ):
         # F-coupled current routes query sources in the psin produced by the
         # same route, so they need a dedicated fixed-point runner.
         return _bind_pj2_psin_uniform_residual_runner_core(
@@ -529,7 +695,7 @@ def bind_fused_residual_runner_into(
             alpha_state=alpha_state,
             R0=R0,
             B0=B0,
-            fix_rho=fix_rho,
+            fix_r=fix_r,
         )
 
     source_eval_runner = bind_source_eval_runner(
@@ -539,7 +705,7 @@ def bind_fused_residual_runner_into(
         geometry_workspace=geometry_workspace,
         source_workspace=source_workspace,
         B0=B0,
-        fix_rho=fix_rho,
+        fix_r=fix_r,
     )
     if source_execution.requires_optimized_psin_profile:
         # These routes read psin from the packed profile, materialize source
@@ -558,7 +724,7 @@ def bind_fused_residual_runner_into(
             residual_pack_binding=residual_pack_binding,
             alpha_state=alpha_state,
             R0=R0,
-            fix_rho=fix_rho,
+            fix_r=fix_r,
         )
 
     return _bind_single_pass_residual_runner_core(
@@ -634,11 +800,11 @@ def _bind_profile_owned_psin_residual_runner_core(
     residual_pack_binding: backend_abi.FusedResidualPackABI,
     alpha_state: np.ndarray,
     R0: float,
-    fix_rho: float,
+    fix_r: float,
 ) -> Callable[[np.ndarray, np.ndarray], None]:
     surface_fields = geometry_workspace.surface_fields
     residual_surface_fields = residual_workspace.surface_fields
-    n_axis_fix = int(np.searchsorted(grid_workspace.rho, fix_rho))
+    n_axis_fix = int(np.searchsorted(grid_workspace.r, fix_r))
     root_fields = residual_workspace.root_fields
     profile_owned_psin_binding = backend_abi.build_profile_owned_psin_source_abi(
         source_plan=source_plan,
@@ -658,28 +824,59 @@ def _bind_profile_owned_psin_residual_runner_core(
         # Profile-owned psin routes copy psin/psin_r/psin_rr from the active
         # optimized profile, then evaluate pprime/driver samples at that psin
         # coordinate.  The source kernel writes only source derivatives/scales.
-        _materialize_profile_owned_psin_source_impl(
-            psin,
-            psin_r,
-            psin_rr,
-            profile_owned_psin_binding.source_psin_query,
-            profile_owned_psin_binding.source_parameter_query,
-            profile_owned_psin_binding.materialized_pprime_input,
-            profile_owned_psin_binding.materialized_driver_input,
-            profile_owned_psin_binding.psin_profile_fields,
-            profile_owned_psin_binding.scaled_pprime,
-            profile_owned_psin_binding.scaled_driver,
-            profile_owned_psin_binding.pprime_spline_coeff,
-            profile_owned_psin_binding.driver_spline_coeff,
-            profile_owned_psin_binding.parameterization_code,
-            profile_owned_psin_binding.grid_radial_fields,
-            profile_owned_psin_binding.differentiator,
-            profile_owned_psin_binding.accumulator,
-            grid_workspace.weights,
-            n_axis_fix,
-            profile_owned_psin_binding.barycentric_weights,
-            profile_owned_psin_binding.use_barycentric,
-        )
+        if source_plan.is_explicit_nodes:
+            _materialize_profile_owned_psin_fields_impl(
+                psin,
+                psin_r,
+                psin_rr,
+                profile_owned_psin_binding.source_psin_query,
+                profile_owned_psin_binding.psin_profile_fields,
+                profile_owned_psin_binding.grid_radial_fields,
+                profile_owned_psin_binding.differentiator,
+                profile_owned_psin_binding.accumulator,
+                grid_workspace.weights,
+                n_axis_fix,
+            )
+            coefficient0 = (
+                profile_owned_psin_binding.pressure_spline_coeff
+                if profile_owned_psin_binding.differentiate_pressure
+                else profile_owned_psin_binding.pprime_spline_coeff
+            )
+            _explicit_pchip_interpolate_pair_with_derivatives(
+                profile_owned_psin_binding.materialized_pprime_input,
+                profile_owned_psin_binding.materialized_driver_input,
+                profile_owned_psin_binding.materialized_pprime_input,
+                profile_owned_psin_binding.materialized_driver_input,
+                source_workspace.source_coordinate_nodes,
+                coefficient0,
+                profile_owned_psin_binding.driver_spline_coeff,
+                profile_owned_psin_binding.source_psin_query,
+                profile_owned_psin_binding.differentiate_pressure,
+                False,
+            )
+        else:
+            _materialize_profile_owned_psin_source_impl(
+                psin,
+                psin_r,
+                psin_rr,
+                profile_owned_psin_binding.source_psin_query,
+                profile_owned_psin_binding.source_parameter_query,
+                profile_owned_psin_binding.materialized_pprime_input,
+                profile_owned_psin_binding.materialized_driver_input,
+                profile_owned_psin_binding.psin_profile_fields,
+                profile_owned_psin_binding.scaled_pprime,
+                profile_owned_psin_binding.scaled_driver,
+                profile_owned_psin_binding.pprime_spline_coeff,
+                profile_owned_psin_binding.driver_spline_coeff,
+                profile_owned_psin_binding.parameterization_code,
+                profile_owned_psin_binding.grid_radial_fields,
+                profile_owned_psin_binding.differentiator,
+                profile_owned_psin_binding.accumulator,
+                grid_workspace.weights,
+                n_axis_fix,
+                profile_owned_psin_binding.barycentric_weights,
+                profile_owned_psin_binding.use_barycentric,
+            )
         alpha1, alpha2 = source_eval_runner(
             profile_owned_psin_binding.source_target_root_fields,
             FFn_psin,
@@ -718,17 +915,17 @@ def _bind_pj2_psin_uniform_residual_runner_core(
     alpha_state: np.ndarray,
     R0: float,
     B0: float,
-    fix_rho: float,
+    fix_r: float,
 ) -> Callable[[np.ndarray, np.ndarray], None]:
     surface_fields = geometry_workspace.surface_fields
     radial_fields = geometry_workspace.radial_fields
     residual_surface_fields = residual_workspace.surface_fields
-    rho = grid_workspace.rho
+    r = grid_workspace.r
     grid_radial_fields = grid_workspace.radial_fields
     weights = grid_workspace.weights
     differentiator = grid_workspace.differentiator
     accumulator = grid_workspace.accumulator
-    n_axis_fix = int(np.searchsorted(rho, fix_rho))
+    n_axis_fix = int(np.searchsorted(r, fix_r))
     root_fields = residual_workspace.root_fields
 
     source_psin_query = source_workspace.psin_query
@@ -740,14 +937,22 @@ def _bind_pj2_psin_uniform_residual_runner_core(
     psin_profile_u = profile_workspace.values_for("psin")
     pprime_input = source_plan.scaled_pprime
     driver_input = source_plan.scaled_driver
-    pprime_spline_coeff = build_uniform_source_interpolation_coefficients(
-        pprime_input,
-        kind=source_plan.interpolation_kind,
-    )
-    driver_spline_coeff = build_uniform_source_interpolation_coefficients(
-        driver_input,
-        kind=source_plan.interpolation_kind,
-    )
+    if source_plan.is_explicit_nodes:
+        pprime_spline_coeff = (
+            source_workspace.pressure_spline_coeff
+            if source_plan.scaled_pressure is not None
+            else source_workspace.pprime_spline_coeff
+        )
+        driver_spline_coeff = source_workspace.driver_spline_coeff
+    else:
+        pprime_spline_coeff = build_uniform_source_interpolation_coefficients(
+            pprime_input,
+            kind=source_plan.interpolation_kind,
+        )
+        driver_spline_coeff = build_uniform_source_interpolation_coefficients(
+            driver_input,
+            kind=source_plan.interpolation_kind,
+        )
     coordinate_code = int(source_plan.coordinate_code)
     scaled_p0 = float(source_plan.scaled_p0)
     Ip = float(source_plan.scaled_Ip)
@@ -781,7 +986,38 @@ def _bind_pj2_psin_uniform_residual_runner_core(
                 grid_workspace.axis_interpolation_weights,
                 grid_workspace.edge_interpolation_weights,
             )
-        if has_Ip and use_local_barycentric:
+        if source_plan.is_explicit_nodes:
+            alpha1, alpha2 = _run_pj2_psin_explicit_with_scratch_impl(
+                source_psin_query,
+                psin,
+                root_fields,
+                FFn_psin,
+                Pn_psin,
+                materialized_pprime_input,
+                materialized_driver_input,
+                source_workspace.source_coordinate_nodes,
+                pprime_spline_coeff,
+                driver_spline_coeff,
+                source_plan.scaled_pressure is not None,
+                coordinate_code,
+                R0,
+                B0,
+                weights,
+                differentiator,
+                accumulator,
+                grid_radial_fields,
+                n_axis_fix,
+                radial_fields,
+                surface_fields,
+                f_profile_fields,
+                scaled_p0,
+                Ip,
+                beta,
+                array_scratch,
+                matrix_scratch,
+                use_jtotal_semantics,
+            )
+        elif has_Ip and use_local_barycentric:
             # The barycentric helper updates pprime/driver inside the fixed-point
             # loop without allocating a fresh remap matrix for each psin query.
             alpha1, alpha2 = _run_pj2_psin_uniform_barycentric_with_scratch_impl(
@@ -891,12 +1127,62 @@ def _bind_source_eval_runner_for_fused_backend(
         driver_input: np.ndarray,
         R0: float,
     ) -> tuple[float, float]:
-        alpha1, alpha2 = source_eval_binding.source_kernel(
+        return _evaluate_source_kernel_impl(
+            source_eval_binding.source_kernel,
             out_root_fields,
             out_FFn_psin,
             out_Pn_psin,
             pprime_input,
             driver_input,
+            source_eval_binding.coordinate_code,
+            R0,
+            source_eval_binding.B0,
+            source_eval_binding.weights,
+            source_eval_binding.differentiator,
+            source_eval_binding.accumulator,
+            source_eval_binding.grid_radial_fields,
+            source_eval_binding.n_axis_fix,
+            source_eval_binding.radial_fields,
+            source_eval_binding.surface_fields,
+            f_profile_fields,
+            source_eval_binding.scaled_p0,
+            source_eval_binding.scaled_Ip,
+            source_eval_binding.beta,
+            source_eval_binding.array_scratch,
+            source_eval_binding.matrix_scratch,
+            source_eval_binding.pressure_state,
+            source_eval_binding.pressure_derivative_work,
+            source_eval_binding.driver_derivative_work,
+            source_eval_binding.scale_driver_by_alpha2,
+        )
+
+    return runner
+
+
+def _bind_r_explicit_derivative_source_eval_runner(
+    *,
+    source_eval_binding: backend_abi.FusedSourceEvalABI,
+    f_profile_fields: np.ndarray,
+    driver_derivative: np.ndarray,
+    source_kernel: Callable,
+) -> Callable:
+    """Bind a r/explicit route with a derivative from its retained PCHIP."""
+
+    def runner(
+        out_root_fields: np.ndarray,
+        out_FFn_psin: np.ndarray,
+        out_Pn_psin: np.ndarray,
+        pprime_input: np.ndarray,
+        driver_input: np.ndarray,
+        R0: float,
+    ) -> tuple[float, float]:
+        alpha1, alpha2 = source_kernel(
+            out_root_fields,
+            out_FFn_psin,
+            out_Pn_psin,
+            pprime_input,
+            driver_input,
+            driver_derivative,
             source_eval_binding.coordinate_code,
             R0,
             source_eval_binding.B0,

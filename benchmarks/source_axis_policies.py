@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Characterize magnetic-axis policies for rho-coordinate source routes.
+"""Characterize magnetic-axis policies for r-coordinate source routes.
 
 The benchmark starts every route from profiles derived from one converged PF
 equilibrium.  It then applies controlled, axis-local perturbations without
@@ -9,7 +9,7 @@ changing the public source contract.  This separates three questions:
 2. Does a route preserve the profile that is authoritative for that route?
 3. Does an axis policy improve or damage the resulting physical equilibrium?
 
-``fix_rho`` is changed through the private Numba runtime only for this
+``fix_r`` is changed through the private Numba runtime only for this
 diagnostic.  It is deliberately not a public Kernel option.
 """
 
@@ -59,24 +59,24 @@ DRIVER_FIELDS = {
 }
 
 
-def _source_rho(case) -> np.ndarray:
+def _source_r(case) -> np.ndarray:
     if case.topology.nodes == "grid":
         from veqpy.numerics import make_quadrature
 
-        rho, _ = make_quadrature(case.topology.Nr, scheme=case.topology.quadrature)
-        return np.asarray(rho, dtype=np.float64)
+        r, _ = make_quadrature(case.topology.Nr, scheme=case.topology.quadrature)
+        return np.asarray(r, dtype=np.float64)
     return np.linspace(0.0, 1.0, case.topology.sample_count, dtype=np.float64)
 
 
-def _axis_envelope(rho: np.ndarray, width: float) -> np.ndarray:
-    return np.exp(-((rho / width) ** 4))
+def _axis_envelope(r: np.ndarray, width: float) -> np.ndarray:
+    return np.exp(-((r / width) ** 4))
 
 
 def _perturb_source(
     source: KernelSource,
     *,
     route: str,
-    rho: np.ndarray,
+    r: np.ndarray,
     kind: str,
     amplitude: float,
     width: float,
@@ -86,7 +86,7 @@ def _perturb_source(
 
     pressure = np.asarray(source.pressure_profile, dtype=np.float64).copy()
     driver = np.asarray(source.driver_profile, dtype=np.float64).copy()
-    envelope = _axis_envelope(rho, width)
+    envelope = _axis_envelope(r, width)
     pressure_scale = max(float(np.max(np.abs(pressure))), 1.0)
     driver_scale = max(float(np.max(np.abs(driver))), 1.0)
 
@@ -101,13 +101,13 @@ def _perturb_source(
         driver *= 1.0 + amplitude * envelope
     elif kind == "driver-irregular":
         if route in {"PF", "PP", "PI"}:
-            # FF_r and psi_r are odd in rho; Itor starts as rho**2.  An
+            # FF_r and psi_r are odd in r; Itor starts as r**2.  An
             # additive even bump violates each route's smooth-axis limit.
             driver += amplitude * driver_scale * envelope
         else:
-            # Local current density and q are even in rho.  Add an odd local
+            # Local current density and q are even in r.  Add an odd local
             # component so their axis derivative no longer vanishes.
-            driver += amplitude * driver_scale * (rho / width) * envelope
+            driver += amplitude * driver_scale * (r / width) * envelope
     elif kind == "driver-invalid-coordinate":
         # Force the route driver through zero near the magnetic axis.  This is
         # not a valid smooth flux coordinate; it tests whether a protection is
@@ -123,7 +123,7 @@ def _perturb_source(
         "beta": source.beta,
         "case_name": source.case_name,
     }
-    if source.pressure_name == "pprime":
+    if source.pressure_name != "p":
         kwargs["p0"] = source.p0
     return KernelSource(**kwargs)
 
@@ -148,9 +148,9 @@ def _authority_diagnostics(kernel: Kernel, equilibrium, route: str) -> dict[str,
     driver_target = runtime.source_workspace.materialized_driver_input.copy()
     pressure_actual = np.asarray(equilibrium.P_r, dtype=np.float64)
     driver_actual = np.asarray(getattr(equilibrium, DRIVER_FIELDS[route]), dtype=np.float64)
-    rho = np.asarray(equilibrium.rho, dtype=np.float64)
-    all_nodes = np.ones(rho.shape, dtype=np.bool_)
-    axis_nodes = rho < 0.05
+    r = np.asarray(equilibrium.r, dtype=np.float64)
+    all_nodes = np.ones(r.shape, dtype=np.bool_)
+    axis_nodes = r < 0.05
     outer_nodes = ~axis_nodes
     diagnostics = {
         "pressure_shape_rel_l2": _best_scale_error(pressure_target, pressure_actual, all_nodes),
@@ -208,14 +208,14 @@ def _run_case(
     perturbation: str,
     amplitude: float,
     width: float,
-    fix_rho: float,
+    fix_r: float,
 ) -> dict[str, Any]:
-    spec = RouteBenchmarkSpec(route, "rho", nodes, "ip")
+    spec = RouteBenchmarkSpec(route, "r", nodes, "ip")
     case = route_kernel_case(spec, nr=nr)
     source = _perturb_source(
         case.source,
         route=route,
-        rho=_source_rho(case),
+        r=_source_r(case),
         kind=perturbation,
         amplitude=amplitude,
         width=width,
@@ -227,15 +227,15 @@ def _run_case(
         config=case.config,
     )
     # Research-only switch.  The public runtime contract remains unchanged.
-    kernel._impl._solver.runtime.fix_rho = float(fix_rho)
+    kernel._impl._solver.runtime.fix_r = float(fix_r)
     row: dict[str, Any] = {
         "route": route,
-        "coordinate": "rho",
+        "coordinate": "r",
         "nodes": nodes,
         "constraint": "ip",
         "Nr": int(nr),
         "perturbation": perturbation,
-        "fix_rho": float(fix_rho),
+        "fix_r": float(fix_r),
     }
     try:
         result = kernel.solve(case.boundary, case.source)
@@ -278,7 +278,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--perturbation", action="append", choices=PERTURBATIONS)
     parser.add_argument("--amplitude", type=float, default=0.2)
     parser.add_argument("--width", type=float, default=0.05)
-    parser.add_argument("--fix-rho", type=float, default=0.05)
+    parser.add_argument("--fix-r", type=float, default=0.05)
     parser.add_argument(
         "--output",
         type=Path,
@@ -298,7 +298,7 @@ def main(argv: list[str] | None = None) -> int:
             perturbation=perturbation,
             amplitude=args.amplitude,
             width=args.width,
-            fix_rho=args.fix_rho,
+            fix_r=args.fix_r,
         )
         for nr in radial_counts
         for node_kind in nodes
@@ -314,7 +314,7 @@ def main(argv: list[str] | None = None) -> int:
             "perturbations": list(perturbations),
             "amplitude": float(args.amplitude),
             "width": float(args.width),
-            "fix_rho": float(args.fix_rho),
+            "fix_r": float(args.fix_r),
         },
         "summary": {
             "case_count": len(rows),

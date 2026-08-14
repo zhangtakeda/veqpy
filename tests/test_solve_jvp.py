@@ -50,10 +50,10 @@ def _boundary() -> KernelBoundary:
 
 def _source() -> KernelSource:
     psin = np.linspace(0.0, 1.0, 9, dtype=np.float64)
-    ffprime, scaled_pprime = pf_reference_profiles(psin)
+    FF_psin, scaled_P_psin = pf_reference_profiles(psin)
     return KernelSource(
-        pprime=scaled_pprime / MU0,
-        ffprime=ffprime,
+        P_psin=scaled_P_psin / MU0,
+        FF_psin=FF_psin,
         Ip=3.0e6,
     )
 
@@ -80,12 +80,12 @@ def _kernel() -> Kernel:
 
 def _source_with_profiles(
     template: KernelSource,
-    pprime: np.ndarray,
-    ffprime: np.ndarray,
+    P_psin: np.ndarray,
+    FF_psin: np.ndarray,
 ) -> KernelSource:
     return KernelSource(
-        pprime=pprime,
-        ffprime=ffprime,
+        P_psin=P_psin,
+        FF_psin=FF_psin,
         p0=template.p0,
         Ip=template.Ip,
         beta=template.beta,
@@ -116,8 +116,8 @@ def _directions() -> tuple[np.ndarray, np.ndarray]:
 def _make_veq_component(om, kernel, boundary, source, output_size):
     class VEQComponent(om.ExplicitComponent):
         def setup(self) -> None:
-            self.add_input("pprime", val=source.pprime)
-            self.add_input("ffprime", val=source.ffprime)
+            self.add_input("P_psin", val=source.P_psin)
+            self.add_input("FF_psin", val=source.FF_psin)
             self.add_output("equilibrium", shape=output_size)
             self._base_result = None
 
@@ -127,8 +127,8 @@ def _make_veq_component(om, kernel, boundary, source, output_size):
         def compute(self, inputs, outputs) -> None:
             runtime_source = _source_with_profiles(
                 source,
-                np.asarray(inputs["pprime"]),
-                np.asarray(inputs["ffprime"]),
+                np.asarray(inputs["P_psin"]),
+                np.asarray(inputs["FF_psin"]),
             )
             self._base_result = kernel.solve(boundary, runtime_source)
             outputs["equilibrium"] = _equilibrium_output(kernel, self._base_result)
@@ -138,14 +138,14 @@ def _make_veq_component(om, kernel, boundary, source, output_size):
                 raise NotImplementedError("the initial VEQ solve-map contract is forward-only")
             runtime_source = _source_with_profiles(
                 source,
-                np.asarray(inputs["pprime"]),
-                np.asarray(inputs["ffprime"]),
+                np.asarray(inputs["P_psin"]),
+                np.asarray(inputs["FF_psin"]),
             )
             tangent = {}
-            if "pprime" in d_inputs:
-                tangent["pprime"] = np.asarray(d_inputs["pprime"])
-            if "ffprime" in d_inputs:
-                tangent["ffprime"] = np.asarray(d_inputs["ffprime"])
+            if "P_psin" in d_inputs:
+                tangent["P_psin"] = np.asarray(d_inputs["P_psin"])
+            if "FF_psin" in d_inputs:
+                tangent["FF_psin"] = np.asarray(d_inputs["FF_psin"])
             d_outputs["equilibrium"] += kernel.solve_jvp(
                 boundary,
                 runtime_source,
@@ -184,26 +184,26 @@ def test_solve_jvp_covers_equilibrium_materialization_and_preserves_kernel_state
     actual = kernel.solve_jvp(
         boundary,
         source,
-        source_tangent={"pprime": dp, "ffprime": dff},
+        source_tangent={"P_psin": dp, "FF_psin": dff},
         output=_equilibrium_output,
         base_result=base,
         relative_step=1.0e-5,
     )
 
     relative_rate = max(
-        np.max(np.abs(dp)) / max(1.0, np.max(np.abs(source.pprime))),
-        np.max(np.abs(dff)) / max(1.0, np.max(np.abs(source.ffprime))),
+        np.max(np.abs(dp)) / max(1.0, np.max(np.abs(source.P_psin))),
+        np.max(np.abs(dff)) / max(1.0, np.max(np.abs(source.FF_psin))),
     )
     reference_step = 0.5e-5 / relative_rate
     plus_source = _source_with_profiles(
         source,
-        source.pprime + reference_step * dp,
-        source.ffprime + reference_step * dff,
+        source.P_psin + reference_step * dp,
+        source.FF_psin + reference_step * dff,
     )
     minus_source = _source_with_profiles(
         source,
-        source.pprime - reference_step * dp,
-        source.ffprime - reference_step * dff,
+        source.P_psin - reference_step * dp,
+        source.FF_psin - reference_step * dff,
     )
     plus = kernel.solve(boundary, plus_source, x0=base.x)
     plus_output = _equilibrium_output(kernel, plus)
@@ -223,7 +223,7 @@ def test_solve_jvp_covers_equilibrium_materialization_and_preserves_kernel_state
     kernel.solve_jvp(
         boundary,
         source,
-        source_tangent={"pprime": dp, "ffprime": dff},
+        source_tangent={"P_psin": dp, "FF_psin": dff},
         base_result=base,
     )
     assert len(kernel.history) == size
@@ -231,7 +231,7 @@ def test_solve_jvp_covers_equilibrium_materialization_and_preserves_kernel_state
     zero = kernel.solve_jvp(
         boundary,
         source,
-        source_tangent={"pprime": np.zeros_like(source.pprime)},
+        source_tangent={"P_psin": np.zeros_like(source.P_psin)},
         output=_equilibrium_output,
         base_result=base,
     )
@@ -282,7 +282,7 @@ def test_solve_jvp_supports_boundary_directions_and_rejects_inactive_fields() ->
         kernel.solve_jvp(
             boundary,
             source,
-            source_tangent={"q": np.ones_like(source.pprime)},
+            source_tangent={"q": np.ones_like(source.P_psin)},
             base_result=base,
         )
     kernel.close()
@@ -295,7 +295,7 @@ def test_solve_jvp_rejects_cxx_until_native_continuation_is_transactional() -> N
         kernel.solve_jvp(
             _boundary(),
             _source(),
-            source_tangent={"pprime": np.ones(9)},
+            source_tangent={"P_psin": np.ones(9)},
         )
     kernel.close()
 
@@ -314,10 +314,10 @@ def test_openmdao_propagates_veq_solve_jvp_through_a_downstream_response() -> No
 
     problem = om.Problem(reports=False)
     independent = om.IndepVarComp()
-    independent.add_output("pprime", val=source.pprime)
-    independent.add_output("ffprime", val=source.ffprime)
+    independent.add_output("P_psin", val=source.P_psin)
+    independent.add_output("FF_psin", val=source.FF_psin)
     problem.model.add_subsystem("input", independent, promotes_outputs=["*"])
-    problem.model.add_subsystem("veq", VEQComponent(), promotes_inputs=["pprime", "ffprime"])
+    problem.model.add_subsystem("veq", VEQComponent(), promotes_inputs=["P_psin", "FF_psin"])
     problem.model.add_subsystem("response", Response())
     problem.model.connect("veq.equilibrium", "response.equilibrium")
     problem.setup(mode="fwd")
@@ -326,21 +326,21 @@ def test_openmdao_propagates_veq_solve_jvp_through_a_downstream_response() -> No
     dp, dff = _directions()
     propagated = problem.compute_jacvec_product(
         of=["response.metric"],
-        wrt=["pprime", "ffprime"],
+        wrt=["P_psin", "FF_psin"],
         mode="fwd",
-        seed={"pprime": dp, "ffprime": dff},
+        seed={"P_psin": dp, "FF_psin": dff},
         linearize=True,
     )["response.metric"]
     expected_equilibrium = kernel.solve_jvp(
         boundary,
         source,
-        source_tangent={"pprime": dp, "ffprime": dff},
+        source_tangent={"P_psin": dp, "FF_psin": dff},
         output=_equilibrium_output,
         relative_step=1.0e-5,
     )
     totals = problem.compute_totals(
         of=["response.metric"],
-        wrt=["pprime", "ffprime"],
+        wrt=["P_psin", "FF_psin"],
         return_format="array",
     )
 
@@ -361,23 +361,23 @@ def test_openmdao_solves_coupled_total_jvp_with_veq_inside_a_cycle() -> None:
     kernel = _kernel()
     output_size = 4 * _topology().Nr + 1
     weights = np.linspace(0.5, 1.5, output_size)
-    feedback_shape = np.linspace(0.0, 1.0, source.pprime.size) * 1.0e4
+    feedback_shape = np.linspace(0.0, 1.0, source.P_psin.size) * 1.0e4
     VEQComponent = _make_veq_component(om, kernel, boundary, source, output_size)
     Response = _make_response_component(om, weights)
 
     class ComposePressure(om.ExplicitComponent):
         def setup(self) -> None:
-            self.add_input("pbase", val=source.pprime)
+            self.add_input("pbase", val=source.P_psin)
             self.add_input("feedback", val=0.0)
-            self.add_output("pprime", val=source.pprime)
+            self.add_output("P_psin", val=source.P_psin)
 
         def setup_partials(self) -> None:
-            indices = np.arange(source.pprime.size)
-            self.declare_partials("pprime", "pbase", rows=indices, cols=indices, val=1.0)
-            self.declare_partials("pprime", "feedback", val=feedback_shape[:, None])
+            indices = np.arange(source.P_psin.size)
+            self.declare_partials("P_psin", "pbase", rows=indices, cols=indices, val=1.0)
+            self.declare_partials("P_psin", "feedback", val=feedback_shape[:, None])
 
         def compute(self, inputs, outputs) -> None:
-            outputs["pprime"] = inputs["pbase"] + inputs["feedback"] * feedback_shape
+            outputs["P_psin"] = inputs["pbase"] + inputs["feedback"] * feedback_shape
 
     class EquilibriumFeedback(om.ExplicitComponent):
         def setup(self) -> None:
@@ -398,14 +398,14 @@ def test_openmdao_solves_coupled_total_jvp_with_veq_inside_a_cycle() -> None:
 
     problem = om.Problem(reports=False)
     independent = om.IndepVarComp()
-    independent.add_output("pbase", val=source.pprime)
-    independent.add_output("ffprime", val=source.ffprime)
+    independent.add_output("pbase", val=source.P_psin)
+    independent.add_output("FF_psin", val=source.FF_psin)
     problem.model.add_subsystem("input", independent, promotes_outputs=["*"])
     problem.model.add_subsystem("compose", ComposePressure(), promotes_inputs=["pbase"])
-    problem.model.add_subsystem("veq", VEQComponent(), promotes_inputs=["ffprime"])
+    problem.model.add_subsystem("veq", VEQComponent(), promotes_inputs=["FF_psin"])
     problem.model.add_subsystem("feedback", EquilibriumFeedback())
     problem.model.add_subsystem("response", Response())
-    problem.model.connect("compose.pprime", "veq.pprime")
+    problem.model.connect("compose.P_psin", "veq.P_psin")
     problem.model.connect("veq.equilibrium", "feedback.equilibrium")
     problem.model.connect("feedback.feedback", "compose.feedback")
     problem.model.connect("veq.equilibrium", "response.equilibrium")
@@ -427,19 +427,19 @@ def test_openmdao_solves_coupled_total_jvp_with_veq_inside_a_cycle() -> None:
     dp, dff = _directions()
     propagated = problem.compute_jacvec_product(
         of=["response.metric"],
-        wrt=["pbase", "ffprime"],
+        wrt=["pbase", "FF_psin"],
         mode="fwd",
-        seed={"pbase": dp, "ffprime": dff},
+        seed={"pbase": dp, "FF_psin": dff},
         linearize=True,
     )["response.metric"]
 
     reference_step = 4.0e-4
-    problem.set_val("pbase", source.pprime + reference_step * dp)
-    problem.set_val("ffprime", source.ffprime + reference_step * dff)
+    problem.set_val("pbase", source.P_psin + reference_step * dp)
+    problem.set_val("FF_psin", source.FF_psin + reference_step * dff)
     problem.run_model()
     plus = float(problem.get_val("response.metric")[0])
-    problem.set_val("pbase", source.pprime - reference_step * dp)
-    problem.set_val("ffprime", source.ffprime - reference_step * dff)
+    problem.set_val("pbase", source.P_psin - reference_step * dp)
+    problem.set_val("FF_psin", source.FF_psin - reference_step * dff)
     problem.run_model()
     minus = float(problem.get_val("response.metric")[0])
     expected = (plus - minus) / (2.0 * reference_step)
