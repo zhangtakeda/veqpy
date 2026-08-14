@@ -63,9 +63,9 @@ def test_grid_and_profile_reactive_fields_match_analytic_derivatives() -> None:
     grid = Grid(Nr=20, Nt=16, quadrature_scheme="legendre")
     profile = Profile(scale=2.5, power=3, envelope_power=0, offset=1.0, grid=grid)
 
-    assert_allclose(profile.value, 2.5 * grid.rho**3)
-    assert_allclose(profile.derivative, 7.5 * grid.rho**2)
-    assert_allclose(profile.second_derivative, 15.0 * grid.rho)
+    assert_allclose(profile.value, 2.5 * grid.r**3)
+    assert_allclose(profile.derivative, 7.5 * grid.r**2)
+    assert_allclose(profile.second_derivative, 15.0 * grid.r)
     assert_allclose(profile.fields[0], profile.value)
     assert_allclose(profile.fields[1], profile.derivative)
     assert_allclose(profile.fields[2], profile.second_derivative)

@@ -30,6 +30,14 @@ def _make_kernel_impl(
     if not isinstance(kernel_recipe, KernelRecipe):
         raise TypeError(f"recipe must be KernelRecipe, got {type(kernel_recipe).__name__}")
     if kernel_recipe.backend == "cxx":
+        if topology.nodes == "explicit":
+            raise NotImplementedError(
+                "nodes='explicit' is currently supported only by backend='numba'"
+            )
+        if topology.coordinate == "rho":
+            raise NotImplementedError(
+                "coordinate='rho' is currently supported only by backend='numba'"
+            )
         from veqpy.kernels.cxx_kernel.kernel import _CxxKernelImpl
 
         return _CxxKernelImpl(

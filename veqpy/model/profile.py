@@ -147,19 +147,19 @@ class Profile(Reactive, Serial):
 
     @property
     def value(self) -> np.ndarray:
-        """Profile values on ``grid.rho``."""
+        """Profile values on ``grid.r``."""
 
         return self.fields[0]
 
     @property
     def derivative(self) -> np.ndarray:
-        """First radial derivative on ``grid.rho``."""
+        """First radial derivative on ``grid.r``."""
 
         return self.fields[1]
 
     @property
     def second_derivative(self) -> np.ndarray:
-        """Second radial derivative on ``grid.rho``."""
+        """Second radial derivative on ``grid.r``."""
 
         return self.fields[2]
 
@@ -175,10 +175,10 @@ def _profile_fields_on_grid(
     coeff: np.ndarray | None,
 ) -> np.ndarray:
     fields = np.empty((3, grid.Nr), dtype=np.float64)
-    rp_fields = _power_terms(grid.rho, power)
+    rp_fields = _power_terms(grid.r, power)
     env_fields = _envelope_terms(
-        grid.rho,
-        grid.rho_powers[2],
+        grid.r,
+        grid.r_powers[2],
         grid.y,
         envelope_power,
     )
@@ -283,31 +283,31 @@ def _amplitude_power(
     return value, value_r, value_rr
 
 
-def _power_terms(rho: np.ndarray, power: int) -> np.ndarray:
+def _power_terms(r: np.ndarray, power: int) -> np.ndarray:
     power = int(power)
-    out = np.empty((3, rho.shape[0]), dtype=np.float64)
+    out = np.empty((3, r.shape[0]), dtype=np.float64)
     if power == 0:
         out[0].fill(1.0)
         out[1].fill(0.0)
         out[2].fill(0.0)
         return out
-    out[0] = rho**power
-    out[1] = power * rho ** (power - 1)
+    out[0] = r**power
+    out[1] = power * r ** (power - 1)
     if power == 1:
         out[2].fill(0.0)
     else:
-        out[2] = power * (power - 1) * rho ** (power - 2)
+        out[2] = power * (power - 1) * r ** (power - 2)
     return out
 
 
 def _envelope_terms(
-    rho: np.ndarray,
-    rho2: np.ndarray,
+    r: np.ndarray,
+    r2: np.ndarray,
     y: np.ndarray,
     envelope_power: int,
 ) -> np.ndarray:
     envelope_power = int(envelope_power)
-    out = np.empty((3, rho.shape[0]), dtype=np.float64)
+    out = np.empty((3, r.shape[0]), dtype=np.float64)
     if envelope_power == 0:
         out[0].fill(1.0)
         out[1].fill(0.0)
@@ -315,14 +315,14 @@ def _envelope_terms(
         return out
     if envelope_power == 1:
         out[0] = y
-        out[1] = -2.0 * rho
+        out[1] = -2.0 * r
         out[2].fill(-2.0)
         return out
     out[0] = y**envelope_power
-    out[1] = -2.0 * envelope_power * rho * y ** (envelope_power - 1)
+    out[1] = -2.0 * envelope_power * r * y ** (envelope_power - 1)
     out[2] = -2.0 * envelope_power * y ** (envelope_power - 1) + 4.0 * envelope_power * (
         envelope_power - 1
-    ) * rho2 * y ** (envelope_power - 2)
+    ) * r2 * y ** (envelope_power - 2)
     return out
 
 

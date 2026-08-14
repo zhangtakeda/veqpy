@@ -28,7 +28,10 @@ from veqpy import (  # noqa: E402
     KernelTopology,
     SolveResult,
 )
-from veqpy.kernels.abi.enums import SOURCE_DRIVER_BY_ROUTE  # noqa: E402
+from veqpy.kernels.abi.enums import (  # noqa: E402
+    PRESSURE_DERIVATIVE_BY_COORDINATE,
+    source_driver_for,
+)
 from veqpy.kernels.boundary_materialization import materialize_kernel_boundary  # noqa: E402
 from veqpy.kernels.numba_kernel.packed_layout import (  # noqa: E402
     build_profile_index,
@@ -59,10 +62,10 @@ def benchmark_result_path(name: str, filename: str | None = None) -> Path:
 MU0 = 4.0e-7 * np.pi
 
 ROUTE_BENCHMARK_MODES = ("PF", "PP", "PI", "PJ1", "PJ2", "PJ3", "PQ")
-# Route performance qualification follows the public geometric-rho contract.
+# Route performance qualification follows the public geometric-r contract.
 # psin remains supported and is covered by focused physics/API tests, but is
 # not mixed into route timing or pass-rate summaries.
-ROUTE_BENCHMARK_COORDINATES = ("rho",)
+ROUTE_BENCHMARK_COORDINATES = ("r",)
 ROUTE_BENCHMARK_NODES = ("uniform", "grid")
 ROUTE_BENCHMARK_CONSTRAINTS = {
     "PF": ("ip", "beta", "none"),
@@ -417,8 +420,9 @@ class KernelCase:
 @dataclass(frozen=True, slots=True)
 class RouteReference:
     ref_profiles: dict[str, np.ndarray | float]
-    rho_axis: np.ndarray
+    r_axis: np.ndarray
     psin_axis: np.ndarray
+    rho_axis: np.ndarray
     reference_shape_x: np.ndarray
 
 
@@ -598,7 +602,7 @@ def profile_counts_for_route(
     f_count = 0
     if route in {"PJ2", "PJ3"}:
         f_count = active_count
-    elif coordinate == "psin" and nodes == "uniform":
+    elif coordinate == "psin" and nodes != "grid":
         psin_count = active_count
     return {
         "h_count": h_count,
@@ -625,7 +629,7 @@ def profile_counts_from_signature(
         f_count = int(pj2_f_count)
     if route in {"PJ2", "PJ3"}:
         psin_count = 0
-    elif not (coordinate == "psin" and nodes == "uniform"):
+    elif not (coordinate == "psin" and nodes != "grid"):
         psin_count = 0
     c_counts = _family_counts(signature, "c", start=0)
     s_counts = _family_counts(signature, "s", start=1)
@@ -692,22 +696,22 @@ def pf_reference_profiles(psin: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 
 @lru_cache(maxsize=1)
 def synthetic_route_reference() -> RouteReference:
-    rho_src = np.linspace(0.0, 1.0, DEFAULT_ROUTE_SAMPLE_COUNT, dtype=np.float64)
-    psin_src = rho_src * rho_src
+    r_src = np.linspace(0.0, 1.0, DEFAULT_ROUTE_SAMPLE_COUNT, dtype=np.float64)
+    psin_src = r_src * r_src
     ffn_psin_src, pn_psin_src = pf_reference_profiles(psin_src)
-    ffn_r_src = ffn_psin_src * (2.0 * rho_src)
-    pn_r_src = pn_psin_src * (2.0 * rho_src)
+    ffn_r_src = ffn_psin_src * (2.0 * r_src)
+    pn_r_src = pn_psin_src * (2.0 * r_src)
     topology = KernelTopology(
         **profile_counts_from_signature(
             SYNTHETIC_ROUTE_SIGNATURE,
             route="PF",
-            coordinate="rho",
+            coordinate="r",
             nodes="uniform",
         ),
         Nr=64,
         Nt=32,
         route="PF",
-        coordinate="rho",
+        coordinate="r",
         nodes="uniform",
         constraint="ip",
         sample_count=DEFAULT_ROUTE_SAMPLE_COUNT,
@@ -715,8 +719,8 @@ def synthetic_route_reference() -> RouteReference:
         K_max=DEFAULT_ROUTE_K_MAX,
     )
     source = KernelSource(
-        pprime=pn_r_src / MU0,
-        ffprime=ffn_r_src,
+        P_r=pn_r_src / MU0,
+        FF_r=ffn_r_src,
         Ip=3.0e6,
         beta=np.nan,
         case_name="synthetic-reference",
@@ -737,12 +741,14 @@ def synthetic_route_reference() -> RouteReference:
         raise RuntimeError("synthetic route reference solve failed")
     try:
         equilibrium = kernel.build_equilibrium()
-        rho_axis = np.asarray(equilibrium.rho, dtype=np.float64)
+        r_axis = np.asarray(equilibrium.r, dtype=np.float64)
         psin_axis = np.asarray(equilibrium.psin, dtype=np.float64)
+        rho_axis = np.asarray(equilibrium.rho, dtype=np.float64)
         return RouteReference(
             ref_profiles=build_route_reference_profiles(equilibrium),
-            rho_axis=rho_axis,
+            r_axis=r_axis,
             psin_axis=psin_axis,
+            rho_axis=rho_axis,
             reference_shape_x=extract_shape_x(topology, result.x),
         )
     finally:
@@ -759,6 +765,8 @@ def build_route_reference_profiles(equilibrium: Any) -> dict[str, np.ndarray | f
     pn_r = np.asarray(equilibrium.Pn_r, dtype=np.float64)
     ff_r = np.asarray(equilibrium.FF_r, dtype=np.float64)
     p_r = np.asarray(equilibrium.P_r, dtype=np.float64)
+    rho_r = np.asarray(equilibrium.rho_r, dtype=np.float64)
+    rho_r_safe = safe_divisor(rho_r)
     itor = np.asarray(equilibrium.Itor, dtype=np.float64)
     jtor = np.asarray(equilibrium.jtor, dtype=np.float64)
     jpara = np.asarray(equilibrium.jpara, dtype=np.float64)
@@ -772,13 +780,19 @@ def build_route_reference_profiles(equilibrium: Any) -> dict[str, np.ndarray | f
         "Pn_r": pn_r,
         "FFn_psin": ffn_r / psin_r_safe,
         "Pn_psin": pn_r / psin_r_safe,
+        "FFn_rho": ffn_r / rho_r_safe,
         "setup_Pn_r": pn_r / MU0,
         "setup_Pn_psin": (pn_r / psin_r_safe) / MU0,
+        "setup_Pn_rho": (pn_r / rho_r_safe) / MU0,
         "FF_r": ff_r,
         "P_r": p_r,
         "mu0_P_r": mu0_p_r,
+        "FF_psin": ff_r / psin_r_safe,
+        "P_psin": p_r / psin_r_safe,
         "FF_psi": ff_r / psi_r_safe,
         "P_psi": p_r / psi_r_safe,
+        "FF_rho": ff_r / rho_r_safe,
+        "P_rho": p_r / rho_r_safe,
         "mu0_P_psi": mu0_p_r / psi_r_safe,
         "Itorn": MU0 * itor,
         "Itor": itor,
@@ -814,7 +828,12 @@ def build_route_mode_inputs(
     pressure_keys = pressure_keys_for_coordinate(coordinate)
     if mode == "PF":
         use_normalized = constraint in {"ip", "beta"}
-        driver_keys = ("FFn_r", "FF_r") if coordinate == "rho" else ("FFn_psin", "FF_psi")
+        if coordinate == "r":
+            driver_keys = ("FFn_r", "FF_r")
+        elif coordinate == "psin":
+            driver_keys = ("FFn_psin", "FF_psin")
+        else:
+            driver_keys = ("FFn_rho", "FF_rho")
         driver_input = pick_ref_profile(ref, driver_keys[0], driver_keys[1], use_normalized)
         pprime_input = pick_ref_profile(ref, pressure_keys[0], pressure_keys[1], use_normalized)
         return pprime_input, driver_input
@@ -866,10 +885,12 @@ def constraint_route_domains(constraint: str) -> tuple[str, str]:
 
 
 def pressure_keys_for_coordinate(coordinate: str) -> tuple[str, str]:
-    if coordinate == "rho":
+    if coordinate == "r":
         return "setup_Pn_r", "P_r"
     if coordinate == "psin":
-        return "setup_Pn_psin", "P_psi"
+        return "setup_Pn_psin", "P_psin"
+    if coordinate == "rho":
+        return "setup_Pn_rho", "P_rho"
     raise ValueError(f"unsupported coordinate: {coordinate!r}")
 
 
@@ -899,15 +920,25 @@ def source_profiles_for_route(
     )
     if spec.nodes == "grid":
         grid = Grid(Nr=int(nr), Nt=int(nt), quadrature_scheme="legendre")
-        if spec.coordinate == "rho":
-            target_axis = np.asarray(grid.rho, dtype=np.float64)
-            source_axis = reference.rho_axis
-        else:
-            target_axis = profile_interp(reference.rho_axis, reference.psin_axis, grid.rho)
+        if spec.coordinate == "r":
+            target_axis = np.asarray(grid.r, dtype=np.float64)
+            source_axis = reference.r_axis
+        elif spec.coordinate == "psin":
+            target_axis = profile_interp(reference.r_axis, reference.psin_axis, grid.r)
             source_axis = reference.psin_axis
+        else:
+            # The Gauss values label nodes in sqrt(Phi_N), rather than values
+            # already projected onto the geometric-r operator grid.
+            target_axis = np.asarray(grid.r, dtype=np.float64)
+            source_axis = reference.rho_axis
     else:
         target_axis = uniform_route_source_axis(spec, sample_count)
-        source_axis = reference.rho_axis if spec.coordinate == "rho" else reference.psin_axis
+        if spec.coordinate == "r":
+            source_axis = reference.r_axis
+        elif spec.coordinate == "psin":
+            source_axis = reference.psin_axis
+        else:
+            source_axis = reference.rho_axis
     return (
         profile_interp(source_axis, pprime, target_axis).astype(np.float64),
         profile_interp(source_axis, driver, target_axis).astype(np.float64),
@@ -1044,25 +1075,25 @@ def benchmark_route_case_diagnostics(
 ) -> dict[str, float | int]:
     psi_r_rel_rms_error, psi_r_rel_max_error, psi_r_head_changes, psi_r_tail_changes = (
         diagnostic_profile_metrics(
-            reference.rho_axis,
+            reference.r_axis,
             np.asarray(reference.ref_profiles["psi_r"], dtype=np.float64),
-            equilibrium.rho,
+            equilibrium.r,
             equilibrium.alpha2 * equilibrium.psin_r,
         )
     )
     ff_rel_rms_error, ff_rel_max_error, ff_head_changes, ff_tail_changes = (
         diagnostic_profile_metrics(
-            reference.rho_axis,
+            reference.r_axis,
             np.asarray(reference.ref_profiles["FF_psi"], dtype=np.float64),
-            equilibrium.rho,
+            equilibrium.r,
             equilibrium.alpha1 * equilibrium.FFn_psin,
         )
     )
     mu0_p_rel_rms_error, mu0_p_rel_max_error, mu0_p_head_changes, mu0_p_tail_changes = (
         diagnostic_profile_metrics(
-            reference.rho_axis,
+            reference.r_axis,
             np.asarray(reference.ref_profiles["mu0_P_psi"], dtype=np.float64),
-            equilibrium.rho,
+            equilibrium.r,
             equilibrium.alpha1 * equilibrium.Pn_psin,
         )
     )
@@ -1119,9 +1150,9 @@ def benchmark_pj23_closure_diagnostics(
         )
     if spec.constraint in {"both", "beta"}:
         target_beta = float(runtime.plan.source_plan.beta)
-        diagnostics["beta_relative_error"] = abs(
-            float(equilibrium.beta_t) - target_beta
-        ) / max(abs(target_beta), 1.0e-14)
+        diagnostics["beta_relative_error"] = abs(float(equilibrium.beta_t) - target_beta) / max(
+            abs(target_beta), 1.0e-14
+        )
     return diagnostics
 
 
@@ -1133,15 +1164,43 @@ def source_profiles_from_geqdsk(
     sample_count: int,
 ) -> tuple[np.ndarray, np.ndarray]:
     axis = np.linspace(0.0, 1.0, int(sample_count), dtype=np.float64)
-    source_axis = axis if coordinate == "psin" else axis * axis
     geqdsk_axis = np.linspace(0.0, 1.0, max(int(geqdsk.P_psi.size), 2), dtype=np.float64)
+    psi_span = float(geqdsk.psi_bound - geqdsk.psi_axis)
+    if not np.isfinite(psi_span) or abs(psi_span) <= 1.0e-14:
+        raise ValueError("GEQDSK does not define a finite poloidal-flux span")
     p_psi = _finite_or_default_profile(geqdsk.P_psi, geqdsk_axis.size, scale=1.0e6)
     ff_psi = _finite_or_default_profile(geqdsk.FF_psi, geqdsk_axis.size, scale=1.0)
-    pprime = np.interp(source_axis, geqdsk_axis, p_psi)
-    driver = np.interp(source_axis, geqdsk_axis, ff_psi)
-    if coordinate == "rho":
-        pprime = pprime * (2.0 * np.maximum(axis, 1.0e-12))
-        driver = driver * (2.0 * np.maximum(axis, 1.0e-12))
+    if coordinate == "psin":
+        source_psin = axis
+        dpsi_dcoordinate = np.full_like(axis, psi_span)
+    elif coordinate == "r":
+        source_psin = axis * axis
+        dpsi_dcoordinate = 2.0 * axis * psi_span
+    elif coordinate == "rho":
+        # GEQDSK supplies q=dPhi/dPsi on normalized poloidal flux.  Its
+        # cumulative integral therefore defines the normalized toroidal-flux
+        # coordinate needed to express the same PF source in sqrt(Phi_N).
+        q_psi = _finite_or_default_profile(geqdsk.q, geqdsk_axis.size, scale=1.0)
+        increments = 0.5 * (q_psi[1:] + q_psi[:-1]) * np.diff(geqdsk_axis)
+        phi = np.concatenate(([0.0], np.cumsum(increments)))
+        phi_edge = float(phi[-1])
+        if not np.isfinite(phi_edge) or abs(phi_edge) <= 1.0e-14:
+            raise ValueError("GEQDSK q profile does not define a finite toroidal-flux span")
+        phi_norm = phi / phi_edge
+        if np.any(~np.isfinite(phi_norm)) or np.any(np.diff(phi_norm) <= 0.0):
+            raise ValueError("GEQDSK q profile does not define a monotone toroidal-flux coordinate")
+        rho_axis = np.sqrt(np.clip(phi_norm, 0.0, 1.0))
+        source_psin = profile_interp(rho_axis, geqdsk_axis, axis)
+        q_on_source = profile_interp(geqdsk_axis, q_psi, source_psin)
+        if np.any(abs(q_on_source) <= 1.0e-14):
+            raise ValueError("GEQDSK q profile crosses zero in the source domain")
+        dpsi_dcoordinate = 2.0 * axis * psi_span * phi_edge / q_on_source
+    else:
+        raise ValueError(f"unsupported GEQDSK source coordinate: {coordinate!r}")
+    pprime = profile_interp(geqdsk_axis, p_psi, source_psin) * dpsi_dcoordinate
+    driver = profile_interp(geqdsk_axis, ff_psi, source_psin)
+    if route == "PF":
+        driver *= dpsi_dcoordinate
     if route in {"PI", "PJ1", "PJ2", "PJ3"}:
         driver = driver / MU0
     return pprime.astype(np.float64), driver.astype(np.float64)
@@ -1175,11 +1234,11 @@ def route_kernel_case(
         spec,
         nr=nr,
         nt=nt,
-        sample_count=count,
+        sample_count=None if spec.nodes == "explicit" else count,
     )
     signature = (
         SYNTHETIC_PSIN_ROUTE_SIGNATURE
-        if spec.coordinate == "psin" and spec.nodes == "uniform"
+        if spec.coordinate == "psin" and spec.nodes != "grid"
         else SYNTHETIC_ROUTE_SIGNATURE
     )
     topology = KernelTopology(
@@ -1202,8 +1261,11 @@ def route_kernel_case(
         K_max=DEFAULT_ROUTE_K_MAX,
     )
     source = KernelSource(
-        pprime=pprime,
-        **{SOURCE_DRIVER_BY_ROUTE[spec.mode]: driver},
+        **{PRESSURE_DERIVATIVE_BY_COORDINATE[spec.coordinate]: pprime},
+        **{source_driver_for(spec.mode, spec.coordinate): driver},
+        source_nodes=(
+            np.linspace(0.0, 1.0, count, dtype=np.float64) if spec.nodes == "explicit" else None
+        ),
         Ip=float(reference.ref_profiles["Ip_constraint"]) if uses_ip else np.nan,
         beta=float(reference.ref_profiles["beta_constraint"]) if uses_beta else np.nan,
         case_name=spec.case_name,
@@ -1275,8 +1337,8 @@ def geqdsk_kernel_case(
         K_max=max(2, m_max),
     )
     source = KernelSource(
-        pprime=pprime,
-        **{SOURCE_DRIVER_BY_ROUTE[spec.mode]: driver},
+        **{PRESSURE_DERIVATIVE_BY_COORDINATE[spec.coordinate]: pprime},
+        **{source_driver_for(spec.mode, spec.coordinate): driver},
         Ip=abs(float(geqdsk.Ip)) if uses_ip else np.nan,
         beta=0.02 if uses_beta else np.nan,
         case_name=f"{case_key}-{config_label}-{spec.case_name}",

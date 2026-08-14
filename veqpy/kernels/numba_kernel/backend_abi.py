@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from veqpy.kernels.numba_kernel.numba_source import SOURCE_ROUTE_KEYS
+from veqpy.kernels.numba_kernel.numba_source import R_COORDINATE, SOURCE_ROUTE_KEYS
 
 if TYPE_CHECKING:
     from veqpy.kernels.numba_kernel.workspace import (
@@ -48,6 +48,11 @@ PROFILE_OWNED_PSIN_ROUTE_KEYS: frozenset[RouteKey] = frozenset(
         ("PI", "psin", "uniform"),
         ("PJ1", "psin", "uniform"),
         ("PQ", "psin", "uniform"),
+        ("PF", "psin", "explicit"),
+        ("PP", "psin", "explicit"),
+        ("PI", "psin", "explicit"),
+        ("PJ1", "psin", "explicit"),
+        ("PQ", "psin", "explicit"),
     }
 )
 
@@ -71,6 +76,7 @@ class SourceExecutionABI:
     f_active_length: int
     requires_optimized_psin_profile: bool
     requires_optimized_f_profile: bool
+    requires_rho_closure: bool
     requires_psin_query_workspace: bool
     requires_source_parameter_query: bool
     requires_target_root_fields: bool
@@ -133,6 +139,7 @@ def build_source_execution_abi(
     if F_active_length > 0 and F_active_slot < 0:
         raise ValueError("F is active but has no active profile slot")
     requires_optimized_psin_profile = route_key in PROFILE_OWNED_PSIN_ROUTE_KEYS
+    requires_rho_closure = route_key[1] == "rho"
     supports_optimized_f_profile = route_key[0] in {"PJ2", "PJ3"}
     requires_optimized_f_profile = supports_optimized_f_profile and F_active_length > 0
 
@@ -144,22 +151,23 @@ def build_source_execution_abi(
     if F_active_length > 0 and psin_active_length > 0:
         raise ValueError("Active F and active psin profiles are mutually exclusive")
 
-    # In psin-coordinate routes, exactly one layer owns psin: either the packed
-    # optimizer profile, or the source kernel. Mixing the two would make the
-    # source query stale or double-count an optimized flux coordinate.
+    # psin is a GS solution coordinate rather than a qualified coordinate-only
+    # local map. Its sampled routes therefore keep psin (or PJ2/PJ3 F) in the
+    # outer unknown vector; only their bounded source query is local. Exactly
+    # one layer may own psin, or the residual would double-count the coordinate.
     if requires_optimized_psin_profile and psin_active_length <= 0:
         raise ValueError(
             f"{route_key[0]} {route_key[1]}/{route_key[2]} requires an active psin profile"
         )
     if not requires_optimized_psin_profile and psin_active_length > 0:
         raise ValueError(
-            f"{route_key[0]} {route_key[1]}/{route_key[2]} does not accept an active psin "
-            "profile"
+            f"{route_key[0]} {route_key[1]}/{route_key[2]} does not accept an active psin profile"
         )
 
-    is_f_current_psin_uniform = route_key[0] in {"PJ2", "PJ3"} and route_key[1:] == (
-        "psin",
-        "uniform",
+    is_f_current_psin_sampled = (
+        route_key[0] in {"PJ2", "PJ3"}
+        and route_key[1] == "psin"
+        and route_key[2] in {"uniform", "explicit"}
     )
     return SourceExecutionABI(
         route_key=route_key,
@@ -167,15 +175,14 @@ def build_source_execution_abi(
         f_active_length=F_active_length,
         requires_optimized_psin_profile=requires_optimized_psin_profile,
         requires_optimized_f_profile=requires_optimized_f_profile,
+        requires_rho_closure=requires_rho_closure,
         requires_psin_query_workspace=(
-            requires_optimized_psin_profile or is_f_current_psin_uniform
+            requires_optimized_psin_profile or is_f_current_psin_sampled
         ),
         requires_source_parameter_query=bool(
             source_plan.coordinate == "psin" and source_plan.parameterization != "identity"
         ),
-        requires_target_root_fields=(
-            requires_optimized_psin_profile or is_f_current_psin_uniform
-        ),
+        requires_target_root_fields=(requires_optimized_psin_profile or is_f_current_psin_sampled),
     )
 
 
@@ -269,6 +276,9 @@ class FusedSourceEvalABI:
     array_scratch: np.ndarray
     matrix_scratch: np.ndarray
     pressure_state: np.ndarray
+    pressure_derivative_work: np.ndarray
+    driver_derivative_work: np.ndarray
+    scale_driver_by_alpha2: bool
     B0: float
 
 
@@ -283,6 +293,8 @@ class _ProfileOwnedPsinSourceABI:
     source_psin_query: np.ndarray
     source_parameter_query: np.ndarray
     pprime_spline_coeff: np.ndarray
+    pressure_spline_coeff: np.ndarray
+    differentiate_pressure: bool
     driver_spline_coeff: np.ndarray
     barycentric_weights: np.ndarray
     use_barycentric: bool
@@ -379,16 +391,23 @@ def build_fused_source_eval_abi(
     geometry_workspace: GeometryWorkspace,
     source_workspace: SourceWorkspace,
     B0: float,
-    fix_rho: float,
+    fix_r: float,
 ) -> FusedSourceEvalABI:
     """Collect arrays and constants required by fused source evaluation."""
-    # ``fix_rho`` is lowered once at bind time; source kernels only need the
+    # ``fix_r`` is lowered once at bind time; source kernels only need the
     # integer cutoff for axis regularization.
-    n_axis_fix = int(np.searchsorted(grid_workspace.rho, fix_rho))
+    n_axis_fix = int(np.searchsorted(grid_workspace.r, fix_r))
 
     return FusedSourceEvalABI(
         source_kernel=source_plan.kernel,
-        coordinate_code=int(source_plan.coordinate_code),
+        # The rho wrapper applies ds/dr before invoking the existing r
+        # route kernel.  Pressure normalization must therefore also consume r
+        # derivatives, while SourcePlan retains rho as the public semantic.
+        coordinate_code=(
+            R_COORDINATE
+            if bool(source_plan.is_rho_coordinate)
+            else int(source_plan.coordinate_code)
+        ),
         weights=grid_workspace.weights,
         differentiator=grid_workspace.differentiator,
         accumulator=grid_workspace.accumulator,
@@ -402,6 +421,9 @@ def build_fused_source_eval_abi(
         array_scratch=source_workspace.array_scratch,
         matrix_scratch=source_workspace.matrix_scratch,
         pressure_state=source_workspace.pressure_state,
+        pressure_derivative_work=source_workspace.pressure_derivative_work,
+        driver_derivative_work=source_workspace.driver_derivative_work,
+        scale_driver_by_alpha2=source_plan.route == "PF",
         B0=B0,
     )
 
@@ -426,6 +448,8 @@ def build_profile_owned_psin_source_abi(
         source_psin_query=source_workspace.psin_query,
         source_parameter_query=source_workspace.parameter_query,
         pprime_spline_coeff=source_workspace.pprime_spline_coeff,
+        pressure_spline_coeff=source_workspace.pressure_spline_coeff,
+        differentiate_pressure=source_plan.scaled_pressure is not None,
         driver_spline_coeff=source_workspace.driver_spline_coeff,
         barycentric_weights=source_workspace.barycentric_weights,
         use_barycentric=bool(source_plan.uses_barycentric_interpolation),

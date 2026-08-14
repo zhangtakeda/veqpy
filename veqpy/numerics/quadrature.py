@@ -9,7 +9,7 @@ Public API:
 - quadrature_generator
 
 Design notes:
-- Builders return ``(rho, weights)`` on ``[0, 1]`` with weights already scaled
+- Builders return ``(r, weights)`` on ``[0, 1]`` with weights already scaled
   for integration over that interval.  ``Grid`` combines these radial weights
   with the uniform poloidal rule when integrating 2D fields.
 - Available schemes are registered by name: ``legendre`` (default), ``lobatto``,
@@ -106,12 +106,12 @@ def radau_quadrature(n: int) -> tuple[np.ndarray, np.ndarray]:
 @quadrature_generator("uniform")
 def uniform_quadrature(n: int) -> tuple[np.ndarray, np.ndarray]:
     """Build trapezoidal uniform nodes and weights on ``[0, 1]``."""
-    rho = np.linspace(0.0, 1.0, n)
+    r = np.linspace(0.0, 1.0, n)
     h = 1.0 / (n - 1)
     weights = np.full(n, h, dtype=np.float64)
     weights[0] = 0.5 * h
     weights[-1] = 0.5 * h
-    return rho, weights
+    return r, weights
 
 
 # -----------------------------------------------------------------------------

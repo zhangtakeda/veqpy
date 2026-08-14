@@ -43,7 +43,10 @@ and easier to reuse than full solver-native equilibrium or reconstruction pipeli
   `Equilibrium` snapshot produced after the solve.
 - **Unified source route layer**: PF, PP, PI, PJ1, PJ2, PJ3, and PQ routes map pressure-gradient,
   toroidal-field, flux-gradient, current-related, or safety-factor information to one
-  finite-dimensional residual assembly.
+  finite-dimensional residual assembly. The Numba backend accepts sources on geometric
+  `r`, normalized poloidal flux `psin`, or normalized toroidal-flux radius
+  `rho = sqrt(Phi_N)`; `rho` is closed
+  locally from the equilibrium produced by the same residual evaluation.
 - **Explicit Kernel runtime boundary**:
   `KernelTopology + KernelBoundary + KernelSource -> Kernel -> SolveResult + Equilibrium`
   separates packed topology, runtime case inputs, nonlinear solve orchestration, and
@@ -53,12 +56,20 @@ and easier to reuse than full solver-native equilibrium or reconstruction pipeli
 - **Formula-oriented model objects**: `Profile` stores serializable shape-profile
   roots and, when bound to a `Grid`, lazily materializes value and radial
   derivatives. `Grid` and `Equilibrium` use reactive derived properties to
-  reconstruct geometry and physics diagnostics by formula.
+  reconstruct geometry and physics diagnostics by formula. The integration
+  grid is always `(r, theta)`, where `r` is VEQ's normalized geometric radius;
+  `rho` is reserved for the derived normalized toroidal-flux radius
+  `sqrt(Phi_N)`.
 - **Kernel API**: `veqpy.Kernel` is the backend-neutral runtime handle.
   It uses
   `KernelTopology + KernelRecipe + KernelBoundary + KernelSource + KernelConfig`
   types from `veqpy`, keeps raw runtime source profiles in `KernelSource`, and
   selects the `cxx` or `numba` backend through `KernelRecipe.backend`.
+  With `nodes="explicit"`, `KernelSource.source_nodes` and the corresponding
+  source profiles remain on their original arbitrary normalized grid inside
+  the Numba Kernel. Dynamic `psin`/`rho` closures query that retained
+  representation again at every internal iteration. Their runtime length does
+  not enter `KernelTopology`; use `sample_count=None` for this node mode.
 
 ## Installation
 
@@ -181,10 +192,13 @@ The package-level Kernel API is intentionally semantic: users construct
 `KernelBoundary`/`KernelSource` carry runtime cases, `KernelConfig` carries the
 handle-level default solve policy, and `KernelRecipe` remains the shared backend
 recipe type. `KernelSource` stores exactly one raw pressure representation:
-either `p`, or `pprime` with an optional edge pressure `p0`. It also stores `Ip`
-and `beta` plus exactly one route-specific driver: `ffprime` (PF), `psi_r` (PP),
-`itor` (PI), `jtor` (PJ1), `jpara` (PJ2), `jtotal` (PJ3), or `q` (PQ). The selected driver must
-match `KernelTopology.route`; the Kernel runtime derives `pprime`/`p0` from `p`
+either `p`, or the coordinate-matched `P_r`, `P_rho`, or `P_psin` derivative
+with an optional edge pressure `p0`. It also stores `Ip`
+and `beta` plus exactly one route-specific driver. PF uses the coordinate-matched
+`FF_r`, `FF_rho`, or `FF_psin`; the remaining routes use `psi_r` (PP), `itor`
+(PI), `jtor` (PJ1), `jpara` (PJ2), `jtotal` (PJ3), or `q` (PQ). The selected
+driver must match both `KernelTopology.route` and, for PF, its coordinate; the
+Kernel runtime derives the selected pressure derivative and `p0` from `p`
 when needed and materializes route-dependent `mu0` scaling before calling
 backend kernels. Sine-family Kernel
 inputs are s1-started: `KernelTopology.s_counts=(n1, n2, ...)` and
@@ -193,6 +207,8 @@ structural s0=0 slot. `KernelRecipe` defaults to `backend="numba"` for the direc
 Numba runtime; `backend="cxx"` explicitly selects the native backend. Both backends
 use the same public `Kernel` type and method surface, including residuals, solves,
 finite-difference JVP/Jacobian calls, and `build_equilibrium()`.
+Native `coordinate="rho"` closure is currently Numba-only and is rejected
+explicitly by the Cxx backend.
 `build(topology=..., recipe=None, config=None)` creates a reusable `Kernel` and
 caches that default policy on the handle; `Kernel.solve(...)` can use it as-is,
 replace it with a one-off `config=...`, or override individual fields such as

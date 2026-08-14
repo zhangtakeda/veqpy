@@ -163,11 +163,11 @@ class ProfileWorkspace:
         env_fields = self.profile_env_fields[p]
         # Power/envelope terms depend only on static profile shape and grid, not
         # on packed coefficients.  Refresh them when the profile spec changes.
-        _fill_power_terms(rp_fields, grid_workspace.rho, int(power))
+        _fill_power_terms(rp_fields, grid_workspace.r, int(power))
         _fill_envelope_terms(
             env_fields,
-            grid_workspace.rho,
-            grid_workspace.rho_powers[2],
+            grid_workspace.r,
+            grid_workspace.r_powers[2],
             grid_workspace.y,
             int(envelope_power),
         )
@@ -319,7 +319,7 @@ def _fill_profile_outputs(
         np.multiply(u_fields, scale, out=u_fields)
 
 
-def _fill_power_terms(out: np.ndarray, rho: np.ndarray, power: int) -> None:
+def _fill_power_terms(out: np.ndarray, r: np.ndarray, power: int) -> None:
     power = int(power)
     if power == 0:
         out[0].fill(1.0)
@@ -327,19 +327,19 @@ def _fill_power_terms(out: np.ndarray, rho: np.ndarray, power: int) -> None:
         out[2].fill(0.0)
         return
 
-    out[0] = rho**power
-    out[1] = power * rho ** (power - 1)
+    out[0] = r**power
+    out[1] = power * r ** (power - 1)
     if power == 1:
-        # Avoid rho**-1 at the axis; the second derivative is analytically zero.
+        # Avoid r**-1 at the axis; the second derivative is analytically zero.
         out[2].fill(0.0)
     else:
-        out[2] = power * (power - 1) * rho ** (power - 2)
+        out[2] = power * (power - 1) * r ** (power - 2)
 
 
 def _fill_envelope_terms(
     out: np.ndarray,
-    rho: np.ndarray,
-    rho2: np.ndarray,
+    r: np.ndarray,
+    r2: np.ndarray,
     y: np.ndarray,
     envelope_power: int,
 ) -> None:
@@ -351,15 +351,15 @@ def _fill_envelope_terms(
         return
 
     if envelope_power == 1:
-        # y is the standard edge envelope 1-rho**2.
+        # y is the standard edge envelope 1-r**2.
         out[0] = y
-        out[1] = -2.0 * rho
+        out[1] = -2.0 * r
         out[2].fill(-2.0)
         return
 
     out[0] = y**envelope_power
-    out[1] = -2.0 * envelope_power * rho * y ** (envelope_power - 1)
+    out[1] = -2.0 * envelope_power * r * y ** (envelope_power - 1)
     out[2] = (
         -2.0 * envelope_power * y ** (envelope_power - 1)
-        + 4.0 * envelope_power * (envelope_power - 1) * rho2 * y ** (envelope_power - 2)
+        + 4.0 * envelope_power * (envelope_power - 1) * r2 * y ** (envelope_power - 2)
     )

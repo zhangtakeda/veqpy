@@ -71,13 +71,13 @@ def test_numba_geqdsk_low_order_solution_has_physical_diagnostics(case_key: str)
     assert 0.0 <= float(equilibrium.beta_t) <= 1.0
 
     for name in (
-        "rho",
+        "r",
         "psin",
         "Psi",
         "Phi",
         "Phi_r",
         "rho_tor",
-        "rho_tor_norm",
+        "rho",
         "q",
         "FFn_psin",
         "Pn_psin",
@@ -97,7 +97,7 @@ def test_numba_geqdsk_low_order_solution_has_physical_diagnostics(case_key: str)
         assert values.size > 0
         assert np.all(np.isfinite(values)), f"{case_key} {name} contains non-finite values"
 
-    rho = np.asarray(equilibrium.rho, dtype=np.float64)
+    r = np.asarray(equilibrium.r, dtype=np.float64)
     psin = np.asarray(equilibrium.psin, dtype=np.float64)
-    assert np.all(np.diff(rho) > 0.0)
+    assert np.all(np.diff(r) > 0.0)
     assert np.all(np.diff(psin) >= -1.0e-10)

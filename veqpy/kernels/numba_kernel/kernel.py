@@ -15,7 +15,10 @@ from typing import Any
 import numpy as np
 from numpy.linalg import norm
 
-from veqpy.kernels.abi.enums import SOURCE_DRIVER_BY_ROUTE
+from veqpy.kernels.abi.enums import (
+    PRESSURE_DERIVATIVE_BY_COORDINATE,
+    source_driver_for,
+)
 from veqpy.kernels.boundary_materialization import materialize_kernel_boundary
 from veqpy.kernels.initial import KernelInitial, materialize_initial_state
 from veqpy.kernels.pareto import (
@@ -569,13 +572,20 @@ def _prepare_boundary(topology: KernelTopology) -> KernelBoundary:
 
 
 def _prepare_source(topology: KernelTopology) -> KernelSource:
-    sample_count = int(topology.sample_count)
-    pprime = np.full(sample_count, 1.0e6, dtype=np.float64)
+    sample_count = 2 if topology.nodes == "explicit" else int(topology.sample_count)
+    pressure_derivative = np.full(sample_count, -1.0e6, dtype=np.float64)
     driver_value = 1.0e6 if topology.route in {"PI", "PJ1", "PJ2", "PJ3"} else 1.0
     driver = np.full(sample_count, driver_value, dtype=np.float64)
     return KernelSource(
-        pprime=pprime,
-        **{SOURCE_DRIVER_BY_ROUTE[topology.route]: driver},
+        **{
+            PRESSURE_DERIVATIVE_BY_COORDINATE[topology.coordinate]: pressure_derivative,
+            source_driver_for(topology.route, topology.coordinate): driver,
+        },
+        source_nodes=(
+            np.linspace(0.0, 1.0, sample_count, dtype=np.float64)
+            if topology.nodes == "explicit"
+            else None
+        ),
         Ip=1.0e6,
         beta=0.5 if topology.source_uses_beta_constraint else np.nan,
     )

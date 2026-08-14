@@ -15,11 +15,16 @@ def test_grid_user_arrays_and_integration() -> None:
     grid = Grid(Nr=6, Nt=8, quadrature_scheme="legendre")
     field = np.ones((grid.Nr, grid.Nt), dtype=np.float64)
 
-    assert grid.rho.shape == (6,)
+    assert grid.r.shape == (6,)
     assert grid.theta.shape == (8,)
+    radial_coordinate, poloidal_coordinate = grid.coordinates
+    assert_allclose(radial_coordinate, grid.r)
+    assert_allclose(poloidal_coordinate, grid.theta)
     assert grid.weights.shape == (6,)
     assert_allclose(float(np.sum(grid.weights)), 1.0)
-    assert not grid.rho.flags.writeable
+    assert not grid.r.flags.writeable
+    with pytest.raises(AttributeError):
+        _ = grid.rho
     assert_allclose(grid.integrate(np.ones(grid.Nr)), 1.0)
     assert_allclose(grid.integrate(field), 2.0 * np.pi)
 
@@ -50,13 +55,13 @@ def test_profile_fields_are_reactive_when_grid_is_bound() -> None:
         _ = profile.value
 
     profile.grid = grid
-    assert_allclose(profile.value, 6.0 * grid.rho**2)
-    assert_allclose(profile.derivative, 12.0 * grid.rho)
+    assert_allclose(profile.value, 6.0 * grid.r**2)
+    assert_allclose(profile.derivative, 12.0 * grid.r)
     assert_allclose(profile.second_derivative, np.full(grid.Nr, 12.0))
     assert profile.fields.shape == (3, grid.Nr)
 
     profile.scale = 4.0
-    assert_allclose(profile.value, 8.0 * grid.rho**2)
+    assert_allclose(profile.value, 8.0 * grid.r**2)
 
 
 def test_geqdsk_roundtrip(tmp_path: Path) -> None:

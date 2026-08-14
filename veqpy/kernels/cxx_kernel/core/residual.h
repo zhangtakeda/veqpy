@@ -30,7 +30,7 @@ namespace residual::detail
     struct ResidualRuntime
     {
         static_assert(Shape::L_max == GridType::basis_rows, "residual/profile basis rows must match");
-        static_assert(Shape::K_max == GridType::rho_power_rows, "residual/profile rho rows must match");
+        static_assert(Shape::K_max == GridType::r_power_rows, "residual/profile r rows must match");
         static_assert(Shape::M_max + 1 == GridType::harmonic_rows, "residual/profile harmonics must match");
 
         using shape = Shape;
@@ -171,18 +171,18 @@ namespace residual::detail
             else if constexpr (code == block_kappa)
             {
                 project_scaled<Count, ProfileId, ActiveIndex>(
-                    out, rho_power<1>(), GridType::y, unit_weights(), -a * base_scale(), output_scale);
+                    out, r_power<1>(), GridType::y, unit_weights(), -a * base_scale(), output_scale);
             }
             else if constexpr (code == block_c0)
             {
                 project_scaled<Count, ProfileId, ActiveIndex>(
-                    out, rho_power<1>(), GridType::y, unit_weights(), -a * base_scale(), output_scale);
+                    out, r_power<1>(), GridType::y, unit_weights(), -a * base_scale(), output_scale);
             }
             else if constexpr (code == block_c)
             {
                 project_scaled<Count, ProfileId, ActiveIndex>(
                     out,
-                    rho_power<radial_power + 1>(),
+                    r_power<radial_power + 1>(),
                     GridType::y,
                     unit_weights(),
                     -a * base_scale(),
@@ -192,7 +192,7 @@ namespace residual::detail
             {
                 project_scaled<Count, ProfileId, ActiveIndex>(
                     out,
-                    rho_power<radial_power + 1>(),
+                    r_power<radial_power + 1>(),
                     GridType::y,
                     unit_weights(),
                     -a * base_scale(),
@@ -201,7 +201,7 @@ namespace residual::detail
             else if constexpr (code == block_psin)
             {
                 project_scaled<Count, ProfileId, ActiveIndex>(
-                    out, rho_power<2>(), GridType::y, unit_weights(), base_scale(), output_scale);
+                    out, r_power<2>(), GridType::y, unit_weights(), base_scale(), output_scale);
             }
             else if constexpr (code == block_F)
             {
@@ -293,7 +293,7 @@ namespace residual::detail
             if constexpr (order == 0)
                 return 0;
             else
-                return order < GridType::rho_power_rows ? order : GridType::rho_power_rows;
+                return order < GridType::r_power_rows ? order : GridType::r_power_rows;
         }
 
         template <size_t Count,
@@ -352,7 +352,7 @@ namespace residual::detail
         }
 
         template <size_t Power>
-        static constexpr RadialVector rho_power() noexcept
+        static constexpr RadialVector r_power() noexcept
         {
             RadialVector out{uninitialized};
             for (size_t i = 0; i < radial_nodes; ++i)

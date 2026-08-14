@@ -145,7 +145,7 @@ def _seed_active_psin_coefficients(
     if fit_count == 1:
         coeff = _project_psin0_source_target_coefficient(
             raw_target,
-            expected_shape=plan.grid_workspace.rho.shape,
+            expected_shape=plan.grid_workspace.r.shape,
             plan=plan,
             profile_workspace=profile_workspace,
             psin_profile_id=int(psin_profile_id),
@@ -153,7 +153,7 @@ def _seed_active_psin_coefficients(
     else:
         target = _normalized_source_psin_target(
             raw_target,
-            expected_shape=plan.grid_workspace.rho.shape,
+            expected_shape=plan.grid_workspace.r.shape,
             axis_weights=plan.grid_workspace.axis_interpolation_weights,
             edge_weights=plan.grid_workspace.edge_interpolation_weights,
         )

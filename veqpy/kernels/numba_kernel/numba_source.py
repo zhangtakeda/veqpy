@@ -47,7 +47,7 @@ from veqpy.kernels.numba_kernel.workspace.field_rows import (
     GEOMETRY_RADIAL_V_R,
     GEOMETRY_SURFACE_JDIVR,
     GEOMETRY_SURFACE_R,
-    GRID_RADIAL_RHO,
+    GRID_RADIAL_R,
     RESIDUAL_ROOT_PSIN,
     RESIDUAL_ROOT_PSIN_R,
     RESIDUAL_ROOT_PSIN_RR,
@@ -65,28 +65,45 @@ PJ2_PSIN_UNIFORM_FIXED_POINT_MAX_RESIDUAL = 1.0e-10
 PJ2_PSIN_UNIFORM_FIXED_POINT_FINALIZE_ITER = 8
 PJ2_PSIN_UNIFORM_BARYCENTRIC_ORDER_CAP = 8
 
-# Geometric-rho PJ2/PJ3 strict closures stop as soon as their dimensionless
+# Geometric-r PJ2/PJ3 strict closures stop as soon as their dimensionless
 # Picard defect reaches the default outer VEQ residual scale.  A shared cap keeps
 # source materialization bounded without paying route-specific fixed sweep counts.
 PJ23_STRICT_FIXED_POINT_MAX_ITER = 10
 PJ23_STRICT_FIXED_POINT_MAX_RESIDUAL = 1.0e-6
 
-RHO_COORDINATE = 0
+# Native sqrt(Phi_N) routes rebuild their evolving source coordinate inside
+# every residual evaluation.  The loop is deliberately cold-started from
+# s=r so one residual is independent of all previous evaluations.
+RHO_FIXED_POINT_MAX_ITER = 16
+RHO_FIXED_POINT_MAX_RESIDUAL = 1.0e-6
+PSIN_DERIVATIVE_FIXED_POINT_MAX_ITER = 64
+PSIN_DERIVATIVE_FIXED_POINT_MAX_RESIDUAL = 1.0e-10
+
+RETAINED_SOURCE_UNIFORM_SPLINE = 0
+RETAINED_SOURCE_LOCAL_BARYCENTRIC = 1
+RETAINED_SOURCE_GRID_BARYCENTRIC = 2
+RETAINED_SOURCE_EXPLICIT_PCHIP = 3
+
+R_COORDINATE = 0
 PSIN_COORDINATE = 1
+RHO_COORDINATE = 2
 
 COORDINATE_NAMES = {
-    RHO_COORDINATE: "rho",
+    R_COORDINATE: "r",
     PSIN_COORDINATE: "psin",
+    RHO_COORDINATE: "rho",
 }
 
 COORDINATE_CODES = {
-    "rho": RHO_COORDINATE,
+    "r": R_COORDINATE,
     "psin": PSIN_COORDINATE,
+    "rho": RHO_COORDINATE,
 }
 
 UNIFORM_NODES = "uniform"
 GRID_NODES = "grid"
-NODE_NAMES = (UNIFORM_NODES, GRID_NODES)
+EXPLICIT_NODES = "explicit"
+NODE_NAMES = (UNIFORM_NODES, GRID_NODES, EXPLICIT_NODES)
 
 SOURCE_PARAMETERIZATION_IDENTITY = "identity"
 SOURCE_PARAMETERIZATION_SQRT_PSIN = "sqrt_psin"
@@ -108,35 +125,11 @@ _SLOT_PQ_MATRIX = 8
 
 RouteKey = tuple[str, str, str]
 
-SOURCE_ROUTE_KEYS: tuple[RouteKey, ...] = (
-    ("PF", "rho", "uniform"),
-    ("PF", "rho", "grid"),
-    ("PF", "psin", "uniform"),
-    ("PF", "psin", "grid"),
-    ("PP", "rho", "uniform"),
-    ("PP", "rho", "grid"),
-    ("PP", "psin", "uniform"),
-    ("PP", "psin", "grid"),
-    ("PI", "rho", "uniform"),
-    ("PI", "rho", "grid"),
-    ("PI", "psin", "uniform"),
-    ("PI", "psin", "grid"),
-    ("PJ1", "rho", "uniform"),
-    ("PJ1", "rho", "grid"),
-    ("PJ1", "psin", "uniform"),
-    ("PJ1", "psin", "grid"),
-    ("PJ2", "rho", "uniform"),
-    ("PJ2", "rho", "grid"),
-    ("PJ2", "psin", "uniform"),
-    ("PJ2", "psin", "grid"),
-    ("PJ3", "rho", "uniform"),
-    ("PJ3", "rho", "grid"),
-    ("PJ3", "psin", "uniform"),
-    ("PJ3", "psin", "grid"),
-    ("PQ", "rho", "uniform"),
-    ("PQ", "rho", "grid"),
-    ("PQ", "psin", "uniform"),
-    ("PQ", "psin", "grid"),
+SOURCE_ROUTE_KEYS: tuple[RouteKey, ...] = tuple(
+    (route, coordinate, nodes)
+    for route in ("PF", "PP", "PI", "PJ1", "PJ2", "PJ3", "PQ")
+    for coordinate in ("r", "psin", "rho")
+    for nodes in NODE_NAMES
 )
 SOURCE_ROUTE_KEY_SET: frozenset[RouteKey] = frozenset(SOURCE_ROUTE_KEYS)
 
@@ -191,7 +184,7 @@ def register_source_route(*route_keys: RouteKey) -> Callable[[Callable], Callabl
     """Register one implementation for one or more canonical source route tuples.
 
     Source route registration is intentionally tuple-only at the runtime boundary:
-    each key must be a three-string tuple such as ``("PJ1", "rho", "uniform")``.
+    each key must be a three-string tuple such as ``("PJ1", "r", "uniform")``.
     Friendly route-name aliases belong at the model/source-plan boundary, not
     in this bind-time registry.
     """
@@ -231,6 +224,15 @@ def validate_route(route: str, coordinate: str, nodes: str = UNIFORM_NODES) -> _
     try:
         return ROUTE_REGISTRY[key]
     except KeyError as exc:
+        if key[2] == EXPLICIT_NODES:
+            base = ROUTE_REGISTRY[(key[0], key[1], UNIFORM_NODES)]
+            return _SourceRouteSpec(
+                route=base.route,
+                coordinate=base.coordinate,
+                coordinate_code=base.coordinate_code,
+                nodes=EXPLICIT_NODES,
+                implementation=base.implementation,
+            )
         supported = ", ".join("/".join(route_key) for route_key in sorted(ROUTE_REGISTRY))
         raise KeyError(
             f"Unknown source route {route!r}/{coordinate!r}/{nodes!r}; supported: {supported}"
@@ -241,9 +243,7 @@ def source_parameterization_for_route_key(route_key: RouteKey | str) -> str:
     """Return the source-input parameterization for a registered concrete route key."""
 
     normalized_key = _normalize_route_key(route_key)
-    if normalized_key not in ROUTE_REGISTRY:
-        supported = ", ".join("/".join(route_key) for route_key in sorted(ROUTE_REGISTRY))
-        raise KeyError(f"Unknown source route {normalized_key!r}; supported: {supported}")
+    validate_route(*normalized_key)
     if normalized_key == ("PP", "psin", "uniform"):
         # This public source axis is sqrt(psin) to give uniform samples more
         # resolution near the magnetic axis.  Internal root fields stay in psin.
@@ -281,8 +281,8 @@ def _source_geometry_workspace_views(
 
 
 @njit(cache=True, nogil=True)
-def _source_grid_rho(grid_radial_fields: np.ndarray) -> np.ndarray:
-    return grid_radial_fields[GRID_RADIAL_RHO]
+def _source_grid_r(grid_radial_fields: np.ndarray) -> np.ndarray:
+    return grid_radial_fields[GRID_RADIAL_R]
 
 
 @njit(cache=True, nogil=True, inline="always")
@@ -334,7 +334,7 @@ def _update_psin_coordinate(
     weights: np.ndarray,
 ) -> np.ndarray:
     # The prefix accumulator is anchored at the physical axis, even though the
-    # Gauss nodes do not include rho=0.  Normalize with the full [0, 1]
+    # Gauss nodes do not include r=0.  Normalize with the full [0, 1]
     # quadrature, not the first/last interior samples.
     full_integration(out_psin, psin_r, accumulator)
     return _normalize_psin_coordinate_inplace(out_psin, _full_integral(psin_r, weights))
@@ -351,49 +351,81 @@ def _normalize_psin_coordinate_inplace(psin: np.ndarray, scale: float) -> np.nda
 
 
 @njit(cache=True, fastmath=True, nogil=True)
-def _regularize_axis_linear(profile: np.ndarray, rho: np.ndarray, n_fix: int) -> np.ndarray:
+def _regularize_axis_linear(profile: np.ndarray, r: np.ndarray, n_fix: int) -> np.ndarray:
     if n_fix <= 0:
         return profile
 
-    # Axis-near derivatives are ill-conditioned in rho coordinates.  Fit the
-    # smooth ratio profile/rho against rho**2 outside the affected region and
+    # Axis-near derivatives are ill-conditioned in r coordinates.  Fit the
+    # smooth ratio profile/r against r**2 outside the affected region and
     # extrapolate inward.
     anchor0 = n_fix
     anchor1 = n_fix + 1
-    rho0 = rho[anchor0]
-    rho1 = rho[anchor1]
-    x0 = rho0 * rho0
-    x1 = rho1 * rho1
+    r0 = r[anchor0]
+    r1 = r[anchor1]
+    x0 = r0 * r0
+    x1 = r1 * r1
 
-    slope0 = profile[anchor0] / rho0
-    slope1 = profile[anchor1] / rho1
+    slope0 = profile[anchor0] / r0
+    slope1 = profile[anchor1] / r1
     slope_gradient = (slope1 - slope0) / (x1 - x0)
     for i in range(n_fix):
-        x = rho[i] * rho[i]
-        profile[i] = rho[i] * (slope0 + slope_gradient * (x - x0))
+        x = r[i] * r[i]
+        profile[i] = r[i] * (slope0 + slope_gradient * (x - x0))
 
     return profile
 
 
 @njit(cache=True, fastmath=True, nogil=True)
-def _regularize_psin_r(psin_r: np.ndarray, rho: np.ndarray, n_fix: int) -> np.ndarray:
+def _regularize_psin_r(psin_r: np.ndarray, r: np.ndarray, n_fix: int) -> np.ndarray:
     """Repair and floor ``psin_r`` before downstream divisions.
 
-    ``n_fix`` is the number of head samples whose ``rho`` lies inside the
+    ``n_fix`` is the number of head samples whose ``r`` lies inside the
     axis-affected region.  It is pre-computed during operator setup from the
-    grid ``rho`` array and the ``fix_rho`` threshold.
+    grid ``r`` array and the ``fix_r`` threshold.
 
     The first two samples outside the affected region (indices ``n_fix`` and
     ``n_fix + 1``) serve as clean anchors.  Extrapolate the smooth even ratio
-    ``psin_r / rho`` as a linear function of ``rho^2`` back to all head samples,
+    ``psin_r / r`` as a linear function of ``r^2`` back to all head samples,
     then enforce the single runtime-level positive floor used by psin-space
     divisions.
     """
-    _regularize_axis_linear(psin_r, rho, n_fix)
+    _regularize_axis_linear(psin_r, r, n_fix)
     for i in range(psin_r.shape[0]):
         if psin_r[i] < 1.0e-10:
             psin_r[i] = 1.0e-10
     return psin_r
+
+
+@njit(cache=True, fastmath=True, nogil=True)
+def _regularize_psin_r_with_derivative(
+    psin_r: np.ndarray,
+    psin_rr: np.ndarray,
+    r: np.ndarray,
+    n_fix: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Apply the PP axis extension to a field and its analytic derivative."""
+    if n_fix > 0:
+        anchor0 = n_fix
+        anchor1 = n_fix + 1
+        r0 = r[anchor0]
+        r1 = r[anchor1]
+        x0 = r0 * r0
+        x1 = r1 * r1
+        slope0 = psin_r[anchor0] / r0
+        slope1 = psin_r[anchor1] / r1
+        slope_gradient = (slope1 - slope0) / (x1 - x0)
+        for i in range(n_fix):
+            x = r[i] * r[i]
+            psin_r[i] = r[i] * (slope0 + slope_gradient * (x - x0))
+            psin_rr[i] = slope0 + slope_gradient * (3.0 * x - x0)
+
+    # Keep the existing runtime floor semantics.  Where clipping is active the
+    # realized field is locally constant, so its consistent derivative is zero.
+    for i in range(psin_r.shape[0]):
+        if psin_r[i] < 1.0e-10:
+            psin_r[i] = 1.0e-10
+            psin_rr[i] = 0.0
+    return psin_r, psin_rr
 
 
 @njit(cache=True, fastmath=True, nogil=True)
@@ -412,42 +444,42 @@ def _floor_signed_current_primitive(profile: np.ndarray, edge: float) -> np.ndar
 
 
 @njit(cache=True, fastmath=True, nogil=True)
-def _regularize_axis_even(profile: np.ndarray, rho: np.ndarray, n_fix: int) -> np.ndarray:
+def _regularize_axis_even(profile: np.ndarray, r: np.ndarray, n_fix: int) -> np.ndarray:
     if n_fix <= 0:
         return profile
 
     # Even profiles have zero first derivative at the magnetic axis.  Linear
-    # extrapolation in rho**2 preserves that parity better than in rho.
+    # extrapolation in r**2 preserves that parity better than in r.
     anchor0 = n_fix
     anchor1 = n_fix + 1
-    x0 = rho[anchor0] * rho[anchor0]
-    x1 = rho[anchor1] * rho[anchor1]
+    x0 = r[anchor0] * r[anchor0]
+    x1 = r[anchor1] * r[anchor1]
     value0 = profile[anchor0]
     value1 = profile[anchor1]
     value_gradient = (value1 - value0) / (x1 - x0)
     for i in range(n_fix):
-        x = rho[i] * rho[i]
+        x = r[i] * r[i]
         profile[i] = value0 + value_gradient * (x - x0)
 
     return profile
 
 
 @njit(cache=True, fastmath=True, nogil=True)
-def _regularize_ffn_psin(FFn_psin: np.ndarray, rho: np.ndarray, n_fix: int) -> np.ndarray:
-    return _regularize_axis_even(FFn_psin, rho, n_fix)
+def _regularize_ffn_psin(FFn_psin: np.ndarray, r: np.ndarray, n_fix: int) -> np.ndarray:
+    return _regularize_axis_even(FFn_psin, r, n_fix)
 
 
 @njit(cache=True, fastmath=True, nogil=True)
-def _enforce_axis_even_profile(profile: np.ndarray, rho: np.ndarray) -> np.ndarray:
+def _enforce_axis_even_profile(profile: np.ndarray, r: np.ndarray) -> np.ndarray:
     if profile.shape[0] < 3:
         return profile
-    x1 = rho[1] * rho[1]
-    x2 = rho[2] * rho[2]
+    x1 = r[1] * r[1]
+    x2 = r[2] * r[2]
     if abs(x2 - x1) < 1e-14:
         return profile
     slope = (profile[2] - profile[1]) / (x2 - x1)
     intercept = profile[1] - slope * x1
-    profile[0] = intercept + slope * rho[0] * rho[0]
+    profile[0] = intercept + slope * r[0] * r[0]
     profile[1] = intercept + slope * x1
     return profile
 
@@ -477,7 +509,7 @@ def _build_unscaled_pressure_profile(
     weights: np.ndarray,
 ) -> np.ndarray:
     """Build mu0*p before the route-level common pressure multiplier."""
-    if coordinate_code == RHO_COORDINATE:
+    if coordinate_code == R_COORDINATE:
         _compute_Pn_out(out_pressure, pprime_input, accumulator, weights)
     else:
         product_into(radial_scratch, pprime_input, psin_r)
@@ -583,7 +615,7 @@ def finalize_pressure_normalization(
     for i in range(pprime_input.shape[0]):
         raw = pprime_input[i]
         denominator += raw * raw * weights[i]
-        if coordinate_code == RHO_COORDINATE:
+        if coordinate_code == R_COORDINATE:
             realized = alpha1 * alpha2 * out_Pn_psin[i] * psin_r[i]
         else:
             realized = alpha1 * out_Pn_psin[i]
@@ -591,7 +623,7 @@ def finalize_pressure_normalization(
     if denominator > 1.0e-28:
         pressure_multiplier = numerator / denominator
     elif np.isfinite(beta):
-        pressure_multiplier = alpha1 * alpha2 if coordinate_code == RHO_COORDINATE else alpha1
+        pressure_multiplier = alpha1 * alpha2 if coordinate_code == R_COORDINATE else alpha1
     else:
         # With pprime == 0, p0 is already an absolute pressure unless a beta
         # branch explicitly selected a different multiplier before this helper.
@@ -632,7 +664,7 @@ def finalize_pressure_normalization(
 
 
 @njit(cache=True, nogil=True)
-def _rho_beta_pressure_denominator(
+def _r_beta_pressure_denominator(
     relative_pressure: np.ndarray,
     V_r: np.ndarray,
     weights: np.ndarray,
@@ -688,7 +720,7 @@ def _solve_pf_psin_beta_alpha1(
 
 
 @njit(cache=True, fastmath=True, nogil=True)
-def _fill_pf_rho_integrand(
+def _fill_pf_r_integrand(
     out: np.ndarray,
     Kn: np.ndarray,
     driver_input: np.ndarray,
@@ -750,7 +782,7 @@ def _fill_g1n_psin_integrand(
 
 
 @njit(cache=True, fastmath=True, nogil=True)
-def _fill_g1n_rho_integrand(
+def _fill_g1n_r_integrand(
     out: np.ndarray,
     JdivR: np.ndarray,
     FFn_r: np.ndarray,
@@ -786,7 +818,7 @@ def _g1n_psin_integral_from_radial_moments(
 
 
 @njit(cache=True, fastmath=True, nogil=True)
-def _g1n_rho_integral_from_radial_moments(
+def _g1n_r_integral_from_radial_moments(
     FFn_r: np.ndarray,
     Pn_r: np.ndarray,
     psin_r: np.ndarray,
@@ -1062,7 +1094,7 @@ def _validate_pq_source_scalar(value: float, label_code: int) -> None:
 def _normalize_pq_signed_psi_r(
     psi_r: np.ndarray,
     weights: np.ndarray,
-    rho: np.ndarray,
+    r: np.ndarray,
     n_axis_fix: int,
 ) -> float:
     alpha2 = dot(psi_r, weights)
@@ -1071,7 +1103,7 @@ def _normalize_pq_signed_psi_r(
     for i in range(psi_r.shape[0]):
         if not np.isfinite(psi_r[i]) or psi_r[i] <= 0.0:
             raise ValueError("PQ strict solve produced invalid normalized psin_r")
-    _regularize_psin_r(psi_r, rho, n_axis_fix)
+    _regularize_psin_r(psi_r, r, n_axis_fix)
     for i in range(psi_r.shape[0]):
         if not np.isfinite(psi_r[i]) or psi_r[i] <= 0.0:
             raise ValueError("PQ strict solve produced invalid normalized psin_r")
@@ -1283,35 +1315,40 @@ def build_source_remap_cache(
     coordinate: str,
     source_sample_count: int,
     *,
-    rho: np.ndarray | None = None,
+    r: np.ndarray | None = None,
     stencil_size: int = DEFAULT_LOCAL_BARYCENTRIC_STENCIL,
     interpolation_kind: str | None = None,
 ) -> tuple[int, np.ndarray, np.ndarray]:
     """Build reusable interpolation cache data for sampled source inputs.
 
-    Rho-coordinate sources are tied to the fixed operator grid, so their remap
+    r-coordinate sources are tied to the fixed operator grid, so their remap
     matrix can be built once.  Psin-coordinate sources depend on the current
     solution and only keep interpolation weights here; their query is refreshed
     at each source evaluation.
     """
     coord = str(coordinate).lower()
-    if coord not in ("rho", "psin"):
+    if coord not in ("r", "psin", "rho"):
         raise ValueError(f"Unsupported coordinate {coordinate!r}")
 
     count = int(source_sample_count)
     if count < 1:
         raise ValueError(f"source_sample_count must be positive, got {source_sample_count!r}")
 
-    coord_code = PSIN_COORDINATE if coord == "psin" else RHO_COORDINATE
+    if coord == "psin":
+        coord_code = PSIN_COORDINATE
+    elif coord == "rho":
+        coord_code = RHO_COORDINATE
+    else:
+        coord_code = R_COORDINATE
     local_size = min(count, int(stencil_size))
     if local_size < 1:
         raise ValueError(f"stencil_size must be positive, got {stencil_size!r}")
     weights = uniform_barycentric_weights(local_size)
     fixed_remap_matrix = np.empty((0, 0), dtype=np.float64)
-    if coord_code == RHO_COORDINATE:
-        if rho is None:
-            raise ValueError("rho is required when coordinate='rho'")
-        query = np.clip(np.asarray(rho, dtype=np.float64), 0.0, 1.0)
+    if coord_code == R_COORDINATE:
+        if r is None:
+            raise ValueError("r is required when coordinate='r'")
+        query = np.clip(np.asarray(r, dtype=np.float64), 0.0, 1.0)
         fixed_remap_matrix = build_uniform_source_interpolation_matrix(
             query, count, kind=interpolation_kind
         )
@@ -1333,7 +1370,7 @@ def resolve_source_inputs(
     psin_query: np.ndarray,
     use_barycentric: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Resolve sampled pprime/driver inputs onto operator rho nodes."""
+    """Resolve sampled pprime/driver inputs onto operator r nodes."""
 
     pprime = np.asarray(pprime_input, dtype=np.float64)
     driver = np.asarray(driver_input, dtype=np.float64)
@@ -1387,7 +1424,7 @@ def _resolve_source_inputs_prepared(
     if psin_query.ndim != 1:
         raise ValueError(f"Expected psin_query to be 1D, got {psin_query.shape}")
 
-    if coordinate_code == RHO_COORDINATE:
+    if coordinate_code == R_COORDINATE:
         # Rho inputs use the precomputed linear map; no solver state participates
         # after the cache is built.
         np.matmul(fixed_remap_matrix, pprime, out=out_pprime_input)
@@ -1427,26 +1464,29 @@ def _resolve_source_inputs_prepared(
 # ---------------------------------------------------------------------------
 
 # Route families share one output contract but choose different primitives:
-# PF derives psin_r from pprime/FF' source balance, PP takes psi_r directly, PI
+# PF derives psin_r from the coordinate-matched P/FF derivative balance, PP
+# takes psi_r directly, PI
 # works through toroidal-current primitives, PJ routes start from current-density
 # data, and PQ treats q as strict input. The
-# repeated rho/psin/uniform/grid functions below differ mainly in how the input
+# repeated r/psin/uniform/grid functions below differ mainly in how the input
 # profiles are interpreted or remapped; keep family-level comments here instead
 # of duplicating them in every variant.
 #
 # Docs-facing route meanings in compact form:
-# - PF: pprime is paired with ffprime.
+# - PF: P_r/P_rho/P_psin is paired with FF_r/FF_rho/FF_psin.
 # - PP: pprime is paired with psi_r.
 # - PI/PJ1/PJ2/PJ3: pprime is paired with itor/jtor/jpara/jtotal respectively.
 # - PQ: pprime is paired with q, so F or F**2 is solved from q and edge F.
 
 
 @register_source_route(
+    ("PF", "r", "uniform"),
+    ("PF", "r", "grid"),
     ("PF", "rho", "uniform"),
     ("PF", "rho", "grid"),
 )
 @njit(cache=True, nogil=True)
-def _update_pf_from_rho_inputs_with_scratch(
+def _update_pf_from_r_inputs_with_scratch(
     out_root_fields: np.ndarray,
     out_FFn_psin: np.ndarray,
     out_Pn_psin: np.ndarray,
@@ -1470,12 +1510,12 @@ def _update_pf_from_rho_inputs_with_scratch(
     matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
-    rho = _source_grid_rho(grid_radial_fields)
+    r = _source_grid_r(grid_radial_fields)
     V_r, Kn, _, Ln_r, _, _, _ = _source_geometry_workspace_views(radial_fields, surface_fields)
     has_Ip = not np.isnan(Ip)
     has_beta = not np.isnan(beta)
     integrand = array_scratch[_SLOT_INTEGRAND]
-    _fill_pf_rho_integrand(integrand, Kn, driver_input, Ln_r, V_r, pprime_input)
+    _fill_pf_r_integrand(integrand, Kn, driver_input, Ln_r, V_r, pprime_input)
     full_integration(out_psin_r, integrand, accumulator)
     out_psin_r *= -2.0
     psi_square_sign = _weighted_profile_sign(out_psin_r, weights)
@@ -1486,7 +1526,7 @@ def _update_pf_from_rho_inputs_with_scratch(
             out_psin_r[i] = 1.0e-6
     out_psin_r[:] = np.sqrt(out_psin_r)
     out_psin_r /= Kn
-    _regularize_psin_r(out_psin_r, rho, n_axis_fix)
+    _regularize_psin_r(out_psin_r, r, n_axis_fix)
     prof = out_psin_r
     integral_prof = dot(prof, weights)
     # alpha2 stores the pre-normalization integral; psin_r itself is normalized
@@ -1496,8 +1536,8 @@ def _update_pf_from_rho_inputs_with_scratch(
     _update_psin_coordinate(out_psin, out_psin_r, accumulator, weights)
     if (not has_Ip) and (not has_beta):
         # With no global Ip/beta target, PF determines both alpha scales from
-        # the integrated source profiles.  Rho-coordinate PF inputs are
-        # derivatives with respect to rho, so their global sign belongs to the
+        # the integrated source profiles. r-coordinate PF inputs are
+        # derivatives with respect to r, so their global sign belongs to the
         # flux-direction gauge carried by alpha2, not to the solved shape.
         alpha2 = psi_square_sign * integral_prof
         alpha1 = -dot(pprime_input, weights) / integral_prof
@@ -1518,7 +1558,7 @@ def _update_pf_from_rho_inputs_with_scratch(
         return alpha1, alpha2
     c2 = integral_prof * integral_prof
     if has_Ip and (not has_beta):
-        G1n_integral = _g1n_rho_integral_from_radial_moments(
+        G1n_integral = _g1n_r_integral_from_radial_moments(
             driver_input,
             pprime_input,
             out_psin_r,
@@ -1536,7 +1576,7 @@ def _update_pf_from_rho_inputs_with_scratch(
             * beta
             * B0**2
             * dot(V_r, weights)
-            / _rho_beta_pressure_denominator(scratch_aux, V_r, weights, scaled_p0)
+            / _r_beta_pressure_denominator(scratch_aux, V_r, weights, scaled_p0)
         )
         alpha1 = _signed_sqrt_ratio(c1, c2)
     else:
@@ -1573,7 +1613,7 @@ def _update_pf_from_psin_uniform_inputs_with_scratch(
     matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
-    rho = _source_grid_rho(grid_radial_fields)
+    r = _source_grid_r(grid_radial_fields)
     V_r, Kn, _, Ln_r, _, _, _ = _source_geometry_workspace_views(radial_fields, surface_fields)
     has_Ip = not np.isnan(Ip)
     has_beta = not np.isnan(beta)
@@ -1585,7 +1625,7 @@ def _update_pf_from_psin_uniform_inputs_with_scratch(
     psi_scale_sign = _weighted_profile_sign(out_psin_r, weights)
     if psi_scale_sign < 0.0:
         out_psin_r *= -1.0
-    _regularize_psin_r(out_psin_r, rho, n_axis_fix)
+    _regularize_psin_r(out_psin_r, r, n_axis_fix)
     integral_prof = dot(out_psin_r, weights)
     out_psin_r /= integral_prof
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
@@ -1608,12 +1648,12 @@ def _update_pf_from_psin_uniform_inputs_with_scratch(
         )
         scale_into(out_Pn_psin, pprime_input, 1.0 / alpha1)
         scale_into(out_FFn_psin, driver_input, 1.0 / alpha1)
-        _regularize_ffn_psin(out_FFn_psin, rho, n_axis_fix)
+        _regularize_ffn_psin(out_FFn_psin, r, n_axis_fix)
         return alpha1, alpha2
     c2 = integral_prof
     copy_into(out_Pn_psin, pprime_input)
     copy_into(out_FFn_psin, driver_input)
-    _regularize_ffn_psin(out_FFn_psin, rho, n_axis_fix)
+    _regularize_ffn_psin(out_FFn_psin, r, n_axis_fix)
     if has_Ip and (not has_beta):
         G1n_integral = _g1n_psin_integral_from_radial_moments(
             out_FFn_psin,
@@ -1668,7 +1708,7 @@ def _update_pf_from_psin_grid_inputs_with_scratch(
     matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
-    rho = _source_grid_rho(grid_radial_fields)
+    r = _source_grid_r(grid_radial_fields)
     V_r, Kn, _, Ln_r, _, _, _ = _source_geometry_workspace_views(radial_fields, surface_fields)
     has_Ip = not np.isnan(Ip)
     has_beta = not np.isnan(beta)
@@ -1680,7 +1720,7 @@ def _update_pf_from_psin_grid_inputs_with_scratch(
     psi_scale_sign = _weighted_profile_sign(out_psin_r, weights)
     if psi_scale_sign < 0.0:
         out_psin_r *= -1.0
-    _regularize_psin_r(out_psin_r, rho, n_axis_fix)
+    _regularize_psin_r(out_psin_r, r, n_axis_fix)
     integral_prof = dot(out_psin_r, weights)
     out_psin_r /= integral_prof
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
@@ -1703,12 +1743,12 @@ def _update_pf_from_psin_grid_inputs_with_scratch(
         )
         scale_into(out_Pn_psin, pprime_input, 1.0 / alpha1)
         scale_into(out_FFn_psin, driver_input, 1.0 / alpha1)
-        _regularize_ffn_psin(out_FFn_psin, rho, n_axis_fix)
+        _regularize_ffn_psin(out_FFn_psin, r, n_axis_fix)
         return alpha1, alpha2
     c2 = integral_prof
     copy_into(out_Pn_psin, pprime_input)
     copy_into(out_FFn_psin, driver_input)
-    _regularize_ffn_psin(out_FFn_psin, rho, n_axis_fix)
+    _regularize_ffn_psin(out_FFn_psin, r, n_axis_fix)
     if has_Ip and (not has_beta):
         G1n_integral = _g1n_psin_integral_from_radial_moments(
             out_FFn_psin,
@@ -1737,17 +1777,15 @@ def _update_pf_from_psin_grid_inputs_with_scratch(
     return alpha1, alpha2
 
 
-@register_source_route(
-    ("PP", "rho", "uniform"),
-    ("PP", "rho", "grid"),
-)
 @njit(cache=True, nogil=True)
-def _update_pp_from_rho_inputs_with_scratch(
+def _update_pp_from_r_inputs_impl(
     out_root_fields: np.ndarray,
     out_FFn_psin: np.ndarray,
     out_Pn_psin: np.ndarray,
     pprime_input: np.ndarray,
     driver_input: np.ndarray,
+    driver_derivative: np.ndarray,
+    use_materialized_driver_derivative: bool,
     coordinate_code: int,
     R0: float,
     B0: float,
@@ -1766,7 +1804,7 @@ def _update_pp_from_rho_inputs_with_scratch(
     matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
-    rho = _source_grid_rho(grid_radial_fields)
+    r = _source_grid_r(grid_radial_fields)
     V_r, Kn, Kn_r, Ln_r, S_r, R, JdivR = _source_geometry_workspace_views(
         radial_fields, surface_fields
     )
@@ -1777,7 +1815,11 @@ def _update_pp_from_rho_inputs_with_scratch(
         # absolute scale through the edge value; otherwise alpha2 is the weighted
         # normalization integral.
         copy_into(out_psin_r, driver_input)
-        _regularize_psin_r(out_psin_r, rho, n_axis_fix)
+        if use_materialized_driver_derivative:
+            copy_into(out_psin_rr, driver_derivative)
+            _regularize_psin_r_with_derivative(out_psin_r, out_psin_rr, r, n_axis_fix)
+        else:
+            _regularize_psin_r(out_psin_r, r, n_axis_fix)
         alpha2 = Ip / (
             2.0
             * np.pi
@@ -1787,8 +1829,13 @@ def _update_pp_from_rho_inputs_with_scratch(
     else:
         alpha2 = dot(driver_input, weights)
         scale_into(out_psin_r, driver_input, 1.0 / alpha2)
-        _regularize_psin_r(out_psin_r, rho, n_axis_fix)
-    full_differentiation(out_psin_rr, out_psin_r, differentiator)
+        if use_materialized_driver_derivative:
+            scale_into(out_psin_rr, driver_derivative, 1.0 / alpha2)
+            _regularize_psin_r_with_derivative(out_psin_r, out_psin_rr, r, n_axis_fix)
+        else:
+            _regularize_psin_r(out_psin_r, r, n_axis_fix)
+    if not use_materialized_driver_derivative:
+        full_differentiation(out_psin_rr, out_psin_r, differentiator)
     _update_psin_coordinate(out_psin, out_psin_r, accumulator, weights)
     if has_beta:
         scaled_ratio_into(out_Pn_psin, pprime_input, out_psin_r, 1.0)
@@ -1801,7 +1848,7 @@ def _update_pp_from_rho_inputs_with_scratch(
             * beta
             * B0**2
             * dot(V_r, weights)
-            / (alpha2 * _rho_beta_pressure_denominator(scratch_aux, V_r, weights, scaled_p0))
+            / (alpha2 * _r_beta_pressure_denominator(scratch_aux, V_r, weights, scaled_p0))
         )
     else:
         scratch_Pr = array_scratch[_SLOT_Pr]
@@ -1833,6 +1880,116 @@ def _update_pp_from_rho_inputs_with_scratch(
     return alpha1, alpha2
 
 
+@register_source_route(
+    ("PP", "r", "uniform"),
+    ("PP", "r", "grid"),
+    ("PP", "rho", "uniform"),
+    ("PP", "rho", "grid"),
+)
+@njit(cache=True, nogil=True)
+def _update_pp_from_r_inputs_with_scratch(
+    out_root_fields: np.ndarray,
+    out_FFn_psin: np.ndarray,
+    out_Pn_psin: np.ndarray,
+    pprime_input: np.ndarray,
+    driver_input: np.ndarray,
+    coordinate_code: int,
+    R0: float,
+    B0: float,
+    weights: np.ndarray,
+    differentiator: np.ndarray,
+    accumulator: np.ndarray,
+    grid_radial_fields: np.ndarray,
+    n_axis_fix: int,
+    radial_fields: np.ndarray,
+    surface_fields: np.ndarray,
+    F_fields: np.ndarray,
+    scaled_p0: float,
+    Ip: float,
+    beta: float,
+    array_scratch: np.ndarray,
+    matrix_scratch: np.ndarray,
+) -> tuple[float, float]:
+    return _update_pp_from_r_inputs_impl(
+        out_root_fields,
+        out_FFn_psin,
+        out_Pn_psin,
+        pprime_input,
+        driver_input,
+        driver_input,
+        False,
+        coordinate_code,
+        R0,
+        B0,
+        weights,
+        differentiator,
+        accumulator,
+        grid_radial_fields,
+        n_axis_fix,
+        radial_fields,
+        surface_fields,
+        F_fields,
+        scaled_p0,
+        Ip,
+        beta,
+        array_scratch,
+        matrix_scratch,
+    )
+
+
+@njit(cache=True, nogil=True)
+def _update_pp_from_r_explicit_inputs_with_scratch(
+    out_root_fields: np.ndarray,
+    out_FFn_psin: np.ndarray,
+    out_Pn_psin: np.ndarray,
+    pprime_input: np.ndarray,
+    driver_input: np.ndarray,
+    driver_derivative: np.ndarray,
+    coordinate_code: int,
+    R0: float,
+    B0: float,
+    weights: np.ndarray,
+    differentiator: np.ndarray,
+    accumulator: np.ndarray,
+    grid_radial_fields: np.ndarray,
+    n_axis_fix: int,
+    radial_fields: np.ndarray,
+    surface_fields: np.ndarray,
+    F_fields: np.ndarray,
+    scaled_p0: float,
+    Ip: float,
+    beta: float,
+    array_scratch: np.ndarray,
+    matrix_scratch: np.ndarray,
+) -> tuple[float, float]:
+    """PP-r closure with PCHIP and axis-consistent psi_r derivatives."""
+    return _update_pp_from_r_inputs_impl(
+        out_root_fields,
+        out_FFn_psin,
+        out_Pn_psin,
+        pprime_input,
+        driver_input,
+        driver_derivative,
+        True,
+        coordinate_code,
+        R0,
+        B0,
+        weights,
+        differentiator,
+        accumulator,
+        grid_radial_fields,
+        n_axis_fix,
+        radial_fields,
+        surface_fields,
+        F_fields,
+        scaled_p0,
+        Ip,
+        beta,
+        array_scratch,
+        matrix_scratch,
+    )
+
+
 @register_source_route(("PP", "psin", "uniform"))
 @njit(cache=True, nogil=True)
 def _update_pp_from_psin_uniform_inputs_with_scratch(
@@ -1859,7 +2016,7 @@ def _update_pp_from_psin_uniform_inputs_with_scratch(
     matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
-    rho = _source_grid_rho(grid_radial_fields)
+    r = _source_grid_r(grid_radial_fields)
     V_r, Kn, Kn_r, Ln_r, S_r, R, JdivR = _source_geometry_workspace_views(
         radial_fields, surface_fields
     )
@@ -1867,7 +2024,7 @@ def _update_pp_from_psin_uniform_inputs_with_scratch(
     has_beta = not np.isnan(beta)
     if has_Ip:
         copy_into(out_psin_r, driver_input)
-        _regularize_psin_r(out_psin_r, rho, n_axis_fix)
+        _regularize_psin_r(out_psin_r, r, n_axis_fix)
         alpha2 = Ip / (
             2.0
             * np.pi
@@ -1877,7 +2034,7 @@ def _update_pp_from_psin_uniform_inputs_with_scratch(
     else:
         alpha2 = dot(driver_input, weights)
         scale_into(out_psin_r, driver_input, 1.0 / alpha2)
-        _regularize_psin_r(out_psin_r, rho, n_axis_fix)
+        _regularize_psin_r(out_psin_r, r, n_axis_fix)
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
     _update_psin_coordinate(out_psin, out_psin_r, accumulator, weights)
     if has_beta:
@@ -1920,7 +2077,7 @@ def _update_pp_from_psin_uniform_inputs_with_scratch(
         Ln_r,
         alpha2 / alpha1,
     )
-    _regularize_ffn_psin(out_FFn_psin, rho, n_axis_fix)
+    _regularize_ffn_psin(out_FFn_psin, r, n_axis_fix)
     return alpha1, alpha2
 
 
@@ -1950,7 +2107,7 @@ def _update_pp_from_psin_grid_inputs_with_scratch(
     matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
-    rho = _source_grid_rho(grid_radial_fields)
+    r = _source_grid_r(grid_radial_fields)
     V_r, Kn, Kn_r, Ln_r, S_r, R, JdivR = _source_geometry_workspace_views(
         radial_fields, surface_fields
     )
@@ -1958,7 +2115,7 @@ def _update_pp_from_psin_grid_inputs_with_scratch(
     has_beta = not np.isnan(beta)
     if has_Ip:
         copy_into(out_psin_r, driver_input)
-        _regularize_psin_r(out_psin_r, rho, n_axis_fix)
+        _regularize_psin_r(out_psin_r, r, n_axis_fix)
         alpha2 = Ip / (
             2.0
             * np.pi
@@ -1968,7 +2125,7 @@ def _update_pp_from_psin_grid_inputs_with_scratch(
     else:
         alpha2 = dot(driver_input, weights)
         scale_into(out_psin_r, driver_input, 1.0 / alpha2)
-        _regularize_psin_r(out_psin_r, rho, n_axis_fix)
+        _regularize_psin_r(out_psin_r, r, n_axis_fix)
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
     _update_psin_coordinate(out_psin, out_psin_r, accumulator, weights)
     if has_beta:
@@ -2011,16 +2168,108 @@ def _update_pp_from_psin_grid_inputs_with_scratch(
         Ln_r,
         alpha2 / alpha1,
     )
-    _regularize_ffn_psin(out_FFn_psin, rho, n_axis_fix)
+    _regularize_ffn_psin(out_FFn_psin, r, n_axis_fix)
+    return alpha1, alpha2
+
+
+@njit(cache=True, nogil=True)
+def _update_pi_from_r_inputs_impl(
+    out_root_fields: np.ndarray,
+    out_FFn_psin: np.ndarray,
+    out_Pn_psin: np.ndarray,
+    pprime_input: np.ndarray,
+    driver_input: np.ndarray,
+    driver_derivative: np.ndarray,
+    use_materialized_driver_derivative: bool,
+    coordinate_code: int,
+    R0: float,
+    B0: float,
+    weights: np.ndarray,
+    differentiator: np.ndarray,
+    accumulator: np.ndarray,
+    grid_radial_fields: np.ndarray,
+    n_axis_fix: int,
+    radial_fields: np.ndarray,
+    surface_fields: np.ndarray,
+    F_fields: np.ndarray,
+    scaled_p0: float,
+    Ip: float,
+    beta: float,
+    array_scratch: np.ndarray,
+    matrix_scratch: np.ndarray,
+) -> tuple[float, float]:
+    out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
+    r = _source_grid_r(grid_radial_fields)
+    V_r, Kn, Kn_r, Ln_r, S_r, R, JdivR = _source_geometry_workspace_views(
+        radial_fields, surface_fields
+    )
+    has_Ip = not np.isnan(Ip)
+    has_beta = not np.isnan(beta)
+    Itor = array_scratch[_SLOT_AUX0]
+    driver_scale = 1.0
+    if has_Ip:
+        # PI source profiles represent cumulative toroidal current.  Rescale the
+        # whole primitive when Ip is prescribed, then differentiate only after
+        # psin_r has been normalized.
+        driver_scale = Ip / _edge_eval(driver_input, grid_radial_fields)
+        scale_into(Itor, driver_input, driver_scale)
+    else:
+        copy_into(Itor, driver_input)
+    _floor_signed_current_primitive(Itor, _edge_eval(Itor, grid_radial_fields))
+    itor_over_kn = array_scratch[_SLOT_INTEGRAND]
+    scaled_ratio_into(itor_over_kn, Itor, Kn, 1.0 / (2.0 * np.pi))
+    alpha2 = dot(itor_over_kn, weights)
+    scaled_ratio_into(out_psin_r, Itor, Kn, 1.0 / (2.0 * np.pi * alpha2))
+    _regularize_psin_r(out_psin_r, r, n_axis_fix)
+    full_differentiation(out_psin_rr, out_psin_r, differentiator)
+    _update_psin_coordinate(out_psin, out_psin_r, accumulator, weights)
+    Itor_r = array_scratch[_SLOT_AUX1]
+    if use_materialized_driver_derivative:
+        scale_into(Itor_r, driver_derivative, driver_scale)
+    else:
+        full_differentiation(Itor_r, Itor, differentiator)
+    _regularize_axis_linear(Itor_r, r, n_axis_fix)
+    if has_beta:
+        scaled_ratio_into(out_Pn_psin, pprime_input, out_psin_r, 1.0)
+        scratch_Pn_r = array_scratch[_SLOT_PNr]
+        product_into(scratch_Pn_r, out_Pn_psin, out_psin_r)
+        scratch_aux = array_scratch[_SLOT_AUX2]
+        _compute_Pn_out(scratch_aux, scratch_Pn_r, accumulator, weights)
+        alpha1 = (
+            0.5
+            * beta
+            * B0**2
+            * dot(V_r, weights)
+            / (alpha2 * _r_beta_pressure_denominator(scratch_aux, V_r, weights, scaled_p0))
+        )
+    else:
+        scratch_Pr = array_scratch[_SLOT_Pr]
+        copy_into(scratch_Pr, pprime_input)
+        alpha1 = -dot(scratch_Pr, weights) / alpha2
+        alpha1 = _ensure_pressure_alpha1(
+            alpha1,
+            pprime_input,
+            coordinate_code,
+            scaled_p0,
+            alpha2,
+            out_psin_r,
+            accumulator,
+            weights,
+            array_scratch,
+        )
+        scaled_ratio_into(out_Pn_psin, scratch_Pr, out_psin_r, 1.0 / (alpha1 * alpha2))
+    _fill_pi_ffn_psin(out_FFn_psin, Itor_r, V_r, out_Pn_psin, Ln_r, 1.0 / (2.0 * np.pi * alpha1))
     return alpha1, alpha2
 
 
 @register_source_route(
+    ("PI", "r", "uniform"),
+    ("PI", "r", "grid"),
     ("PI", "rho", "uniform"),
     ("PI", "rho", "grid"),
 )
 @njit(cache=True, nogil=True)
-def _update_pi_from_rho_inputs_with_scratch(
+def _update_pi_from_r_inputs_with_scratch(
     out_root_fields: np.ndarray,
     out_FFn_psin: np.ndarray,
     out_Pn_psin: np.ndarray,
@@ -2043,63 +2292,84 @@ def _update_pi_from_rho_inputs_with_scratch(
     array_scratch: np.ndarray,
     matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
-    out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
-    rho = _source_grid_rho(grid_radial_fields)
-    V_r, Kn, Kn_r, Ln_r, S_r, R, JdivR = _source_geometry_workspace_views(
-        radial_fields, surface_fields
+    return _update_pi_from_r_inputs_impl(
+        out_root_fields,
+        out_FFn_psin,
+        out_Pn_psin,
+        pprime_input,
+        driver_input,
+        driver_input,
+        False,
+        coordinate_code,
+        R0,
+        B0,
+        weights,
+        differentiator,
+        accumulator,
+        grid_radial_fields,
+        n_axis_fix,
+        radial_fields,
+        surface_fields,
+        F_fields,
+        scaled_p0,
+        Ip,
+        beta,
+        array_scratch,
+        matrix_scratch,
     )
-    has_Ip = not np.isnan(Ip)
-    has_beta = not np.isnan(beta)
-    Itor = array_scratch[_SLOT_AUX0]
-    if has_Ip:
-        # PI source profiles represent cumulative toroidal current.  Rescale the
-        # whole primitive when Ip is prescribed, then differentiate only after
-        # psin_r has been normalized.
-        scale_into(Itor, driver_input, Ip / _edge_eval(driver_input, grid_radial_fields))
-    else:
-        copy_into(Itor, driver_input)
-    _floor_signed_current_primitive(Itor, _edge_eval(Itor, grid_radial_fields))
-    itor_over_kn = array_scratch[_SLOT_INTEGRAND]
-    scaled_ratio_into(itor_over_kn, Itor, Kn, 1.0 / (2.0 * np.pi))
-    alpha2 = dot(itor_over_kn, weights)
-    scaled_ratio_into(out_psin_r, Itor, Kn, 1.0 / (2.0 * np.pi * alpha2))
-    _regularize_psin_r(out_psin_r, rho, n_axis_fix)
-    full_differentiation(out_psin_rr, out_psin_r, differentiator)
-    _update_psin_coordinate(out_psin, out_psin_r, accumulator, weights)
-    Itor_r = array_scratch[_SLOT_AUX1]
-    full_differentiation(Itor_r, Itor, differentiator)
-    _regularize_axis_linear(Itor_r, rho, n_axis_fix)
-    if has_beta:
-        scaled_ratio_into(out_Pn_psin, pprime_input, out_psin_r, 1.0)
-        scratch_Pn_r = array_scratch[_SLOT_PNr]
-        product_into(scratch_Pn_r, out_Pn_psin, out_psin_r)
-        scratch_aux = array_scratch[_SLOT_AUX2]
-        _compute_Pn_out(scratch_aux, scratch_Pn_r, accumulator, weights)
-        alpha1 = (
-            0.5
-            * beta
-            * B0**2
-            * dot(V_r, weights)
-            / (alpha2 * _rho_beta_pressure_denominator(scratch_aux, V_r, weights, scaled_p0))
-        )
-    else:
-        scratch_Pr = array_scratch[_SLOT_Pr]
-        copy_into(scratch_Pr, pprime_input)
-        alpha1 = -dot(scratch_Pr, weights) / alpha2
-        alpha1 = _ensure_pressure_alpha1(
-            alpha1,
-            pprime_input,
-            coordinate_code,
-            scaled_p0,
-            alpha2,
-            out_psin_r,
-            accumulator,
-            weights,
-            array_scratch,
-        )
-        scaled_ratio_into(out_Pn_psin, scratch_Pr, out_psin_r, 1.0 / (alpha1 * alpha2))
-    _fill_pi_ffn_psin(out_FFn_psin, Itor_r, V_r, out_Pn_psin, Ln_r, 1.0 / (2.0 * np.pi * alpha1))
-    return alpha1, alpha2
+
+
+@njit(cache=True, nogil=True)
+def _update_pi_from_r_explicit_inputs_with_scratch(
+    out_root_fields: np.ndarray,
+    out_FFn_psin: np.ndarray,
+    out_Pn_psin: np.ndarray,
+    pprime_input: np.ndarray,
+    driver_input: np.ndarray,
+    driver_derivative: np.ndarray,
+    coordinate_code: int,
+    R0: float,
+    B0: float,
+    weights: np.ndarray,
+    differentiator: np.ndarray,
+    accumulator: np.ndarray,
+    grid_radial_fields: np.ndarray,
+    n_axis_fix: int,
+    radial_fields: np.ndarray,
+    surface_fields: np.ndarray,
+    F_fields: np.ndarray,
+    scaled_p0: float,
+    Ip: float,
+    beta: float,
+    array_scratch: np.ndarray,
+    matrix_scratch: np.ndarray,
+) -> tuple[float, float]:
+    """PI-r closure using the derivative of its retained PCHIP primitive."""
+    return _update_pi_from_r_inputs_impl(
+        out_root_fields,
+        out_FFn_psin,
+        out_Pn_psin,
+        pprime_input,
+        driver_input,
+        driver_derivative,
+        True,
+        coordinate_code,
+        R0,
+        B0,
+        weights,
+        differentiator,
+        accumulator,
+        grid_radial_fields,
+        n_axis_fix,
+        radial_fields,
+        surface_fields,
+        F_fields,
+        scaled_p0,
+        Ip,
+        beta,
+        array_scratch,
+        matrix_scratch,
+    )
 
 
 @register_source_route(("PI", "psin", "uniform"))
@@ -2128,7 +2398,7 @@ def _update_pi_from_psin_uniform_inputs_with_scratch(
     matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
-    rho = _source_grid_rho(grid_radial_fields)
+    r = _source_grid_r(grid_radial_fields)
     V_r, Kn, Kn_r, Ln_r, S_r, R, JdivR = _source_geometry_workspace_views(
         radial_fields, surface_fields
     )
@@ -2144,12 +2414,12 @@ def _update_pi_from_psin_uniform_inputs_with_scratch(
     scaled_ratio_into(itor_over_kn, Itor, Kn, 1.0 / (2.0 * np.pi))
     alpha2 = dot(itor_over_kn, weights)
     scaled_ratio_into(out_psin_r, Itor, Kn, 1.0 / (2.0 * np.pi * alpha2))
-    _regularize_psin_r(out_psin_r, rho, n_axis_fix)
+    _regularize_psin_r(out_psin_r, r, n_axis_fix)
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
     _update_psin_coordinate(out_psin, out_psin_r, accumulator, weights)
     Itor_r = array_scratch[_SLOT_AUX1]
     full_differentiation(Itor_r, Itor, differentiator)
-    _regularize_axis_linear(Itor_r, rho, n_axis_fix)
+    _regularize_axis_linear(Itor_r, r, n_axis_fix)
     if has_beta:
         copy_into(out_Pn_psin, pprime_input)
         scratch_Pn_r = array_scratch[_SLOT_PNr]
@@ -2180,7 +2450,7 @@ def _update_pi_from_psin_uniform_inputs_with_scratch(
         )
         scaled_ratio_into(out_Pn_psin, scratch_Pr, out_psin_r, 1.0 / (alpha1 * alpha2))
     _fill_pi_ffn_psin(out_FFn_psin, Itor_r, V_r, out_Pn_psin, Ln_r, 1.0 / (2.0 * np.pi * alpha1))
-    _regularize_ffn_psin(out_FFn_psin, rho, n_axis_fix)
+    _regularize_ffn_psin(out_FFn_psin, r, n_axis_fix)
     return alpha1, alpha2
 
 
@@ -2210,7 +2480,7 @@ def _update_pi_from_psin_grid_inputs_with_scratch(
     matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
-    rho = _source_grid_rho(grid_radial_fields)
+    r = _source_grid_r(grid_radial_fields)
     V_r, Kn, Kn_r, Ln_r, S_r, R, JdivR = _source_geometry_workspace_views(
         radial_fields, surface_fields
     )
@@ -2226,12 +2496,12 @@ def _update_pi_from_psin_grid_inputs_with_scratch(
     scaled_ratio_into(itor_over_kn, Itor, Kn, 1.0 / (2.0 * np.pi))
     alpha2 = dot(itor_over_kn, weights)
     scaled_ratio_into(out_psin_r, Itor, Kn, 1.0 / (2.0 * np.pi * alpha2))
-    _regularize_psin_r(out_psin_r, rho, n_axis_fix)
+    _regularize_psin_r(out_psin_r, r, n_axis_fix)
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
     _update_psin_coordinate(out_psin, out_psin_r, accumulator, weights)
     Itor_r = array_scratch[_SLOT_AUX1]
     full_differentiation(Itor_r, Itor, differentiator)
-    _regularize_axis_linear(Itor_r, rho, n_axis_fix)
+    _regularize_axis_linear(Itor_r, r, n_axis_fix)
     if has_beta:
         copy_into(out_Pn_psin, pprime_input)
         scratch_Pn_r = array_scratch[_SLOT_PNr]
@@ -2262,16 +2532,18 @@ def _update_pi_from_psin_grid_inputs_with_scratch(
         )
         scaled_ratio_into(out_Pn_psin, scratch_Pr, out_psin_r, 1.0 / (alpha1 * alpha2))
     _fill_pi_ffn_psin(out_FFn_psin, Itor_r, V_r, out_Pn_psin, Ln_r, 1.0 / (2.0 * np.pi * alpha1))
-    _regularize_ffn_psin(out_FFn_psin, rho, n_axis_fix)
+    _regularize_ffn_psin(out_FFn_psin, r, n_axis_fix)
     return alpha1, alpha2
 
 
 @register_source_route(
+    ("PJ1", "r", "uniform"),
+    ("PJ1", "r", "grid"),
     ("PJ1", "rho", "uniform"),
     ("PJ1", "rho", "grid"),
 )
 @njit(cache=True, nogil=True)
-def _update_pj1_from_rho_inputs_with_scratch(
+def _update_pj1_from_r_inputs_with_scratch(
     out_root_fields: np.ndarray,
     out_FFn_psin: np.ndarray,
     out_Pn_psin: np.ndarray,
@@ -2295,7 +2567,7 @@ def _update_pj1_from_rho_inputs_with_scratch(
     matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
-    rho = _source_grid_rho(grid_radial_fields)
+    r = _source_grid_r(grid_radial_fields)
     V_r, Kn, Kn_r, Ln_r, S_r, R, JdivR = _source_geometry_workspace_views(
         radial_fields, surface_fields
     )
@@ -2324,7 +2596,7 @@ def _update_pj1_from_rho_inputs_with_scratch(
     scaled_ratio_into(itor_over_kn, I_tor, Kn, 1.0 / (2.0 * np.pi))
     alpha2 = dot(itor_over_kn, weights)
     scaled_ratio_into(out_psin_r, I_tor, Kn, 1.0 / (2.0 * np.pi * alpha2))
-    _regularize_psin_r(out_psin_r, rho, n_axis_fix)
+    _regularize_psin_r(out_psin_r, r, n_axis_fix)
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
     _update_psin_coordinate(out_psin, out_psin_r, accumulator, weights)
     if has_beta:
@@ -2338,7 +2610,7 @@ def _update_pj1_from_rho_inputs_with_scratch(
             * beta
             * B0**2
             * dot(V_r, weights)
-            / (alpha2 * _rho_beta_pressure_denominator(scratch_aux, V_r, weights, scaled_p0))
+            / (alpha2 * _r_beta_pressure_denominator(scratch_aux, V_r, weights, scaled_p0))
         )
     else:
         scratch_Pr = array_scratch[_SLOT_Pr]
@@ -2395,7 +2667,7 @@ def _update_pj1_from_psin_uniform_inputs_with_scratch(
     matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
-    rho = _source_grid_rho(grid_radial_fields)
+    r = _source_grid_r(grid_radial_fields)
     V_r, Kn, Kn_r, Ln_r, S_r, R, JdivR = _source_geometry_workspace_views(
         radial_fields, surface_fields
     )
@@ -2417,13 +2689,13 @@ def _update_pj1_from_psin_uniform_inputs_with_scratch(
     else:
         copy_into(I_tor, I_tor_prof)
         copy_into(jtor, driver_input)
-    _enforce_axis_even_profile(jtor, rho)
+    _enforce_axis_even_profile(jtor, r)
     _floor_signed_current_primitive(I_tor, current_edge * source_scale)
     itor_over_kn = array_scratch[_SLOT_INTEGRAND]
     scaled_ratio_into(itor_over_kn, I_tor, Kn, 1.0 / (2.0 * np.pi))
     alpha2 = dot(itor_over_kn, weights)
     scaled_ratio_into(out_psin_r, I_tor, Kn, 1.0 / (2.0 * np.pi * alpha2))
-    _regularize_psin_r(out_psin_r, rho, n_axis_fix)
+    _regularize_psin_r(out_psin_r, r, n_axis_fix)
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
     _update_psin_coordinate(out_psin, out_psin_r, accumulator, weights)
     if has_beta:
@@ -2465,7 +2737,7 @@ def _update_pj1_from_psin_uniform_inputs_with_scratch(
         Ln_r,
         1.0 / (2.0 * np.pi * alpha1),
     )
-    _regularize_ffn_psin(out_FFn_psin, rho, n_axis_fix)
+    _regularize_ffn_psin(out_FFn_psin, r, n_axis_fix)
     return alpha1, alpha2
 
 
@@ -2495,7 +2767,7 @@ def _update_pj1_from_psin_grid_inputs_with_scratch(
     matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
-    rho = _source_grid_rho(grid_radial_fields)
+    r = _source_grid_r(grid_radial_fields)
     V_r, Kn, Kn_r, Ln_r, S_r, R, JdivR = _source_geometry_workspace_views(
         radial_fields, surface_fields
     )
@@ -2517,13 +2789,13 @@ def _update_pj1_from_psin_grid_inputs_with_scratch(
     else:
         copy_into(I_tor, I_tor_prof)
         copy_into(jtor, driver_input)
-    _enforce_axis_even_profile(jtor, rho)
+    _enforce_axis_even_profile(jtor, r)
     _floor_signed_current_primitive(I_tor, current_edge * source_scale)
     itor_over_kn = array_scratch[_SLOT_INTEGRAND]
     scaled_ratio_into(itor_over_kn, I_tor, Kn, 1.0 / (2.0 * np.pi))
     alpha2 = dot(itor_over_kn, weights)
     scaled_ratio_into(out_psin_r, I_tor, Kn, 1.0 / (2.0 * np.pi * alpha2))
-    _regularize_psin_r(out_psin_r, rho, n_axis_fix)
+    _regularize_psin_r(out_psin_r, r, n_axis_fix)
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
     _update_psin_coordinate(out_psin, out_psin_r, accumulator, weights)
     if has_beta:
@@ -2565,7 +2837,7 @@ def _update_pj1_from_psin_grid_inputs_with_scratch(
         Ln_r,
         1.0 / (2.0 * np.pi * alpha1),
     )
-    _regularize_ffn_psin(out_FFn_psin, rho, n_axis_fix)
+    _regularize_ffn_psin(out_FFn_psin, r, n_axis_fix)
     return alpha1, alpha2
 
 
@@ -2595,7 +2867,7 @@ def _update_pj2_from_psin_uniform_inputs_with_scratch(
     matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
-    rho = _source_grid_rho(grid_radial_fields)
+    r = _source_grid_r(grid_radial_fields)
     V_r, Kn, _, Ln_r, _, _, _ = _source_geometry_workspace_views(radial_fields, surface_fields)
     F = F_fields[0]
     F_r = F_fields[1]
@@ -2625,7 +2897,7 @@ def _update_pj2_from_psin_uniform_inputs_with_scratch(
     scaled_ratio_into(integrand, I_tor, Kn, 1.0 / (2.0 * np.pi))
     alpha2 = dot(integrand, weights)
     scale_into(out_psin_r, integrand, 1.0 / alpha2)
-    _regularize_psin_r(out_psin_r, rho, n_axis_fix)
+    _regularize_psin_r(out_psin_r, r, n_axis_fix)
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
     _update_psin_coordinate(out_psin, out_psin_r, accumulator, weights)
 
@@ -2657,7 +2929,7 @@ def _update_pj2_from_psin_uniform_inputs_with_scratch(
 
     product_into(out_FFn_psin, F, F_r)
     scaled_ratio_into(out_FFn_psin, out_FFn_psin, out_psin_r, 1.0 / (alpha1 * alpha2))
-    _regularize_ffn_psin(out_FFn_psin, rho, n_axis_fix)
+    _regularize_ffn_psin(out_FFn_psin, r, n_axis_fix)
     return alpha1, alpha2
 
 
@@ -2687,7 +2959,7 @@ def _update_pj2_from_psin_grid_inputs_with_scratch(
     matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
-    rho = _source_grid_rho(grid_radial_fields)
+    r = _source_grid_r(grid_radial_fields)
     V_r, Kn, _, Ln_r, _, _, _ = _source_geometry_workspace_views(radial_fields, surface_fields)
     F = F_fields[0]
     F_r = F_fields[1]
@@ -2715,7 +2987,7 @@ def _update_pj2_from_psin_grid_inputs_with_scratch(
     scaled_ratio_into(integrand, I_tor, Kn, 1.0 / (2.0 * np.pi))
     alpha2 = dot(integrand, weights)
     scale_into(out_psin_r, integrand, 1.0 / alpha2)
-    _regularize_psin_r(out_psin_r, rho, n_axis_fix)
+    _regularize_psin_r(out_psin_r, r, n_axis_fix)
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
     _update_psin_coordinate(out_psin, out_psin_r, accumulator, weights)
 
@@ -2747,16 +3019,18 @@ def _update_pj2_from_psin_grid_inputs_with_scratch(
 
     product_into(out_FFn_psin, F, F_r)
     scaled_ratio_into(out_FFn_psin, out_FFn_psin, out_psin_r, 1.0 / (alpha1 * alpha2))
-    _regularize_ffn_psin(out_FFn_psin, rho, n_axis_fix)
+    _regularize_ffn_psin(out_FFn_psin, r, n_axis_fix)
     return alpha1, alpha2
 
 
 @register_source_route(
+    ("PJ2", "r", "uniform"),
+    ("PJ2", "r", "grid"),
     ("PJ2", "rho", "uniform"),
     ("PJ2", "rho", "grid"),
 )
 @njit(cache=True, nogil=True)
-def _update_pj2_from_rho_inputs_with_scratch(
+def _update_pj2_from_r_inputs_with_scratch(
     out_root_fields: np.ndarray,
     out_FFn_psin: np.ndarray,
     out_Pn_psin: np.ndarray,
@@ -2780,7 +3054,7 @@ def _update_pj2_from_rho_inputs_with_scratch(
     matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
-    rho = _source_grid_rho(grid_radial_fields)
+    r = _source_grid_r(grid_radial_fields)
     V_r, Kn, Kn_r, Ln_r, S_r, R, JdivR = _source_geometry_workspace_views(
         radial_fields, surface_fields
     )
@@ -2807,7 +3081,7 @@ def _update_pj2_from_rho_inputs_with_scratch(
     scaled_ratio_into(itor_over_kn, I_tor, Kn, 1.0 / (2.0 * np.pi))
     alpha2 = dot(itor_over_kn, weights)
     scaled_ratio_into(out_psin_r, I_tor, Kn, 1.0 / (2.0 * np.pi * alpha2))
-    _regularize_psin_r(out_psin_r, rho, n_axis_fix)
+    _regularize_psin_r(out_psin_r, r, n_axis_fix)
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
     _update_psin_coordinate(out_psin, out_psin_r, accumulator, weights)
     if has_beta:
@@ -2821,7 +3095,7 @@ def _update_pj2_from_rho_inputs_with_scratch(
             * beta
             * B0**2
             * dot(V_r, weights)
-            / (alpha2 * _rho_beta_pressure_denominator(scratch_aux, V_r, weights, scaled_p0))
+            / (alpha2 * _r_beta_pressure_denominator(scratch_aux, V_r, weights, scaled_p0))
         )
     else:
         scratch_Pr = array_scratch[_SLOT_Pr]
@@ -2997,7 +3271,166 @@ def _strict_fixed_point_defect(
 
 
 @njit(cache=True, nogil=True)
-def _update_pj23_strict_from_rho_inputs_with_scratch(
+def _pj23_joint_pressure_multiplier(
+    pprime_input: np.ndarray,
+    beta: float,
+    B0: float,
+    scaled_p0: float,
+    V_r: np.ndarray,
+    accumulator: np.ndarray,
+    weights: np.ndarray,
+    relative_pressure: np.ndarray,
+) -> float:
+    """Return the algebraic pressure multiplier for one joint PJ2/PJ3 map."""
+    if np.isnan(beta):
+        return 1.0
+    _compute_Pn_out(relative_pressure, pprime_input, accumulator, weights)
+    denominator = _r_beta_pressure_denominator(
+        relative_pressure,
+        V_r,
+        weights,
+        scaled_p0,
+    )
+    if not np.isfinite(denominator) or abs(denominator) <= 1.0e-20:
+        raise ValueError("joint PJ2/PJ3 beta closure received zero pressure response")
+    return 0.5 * beta * B0 * B0 * dot(V_r, weights) / denominator
+
+
+@njit(cache=True, nogil=True)
+def _pj23_joint_fixed_point_map_with_scratch(
+    out_u: np.ndarray,
+    out_C: np.ndarray,
+    F: np.ndarray,
+    u: np.ndarray,
+    C: np.ndarray,
+    pprime_input: np.ndarray,
+    driver_input: np.ndarray,
+    pressure_multiplier: float,
+    B0: float,
+    F_edge: float,
+    Kn: np.ndarray,
+    Ln_r: np.ndarray,
+    V_r: np.ndarray,
+    weights: np.ndarray,
+    accumulator: np.ndarray,
+    scaled_Ip: float,
+    use_jtotal_semantics: bool,
+    array_scratch: np.ndarray,
+) -> float:
+    """Apply one strict physics map and return its dimensionless defect."""
+    ru0 = array_scratch[_SLOT_PNr]
+    ru1 = array_scratch[_SLOT_Pr]
+    rc0 = array_scratch[_SLOT_Fr]
+    rc1 = array_scratch[_SLOT_EFFECTIVE_DRIVER]
+    _strict_fixed_point_map(
+        out_u,
+        out_C,
+        ru0,
+        ru1,
+        rc0,
+        rc1,
+        F,
+        u,
+        C,
+        pprime_input,
+        driver_input,
+        pressure_multiplier,
+        B0,
+        F_edge,
+        Kn,
+        Ln_r,
+        V_r,
+        weights,
+        accumulator,
+        scaled_Ip,
+        use_jtotal_semantics,
+    )
+    return _strict_fixed_point_defect(u, C, out_u, out_C, scaled_Ip)
+
+
+@njit(cache=True, nogil=True)
+def _publish_pj23_joint_state(
+    out_root_fields: np.ndarray,
+    out_FFn_psin: np.ndarray,
+    out_Pn_psin: np.ndarray,
+    F_fields: np.ndarray,
+    u: np.ndarray,
+    C: np.ndarray,
+    pprime_input: np.ndarray,
+    pressure_multiplier: float,
+    scaled_p0: float,
+    beta: float,
+    R0: float,
+    B0: float,
+    Kn: np.ndarray,
+    weights: np.ndarray,
+    differentiator: np.ndarray,
+    accumulator: np.ndarray,
+    array_scratch: np.ndarray,
+    pressure_state: np.ndarray,
+) -> tuple[float, float]:
+    """Publish one accepted joint ``(u, C)`` state and normalize pressure."""
+    out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
+    F = F_fields[0]
+    F_r = F_fields[1]
+    F_rr = F_fields[2]
+    ru0 = array_scratch[_SLOT_PNr]
+    F_edge = R0 * B0
+    for i in range(F.shape[0]):
+        F[i] = F_edge * np.exp(0.5 * u[i])
+        F_r[i] = 0.5 * F[i] * ru0[i]
+        out_psin_r[i] = C[i] / Kn[i]
+    alpha2 = dot(out_psin_r, weights)
+    if not np.isfinite(alpha2) or abs(alpha2) <= 1.0e-14:
+        raise ValueError("joint PJ2/PJ3 closure produced invalid flux scale")
+    out_psin_r /= alpha2
+    full_differentiation(out_psin_rr, out_psin_r, differentiator)
+    _update_psin_coordinate(out_psin, out_psin_r, accumulator, weights)
+    full_differentiation(F_rr, F_r, differentiator)
+
+    if not np.isnan(beta):
+        alpha1 = pressure_multiplier / alpha2
+    else:
+        alpha1 = -dot(pprime_input, weights) / alpha2
+        alpha1 = _ensure_pressure_alpha1(
+            alpha1,
+            pprime_input,
+            R_COORDINATE,
+            scaled_p0,
+            alpha2,
+            out_psin_r,
+            accumulator,
+            weights,
+            array_scratch,
+        )
+    for i in range(out_Pn_psin.shape[0]):
+        x_i = alpha2 * out_psin_r[i]
+        denominator = alpha1 * x_i
+        if not np.isfinite(denominator) or abs(denominator) <= 1.0e-20:
+            raise ValueError("joint PJ2/PJ3 closure produced invalid source normalization")
+        out_Pn_psin[i] = pressure_multiplier * pprime_input[i] / denominator
+        out_FFn_psin[i] = F[i] * F_r[i] / denominator
+    alpha1 = finalize_pressure_normalization(
+        out_FFn_psin,
+        out_Pn_psin,
+        pprime_input,
+        R_COORDINATE,
+        scaled_p0,
+        beta,
+        alpha1,
+        alpha2,
+        out_psin_r,
+        accumulator,
+        weights,
+        array_scratch[0],
+        array_scratch[1],
+        pressure_state,
+    )
+    return alpha1, alpha2
+
+
+@njit(cache=True, nogil=True)
+def _update_pj23_strict_from_r_inputs_with_scratch(
     out_root_fields: np.ndarray,
     out_FFn_psin: np.ndarray,
     out_Pn_psin: np.ndarray,
@@ -3022,18 +3455,16 @@ def _update_pj23_strict_from_rho_inputs_with_scratch(
     use_jtotal_semantics: bool,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
-    V_r, Kn, _, Ln_r, _, _, _ = _source_geometry_workspace_views(
-        radial_fields, surface_fields
-    )
+    V_r, Kn, _, Ln_r, _, _, _ = _source_geometry_workspace_views(radial_fields, surface_fields)
 
-    # beta scales the complete rho-coordinate pressure profile by one scalar;
+    # beta scales the complete r-coordinate pressure profile by one scalar;
     # unlike the flux/current closure, this multiplier is algebraic and does
     # not depend on the Picard state.
     pressure_multiplier = 1.0
     if not np.isnan(beta):
         relative_pressure = array_scratch[_SLOT_AUX2]
         _compute_Pn_out(relative_pressure, pprime_input, accumulator, weights)
-        pressure_denominator = _rho_beta_pressure_denominator(
+        pressure_denominator = _r_beta_pressure_denominator(
             relative_pressure,
             V_r,
             weights,
@@ -3041,9 +3472,7 @@ def _update_pj23_strict_from_rho_inputs_with_scratch(
         )
         if not np.isfinite(pressure_denominator) or abs(pressure_denominator) <= 1.0e-20:
             raise ValueError("strict PJ2/PJ3 beta closure received zero pressure response")
-        pressure_multiplier = (
-            0.5 * beta * B0 * B0 * dot(V_r, weights) / pressure_denominator
-        )
+        pressure_multiplier = 0.5 * beta * B0 * B0 * dot(V_r, weights) / pressure_denominator
 
     u = array_scratch[_SLOT_INTEGRAND]
     C = array_scratch[_SLOT_AUX0]
@@ -3116,7 +3545,7 @@ def _update_pj23_strict_from_rho_inputs_with_scratch(
         alpha1 = _ensure_pressure_alpha1(
             alpha1,
             pprime_input,
-            RHO_COORDINATE,
+            R_COORDINATE,
             scaled_p0,
             alpha2,
             out_psin_r,
@@ -3135,7 +3564,7 @@ def _update_pj23_strict_from_rho_inputs_with_scratch(
 
 
 @njit(cache=True, nogil=True)
-def _update_pj2_strict_from_rho_inputs_with_scratch(
+def _update_pj2_strict_from_r_inputs_with_scratch(
     out_root_fields: np.ndarray,
     out_FFn_psin: np.ndarray,
     out_Pn_psin: np.ndarray,
@@ -3158,16 +3587,34 @@ def _update_pj2_strict_from_rho_inputs_with_scratch(
     array_scratch: np.ndarray,
     matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
-    return _update_pj23_strict_from_rho_inputs_with_scratch(
-        out_root_fields, out_FFn_psin, out_Pn_psin, pprime_input, driver_input,
-        coordinate_code, R0, B0, weights, differentiator, accumulator,
-        grid_radial_fields, n_axis_fix, radial_fields, surface_fields, F_fields,
-        scaled_p0, Ip, beta, array_scratch, matrix_scratch, False,
+    return _update_pj23_strict_from_r_inputs_with_scratch(
+        out_root_fields,
+        out_FFn_psin,
+        out_Pn_psin,
+        pprime_input,
+        driver_input,
+        coordinate_code,
+        R0,
+        B0,
+        weights,
+        differentiator,
+        accumulator,
+        grid_radial_fields,
+        n_axis_fix,
+        radial_fields,
+        surface_fields,
+        F_fields,
+        scaled_p0,
+        Ip,
+        beta,
+        array_scratch,
+        matrix_scratch,
+        False,
     )
 
 
 @njit(cache=True, nogil=True)
-def _update_pj3_strict_from_rho_inputs_with_scratch(
+def _update_pj3_strict_from_r_inputs_with_scratch(
     out_root_fields: np.ndarray,
     out_FFn_psin: np.ndarray,
     out_Pn_psin: np.ndarray,
@@ -3190,11 +3637,29 @@ def _update_pj3_strict_from_rho_inputs_with_scratch(
     array_scratch: np.ndarray,
     matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
-    return _update_pj23_strict_from_rho_inputs_with_scratch(
-        out_root_fields, out_FFn_psin, out_Pn_psin, pprime_input, driver_input,
-        coordinate_code, R0, B0, weights, differentiator, accumulator,
-        grid_radial_fields, n_axis_fix, radial_fields, surface_fields, F_fields,
-        scaled_p0, Ip, beta, array_scratch, matrix_scratch, True,
+    return _update_pj23_strict_from_r_inputs_with_scratch(
+        out_root_fields,
+        out_FFn_psin,
+        out_Pn_psin,
+        pprime_input,
+        driver_input,
+        coordinate_code,
+        R0,
+        B0,
+        weights,
+        differentiator,
+        accumulator,
+        grid_radial_fields,
+        n_axis_fix,
+        radial_fields,
+        surface_fields,
+        F_fields,
+        scaled_p0,
+        Ip,
+        beta,
+        array_scratch,
+        matrix_scratch,
+        True,
     )
 
 
@@ -3251,13 +3716,9 @@ def _update_pj3_from_psin_uniform_inputs_with_scratch(
     array_scratch: np.ndarray,
     matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
-    V_r, _, _, Ln_r, _, _, _ = _source_geometry_workspace_views(
-        radial_fields, surface_fields
-    )
+    V_r, _, _, Ln_r, _, _, _ = _source_geometry_workspace_views(radial_fields, surface_fields)
     effective_jpara = array_scratch[_SLOT_EFFECTIVE_DRIVER]
-    _materialize_pj3_effective_jpara(
-        effective_jpara, driver_input, B0, V_r, Ln_r, F_fields[0]
-    )
+    _materialize_pj3_effective_jpara(effective_jpara, driver_input, B0, V_r, Ln_r, F_fields[0])
     return _update_pj2_from_psin_uniform_inputs_with_scratch(
         out_root_fields,
         out_FFn_psin,
@@ -3308,13 +3769,9 @@ def _update_pj3_from_psin_grid_inputs_with_scratch(
     array_scratch: np.ndarray,
     matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
-    V_r, _, _, Ln_r, _, _, _ = _source_geometry_workspace_views(
-        radial_fields, surface_fields
-    )
+    V_r, _, _, Ln_r, _, _, _ = _source_geometry_workspace_views(radial_fields, surface_fields)
     effective_jpara = array_scratch[_SLOT_EFFECTIVE_DRIVER]
-    _materialize_pj3_effective_jpara(
-        effective_jpara, driver_input, B0, V_r, Ln_r, F_fields[0]
-    )
+    _materialize_pj3_effective_jpara(effective_jpara, driver_input, B0, V_r, Ln_r, F_fields[0])
     return _update_pj2_from_psin_grid_inputs_with_scratch(
         out_root_fields,
         out_FFn_psin,
@@ -3341,11 +3798,13 @@ def _update_pj3_from_psin_grid_inputs_with_scratch(
 
 
 @register_source_route(
+    ("PJ3", "r", "uniform"),
+    ("PJ3", "r", "grid"),
     ("PJ3", "rho", "uniform"),
     ("PJ3", "rho", "grid"),
 )
 @njit(cache=True, nogil=True)
-def _update_pj3_from_rho_inputs_with_scratch(
+def _update_pj3_from_r_inputs_with_scratch(
     out_root_fields: np.ndarray,
     out_FFn_psin: np.ndarray,
     out_Pn_psin: np.ndarray,
@@ -3368,14 +3827,10 @@ def _update_pj3_from_rho_inputs_with_scratch(
     array_scratch: np.ndarray,
     matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
-    V_r, _, _, Ln_r, _, _, _ = _source_geometry_workspace_views(
-        radial_fields, surface_fields
-    )
+    V_r, _, _, Ln_r, _, _, _ = _source_geometry_workspace_views(radial_fields, surface_fields)
     effective_jpara = array_scratch[_SLOT_EFFECTIVE_DRIVER]
-    _materialize_pj3_effective_jpara(
-        effective_jpara, driver_input, B0, V_r, Ln_r, F_fields[0]
-    )
-    return _update_pj2_from_rho_inputs_with_scratch(
+    _materialize_pj3_effective_jpara(effective_jpara, driver_input, B0, V_r, Ln_r, F_fields[0])
+    return _update_pj2_from_r_inputs_with_scratch(
         out_root_fields,
         out_FFn_psin,
         out_Pn_psin,
@@ -3426,10 +3881,10 @@ def _update_pq_from_psin_uniform_inputs_with_scratch(
     matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
-    rho = _source_grid_rho(grid_radial_fields)
+    r = _source_grid_r(grid_radial_fields)
     edge_weights = _source_grid_edge_weights(grid_radial_fields)
     V_r, Kn, _, Ln_r, _, _, _ = _source_geometry_workspace_views(radial_fields, surface_fields)
-    n = rho.shape[0]
+    n = r.shape[0]
     edge_F = R0 * B0
     if not np.isfinite(edge_F) or abs(edge_F) <= 1.0e-14:
         raise ValueError("PQ/psin strict solve received invalid edge F")
@@ -3517,7 +3972,7 @@ def _update_pq_from_psin_uniform_inputs_with_scratch(
 
     # F*Ln/q is signed physical psi_r.  Keep that sign in alpha2, then normalize
     # the solver psin_r branch back to a positive [0, 1] coordinate.
-    alpha2 = _normalize_pq_signed_psi_r(out_psin_r, weights, rho, n_axis_fix)
+    alpha2 = _normalize_pq_signed_psi_r(out_psin_r, weights, r, n_axis_fix)
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
     _update_psin_coordinate(out_psin, out_psin_r, accumulator, weights)
 
@@ -3549,7 +4004,7 @@ def _update_pq_from_psin_uniform_inputs_with_scratch(
         out_FFn_psin[i] = (q_prof[i] * F_r[i] / Ln_r[i]) / alpha1
         if not np.isfinite(out_FFn_psin[i]) or not np.isfinite(out_Pn_psin[i]):
             raise ValueError("PQ/psin strict solve produced non-finite normalized source")
-    _regularize_ffn_psin(out_FFn_psin, rho, n_axis_fix)
+    _regularize_ffn_psin(out_FFn_psin, r, n_axis_fix)
     return alpha1, alpha2
 
 
@@ -3579,10 +4034,10 @@ def _update_pq_from_psin_grid_inputs_with_scratch(
     matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
-    rho = _source_grid_rho(grid_radial_fields)
+    r = _source_grid_r(grid_radial_fields)
     edge_weights = _source_grid_edge_weights(grid_radial_fields)
     V_r, Kn, _, Ln_r, _, _, _ = _source_geometry_workspace_views(radial_fields, surface_fields)
-    n = rho.shape[0]
+    n = r.shape[0]
     edge_F = R0 * B0
     if not np.isfinite(edge_F) or abs(edge_F) <= 1.0e-14:
         raise ValueError("PQ/psin strict solve received invalid edge F")
@@ -3666,7 +4121,7 @@ def _update_pq_from_psin_grid_inputs_with_scratch(
         if not np.isfinite(out_psin_r[i]):
             raise ValueError("PQ/psin strict solve produced invalid psi_r")
 
-    alpha2 = _normalize_pq_signed_psi_r(out_psin_r, weights, rho, n_axis_fix)
+    alpha2 = _normalize_pq_signed_psi_r(out_psin_r, weights, r, n_axis_fix)
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
     _update_psin_coordinate(out_psin, out_psin_r, accumulator, weights)
 
@@ -3698,16 +4153,18 @@ def _update_pq_from_psin_grid_inputs_with_scratch(
         out_FFn_psin[i] = (q_prof[i] * F_r[i] / Ln_r[i]) / alpha1
         if not np.isfinite(out_FFn_psin[i]) or not np.isfinite(out_Pn_psin[i]):
             raise ValueError("PQ/psin strict solve produced non-finite normalized source")
-    _regularize_ffn_psin(out_FFn_psin, rho, n_axis_fix)
+    _regularize_ffn_psin(out_FFn_psin, r, n_axis_fix)
     return alpha1, alpha2
 
 
 @register_source_route(
+    ("PQ", "r", "uniform"),
+    ("PQ", "r", "grid"),
     ("PQ", "rho", "uniform"),
     ("PQ", "rho", "grid"),
 )
 @njit(cache=True, nogil=True)
-def _update_pq_from_rho_inputs_with_scratch(
+def _update_pq_from_r_inputs_with_scratch(
     out_root_fields: np.ndarray,
     out_FFn_psin: np.ndarray,
     out_Pn_psin: np.ndarray,
@@ -3731,13 +4188,13 @@ def _update_pq_from_rho_inputs_with_scratch(
     matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
     out_psin, out_psin_r, out_psin_rr = _source_output_root_views(out_root_fields)
-    rho = _source_grid_rho(grid_radial_fields)
+    r = _source_grid_r(grid_radial_fields)
     edge_weights = _source_grid_edge_weights(grid_radial_fields)
     V_r, Kn, _, Ln_r, _, _, _ = _source_geometry_workspace_views(radial_fields, surface_fields)
-    n = rho.shape[0]
+    n = r.shape[0]
     edge_F = R0 * B0
     if not np.isfinite(edge_F) or abs(edge_F) <= 1.0e-14:
-        raise ValueError("PQ/rho strict solve received invalid edge F")
+        raise ValueError("PQ/r strict solve received invalid edge F")
 
     W = array_scratch[_SLOT_INTEGRAND]
     q_prof = array_scratch[_SLOT_AUX0]
@@ -3751,7 +4208,7 @@ def _update_pq_from_rho_inputs_with_scratch(
     _fill_pq_q_profile(q_prof, driver_input, Kn, Ln_r, edge_weights, edge_F, Ip)
     _fill_pq_W_and_derivative(W, Y_r, Kn, Ln_r, q_prof, differentiator)
 
-    # In rho-coordinate PQ, solving for Y=F**2 keeps the strict edge condition
+    # In r-coordinate PQ, solving for Y=F**2 keeps the strict edge condition
     # sign-safe; F is recovered only after the dense system succeeds.
     has_beta = not np.isnan(beta)
     pressure_scale = 1.0
@@ -3759,9 +4216,9 @@ def _update_pq_from_rho_inputs_with_scratch(
     if has_beta:
         copy_into(rhs, pprime_input)
         _compute_Pn_out(coeff_y, rhs, accumulator, weights)
-        beta_den_pre = _rho_beta_pressure_denominator(coeff_y, V_r, weights, scaled_p0)
+        beta_den_pre = _r_beta_pressure_denominator(coeff_y, V_r, weights, scaled_p0)
         if not np.isfinite(beta_den_pre) or abs(beta_den_pre) <= 1.0e-14:
-            raise ValueError("PQ/rho strict beta solve produced invalid pressure integral")
+            raise ValueError("PQ/r strict beta solve produced invalid pressure integral")
         beta_C = 0.5 * beta * B0**2 * dot(V_r, weights) / beta_den_pre
         pressure_scale = beta_C
 
@@ -3771,7 +4228,7 @@ def _update_pq_from_rho_inputs_with_scratch(
         coeff_y[i] = 2.0 * Y_r[i]
         rhs[i] = -pressure_factor * pressure_scale * V_r[i] * pprime_input[i] * q_prof[i] / Ln_r[i]
         if not np.isfinite(coeff_d[i]) or not np.isfinite(coeff_y[i]) or not np.isfinite(rhs[i]):
-            raise ValueError("PQ/rho strict solve assembled non-finite system")
+            raise ValueError("PQ/r strict solve assembled non-finite system")
 
     _fill_pq_linear_matrix(
         A,
@@ -3791,13 +4248,13 @@ def _update_pq_from_rho_inputs_with_scratch(
         sign_F = -1.0
     for i in range(n):
         if not np.isfinite(Y[i]) or Y[i] <= 0.0:
-            raise ValueError("PQ/rho strict solve produced non-positive F squared")
+            raise ValueError("PQ/r strict solve produced non-positive F squared")
         F_i = sign_F * np.sqrt(Y[i])
         out_psin_r[i] = F_i * Ln_r[i] / q_prof[i]
         if not np.isfinite(out_psin_r[i]):
-            raise ValueError("PQ/rho strict solve produced invalid psi_r")
+            raise ValueError("PQ/r strict solve produced invalid psi_r")
 
-    alpha2 = _normalize_pq_signed_psi_r(out_psin_r, weights, rho, n_axis_fix)
+    alpha2 = _normalize_pq_signed_psi_r(out_psin_r, weights, r, n_axis_fix)
     full_differentiation(out_psin_rr, out_psin_r, differentiator)
     _update_psin_coordinate(out_psin, out_psin_r, accumulator, weights)
 
@@ -3820,7 +4277,7 @@ def _update_pq_from_rho_inputs_with_scratch(
         for i in range(n):
             denom = alpha1 * alpha2 * out_psin_r[i]
             if abs(denom) <= 1.0e-14:
-                raise ValueError("PQ/rho strict solve produced invalid pressure denominator")
+                raise ValueError("PQ/r strict solve produced invalid pressure denominator")
             out_Pn_psin[i] = pprime_input[i] / denom
     _validate_pq_source_scalar(alpha1, 1)
 
@@ -3829,14 +4286,14 @@ def _update_pq_from_rho_inputs_with_scratch(
             -pressure_factor * pressure_scale * V_r[i] * pprime_input[i] * q_prof[i] / Ln_r[i]
         )
         Y_r[i] = (forcing_i - coeff_y[i] * Y[i]) / coeff_d[i]
-    _regularize_axis_linear(Y_r, rho, n_axis_fix)
+    _regularize_axis_linear(Y_r, r, n_axis_fix)
     for i in range(n):
         denom = alpha1 * alpha2 * out_psin_r[i]
         if abs(denom) <= 1.0e-14:
-            raise ValueError("PQ/rho strict solve produced invalid FFn denominator")
+            raise ValueError("PQ/r strict solve produced invalid FFn denominator")
         out_FFn_psin[i] = 0.5 * Y_r[i] / denom
         if not np.isfinite(out_FFn_psin[i]) or not np.isfinite(out_Pn_psin[i]):
-            raise ValueError("PQ/rho strict solve produced non-finite normalized source")
+            raise ValueError("PQ/r strict solve produced non-finite normalized source")
     return alpha1, alpha2
 
 
@@ -4000,6 +4457,35 @@ def _update_fixed_point_psin_query_and_local_barycentric_inputs_impl(
 
 
 @njit(cache=True, fastmath=True, nogil=True)
+def _materialize_profile_owned_psin_fields_impl(
+    out_psin: np.ndarray,
+    out_psin_r: np.ndarray,
+    out_psin_rr: np.ndarray,
+    out_source_psin_query: np.ndarray,
+    psin_fields: np.ndarray,
+    grid_radial_fields: np.ndarray,
+    differentiator: np.ndarray,
+    accumulator: np.ndarray,
+    weights: np.ndarray,
+    n_axis_fix: int,
+) -> None:
+    r = _source_grid_r(grid_radial_fields)
+    # Copy only psin_r from optimized profile fields; psin and psin_rr are
+    # reconstructed so all source paths share the same axis regularization and
+    # integration conventions.
+    for i in range(out_psin.shape[0]):
+        out_psin_r[i] = psin_fields[1, i]
+
+    _regularize_psin_r(out_psin_r, r, n_axis_fix)
+    full_differentiation(out_psin_rr, out_psin_r, differentiator)
+    _update_psin_coordinate(out_psin, out_psin_r, accumulator, weights)
+
+    for i in range(out_psin.shape[0]):
+        psin_value = out_psin[i]
+        out_source_psin_query[i] = psin_value
+
+
+@njit(cache=True, fastmath=True, nogil=True)
 def _materialize_profile_owned_psin_source_impl(
     out_psin: np.ndarray,
     out_psin_r: np.ndarray,
@@ -4022,20 +4508,20 @@ def _materialize_profile_owned_psin_source_impl(
     barycentric_weights: np.ndarray,
     use_barycentric: bool,
 ) -> None:
-    rho = _source_grid_rho(grid_radial_fields)
-    # Copy only psin_r from optimized profile fields; psin and psin_rr are
-    # reconstructed so all source paths share the same axis regularization and
-    # integration conventions.
+    _materialize_profile_owned_psin_fields_impl(
+        out_psin,
+        out_psin_r,
+        out_psin_rr,
+        out_source_psin_query,
+        psin_fields,
+        grid_radial_fields,
+        differentiator,
+        accumulator,
+        weights,
+        n_axis_fix,
+    )
     for i in range(out_psin.shape[0]):
-        out_psin_r[i] = psin_fields[1, i]
-
-    _regularize_psin_r(out_psin_r, rho, n_axis_fix)
-    full_differentiation(out_psin_rr, out_psin_r, differentiator)
-    _update_psin_coordinate(out_psin, out_psin_r, accumulator, weights)
-
-    for i in range(out_psin.shape[0]):
-        psin_value = out_psin[i]
-        out_source_psin_query[i] = psin_value
+        psin_value = out_source_psin_query[i]
         out_parameter_query[i] = psin_value
 
     if parameterization_code == SOURCE_PARAMETERIZATION_CODE_SQRT_PSIN:
@@ -4168,6 +4654,138 @@ def _uniform_spline_interpolate_pair(
 
 
 @njit(cache=True, fastmath=True, nogil=True)
+def _explicit_pchip_interpolate_pair_with_derivatives(
+    out0: np.ndarray,
+    out1: np.ndarray,
+    out0_derivative: np.ndarray,
+    out1_derivative: np.ndarray,
+    source_nodes: np.ndarray,
+    coeff0: np.ndarray,
+    coeff1: np.ndarray,
+    query: np.ndarray,
+    evaluate_derivative0: bool,
+    evaluate_derivative1: bool,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Evaluate retained PCHIP values and selected derivatives in one lookup."""
+    last_interval = source_nodes.shape[0] - 2
+    for i in range(out0.shape[0]):
+        q = query[i]
+        if q <= source_nodes[0]:
+            interval = 0
+            q = source_nodes[0]
+        elif q >= source_nodes[-1]:
+            interval = last_interval
+            q = source_nodes[-1]
+        else:
+            low = 0
+            high = source_nodes.shape[0] - 1
+            while high - low > 1:
+                middle = (low + high) // 2
+                if source_nodes[middle] <= q:
+                    low = middle
+                else:
+                    high = middle
+            interval = low
+        dx = q - source_nodes[interval]
+        out0[i] = (
+            (coeff0[interval, 3] * dx + coeff0[interval, 2]) * dx + coeff0[interval, 1]
+        ) * dx + coeff0[interval, 0]
+        out1[i] = (
+            (coeff1[interval, 3] * dx + coeff1[interval, 2]) * dx + coeff1[interval, 1]
+        ) * dx + coeff1[interval, 0]
+        if evaluate_derivative0:
+            out0_derivative[i] = (
+                3.0 * coeff0[interval, 3] * dx + 2.0 * coeff0[interval, 2]
+            ) * dx + coeff0[interval, 1]
+        if evaluate_derivative1:
+            out1_derivative[i] = (
+                3.0 * coeff1[interval, 3] * dx + 2.0 * coeff1[interval, 2]
+            ) * dx + coeff1[interval, 1]
+    return out0, out1
+
+
+@njit(cache=True, fastmath=True, nogil=True)
+def _explicit_pchip_interpolate_pair(
+    out0: np.ndarray,
+    out1: np.ndarray,
+    source_nodes: np.ndarray,
+    coeff0: np.ndarray,
+    coeff1: np.ndarray,
+    query: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Evaluate two retained arbitrary-node PCHIP representations in place."""
+    return _explicit_pchip_interpolate_pair_with_derivatives(
+        out0,
+        out1,
+        out0,
+        out1,
+        source_nodes,
+        coeff0,
+        coeff1,
+        query,
+        False,
+        False,
+    )
+
+
+@njit(cache=True, fastmath=True, nogil=True)
+def _interpolate_retained_source_pair_impl(
+    out0: np.ndarray,
+    out1: np.ndarray,
+    values0: np.ndarray,
+    values1: np.ndarray,
+    source_nodes: np.ndarray,
+    source_weights: np.ndarray,
+    coeff0: np.ndarray,
+    coeff1: np.ndarray,
+    local_weights: np.ndarray,
+    query: np.ndarray,
+    interpolation_code: int,
+    differentiate_first: bool,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Evaluate one retained source representation without Python dispatch."""
+    if interpolation_code == RETAINED_SOURCE_EXPLICIT_PCHIP:
+        return _explicit_pchip_interpolate_pair_with_derivatives(
+            out0,
+            out1,
+            out0,
+            out1,
+            source_nodes,
+            coeff0,
+            coeff1,
+            query,
+            differentiate_first,
+            False,
+        )
+    if interpolation_code == RETAINED_SOURCE_GRID_BARYCENTRIC:
+        return _global_barycentric_interpolate_pair(
+            out0,
+            out1,
+            values0,
+            values1,
+            source_nodes,
+            source_weights,
+            query,
+        )
+    if interpolation_code == RETAINED_SOURCE_LOCAL_BARYCENTRIC:
+        return _local_barycentric_interpolate_pair(
+            out0,
+            out1,
+            values0,
+            values1,
+            query,
+            local_weights,
+        )
+    return _uniform_spline_interpolate_pair(
+        out0,
+        out1,
+        coeff0,
+        coeff1,
+        query,
+    )
+
+
+@njit(cache=True, fastmath=True, nogil=True)
 def _local_barycentric_interpolate_pair(
     out0: np.ndarray,
     out1: np.ndarray,
@@ -4221,6 +4839,177 @@ def _local_barycentric_interpolate_pair(
         out0[i] = numerator0 / denominator
         out1[i] = numerator1 / denominator
     return out0, out1
+
+
+@njit(cache=True, fastmath=True, nogil=True)
+def _global_barycentric_interpolate_pair(
+    out0: np.ndarray,
+    out1: np.ndarray,
+    values0: np.ndarray,
+    values1: np.ndarray,
+    source_nodes: np.ndarray,
+    source_weights: np.ndarray,
+    query: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Evaluate two profiles on fixed nonuniform source-coordinate nodes."""
+    for i in range(query.shape[0]):
+        q = query[i]
+        hit = -1
+        for j in range(source_nodes.shape[0]):
+            if abs(q - source_nodes[j]) <= 1.0e-14:
+                hit = j
+                break
+        if hit >= 0:
+            out0[i] = values0[hit]
+            out1[i] = values1[hit]
+            continue
+        denominator = 0.0
+        numerator0 = 0.0
+        numerator1 = 0.0
+        for j in range(source_nodes.shape[0]):
+            term = source_weights[j] / (q - source_nodes[j])
+            denominator += term
+            numerator0 += term * values0[j]
+            numerator1 += term * values1[j]
+        out0[i] = numerator0 / denominator
+        out1[i] = numerator1 / denominator
+    return out0, out1
+
+
+@njit(cache=True, nogil=True)
+def _prepare_rho_r_inputs(
+    out_pprime_r: np.ndarray,
+    out_driver_r: np.ndarray,
+    sampled_pprime_s: np.ndarray,
+    sampled_driver_s: np.ndarray,
+    rho_r: np.ndarray,
+    transform_driver_derivative: bool,
+) -> None:
+    """Apply ds/dr to derivative-valued rho source inputs."""
+    for i in range(out_pprime_r.shape[0]):
+        jacobian = rho_r[i]
+        out_pprime_r[i] = sampled_pprime_s[i] * jacobian
+        if transform_driver_derivative:
+            out_driver_r[i] = sampled_driver_s[i] * jacobian
+        else:
+            out_driver_r[i] = sampled_driver_s[i]
+
+
+@njit(cache=True, nogil=True)
+def _update_rho_from_source(
+    out_s: np.ndarray,
+    out_s_r: np.ndarray,
+    out_f: np.ndarray,
+    out_f2: np.ndarray,
+    FFn_psin: np.ndarray,
+    psin_r: np.ndarray,
+    alpha1: float,
+    alpha2: float,
+    edge_f: float,
+    Ln_r: np.ndarray,
+    accumulator: np.ndarray,
+    weights: np.ndarray,
+) -> int:
+    """Rebuild sqrt(Phi_N) from the source-produced F and current geometry."""
+    edge_integral = 0.0
+    source_scale = alpha1 * alpha2
+    for i in range(out_f.shape[0]):
+        # Reuse out_f as physical F*dF/dr until F itself is recovered below.
+        out_f[i] = source_scale * FFn_psin[i] * psin_r[i]
+        edge_integral += weights[i] * out_f[i]
+    edge_f2 = edge_f * edge_f
+    sign_f = -1.0 if edge_f < 0.0 else 1.0
+    for i in range(out_f.shape[0]):
+        prefix = 0.0
+        for k in range(out_f.shape[0]):
+            prefix += accumulator[i, k] * out_f[k]
+        value = edge_f2 + 2.0 * (prefix - edge_integral)
+        if not np.isfinite(value):
+            return i + 1
+        out_f2[i] = value
+    for i in range(out_f.shape[0]):
+        out_f[i] = sign_f * np.sqrt(out_f2[i])
+
+    phi_edge = 0.0
+    for i in range(out_f.shape[0]):
+        phi_edge += weights[i] * out_f[i] * Ln_r[i]
+    if not np.isfinite(phi_edge) or abs(phi_edge) <= 1.0e-14:
+        return -1
+    previous = -1.0
+    for i in range(out_s.shape[0]):
+        phi = 0.0
+        for k in range(out_s.shape[0]):
+            phi += accumulator[i, k] * out_f[k] * Ln_r[k]
+        phin = phi / phi_edge
+        if not np.isfinite(phin) or phin <= 0.0 or phin >= 1.0:
+            return i + 1
+        s = np.sqrt(phin)
+        s_r = out_f[i] * Ln_r[i] / (2.0 * s * phi_edge)
+        if not np.isfinite(s_r) or s_r <= 0.0 or s <= previous:
+            return i + 1
+        out_s[i] = s
+        out_s_r[i] = s_r
+        previous = s
+    return 0
+
+
+@njit(cache=True, nogil=True)
+def _update_rho_from_u(
+    out_s: np.ndarray,
+    out_s_r: np.ndarray,
+    out_f: np.ndarray,
+    u: np.ndarray,
+    edge_f: float,
+    Ln_r: np.ndarray,
+    accumulator: np.ndarray,
+    weights: np.ndarray,
+) -> int:
+    """Rebuild sqrt(Phi_N) directly from the PJ2/PJ3 ``u=log(F^2/Fedge^2)`` state."""
+    for i in range(out_f.shape[0]):
+        value = edge_f * np.exp(0.5 * u[i])
+        if not np.isfinite(value):
+            return i + 1
+        out_f[i] = value
+    phi_edge = 0.0
+    for i in range(out_f.shape[0]):
+        phi_edge += weights[i] * out_f[i] * Ln_r[i]
+    if not np.isfinite(phi_edge) or abs(phi_edge) <= 1.0e-14:
+        return -1
+    previous = -1.0
+    for i in range(out_s.shape[0]):
+        phi = 0.0
+        for k in range(out_s.shape[0]):
+            phi += accumulator[i, k] * out_f[k] * Ln_r[k]
+        phin = phi / phi_edge
+        if not np.isfinite(phin) or phin <= 0.0 or phin >= 1.0:
+            return i + 1
+        s = np.sqrt(phin)
+        s_r = out_f[i] * Ln_r[i] / (2.0 * s * phi_edge)
+        if not np.isfinite(s_r) or s_r <= 0.0 or s <= previous:
+            return i + 1
+        out_s[i] = s
+        out_s_r[i] = s_r
+        previous = s
+    return 0
+
+
+@njit(cache=True, nogil=True)
+def _rho_fixed_point_defect(
+    current_s: np.ndarray,
+    current_s_r: np.ndarray,
+    next_s: np.ndarray,
+    next_s_r: np.ndarray,
+) -> tuple[float, float, float]:
+    value_defect = 0.0
+    derivative_defect = 0.0
+    for i in range(current_s.shape[0]):
+        value_error = abs(next_s[i] - current_s[i])
+        derivative_error = abs(next_s_r[i] - current_s_r[i]) / (1.0 + abs(next_s_r[i]))
+        if value_error > value_defect:
+            value_defect = value_error
+        if derivative_error > derivative_defect:
+            derivative_defect = derivative_error
+    return max(value_defect, derivative_defect), value_defect, derivative_defect
 
 
 @njit(cache=True, fastmath=True, nogil=True)

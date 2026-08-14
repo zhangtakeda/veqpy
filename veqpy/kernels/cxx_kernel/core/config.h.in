@@ -20,7 +20,7 @@ namespace config
 
         enum SourceCoordinateCode : int
         {
-            SourceCoordinateRho  = 1,
+            SourceCoordinateR  = 1,
             SourceCoordinatePsin = 2,
         };
 
@@ -118,6 +118,6 @@ namespace config
     );
     static_assert(
         Topology::K_max >= 2,
-        "profile rho table requires rho and rho^2 rows"
+        "profile r table requires r and r^2 rows"
     );
 } // namespace config

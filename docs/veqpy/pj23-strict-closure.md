@@ -2,11 +2,11 @@
 
 ## Contract
 
-Geometric-rho PJ2 and PJ3 no longer need an outer parameterized F profile.
+Geometric-r PJ2 and PJ3 no longer need an outer parameterized F profile.
 With `F_count=0`, the Numba source stage solves for
 
 $$
-x=\frac{\mathrm d\psi}{\mathrm d\rho},\qquad
+x=\frac{\mathrm d\psi}{\mathrm d\r},\qquad
 C=K_nx=\frac{\mu_0 I_{\rm tor}}{2\pi},\qquad
 u=\log\!\left(\frac{F^2}{F_{\rm edge}^2}\right).
 $$
@@ -39,10 +39,15 @@ from `C(1)=mu0*Ip/(2*pi)`. A beta constraint is another algebraic multiplier of
 the complete pressure profile, so it does not add an inner nonlinear unknown.
 
 The runtime always starts this local map from `u=C=0`, making a residual
-evaluation independent of call history. Ip-constrained PJ2/PJ3 use 5/9 sweeps;
-absolute-current PJ2/PJ3 use 8/14. One final non-mutating map must give a
-dimensionless fixed-point defect no greater than `1e-8`. Failure is explicit;
-the source stage does not silently accept a truncated closure.
+evaluation independent of call history. Each Picard sweep is followed by a
+dimensionless `(u, C)` defect test. Production uses the internal,
+non-configurable tolerance `1e-6` and a hard limit of ten sweeps. Failure is
+explicit; the source stage does not silently accept a truncated closure.
+
+For native `coordinate="rho"`, this map is not solved as an inner
+subproblem. PJ2/PJ3 instead advance `(s, ds/dr, u, C)` together and apply one
+joint `1e-6` convergence test; see
+[`rho-source-closure.md`](rho-source-closure.md).
 
 `F_count>0` retains the previous optimized-F route. This is useful for
 comparison and remains required by the Cxx and psin-coordinate implementations.

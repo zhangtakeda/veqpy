@@ -24,7 +24,7 @@ from veqpy.base import Reactive, Serial
 from veqpy.numerics import (
     DEFAULT_CALCULUS,
     DEFAULT_QUADRATURE,
-    RHO_AXIS,
+    R_AXIS,
     THETA_AXIS,
     apply_accumulation,
     apply_differentiation,
@@ -35,7 +35,7 @@ from veqpy.numerics import (
 
 
 class Grid(Reactive, Serial):
-    """Radial-poloidal discretization grid configuration."""
+    """Geometric integration grid with coordinate axes ``(r, theta)``."""
 
     root_properties = {
         "Nr",
@@ -146,24 +146,24 @@ class Grid(Reactive, Serial):
     @property
     def quadrature(self) -> tuple[np.ndarray, np.ndarray]:
         """Radial quadrature nodes and weights on the unit interval."""
-        rho, weights = make_quadrature(self.Nr, scheme=self.quadrature_scheme)
-        return _const_array(rho), _const_array(weights)
+        r, weights = make_quadrature(self.Nr, scheme=self.quadrature_scheme)
+        return _const_array(r), _const_array(weights)
 
     @property
-    def rho(self) -> np.ndarray:
+    def r(self) -> np.ndarray:
         """Radial nodes used by profiles and flux surfaces."""
         return self.quadrature[0]
 
     @property
     def weights(self) -> np.ndarray:
-        """Radial quadrature weights paired with ``rho``."""
+        """Radial quadrature weights paired with ``r``."""
         return self.quadrature[1]
 
     @property
     def edge_interpolation_weights(self) -> np.ndarray:
         """Weights that evaluate a radial nodal field at the LCFS."""
         weights = interpolation_matrix(
-            self.rho,
+            self.r,
             np.array([1.0], dtype=np.float64),
         )[0]
         return _const_array(weights)
@@ -172,7 +172,7 @@ class Grid(Reactive, Serial):
     def axis_interpolation_weights(self) -> np.ndarray:
         """Weights that evaluate a radial nodal field at the magnetic axis."""
         weights = interpolation_matrix(
-            self.rho,
+            self.r,
             np.array([0.0], dtype=np.float64),
         )[0]
         return _const_array(weights)
@@ -180,22 +180,22 @@ class Grid(Reactive, Serial):
     def axis_eval(self, profile: np.ndarray) -> float:
         """Evaluate a nodal radial profile at the magnetic axis."""
         values = np.asarray(profile, dtype=np.float64)
-        if values.shape != self.rho.shape:
-            raise ValueError(f"profile shape must be {self.rho.shape}, got {values.shape}")
+        if values.shape != self.r.shape:
+            raise ValueError(f"profile shape must be {self.r.shape}, got {values.shape}")
         return float(np.dot(self.axis_interpolation_weights, values))
 
     def edge_eval(self, profile: np.ndarray) -> float:
         """Evaluate a nodal radial profile at the LCFS."""
         values = np.asarray(profile, dtype=np.float64)
-        if values.shape != self.rho.shape:
-            raise ValueError(f"profile shape must be {self.rho.shape}, got {values.shape}")
+        if values.shape != self.r.shape:
+            raise ValueError(f"profile shape must be {self.r.shape}, got {values.shape}")
         return float(np.dot(self.edge_interpolation_weights, values))
 
     def full_integral(self, profile: np.ndarray) -> float:
         """Integrate a nodal radial profile over the complete ``[0, 1]`` domain."""
         values = np.asarray(profile, dtype=np.float64)
-        if values.shape != self.rho.shape:
-            raise ValueError(f"profile shape must be {self.rho.shape}, got {values.shape}")
+        if values.shape != self.r.shape:
+            raise ValueError(f"profile shape must be {self.r.shape}, got {values.shape}")
         return float(np.dot(self.weights, values))
 
     @property
@@ -205,9 +205,14 @@ class Grid(Reactive, Serial):
         return _const_array(theta)
 
     @property
+    def coordinates(self) -> tuple[np.ndarray, np.ndarray]:
+        """Ordered integration-grid axes ``(r, theta)``."""
+        return self.r, self.theta
+
+    @property
     def calculus(self) -> tuple[np.ndarray, np.ndarray]:
-        """Prefix-integration and differentiation matrices for ``rho`` fields."""
-        accumulator, differentiator = make_calculus(self.rho, scheme=self.calculus_scheme)
+        """Prefix-integration and differentiation matrices for ``r`` fields."""
+        accumulator, differentiator = make_calculus(self.r, scheme=self.calculus_scheme)
         return _const_array(accumulator), _const_array(differentiator)
 
     @property
@@ -265,15 +270,15 @@ class Grid(Reactive, Serial):
 
             if f.ndim != 2:
                 raise ValueError(f"Expected a 2D array when axis={axis}, got {f.shape}")
-            if axis == RHO_AXIS:
+            if axis == R_AXIS:
                 out = np.empty(f.shape[1], dtype=f.dtype)
             elif axis == THETA_AXIS:
                 out = np.empty(f.shape[0], dtype=f.dtype)
             else:
                 raise ValueError(f"Unsupported quadrature axis {axis}")
 
-        if axis == RHO_AXIS:
-            # Contract rho and leave theta samples.
+        if axis == R_AXIS:
+            # Contract r and leave theta samples.
             np.copyto(out, self.weights @ f)
         elif axis == THETA_AXIS:
             nt = f.shape[1]
@@ -287,22 +292,22 @@ class Grid(Reactive, Serial):
 
     @property
     def x(self) -> np.ndarray:
-        """Chebyshev coordinate ``x = 2*rho**2 - 1``."""
-        return _const_array(2.0 * self.rho * self.rho - 1.0)
+        """Chebyshev coordinate ``x = 2*r**2 - 1``."""
+        return _const_array(2.0 * self.r * self.r - 1.0)
 
     @property
     def y(self) -> np.ndarray:
-        """Envelope coordinate ``y = 1 - rho**2``."""
-        return _const_array(1.0 - self.rho * self.rho)
+        """Envelope coordinate ``y = 1 - r**2``."""
+        return _const_array(1.0 - self.r * self.r)
 
     @property
     def T_fields(self) -> np.ndarray:
         """Packed Chebyshev basis table and radial derivatives."""
-        return _const_array(_build_chebyshev_tables(self.rho, self.x, self.L_max))
+        return _const_array(_build_chebyshev_tables(self.r, self.x, self.L_max))
 
     @property
     def T(self) -> np.ndarray:
-        """Chebyshev basis values on ``rho``."""
+        """Chebyshev basis values on ``r``."""
         return self.T_fields[0]
 
     @property
@@ -375,17 +380,17 @@ class Grid(Reactive, Serial):
         return _const_array(_build_K_values(self.M_max, self.K_max))
 
     @property
-    def rho_powers(self) -> np.ndarray:
-        """Cached powers of ``rho`` required by profile envelopes."""
+    def r_powers(self) -> np.ndarray:
+        """Cached powers of ``r`` required by profile envelopes."""
         k_values = self.K_values
-        max_rho_power = max(2, int(np.max(k_values)) + 1)
-        rho_powers = np.empty((max_rho_power + 1, self.Nr), dtype=np.float64)
-        rho_powers[0].fill(1.0)
-        for power in range(1, max_rho_power + 1):
+        max_r_power = max(2, int(np.max(k_values)) + 1)
+        r_powers = np.empty((max_r_power + 1, self.Nr), dtype=np.float64)
+        r_powers[0].fill(1.0)
+        for power in range(1, max_r_power + 1):
             # Powers are small and reused heavily by residual packing, so precompute
-            # instead of calling rho**k inside hot loops.
-            rho_powers[power] = self.rho**power
-        return _const_array(rho_powers)
+            # instead of calling r**k inside hot loops.
+            r_powers[power] = self.r**power
+        return _const_array(r_powers)
 
 
 def _const_array(value: np.ndarray) -> np.ndarray:
@@ -405,11 +410,11 @@ def _build_K_values(M_max: int, K_max: int | None) -> np.ndarray:
 
 
 def _build_chebyshev_tables(
-    rho: np.ndarray,
+    r: np.ndarray,
     x: np.ndarray,
     L_max: int,
 ) -> np.ndarray:
-    Nr = len(rho)
+    Nr = len(r)
     T = np.zeros((L_max + 1, Nr), dtype=np.float64)
     Tx = np.zeros((L_max + 1, Nr), dtype=np.float64)
     Txx = np.zeros((L_max + 1, Nr), dtype=np.float64)
@@ -423,9 +428,9 @@ def _build_chebyshev_tables(
         Tx[k + 1, :] = 2.0 * T[k, :] + 2.0 * x * Tx[k, :] - Tx[k - 1, :]
         Txx[k + 1, :] = 4.0 * Tx[k, :] + 2.0 * x * Txx[k, :] - Txx[k - 1, :]
 
-    # Basis polynomials are defined in x = 2*rho**2 - 1.  Store derivatives in
-    # rho coordinates because all profile and geometry kernels consume d/drho.
-    dx_dr = 4.0 * rho
+    # Basis polynomials are defined in x = 2*r**2 - 1.  Store derivatives in
+    # r coordinates because all profile and geometry kernels consume d/dr.
+    dx_dr = 4.0 * r
     d2x_dr2 = 4.0
     T_r = Tx * dx_dr[None, :]
     T_rr = Txx * (dx_dr[None, :] ** 2) + Tx * d2x_dr2

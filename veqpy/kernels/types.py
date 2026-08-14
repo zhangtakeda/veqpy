@@ -19,6 +19,7 @@ import numpy as np
 
 from veqpy.kernels.abi.enums import (
     LAYOUT_CODES,
+    PRESSURE_DERIVATIVE_BY_COORDINATE,
     SOURCE_ACTIVE_FAMILY_CODES,
     SOURCE_CONSTRAINT_CODES_BY_FLAGS,
     SOURCE_CONSTRAINT_FLAG_ORDER,
@@ -26,11 +27,12 @@ from veqpy.kernels.abi.enums import (
     SOURCE_CONSTRAINT_FLAGS_BY_ROUTE,
     SOURCE_CONSTRAINT_LABELS_BY_FLAGS,
     SOURCE_COORDINATE_CODES,
-    SOURCE_DRIVER_BY_ROUTE,
+    SOURCE_DRIVER_NAMES,
     SOURCE_NODES_CODES,
     SOURCE_PARAMETERIZATION_CODES,
     SOURCE_ROUTE_CODES,
     SUPPORTED_BACKENDS,
+    source_driver_for,
 )
 from veqpy.kernels.abi.identity import compute_topology_key
 from veqpy.kernels.abi.options import (
@@ -523,23 +525,36 @@ class KernelTopology:
 class KernelSource:
     """One pressure representation, one explicit route driver, and constraints.
 
-    The driver keyword is selected by the topology route: ``ffprime`` for PF,
+    The PF driver is selected by the topology coordinate: ``FF_r``,
+    ``FF_rho``, or ``FF_psin``. Other driver keywords are selected by route:
     ``psi_r`` for PP, ``itor`` for PI, ``jtor`` for PJ1, ``jpara`` for PJ2,
     ``jtotal`` for PJ3, and ``q`` for PQ. Pressure is supplied either as ``p``
-    or as ``pprime`` with an optional LCFS value ``p0``. The PJ2 ``jpara``
+    or by one explicit coordinate derivative: ``P_r``, ``P_rho``, or
+    ``P_psin``. The supplied derivative must match ``KernelTopology.coordinate``;
+    backend route kernels apply any later chain rule after interpolation.
+    Conventional ``FF_psi = F*dF/dpsi`` and the pressure derivative ``P_psi``
+    with respect to unnormalized poloidal flux remain model/export quantities;
+    neither is one of these normalized source-coordinate inputs. The PJ2 ``jpara``
     driver has VEQ's ``<J·B> / (F * <R^-2>)`` semantics; PJ3 accepts the IMAS
-    total parallel-current convention ``<J·B> / B0`` directly.
+    total parallel-current convention ``<J·B> / B0`` directly. For a
+    topology with ``nodes="explicit"``, ``source_nodes`` supplies the retained
+    normalized coordinate positions shared by pressure and driver profiles.
     """
 
     p: np.ndarray | list[float] | tuple[float, ...] | None = None
-    pprime: np.ndarray | list[float] | tuple[float, ...] | None = None
-    ffprime: np.ndarray | list[float] | tuple[float, ...] | None = None
+    P_r: np.ndarray | list[float] | tuple[float, ...] | None = None
+    P_rho: np.ndarray | list[float] | tuple[float, ...] | None = None
+    P_psin: np.ndarray | list[float] | tuple[float, ...] | None = None
+    FF_r: np.ndarray | list[float] | tuple[float, ...] | None = None
+    FF_rho: np.ndarray | list[float] | tuple[float, ...] | None = None
+    FF_psin: np.ndarray | list[float] | tuple[float, ...] | None = None
     psi_r: np.ndarray | list[float] | tuple[float, ...] | None = None
     itor: np.ndarray | list[float] | tuple[float, ...] | None = None
     jtor: np.ndarray | list[float] | tuple[float, ...] | None = None
     jpara: np.ndarray | list[float] | tuple[float, ...] | None = None
     jtotal: np.ndarray | list[float] | tuple[float, ...] | None = None
     q: np.ndarray | list[float] | tuple[float, ...] | None = None
+    source_nodes: np.ndarray | list[float] | tuple[float, ...] | None = None
     p0: float | None = None
     Ip: float = np.nan
     beta: float = np.nan
@@ -552,14 +567,19 @@ class KernelSource:
     def __post_init__(self) -> None:
         pressure_values = {
             name: value
-            for name, value in (("p", self.p), ("pprime", self.pprime))
+            for name, value in (
+                ("p", self.p),
+                ("P_r", self.P_r),
+                ("P_rho", self.P_rho),
+                ("P_psin", self.P_psin),
+            )
             if value is not None
         }
         if len(pressure_values) != 1:
             supplied = ", ".join(pressure_values) if pressure_values else "none"
             raise ValueError(
-                "KernelSource requires exactly one pressure input (p or pprime); "
-                f"got {supplied}"
+                "KernelSource requires exactly one pressure input "
+                f"(p, P_r, P_rho, or P_psin); got {supplied}"
             )
         pressure_name, pressure_value = next(iter(pressure_values.items()))
         pressure = _readonly_1d(pressure_value, pressure_name)
@@ -572,15 +592,14 @@ class KernelSource:
 
         driver_values = {
             name: getattr(self, name)
-            for name in SOURCE_DRIVER_BY_ROUTE.values()
+            for name in SOURCE_DRIVER_NAMES
             if getattr(self, name) is not None
         }
         if len(driver_values) != 1:
             supplied = ", ".join(driver_values) if driver_values else "none"
-            choices = ", ".join(SOURCE_DRIVER_BY_ROUTE.values())
+            choices = ", ".join(SOURCE_DRIVER_NAMES)
             raise ValueError(
-                "KernelSource requires exactly one route driver "
-                f"({choices}); got {supplied}"
+                f"KernelSource requires exactly one route driver ({choices}); got {supplied}"
             )
         driver_name, driver_value = next(iter(driver_values.items()))
         driver = _readonly_1d(driver_value, driver_name)
@@ -595,11 +614,43 @@ class KernelSource:
         object.__setattr__(self, driver_name, driver)
         object.__setattr__(self, "_driver_name", driver_name)
         object.__setattr__(self, "_driver_profile", driver)
+        source_nodes = (
+            None if self.source_nodes is None else _readonly_1d(self.source_nodes, "source_nodes")
+        )
+        if source_nodes is not None and source_nodes.shape != pressure.shape:
+            raise ValueError(
+                "source_nodes must share the source-profile shape, "
+                f"got {source_nodes.shape} and {pressure.shape}"
+            )
+        object.__setattr__(self, "source_nodes", source_nodes)
         object.__setattr__(self, "p0", p0)
         object.__setattr__(self, "Ip", float(self.Ip))
         object.__setattr__(self, "beta", float(self.beta))
         case_name = None if self.case_name is None else str(self.case_name)
         object.__setattr__(self, "case_name", case_name)
+
+    def pressure_derivative_for(self, coordinate: str) -> np.ndarray | None:
+        """Return the derivative matching one normalized source coordinate."""
+        if self.pressure_name == "p":
+            return None
+        expected = PRESSURE_DERIVATIVE_BY_COORDINATE[str(coordinate).lower()]
+        if self.pressure_name != expected:
+            raise ValueError(
+                f"coordinate={coordinate!r} requires pressure input {expected}, "
+                f"got {self.pressure_name}"
+            )
+        return self.pressure_profile
+
+    def driver_for(self, route: str, coordinate: str) -> np.ndarray:
+        """Return the route driver after validating its coordinate semantics."""
+
+        expected = source_driver_for(route, coordinate)
+        if self.driver_name != expected:
+            raise ValueError(
+                f"route {str(route).upper()} with coordinate={coordinate!r} "
+                f"requires driver {expected!r}, got {self.driver_name!r}"
+            )
+        return self.driver_profile
 
     @property
     def pressure_name(self) -> str:
@@ -731,7 +782,6 @@ def config_with_overrides(config: KernelConfig, **overrides: Any) -> KernelConfi
     return replace(config, **overrides)
 
 
-
 def _normalize_token(value: str, name: str) -> str:
     if not isinstance(value, str):
         raise TopologyError(f"{name} must be a string")
@@ -784,14 +834,18 @@ def _source_active_family(
     *,
     f_count: int,
 ) -> str:
-    # Geometric-rho PJ2/PJ3 can close F and enclosed current directly in the
-    # source stage.  F_count=0 selects that strict closure; a positive F_count
-    # retains the legacy outer optimized-F approximation.  psin-coordinate
-    # routes still require the optimized-F representation because their source
-    # samples must be remapped through the evolving flux coordinate.
+    # r is the fixed GS operator coordinate, so it needs no coordinate fixed
+    # point; strict PJ2/PJ3 may still close their source physics locally.
+    # rho(r) has a qualified integral map through F and geometry and is
+    # therefore closed by a bounded source-local fixed point. In contrast,
+    # psin(r) is part of the GS solution itself: source-local psin Picard maps
+    # were not robust for PP/PI/PJ2/PJ3 under outer nonlinear trial states, so
+    # psin routes retain joint outer optimization of psin or F.
+    if coordinate == "rho":
+        return "none"
     if route in {"PJ2", "PJ3"} and (coordinate == "psin" or f_count > 0):
         return "F"
-    if coordinate == "psin" and nodes == "uniform":
+    if coordinate == "psin" and nodes != "grid":
         return "psin"
     return "none"
 
@@ -809,7 +863,7 @@ def _validate_source_active_family(
     f_count: int,
 ) -> None:
     if source_active_family == "psin" and psin_count <= 0:
-        raise TopologyError("psin/uniform source topology requires psin_count > 0")
+        raise TopologyError("sampled-psin source topology requires psin_count > 0")
     if source_active_family == "F" and f_count <= 0:
         raise TopologyError("PJ2/PJ3 source topology requires F_count > 0")
     if source_active_family != "psin" and psin_count > 0:
@@ -935,7 +989,14 @@ def _canonical_at_least(value: int | None, minimum: int, name: str) -> int:
     return explicit
 
 
-def _canonical_sample_count(nodes: str, nr: int, sample_count: int | None) -> int:
+def _canonical_sample_count(nodes: str, nr: int, sample_count: int | None) -> int | None:
+    if nodes == "explicit":
+        if sample_count is not None:
+            raise TopologyError(
+                "explicit source sample_count is runtime KernelSource data; "
+                "leave KernelTopology.sample_count=None"
+            )
+        return None
     if nodes == "grid":
         if sample_count is None:
             return nr
@@ -944,7 +1005,7 @@ def _canonical_sample_count(nodes: str, nr: int, sample_count: int | None) -> in
             raise TopologyError("grid source nodes require sample_count == Nr")
         return value
     if sample_count is None:
-        raise TopologyError("uniform source nodes require an explicit sample_count")
+        raise TopologyError(f"{nodes} source nodes require an explicit sample_count")
     return _positive_int(sample_count, "sample_count")
 
 

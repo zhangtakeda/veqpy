@@ -15,7 +15,7 @@ from veqpy.kernels.pareto import (
     generate_pareto_signatures,
     normalize_pareto_candidates,
     normalize_pareto_metric,
-    normalize_pareto_neighborhood_size,
+    normalize_pareto_neighborod_size,
     normalize_pareto_strategy,
     normalize_pareto_target,
     normalize_shape_error_thresholds,
@@ -92,8 +92,8 @@ def tiny_boundary() -> KernelBoundary:
 def tiny_source() -> KernelSource:
     psin = np.linspace(0.0, 1.0, 8, dtype=np.float64)
     return KernelSource(
-        pprime=1.0e6 + 0.2e6 * psin,
-        ffprime=1.0 + 0.1 * psin,
+        P_psin=-(1.0e6 + 0.2e6 * psin),
+        FF_psin=1.0 + 0.1 * psin,
         Ip=3.0e6,
     )
 
@@ -122,8 +122,8 @@ def test_pareto_parameter_normalization() -> None:
     assert normalize_pareto_target("COUNTS") == "counts"
     assert normalize_pareto_metric("Max") == "max"
     assert normalize_pareto_strategy(" adaptive ") == "adaptive"
-    assert normalize_pareto_neighborhood_size(0) == 0
-    assert normalize_pareto_neighborhood_size(2) == 2
+    assert normalize_pareto_neighborod_size(0) == 0
+    assert normalize_pareto_neighborod_size(2) == 2
     assert normalize_shape_error_thresholds(None) == ()
     assert normalize_shape_error_thresholds(1.0e-3) == (1.0e-3,)
     assert normalize_shape_error_thresholds([1.0e-3, 2.0e-3]) == (1.0e-3, 2.0e-3)
@@ -134,10 +134,10 @@ def test_pareto_parameter_normalization() -> None:
         normalize_pareto_metric("mean")
     with pytest.raises(ValueError, match="strategy"):
         normalize_pareto_strategy("random")
-    with pytest.raises(TypeError, match="neighborhood_size"):
-        normalize_pareto_neighborhood_size(True)  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="neighborod_size"):
+        normalize_pareto_neighborod_size(True)  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="non-negative"):
-        normalize_pareto_neighborhood_size(-1)
+        normalize_pareto_neighborod_size(-1)
     with pytest.raises(ValueError, match="finite"):
         normalize_shape_error_thresholds(float("inf"))
     with pytest.raises(ValueError, match="non-negative"):
@@ -295,7 +295,7 @@ def test_adaptive_strategy_starts_from_combined_seed_candidates() -> None:
     assert len(set(adaptive)) == len(adaptive)
 
 
-def test_adaptive_seed_includes_structural_floor_neighborhood() -> None:
+def test_adaptive_seed_includes_structural_floor_neighborod() -> None:
     topology = make_topology(h_count=3, v_count=0, kappa_count=3, psin_count=3, s_counts=(3,))
     coefficients = {
         "h": np.ones(3, dtype=np.float64),
@@ -353,7 +353,7 @@ def test_adaptive_refinement_generates_unseen_local_neighbors() -> None:
         topology,
         frontier=(sample,),
         seen_signatures={KernelParetoSignature.from_topology(topology), signature},
-        neighborhood_size=1,
+        neighborod_size=1,
     )
 
     assert neighbors
@@ -394,7 +394,7 @@ def test_adaptive_refinement_moves_fourier_harmonic_pairs() -> None:
         topology,
         frontier=(sample,),
         seen_signatures={KernelParetoSignature.from_topology(topology), signature},
-        neighborhood_size=1,
+        neighborod_size=1,
     )
 
     assert KernelParetoSignature(

@@ -27,11 +27,11 @@ from benchmarks._common import (
 from veqpy import KernelSource
 
 ROUTE_REGRESSION_CASES = (
-    RouteBenchmarkSpec("PF", "rho", "uniform", "ip"),
-    RouteBenchmarkSpec("PP", "rho", "uniform", "ip"),
-    RouteBenchmarkSpec("PJ2", "rho", "uniform", "ip"),
-    RouteBenchmarkSpec("PJ3", "rho", "uniform", "ip"),
-    RouteBenchmarkSpec("PQ", "rho", "uniform", "ip"),
+    RouteBenchmarkSpec("PF", "r", "uniform", "ip"),
+    RouteBenchmarkSpec("PP", "r", "uniform", "ip"),
+    RouteBenchmarkSpec("PJ2", "r", "uniform", "ip"),
+    RouteBenchmarkSpec("PJ3", "r", "uniform", "ip"),
+    RouteBenchmarkSpec("PQ", "r", "uniform", "ip"),
 )
 
 
@@ -96,7 +96,7 @@ def test_numba_route_benchmark_regresses_against_synthetic_reference(
 @pytest.mark.slow
 def test_strict_pj23_same_grid_round_trip_closes_flux_and_current() -> None:
     seed = route_kernel_case(
-        RouteBenchmarkSpec("PJ2", "rho", "grid", "ip"),
+        RouteBenchmarkSpec("PJ2", "r", "grid", "ip"),
         pj2_f_count=0,
     )
     seed_result, seed_kernel = solve_numba_case(seed)
@@ -120,11 +120,11 @@ def test_strict_pj23_same_grid_round_trip_closes_flux_and_current() -> None:
 
     for route, driver in route_drivers.items():
         case = route_kernel_case(
-            RouteBenchmarkSpec(route, "rho", "grid", "ip"),
+            RouteBenchmarkSpec(route, "r", "grid", "ip"),
             pj2_f_count=0,
         )
         source = KernelSource(
-            pprime=reference_pressure,
+            P_r=reference_pressure,
             **{"jpara" if route == "PJ2" else "jtotal": driver},
             Ip=reference_Ip,
         )

@@ -41,10 +41,10 @@ API.
 
 Benchmark entry points use backend names directly:
 
-- `benchmarks/numba_routes.py`: Numba geometric-rho route matrix.
+- `benchmarks/numba_routes.py`: Numba geometric-r route matrix.
 - `benchmarks/numba_variant_sweep.py`: Numba `Kernel.variant()` switch cost vs
   fresh Kernel construction benchmark.
-- `benchmarks/cxx_routes.py`: Cxx geometric-rho route matrix compared with
+- `benchmarks/cxx_routes.py`: Cxx geometric-r route matrix compared with
   Numba. psin routes retain focused physics/API coverage but are excluded from
   route performance and pass-rate summaries.
 - `benchmarks/cxx_geqdsk.py`: Cxx GEQDSK matrix compared with Numba.

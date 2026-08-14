@@ -42,7 +42,7 @@ namespace geometry::detail
         static constexpr size_t radial_nodes = GridType::radial_nodes;
         static constexpr size_t theta_rows   = GridType::theta_rows;
 
-        // Store [rho][field][theta] so residual loops traverse contiguous theta rows.
+        // Store [r][field][theta] so residual loops traverse contiguous theta rows.
         using SurfaceSlab = Tensor<double, radial_nodes, surface_field_count, theta_rows>;
         using RadialSlab  = Matrix<double, radial_field_count, radial_nodes>;
 
@@ -105,7 +105,7 @@ namespace geometry::detail
 
             for (size_t i = 0; i < radial_nodes; ++i)
             {
-                const double rho_i  = GridType::nodes[i];
+                const double r_i  = GridType::nodes[i];
                 const double h_i    = runtime_profiles.profile_field(Shape::h_profile_id, i, profile_value);
                 const double h_r_i  = runtime_profiles.profile_field(Shape::h_profile_id, i, profile_radial);
                 const double h_rr_i = runtime_profiles.profile_field(Shape::h_profile_id, i, profile_radial2);
@@ -221,23 +221,23 @@ namespace geometry::detail
                     const double cos_tb_ij = cos_tb_values[j];
                     const double sin_tb_ij = sin_tb_values[j];
 
-                    double R_ij = R0 + a * (h_i + rho_i * cos_tb_ij);
+                    double R_ij = R0 + a * (h_i + r_i * cos_tb_ij);
                     if (R_ij < 1.0e-6)
                         R_ij = 1.0e-6;
 
-                    const double R_r_ij  = a * (h_r_i + cos_tb_ij - rho_i * sin_tb_ij * tb_r_ij);
-                    const double R_t_ij  = -a * rho_i * sin_tb_ij * tb_t_ij;
+                    const double R_r_ij  = a * (h_r_i + cos_tb_ij - r_i * sin_tb_ij * tb_r_ij);
+                    const double R_t_ij  = -a * r_i * sin_tb_ij * tb_t_ij;
                     const double R_rr_ij = a * (h_rr_i - 2.0 * sin_tb_ij * tb_r_ij -
-                                                rho_i * (cos_tb_ij * tb_r_ij * tb_r_ij + sin_tb_ij * tb_rr_ij));
+                                                r_i * (cos_tb_ij * tb_r_ij * tb_r_ij + sin_tb_ij * tb_rr_ij));
                     const double R_rt_ij =
-                        -a * (sin_tb_ij * tb_t_ij + rho_i * (cos_tb_ij * tb_r_ij * tb_t_ij + sin_tb_ij * tb_rt_ij));
-                    const double R_tt_ij = -a * rho_i * (cos_tb_ij * tb_t_ij * tb_t_ij + sin_tb_ij * tb_tt_ij);
+                        -a * (sin_tb_ij * tb_t_ij + r_i * (cos_tb_ij * tb_r_ij * tb_t_ij + sin_tb_ij * tb_rt_ij));
+                    const double R_tt_ij = -a * r_i * (cos_tb_ij * tb_t_ij * tb_t_ij + sin_tb_ij * tb_tt_ij);
 
-                    const double Z_r_ij  = a * (v_r_i - (k_i + rho_i * k_r_i) * sin_t);
-                    const double Z_t_ij  = -a * rho_i * k_i * cos_t;
-                    const double Z_rr_ij = a * (v_rr_i - (2.0 * k_r_i + rho_i * k_rr_i) * sin_t);
-                    const double Z_rt_ij = -a * (k_i + rho_i * k_r_i) * cos_t;
-                    const double Z_tt_ij = a * rho_i * k_i * sin_t;
+                    const double Z_r_ij  = a * (v_r_i - (k_i + r_i * k_r_i) * sin_t);
+                    const double Z_t_ij  = -a * r_i * k_i * cos_t;
+                    const double Z_rr_ij = a * (v_rr_i - (2.0 * k_r_i + r_i * k_rr_i) * sin_t);
+                    const double Z_rt_ij = -a * (k_i + r_i * k_r_i) * cos_t;
+                    const double Z_tt_ij = a * r_i * k_i * sin_t;
 
                     double J_ij = R_t_ij * Z_r_ij - R_r_ij * Z_t_ij;
                     if (J_ij < 1.0e-6)

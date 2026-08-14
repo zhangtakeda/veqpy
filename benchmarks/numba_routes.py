@@ -197,7 +197,7 @@ def main(argv: list[str] | None = None) -> int:
         "--pj2-f-count",
         type=int,
         default=0,
-        help="PJ2/PJ3 optimized-F coefficient count; 0 selects strict rho closure",
+        help="PJ2/PJ3 optimized-F coefficient count; 0 selects strict r closure",
     )
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--no-run", action="store_true")

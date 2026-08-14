@@ -48,8 +48,8 @@ def tiny_boundary() -> KernelBoundary:
 def tiny_source() -> KernelSource:
     psin = np.linspace(0.0, 1.0, 9, dtype=np.float64)
     return KernelSource(
-        pprime=1.0e6 + 0.2e6 * psin,
-        ffprime=1.0 + 0.1 * psin,
+        P_psin=-(1.0e6 + 0.2e6 * psin),
+        FF_psin=1.0 + 0.1 * psin,
         Ip=3.0e6,
     )
 
@@ -159,7 +159,7 @@ def test_kernel_variant_switches_pj2_to_strict_closure_and_rejects_missing_psin(
     pj2 = Kernel(
         topology=make_topology(
             route="PJ2",
-            coordinate="rho",
+            coordinate="r",
             nodes="uniform",
             psin_count=0,
             F_count=2,

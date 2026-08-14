@@ -142,7 +142,7 @@ def build_fused_residual_runner_into(
     alpha_state: np.ndarray,
     c_effective_order: int,
     s_effective_order: int,
-    fix_rho: float,
+    fix_r: float,
     psin_profile_fields_available: bool,
     profile_stage_runner: Callable[[np.ndarray], None],
     geometry_stage_runner: Callable[[], None],
@@ -150,6 +150,18 @@ def build_fused_residual_runner_into(
     residual_full_stage_runner_into: Callable[[np.ndarray], None],
 ) -> Callable[[np.ndarray, np.ndarray], None]:
     """Bind the fused packed-state residual runner into a caller output vector."""
+    if plan.source_execution.requires_rho_closure:
+        # Native rho retains a bounded coordinate fixed point inside the
+        # source stage. Keep the same source runner for both residual forms.
+        def sequential_native_source_runner(x_eval: np.ndarray, out: np.ndarray) -> None:
+            profile_stage_runner(x_eval)
+            geometry_stage_runner()
+            alpha1, alpha2 = source_stage_runner()
+            alpha_state[0] = float(alpha1)
+            alpha_state[1] = float(alpha2)
+            residual_full_stage_runner_into(out)
+
+        return sequential_native_source_runner
     if plan.source_execution.requires_optimized_psin_profile and not psin_profile_fields_available:
         # Fused Numba code cannot pull optimized psin fields that do not exist
         # in ProfileWorkspace yet.  The sequential runner keeps behavior correct
@@ -179,5 +191,5 @@ def build_fused_residual_runner_into(
         R0=float(case.R0),
         Z0=float(case.Z0),
         B0=float(case.B0),
-        fix_rho=fix_rho,
+        fix_r=fix_r,
     )

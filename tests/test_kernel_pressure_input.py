@@ -11,25 +11,25 @@ from veqpy import (
     KernelSource,
     KernelTopology,
 )
-from veqpy.kernels.abi.enums import SOURCE_DRIVER_BY_ROUTE
+from veqpy.kernels.abi.enums import PRESSURE_DERIVATIVE_BY_COORDINATE, source_driver_for
 from veqpy.kernels.abi.source_semantics import MU0, materialize_kernel_source
 from veqpy.numerics import make_quadrature
 
 P_ROUTE_CASES = (
     ("PF", "psin", "uniform"),
     ("PP", "psin", "uniform"),
-    ("PI", "rho", "uniform"),
+    ("PI", "r", "uniform"),
     ("PJ1", "psin", "uniform"),
     ("PJ2", "psin", "uniform"),
-    ("PJ3", "rho", "grid"),
-    ("PQ", "rho", "grid"),
+    ("PJ3", "r", "grid"),
+    ("PQ", "r", "grid"),
 )
 
 
 def _topology(
     *,
     route: str = "PQ",
-    coordinate: str = "rho",
+    coordinate: str = "r",
     nodes: str = "uniform",
     constraint: str = "none",
     sample_count: int = 9,
@@ -65,18 +65,18 @@ def _driver_kwargs(
     *,
     coordinate: str,
 ) -> dict[str, np.ndarray]:
-    rho = np.sqrt(parameter_nodes) if coordinate == "psin" else parameter_nodes
+    r = np.sqrt(parameter_nodes) if coordinate == "psin" else parameter_nodes
     if route == "PF":
-        driver = 1.0 + 0.2 * rho * rho
+        driver = -(1.0 + 0.2 * r * r) if coordinate == "psin" else 1.0 + 0.2 * r * r
     elif route == "PP":
-        driver = rho * (1.0 + 0.2 * rho * rho)
+        driver = r * (1.0 + 0.2 * r * r)
     elif route == "PI":
-        driver = rho * rho * (1.0e6 + 0.2e6 * rho * rho)
+        driver = r * r * (1.0e6 + 0.2e6 * r * r)
     elif route in {"PJ1", "PJ2", "PJ3"}:
-        driver = 1.0e6 + 0.2e6 * rho * rho
+        driver = 1.0e6 + 0.2e6 * r * r
     else:
-        driver = 1.7 + 0.1 * rho * rho
-    return {SOURCE_DRIVER_BY_ROUTE[route]: np.asarray(driver, dtype=np.float64)}
+        driver = 1.7 + 0.1 * r * r
+    return {source_driver_for(route, coordinate): np.asarray(driver, dtype=np.float64)}
 
 
 def test_kernel_source_requires_exactly_one_pressure_representation() -> None:
@@ -87,21 +87,21 @@ def test_kernel_source_requires_exactly_one_pressure_representation() -> None:
     from_p = KernelSource(p=pressure, q=q)
     assert from_p.pressure_name == "p"
     assert from_p.pressure_profile is from_p.p
-    assert from_p.pprime is None
+    assert from_p.P_r is None
     assert from_p.p0 is None
     assert from_p.p is not None
     assert not from_p.p.flags.writeable
 
-    from_pprime = KernelSource(pprime=derivative, q=q)
-    assert from_pprime.pressure_name == "pprime"
-    assert from_pprime.pressure_profile is from_pprime.pprime
+    from_pprime = KernelSource(P_r=derivative, q=q)
+    assert from_pprime.pressure_name == "P_r"
+    assert from_pprime.pressure_profile is from_pprime.P_r
     assert from_pprime.p is None
     assert from_pprime.p0 == 0.0
 
     with pytest.raises(ValueError, match="requires exactly one pressure input"):
         KernelSource(q=q)
-    with pytest.raises(ValueError, match="got p, pprime"):
-        KernelSource(p=pressure, pprime=derivative, q=q)
+    with pytest.raises(ValueError, match="got p, P_r"):
+        KernelSource(p=pressure, P_r=derivative, q=q)
     with pytest.raises(ValueError, match="p0 is derived from p"):
         KernelSource(p=pressure, p0=1.0, q=q)
     with pytest.raises(ValueError, match="p and q must share the same shape"):
@@ -109,9 +109,66 @@ def test_kernel_source_requires_exactly_one_pressure_representation() -> None:
 
 
 @pytest.mark.parametrize(
+    ("coordinate", "wrong_keyword", "required_keyword"),
+    [
+        ("r", "P_psin", "P_r"),
+        ("rho", "P_r", "P_rho"),
+        ("psin", "P_rho", "P_psin"),
+    ],
+)
+def test_pressure_derivative_keyword_must_match_source_coordinate(
+    coordinate: str,
+    wrong_keyword: str,
+    required_keyword: str,
+) -> None:
+    topology = _topology(route="PQ", coordinate=coordinate)
+    values = np.linspace(-2.0e3, -1.0e3, topology.sample_count, dtype=np.float64)
+    q = np.linspace(1.7, 1.8, topology.sample_count, dtype=np.float64)
+    source = KernelSource(**{wrong_keyword: values, "q": q})
+
+    with pytest.raises(
+        ValueError,
+        match=rf"coordinate='{coordinate}' requires pressure input {required_keyword}",
+    ):
+        materialize_kernel_source(topology, source)
+
+
+@pytest.mark.parametrize(
+    ("coordinate", "wrong_keyword", "required_keyword"),
+    [
+        ("r", "FF_psin", "FF_r"),
+        ("rho", "FF_r", "FF_rho"),
+        ("psin", "FF_rho", "FF_psin"),
+    ],
+)
+def test_pf_derivative_keyword_must_match_source_coordinate(
+    coordinate: str,
+    wrong_keyword: str,
+    required_keyword: str,
+) -> None:
+    topology = _topology(route="PF", coordinate=coordinate)
+    values = np.linspace(-2.0e3, -1.0e3, topology.sample_count, dtype=np.float64)
+    source = KernelSource(
+        **{
+            PRESSURE_DERIVATIVE_BY_COORDINATE[coordinate]: values,
+            wrong_keyword: np.linspace(-2.0, -1.0, topology.sample_count),
+        }
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            rf"route PF with coordinate='{coordinate}' requires driver "
+            rf"'{required_keyword}'"
+        ),
+    ):
+        materialize_kernel_source(topology, source)
+
+
+@pytest.mark.parametrize(
     ("route", "coordinate"),
     [
-        ("PQ", "rho"),
+        ("PQ", "r"),
         ("PF", "psin"),
         ("PP", "psin"),
     ],
@@ -126,7 +183,7 @@ def test_uniform_p_is_lowered_to_coordinate_aware_pprime_and_edge_pressure(
     edge_pressure = 6408.706536
     amplitude = 1800.0
     curvature = 250.0
-    if coordinate == "rho":
+    if coordinate == "r":
         pressure = edge_pressure + amplitude * (1.0 - physical_coordinate**2)
         expected_pprime = -2.0 * amplitude * physical_coordinate
     else:
@@ -146,7 +203,7 @@ def test_uniform_p_is_lowered_to_coordinate_aware_pprime_and_edge_pressure(
     explicit = materialize_kernel_source(
         topology,
         KernelSource(
-            pprime=expected_pprime,
+            **{PRESSURE_DERIVATIVE_BY_COORDINATE[coordinate]: expected_pprime},
             p0=edge_pressure,
             **driver_kwargs,
         ),
@@ -193,14 +250,14 @@ def test_pp_sqrt_psin_pressure_lowering_remains_stable_at_high_order() -> None:
 
 def test_grid_p_uses_grid_differentiator_and_interpolates_the_lcfs_value() -> None:
     topology = _topology(nodes="grid")
-    rho, _ = make_quadrature(topology.Nr, scheme=topology.quadrature)
+    r, _ = make_quadrature(topology.Nr, scheme=topology.quadrature)
     edge_pressure = 6408.706536
     amplitude = 2200.0
-    pressure = edge_pressure + amplitude * (1.0 - rho * rho)
-    expected_pprime = -2.0 * amplitude * rho
+    pressure = edge_pressure + amplitude * (1.0 - r * r)
+    expected_pprime = -2.0 * amplitude * r
     source = KernelSource(
         p=pressure,
-        q=1.71 + 0.16 * rho * rho,
+        q=1.71 + 0.16 * r * r,
     )
 
     materialized = materialize_kernel_source(topology, source)
@@ -216,16 +273,16 @@ def test_grid_p_uses_grid_differentiator_and_interpolates_the_lcfs_value() -> No
 
 def test_p_lowering_does_not_impose_axis_parity() -> None:
     topology = _topology(nodes="uniform")
-    rho = np.linspace(0.0, 1.0, topology.sample_count, dtype=np.float64)
+    r = np.linspace(0.0, 1.0, topology.sample_count, dtype=np.float64)
     edge_pressure = 6408.706536
     amplitude = 2200.0
-    pressure = edge_pressure + amplitude * (1.0 - rho)
+    pressure = edge_pressure + amplitude * (1.0 - r)
 
     materialized = materialize_kernel_source(
         topology,
         KernelSource(
             p=pressure,
-            q=1.71 + 0.16 * rho * rho,
+            q=1.71 + 0.16 * r * r,
         ),
     )
 
@@ -262,7 +319,7 @@ def test_constant_p_produces_an_exact_zero_derivative(nodes: str) -> None:
 
 def test_constant_p_builds_an_equilibrium_from_its_absolute_pressure() -> None:
     topology = _topology(nodes="grid")
-    rho, _ = make_quadrature(topology.Nr, scheme=topology.quadrature)
+    r, _ = make_quadrature(topology.Nr, scheme=topology.quadrature)
     pressure = 6408.706536
     boundary = KernelBoundary(
         a=1.0,
@@ -274,7 +331,7 @@ def test_constant_p_builds_an_equilibrium_from_its_absolute_pressure() -> None:
     )
     source = KernelSource(
         p=np.full(topology.Nr, pressure, dtype=np.float64),
-        q=1.71 + 0.16 * rho * rho,
+        q=1.71 + 0.16 * r * r,
     )
     kernel = Kernel(
         topology=topology,
@@ -294,8 +351,8 @@ def test_constant_p_builds_an_equilibrium_from_its_absolute_pressure() -> None:
 
 def test_p_rejects_zero_nonfinite_and_psin_grid_profiles() -> None:
     topology = _topology(nodes="grid")
-    rho, _ = make_quadrature(topology.Nr, scheme=topology.quadrature)
-    q = 1.71 + 0.16 * rho * rho
+    r, _ = make_quadrature(topology.Nr, scheme=topology.quadrature)
+    q = 1.71 + 0.16 * r * r
 
     with pytest.raises(ValueError, match="p is all zero"):
         materialize_kernel_source(
@@ -313,7 +370,7 @@ def test_p_rejects_zero_nonfinite_and_psin_grid_profiles() -> None:
             )
 
     psin_grid = _topology(coordinate="psin", nodes="grid")
-    with pytest.raises(ValueError, match="psin\\(rho\\) is solved at runtime"):
+    with pytest.raises(ValueError, match="psin\\(r\\) is solved at runtime"):
         materialize_kernel_source(
             psin_grid,
             KernelSource(p=np.ones(psin_grid.Nr), q=q),
@@ -328,7 +385,7 @@ def test_beta_constraint_scales_p_mode_as_one_complete_profile() -> None:
         constraint="beta",
         nr=nr,
     )
-    rho, _ = make_quadrature(nr, scheme=topology.quadrature)
+    r, _ = make_quadrature(nr, scheme=topology.quadrature)
     boundary = KernelBoundary(
         a=1.0,
         R0=10.0,
@@ -338,10 +395,10 @@ def test_beta_constraint_scales_p_mode_as_one_complete_profile() -> None:
         s_offsets=(0.0,),
     )
     edge_pressure = 6408.706536
-    raw_pressure = edge_pressure + 900.0 * (1.0 - rho * rho)
+    raw_pressure = edge_pressure + 900.0 * (1.0 - r * r)
     source = KernelSource(
         p=raw_pressure,
-        q=1.71 + 0.16 * rho * rho,
+        q=1.71 + 0.16 * r * r,
         beta=beta,
     )
     kernel = Kernel(
@@ -382,7 +439,7 @@ def test_p_and_explicit_pprime_p0_are_numba_route_equivalent(
     physical_coordinate = parameter * parameter if route == "PP" else parameter
     edge_pressure = 6408.706536
     amplitude = 900.0
-    if coordinate == "rho":
+    if coordinate == "r":
         pressure = edge_pressure + amplitude * (1.0 - physical_coordinate**2)
         pprime = -2.0 * amplitude * physical_coordinate
     else:
@@ -395,7 +452,7 @@ def test_p_and_explicit_pprime_p0_are_numba_route_equivalent(
     )
     source_from_p = KernelSource(p=pressure, **driver_kwargs)
     source_from_pprime = KernelSource(
-        pprime=pprime,
+        **{PRESSURE_DERIVATIVE_BY_COORDINATE[coordinate]: pprime},
         p0=edge_pressure,
         **driver_kwargs,
     )

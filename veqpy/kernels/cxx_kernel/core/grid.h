@@ -1241,36 +1241,36 @@ namespace grid::detail
     };
 
     template <size_t N>
-    constexpr Vector<double, N> make_x(const Vector<double, N>& rho)
+    constexpr Vector<double, N> make_x(const Vector<double, N>& r)
     {
         Vector<double, N> out{uninitialized};
         for (size_t i = 0; i < N; ++i)
-            out[i] = 2.0 * rho[i] * rho[i] - 1.0;
+            out[i] = 2.0 * r[i] * r[i] - 1.0;
         return out;
     }
 
     template <size_t N>
-    constexpr Vector<double, N> make_y(const Vector<double, N>& rho)
+    constexpr Vector<double, N> make_y(const Vector<double, N>& r)
     {
         Vector<double, N> out{uninitialized};
         for (size_t i = 0; i < N; ++i)
-            out[i] = 1.0 - rho[i] * rho[i];
+            out[i] = 1.0 - r[i] * r[i];
         return out;
     }
 
     template <size_t Kmax, size_t N>
-    constexpr Matrix<double, Kmax, N> make_rhos(const Vector<double, N>& rho)
+    constexpr Matrix<double, Kmax, N> make_rs(const Vector<double, N>& r)
     {
-        static_assert(Kmax >= 2, "rho table requires at least rho and rho^2");
+        static_assert(Kmax >= 2, "r table requires at least r and r^2");
 
         Matrix<double, Kmax, N> out{uninitialized};
         for (size_t i = 0; i < N; ++i)
         {
-            double value = rho[i];
+            double value = r[i];
             for (size_t row = 0; row < Kmax; ++row)
             {
                 out(row, i) = value;
-                value *= rho[i];
+                value *= r[i];
             }
         }
         return out;
@@ -1284,7 +1284,7 @@ namespace grid::detail
     };
 
     template <size_t Lmax, ChebyshevField Field, size_t N>
-    constexpr Matrix<double, Lmax, N> make_chebyshev_table(const Vector<double, N>& rho, const Vector<double, N>& x)
+    constexpr Matrix<double, Lmax, N> make_chebyshev_table(const Vector<double, N>& r, const Vector<double, N>& x)
     {
         static_assert(Lmax >= 1, "Chebyshev table requires at least one stored row");
 
@@ -1292,7 +1292,7 @@ namespace grid::detail
         for (size_t i = 0; i < N; ++i)
         {
             const double xi       = x[i];
-            const double dx_dr    = 4.0 * rho[i];
+            const double dx_dr    = 4.0 * r[i];
             const double d2x_dr2  = 4.0;
             double       T_prev   = 1.0;
             double       Tx_prev  = 0.0;
@@ -1392,10 +1392,10 @@ namespace grid::detail
         static_assert(Nt >= 4, "Grid requires at least four poloidal nodes");
         static_assert(Lmax >= 1, "Grid requires at least one Chebyshev row");
         static_assert(Mmax >= 1, "Grid requires at least one positive harmonic");
-        static_assert(Kmax >= 2, "Grid requires rho and rho^2 rows");
+        static_assert(Kmax >= 2, "Grid requires r and r^2 rows");
 
         static constexpr size_t basis_rows     = Lmax;
-        static constexpr size_t rho_power_rows = Kmax;
+        static constexpr size_t r_power_rows = Kmax;
         static constexpr size_t harmonic_rows  = Mmax + 1;
         static constexpr size_t radial_nodes   = Nr;
         static constexpr size_t theta_rows     = Nt;
@@ -1407,7 +1407,7 @@ namespace grid::detail
         static constexpr auto   edge_interpolation_weights = interpolation_weights(nodes, 1.0);
         static constexpr auto   x              = make_x(nodes);
         static constexpr auto   y              = make_y(nodes);
-        static constexpr auto   rhos           = make_rhos<Kmax>(nodes);
+        static constexpr auto   rs           = make_rs<Kmax>(nodes);
         static constexpr auto   T              = make_chebyshev_table<Lmax, ChebyshevField::value>(nodes, x);
         static constexpr auto   T_r            = make_chebyshev_table<Lmax, ChebyshevField::radial>(nodes, x);
         static constexpr auto   T_rr           = make_chebyshev_table<Lmax, ChebyshevField::radial2>(nodes, x);

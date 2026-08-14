@@ -7,5 +7,5 @@ Role:
 
 from __future__ import annotations
 
-RHO_AXIS = 0
+R_AXIS = 0
 THETA_AXIS = 1

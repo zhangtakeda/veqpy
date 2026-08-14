@@ -86,50 +86,50 @@ def test_numba_jit_math_elementwise_ops_match_numpy() -> None:
     assert_allclose(out, np.maximum(lhs, -1.0))
 
 
-def _rp_fields(rho: np.ndarray, power: int) -> np.ndarray:
-    fields = np.empty((3, rho.size), dtype=np.float64)
-    fields[0] = rho**power
-    fields[1] = 0.0 if power == 0 else power * rho ** (power - 1)
-    fields[2] = 0.0 if power < 2 else power * (power - 1) * rho ** (power - 2)
+def _rp_fields(r: np.ndarray, power: int) -> np.ndarray:
+    fields = np.empty((3, r.size), dtype=np.float64)
+    fields[0] = r**power
+    fields[1] = 0.0 if power == 0 else power * r ** (power - 1)
+    fields[2] = 0.0 if power < 2 else power * (power - 1) * r ** (power - 2)
     return fields
 
 
-def _constant_envelope(rho: np.ndarray) -> np.ndarray:
-    fields = np.zeros((3, rho.size), dtype=np.float64)
+def _constant_envelope(r: np.ndarray) -> np.ndarray:
+    fields = np.zeros((3, r.size), dtype=np.float64)
     fields[0] = 1.0
     return fields
 
 
 def test_numba_profile_stage_passive_profile_matches_analytic_derivatives() -> None:
-    rho = np.linspace(0.0, 1.0, 12, dtype=np.float64)
-    rp_fields = _rp_fields(rho, power=3)
-    env_fields = _constant_envelope(rho)
-    T = np.empty((0, rho.size), dtype=np.float64)
-    out = np.empty((3, rho.size), dtype=np.float64)
+    r = np.linspace(0.0, 1.0, 12, dtype=np.float64)
+    rp_fields = _rp_fields(r, power=3)
+    env_fields = _constant_envelope(r)
+    T = np.empty((0, r.size), dtype=np.float64)
+    out = np.empty((3, r.size), dtype=np.float64)
 
     update_profile(out, T, T, T, rp_fields, env_fields, 1.75, None, 1.0)
 
-    assert_allclose(out[0], 1.75 * rho**3)
-    assert_allclose(out[1], 1.75 * 3.0 * rho**2)
-    assert_allclose(out[2], 1.75 * 6.0 * rho)
+    assert_allclose(out[0], 1.75 * r**3)
+    assert_allclose(out[1], 1.75 * 3.0 * r**2)
+    assert_allclose(out[2], 1.75 * 6.0 * r)
 
 
 def test_numba_profile_stage_active_polynomial_profile_matches_product_rule() -> None:
-    rho = np.linspace(0.0, 1.0, 12, dtype=np.float64)
-    rp_fields = _rp_fields(rho, power=2)
-    env_fields = _constant_envelope(rho)
-    T = np.vstack((np.ones_like(rho), rho, rho**2))
-    T_r = np.vstack((np.zeros_like(rho), np.ones_like(rho), 2.0 * rho))
-    T_rr = np.vstack((np.zeros_like(rho), np.zeros_like(rho), np.full_like(rho, 2.0)))
+    r = np.linspace(0.0, 1.0, 12, dtype=np.float64)
+    rp_fields = _rp_fields(r, power=2)
+    env_fields = _constant_envelope(r)
+    T = np.vstack((np.ones_like(r), r, r**2))
+    T_r = np.vstack((np.zeros_like(r), np.ones_like(r), 2.0 * r))
+    T_rr = np.vstack((np.zeros_like(r), np.zeros_like(r), np.full_like(r, 2.0)))
     coeff = np.array([0.25, -0.5, 2.0], dtype=np.float64)
-    out = np.empty((3, rho.size), dtype=np.float64)
+    out = np.empty((3, r.size), dtype=np.float64)
 
     update_profile(out, T, T_r, T_rr, rp_fields, env_fields, 0.75, coeff, 1.0)
 
-    amp = 0.75 + coeff[0] + coeff[1] * rho + coeff[2] * rho**2
-    amp_r = coeff[1] + 2.0 * coeff[2] * rho
-    amp_rr = np.full_like(rho, 2.0 * coeff[2])
-    assert_allclose(out[0], rho**2 * amp)
-    assert_allclose(out[1], 2.0 * rho * amp + rho**2 * amp_r)
-    assert_allclose(out[2], 2.0 * amp + 4.0 * rho * amp_r + rho**2 * amp_rr)
+    amp = 0.75 + coeff[0] + coeff[1] * r + coeff[2] * r**2
+    amp_r = coeff[1] + 2.0 * coeff[2] * r
+    amp_rr = np.full_like(r, 2.0 * coeff[2])
+    assert_allclose(out[0], r**2 * amp)
+    assert_allclose(out[1], 2.0 * r * amp + r**2 * amp_r)
+    assert_allclose(out[2], 2.0 * amp + 4.0 * r * amp_r + r**2 * amp_rr)
 

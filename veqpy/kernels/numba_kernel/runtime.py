@@ -12,7 +12,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from veqpy.kernels.abi.source_semantics import (
-    DEFAULT_SOURCE_FIX_RHO,
+    DEFAULT_SOURCE_FIX_R,
     MU0,
     MaterializedKernelSource,
     materialize_kernel_source,
@@ -148,6 +148,10 @@ class KernelRuntimeCase:
         return self.topology.nodes
 
     @property
+    def source_nodes(self) -> np.ndarray | None:
+        return self.source.source_nodes
+
+    @property
     def active_profiles(self) -> dict[str, int]:
         return dict(self.topology.active_profiles)
 
@@ -179,6 +183,7 @@ class KernelRuntimeCase:
     def s_offsets(self) -> np.ndarray:
         return kernel_boundary_s_offsets_with_s0(self.boundary)
 
+
 class NumbaRuntime:
     """Topology-native residual runtime for the Numba backend."""
 
@@ -186,13 +191,13 @@ class NumbaRuntime:
         self,
         topology: KernelTopology,
         *,
-        fix_rho: float = DEFAULT_SOURCE_FIX_RHO,
+        fix_r: float = DEFAULT_SOURCE_FIX_R,
         source_interpolation_kind: str = SOURCE_INTERP_DEFAULT,
     ) -> None:
         self.capacity_topology = topology
         self.active_topology = topology
         self.topology = topology
-        self.fix_rho = float(fix_rho)
+        self.fix_r = float(fix_r)
         self.source_interpolation_kind = source_interpolation_kind
         self.plan = _build_kernel_runtime_plan(
             topology,
@@ -216,6 +221,8 @@ class NumbaRuntime:
         self.c_effective_order = 0
         self.s_effective_order = 0
         self._case: KernelRuntimeCase | None = None
+        self._case_boundary_identity: KernelBoundary | None = None
+        self._case_source_identity: KernelSource | None = None
 
     @property
     def x_size(self) -> int:
@@ -243,6 +250,8 @@ class NumbaRuntime:
         self.c_effective_order = 0
         self.s_effective_order = 0
         self._case = None
+        self._case_boundary_identity = None
+        self._case_source_identity = None
         return True
 
     def zero_state(self) -> np.ndarray:
@@ -269,6 +278,28 @@ class NumbaRuntime:
         return self.profile_workspace.active_profile_blocks()
 
     def set_case(self, boundary: KernelBoundary, source: KernelSource) -> None:
+        if (
+            self._case is not None
+            and boundary is self._case_boundary_identity
+            and source is self._case_source_identity
+        ):
+            # KernelBoundary/KernelSource are immutable snapshot contracts. An
+            # identity hit therefore reuses validated lowering, native-source
+            # coefficients, and bound runners without risking stale values.
+            return
+        same_boundary = self._case is not None and boundary is self._case_boundary_identity
+        if (
+            same_boundary
+            and self._case is not None
+            and _equivalent_kernel_sources(source, self._case.source)
+        ):
+            # Adapters commonly materialize a fresh immutable KernelSource for
+            # every workflow snapshot even when no source value changed.  Keep
+            # the already validated/bound numerical state and merely recognize
+            # the new snapshot identity; three short array comparisons are much
+            # cheaper than rebuilding PCHIP coefficients and Python closures.
+            self._case_source_identity = source
+            return
         materialized = materialize_kernel_source(self.topology, source)
         driver_scale = MU0 if self.topology.route in {"PI", "PJ1", "PJ2", "PJ3"} else 1.0
         case = KernelRuntimeCase(
@@ -276,9 +307,7 @@ class NumbaRuntime:
             boundary,
             source,
             pprime_input=_readonly_runtime_profile(materialized.scaled_pprime / MU0),
-            driver_input=_readonly_runtime_profile(
-                materialized.scaled_driver / driver_scale
-            ),
+            driver_input=_readonly_runtime_profile(materialized.scaled_driver / driver_scale),
             p0=float(materialized.scaled_p0 / MU0),
         )
         self.plan.source_plan = _build_kernel_source_plan(
@@ -287,15 +316,16 @@ class NumbaRuntime:
             source_interpolation_kind=self.source_interpolation_kind,
             materialized=materialized,
         )
-        self.plan.source_execution = backend_abi.build_source_execution_abi(
-            source_plan=self.plan.source_plan,
-            profile_index=self.plan.profile_index,
-            profile_L=self.plan.profile_L,
-            coeff_index=self.plan.coeff_index,
-            active_profile_ids=self.plan.active_profile_ids,
-        )
+        # SourceExecutionABI is purely topological.  ``set_case`` cannot change
+        # route/coordinate/node ownership, so rebuilding it for every numerical
+        # snapshot only adds dispatch and allocation cost.
         self._case = case
-        self._refresh_runtime_state(case)
+        self._case_boundary_identity = boundary
+        self._case_source_identity = source
+        if same_boundary:
+            self._refresh_source_state(case)
+        else:
+            self._refresh_runtime_state(case)
 
     def residual_into(
         self,
@@ -336,6 +366,7 @@ class NumbaRuntime:
         x0: np.ndarray | None,
     ) -> np.ndarray:
         self.set_case(boundary, source)
+        self.invalidate_source_state()
         if x0 is not None:
             return self.coerce_x(x0).copy()
         if initial == "cold-zeros":
@@ -417,7 +448,7 @@ class NumbaRuntime:
             s_family_fields=self.profile_workspace.s_family_fields,
         )
         refresh_source_runtime(
-            grid_rho=self.plan.grid_workspace.rho,
+            grid_r=self.plan.grid_workspace.r,
             source_plan=self.plan.source_plan,
             source_execution=self.plan.source_execution,
             source_workspace=self.source_workspace,
@@ -438,6 +469,17 @@ class NumbaRuntime:
         )
         self._refresh_runtime_bindings(case)
 
+    def _refresh_source_state(self, case: KernelRuntimeCase) -> None:
+        """Refresh a new numerical source while retaining boundary-owned state."""
+        refresh_source_runtime(
+            grid_r=self.plan.grid_workspace.r,
+            source_plan=self.plan.source_plan,
+            source_execution=self.plan.source_execution,
+            source_workspace=self.source_workspace,
+            psin=self.residual_workspace.root_fields[0],
+        )
+        self._refresh_runtime_bindings(case)
+
     def _refresh_runtime_bindings(self, case: KernelRuntimeCase) -> None:
         self.layout = build_kernel_layout(
             plan=self.plan,
@@ -450,7 +492,7 @@ class NumbaRuntime:
             residual_binding_layout=self.plan.residual_binding_layout,
             c_effective_order=self.c_effective_order,
             s_effective_order=self.s_effective_order,
-            fix_rho=self.fix_rho,
+            fix_r=self.fix_r,
             psin_profile_fields_available=self.profile_workspace.has_fields_for("psin"),
         )
         fixed_profile_ids = np.flatnonzero(~self.plan.active_profile_mask).astype(
@@ -490,7 +532,11 @@ class NumbaRuntime:
 
     def invalidate_source_state(self) -> None:
         route_key = tuple(self.plan.source_execution.route_key)
-        if route_key[0] in {"PJ2", "PJ3"} and route_key[1:] == ("psin", "uniform"):
+        if (
+            route_key[0] in {"PJ2", "PJ3"}
+            and route_key[1] == "psin"
+            and route_key[2] in {"uniform", "explicit"}
+        ):
             self.source_workspace.psin_query.fill(-1.0)
 
     def _require_case(self) -> KernelRuntimeCase:
@@ -616,8 +662,10 @@ def _build_kernel_source_plan(
         nodes=topology.nodes,
         parameterization=topology.source_parameterization,
         source_sample_count=int(materialized.scaled_pprime.shape[0]),
+        source_nodes=materialized.source_nodes,
         scaled_pprime=materialized.scaled_pprime,
         scaled_driver=materialized.scaled_driver,
+        scaled_pressure=materialized.scaled_pressure,
         scaled_p0=materialized.scaled_p0,
         scaled_Ip=materialized.scaled_Ip,
         beta=materialized.beta,
@@ -631,7 +679,7 @@ def _placeholder_source_plan(
     source_route_spec: object,
     source_interpolation_kind: str,
 ) -> SourcePlan:
-    samples = int(topology.sample_count)
+    samples = 2 if topology.nodes == "explicit" else int(topology.sample_count)
     placeholder = np.ones(samples, dtype=np.float64)
     placeholder.setflags(write=False)
     return SourcePlan(
@@ -646,8 +694,14 @@ def _placeholder_source_plan(
         nodes=topology.nodes,
         parameterization=source_parameterization_for_route_key(topology.source_route_key),
         source_sample_count=samples,
+        source_nodes=(
+            np.linspace(0.0, 1.0, samples, dtype=np.float64)
+            if topology.nodes == "explicit"
+            else None
+        ),
         scaled_pprime=placeholder,
         scaled_driver=placeholder,
+        scaled_pressure=None,
         scaled_p0=0.0,
         scaled_Ip=np.nan,
         beta=np.nan,
@@ -656,7 +710,7 @@ def _placeholder_source_plan(
 
 
 def _interpolation_kind_for(topology: KernelTopology, kind: str) -> str:
-    if topology.nodes == "grid":
+    if topology.nodes in {"grid", "explicit"}:
         return ""
     return normalize_source_interpolation_kind(kind)
 
@@ -665,6 +719,32 @@ def _readonly_runtime_profile(value: np.ndarray) -> np.ndarray:
     profile = np.ascontiguousarray(value, dtype=np.float64)
     profile.setflags(write=False)
     return profile
+
+
+def _equivalent_kernel_sources(left: KernelSource, right: KernelSource) -> bool:
+    """Return exact numerical equivalence for immutable source snapshots."""
+    if left.pressure_name != right.pressure_name or left.driver_name != right.driver_name:
+        return False
+    if not np.array_equal(left.pressure_profile, right.pressure_profile, equal_nan=True):
+        return False
+    if not np.array_equal(left.driver_profile, right.driver_profile, equal_nan=True):
+        return False
+    if left.source_nodes is None or right.source_nodes is None:
+        if left.source_nodes is not right.source_nodes:
+            return False
+    elif not np.array_equal(left.source_nodes, right.source_nodes, equal_nan=True):
+        return False
+    return (
+        _equal_scalar(left.p0, right.p0)
+        and _equal_scalar(left.Ip, right.Ip)
+        and _equal_scalar(left.beta, right.beta)
+    )
+
+
+def _equal_scalar(left: float | None, right: float | None) -> bool:
+    if left is None or right is None:
+        return left is right
+    return bool(left == right or (np.isnan(left) and np.isnan(right)))
 
 
 def _build_kernel_residual_binding_layout(
@@ -750,8 +830,7 @@ def _boundary_curve_strain(boundary: KernelBoundary) -> float:
         eta_prime += float(order) * s_offsets[order] * np.cos(order_theta)
 
     speed_boundary = np.sqrt(
-        (np.sin(theta + eta) * (1.0 + eta_prime)) ** 2
-        + (kappa * _AUTO_CURVE_STRAIN_COS_THETA) ** 2
+        (np.sin(theta + eta) * (1.0 + eta_prime)) ** 2 + (kappa * _AUTO_CURVE_STRAIN_COS_THETA) ** 2
     )
     speed_ellipse = np.sqrt(
         _AUTO_CURVE_STRAIN_SIN_THETA**2 + (kappa * _AUTO_CURVE_STRAIN_COS_THETA) ** 2
