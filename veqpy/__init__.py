@@ -10,7 +10,7 @@ Public API:
 - Kernel, KernelRecipe, and KernelInitial.
 - KernelTopology, KernelBoundary, KernelSource, and KernelConfig.
 - SolveResult, ParetoResult, and ParetoSample result records.
-- Grid, Profile, Geometry, Geqdsk, and Equilibrium model objects.
+- Grid, Profile, Geqdsk, and Equilibrium model objects.
 
 Dependencies:
 - veqpy.api for function-style entrypoints.
@@ -52,7 +52,6 @@ from veqpy.kernels import (
 )
 from veqpy.model import (
     Equilibrium,
-    Geometry,
     Geqdsk,
     Grid,
     Profile,
@@ -81,7 +80,6 @@ __all__ = [
     "SolveResult",
     "Equilibrium",
     "Geqdsk",
-    "Geometry",
     "Grid",
     "Profile",
 ]

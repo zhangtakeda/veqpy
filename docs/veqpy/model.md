@@ -40,30 +40,6 @@ grid those fields are unavailable. Kernel runtime setup lowers active profile
 topology to flat arrays; `Profile` remains on the model side for
 `Equilibrium.shape_profiles` and other serializable snapshots.
 
-## Dense Geometry Model
-
-`Geometry` is the migration target for the geometric roots currently split
-between `Grid` and `Equilibrium.shape_profiles`. It already provides the new
-dense representation without changing `Equilibrium` construction yet. Its
-serialized discrete roots are `Nr`, `Nt`, `radial_rule`,
-`radial_calculus`, and optional `K_max`; radial nodes, quadrature weights,
-calculus matrices, and basis tables remain lazy derived caches.
-
-All retained shape coefficients are real physical degrees of freedom. The
-one-dimensional `h_coeffs`, `v_coeffs`, and `kappa_coeffs` arrays and the dense
-two-dimensional `c_coeffs`/`s_coeffs` blocks share one radial coefficient
-axis. Cosine rows represent `c0..cM`, sine rows represent `s1..sM`, so
-`L_max` and `M_max` are derived from array shapes and require no separate
-layout arrays. `K_max=None` leaves the Fourier radial power equal to harmonic
-order; an integer caps that power. LCFS values are named `kappa_lcfs`,
-`c_lcfs`, and `s_lcfs`.
-
-The current implementation reuses `Grid` and `Profile` only behind derived
-caches to preserve numerical parity during migration. Neither helper is a
-`Geometry` root or part of its serialized representation. `Geometry.R`,
-`Geometry.Z`, `Geometry.R_lcfs`, and `Geometry.Z_lcfs` are reconstructed from
-the dense roots.
-
 ## Equilibrium Snapshot
 
 `Equilibrium` is the main output object. It receives root fields after the solve, including:

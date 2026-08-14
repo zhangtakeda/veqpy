@@ -322,7 +322,6 @@ def test_veqpy_root_exports_kernel_surface() -> None:
         "SolveResult",
         "Equilibrium",
         "Geqdsk",
-        "Geometry",
         "Grid",
         "Profile",
     ]
