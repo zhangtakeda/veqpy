@@ -15,6 +15,7 @@ ROOT_EXPORTS = {
     "write_serializer",
     "Equilibrium",
     "Geqdsk",
+    "Geometry",
     "Grid",
     "Profile",
     "Kernel",
@@ -45,7 +46,7 @@ KERNEL_EXPORTS = {
     "config_with_overrides",
 }
 
-MODEL_EXPORTS = {"Equilibrium", "Geqdsk", "Grid", "Profile"}
+MODEL_EXPORTS = {"Equilibrium", "Geqdsk", "Geometry", "Grid", "Profile"}
 
 NUMERICS_EXPORTS = {
     "DEFAULT_CALCULUS",
@@ -102,6 +103,7 @@ def test_direct_module_imports_are_available() -> None:
         "veqpy.kernels.cxx_kernel.builder",
         "veqpy.kernels.numba_kernel.packed_layout",
         "veqpy.model.profile",
+        "veqpy.model.geometry",
         "veqpy.model.grid",
         "veqpy.numerics.interpolate",
     ]

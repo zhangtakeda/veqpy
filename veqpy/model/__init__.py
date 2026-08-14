@@ -7,7 +7,7 @@ Role:
 - Provide the public model import surface.
 
 Public API:
-- Grid, Profile, Geqdsk, and Equilibrium.
+- Grid, Profile, Geometry, Geqdsk, and Equilibrium.
 
 Dependencies:
 - veqpy.base for Serial and Reactive infrastructure.
@@ -25,12 +25,14 @@ Design notes:
 from __future__ import annotations
 
 from .equilibrium import Equilibrium
+from .geometry import Geometry
 from .geqdsk import Geqdsk
 from .grid import Grid
 from .profile import Profile
 
 __all__ = [
     "Equilibrium",
+    "Geometry",
     "Grid",
     "Geqdsk",
     "Profile",
