@@ -10,9 +10,8 @@ from __future__ import annotations
 import numpy as np
 from fusionprime_base import MU0, Equilibrium, Geometry
 
-from veqpy.model.equilibrium import _resample_equilibrium_root_fields
-from veqpy.model.grid import Grid
-from veqpy.model.profile import Profile
+from veqpy.numerics.equilibrium import resample_equilibrium_root_fields
+from veqpy.numerics.grid import Grid
 
 from .packed_layout import decode_packed_blocks
 
@@ -64,7 +63,7 @@ def snapshot_equilibrium_from_kernel_runtime(
         profile_amplitude_powers=profile_amplitude_powers,
     )
     if output_grid is not None:
-        psin, psin_r, psin_rr, FFn_psin, Pn_psin = _resample_equilibrium_root_fields(
+        psin, psin_r, psin_rr, FFn_psin, Pn_psin = resample_equilibrium_root_fields(
             source_grid=grid,
             target_grid=output_grid,
             psin=psin,
@@ -104,7 +103,7 @@ def _base_geometry_from_profiles(
     Z0: float,
     a: float,
     B0: float,
-    shape_profiles: dict[str, Profile],
+    shape_profiles: dict[str, dict[str, object]],
 ) -> Geometry:
     """Translate the numerical profile family to base Geometry roots."""
 
@@ -115,9 +114,10 @@ def _base_geometry_from_profiles(
     def coefficients(name: str) -> np.ndarray:
         profile = shape_profiles.get(name)
         result = np.zeros(l_max + 1, dtype=np.float64)
-        if profile is not None and profile.coeff is not None:
-            count = min(result.size, profile.coeff.size)
-            result[:count] = np.asarray(profile.coeff[:count], dtype=np.float64)
+        if profile is not None and profile["coeff"] is not None:
+            coeff = np.asarray(profile["coeff"], dtype=np.float64)
+            count = min(result.size, coeff.size)
+            result[:count] = coeff[:count]
         return result
 
     c_lcfs = np.zeros(m_max + 1, dtype=np.float64)
@@ -127,16 +127,16 @@ def _base_geometry_from_profiles(
     for harmonic in range(m_max + 1):
         profile = shape_profiles.get(f"c{harmonic}")
         if profile is not None:
-            c_lcfs[harmonic] = float(profile.offset)
+            c_lcfs[harmonic] = float(profile["offset"])
         c_coeffs[harmonic] = coefficients(f"c{harmonic}")
     for harmonic in range(1, m_max + 1):
         profile = shape_profiles.get(f"s{harmonic}")
         if profile is not None:
-            s_lcfs[harmonic - 1] = float(profile.offset)
+            s_lcfs[harmonic - 1] = float(profile["offset"])
         s_coeffs[harmonic - 1] = coefficients(f"s{harmonic}")
 
     kappa_profile = shape_profiles.get("k")
-    kappa_lcfs = 1.0 if kappa_profile is None else float(kappa_profile.offset)
+    kappa_lcfs = 1.0 if kappa_profile is None else float(kappa_profile["offset"])
     return Geometry(
         Nr=int(grid.Nr),
         Nt=int(grid.Nt),
@@ -167,17 +167,17 @@ def _snapshot_equilibrium_profiles(
     profile_powers: np.ndarray,
     profile_envelope_powers: np.ndarray,
     profile_amplitude_powers: np.ndarray,
-) -> dict[str, Profile]:
-    profiles: dict[str, Profile] = {}
+) -> dict[str, dict[str, object]]:
+    profiles: dict[str, dict[str, object]] = {}
     for name in shape_profile_names:
         profile_id = profile_index[name]
         coeff = coeff_values[profile_id]
-        profiles[name] = Profile(
-            scale=float(profile_scales[profile_id]),
-            power=int(profile_powers[profile_id]),
-            envelope_power=int(profile_envelope_powers[profile_id]),
-            amplitude_power=float(profile_amplitude_powers[profile_id]),
-            offset=float(profile_offsets[profile_id]),
-            coeff=None if coeff is None else np.asarray(coeff, dtype=np.float64).copy(),
-        )
+        profiles[name] = {
+            "scale": float(profile_scales[profile_id]),
+            "power": int(profile_powers[profile_id]),
+            "envelope_power": int(profile_envelope_powers[profile_id]),
+            "amplitude_power": float(profile_amplitude_powers[profile_id]),
+            "offset": float(profile_offsets[profile_id]),
+            "coeff": None if coeff is None else np.asarray(coeff, dtype=np.float64).copy(),
+        }
     return profiles

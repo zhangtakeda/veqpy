@@ -11,6 +11,7 @@ from dataclasses import dataclass, replace
 from time import perf_counter
 
 import numpy as np
+from fusionprime_base import Equilibrium
 from scipy.optimize import least_squares, root
 
 from veqpy.kernels.types import (
@@ -20,8 +21,7 @@ from veqpy.kernels.types import (
     _SolveSnapshot,
     _SourceCase,
 )
-from veqpy.model.equilibrium import Equilibrium
-from veqpy.model.grid import Grid
+from veqpy.numerics.grid import Grid
 
 from .residual_scale import make_residual_scale
 from .result import solve_result_from_runtime

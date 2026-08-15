@@ -66,6 +66,7 @@ namespace cxx_kernel_api
                 setup.pprime[i] = input.pprime[i];
                 setup.driver[i] = input.driver[i];
             }
+            setup.source_count = input.source_count;
             return setup;
         }
 

@@ -26,7 +26,7 @@ from veqpy.kernels.numba_kernel.workspace.field_rows import GRID_RADIAL_R_POWERS
 _AMPLITUDE_POWER_FLOOR = 1.0e-10
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def _apply_amplitude_power(
     amp: float,
     amp_r: float,
@@ -64,7 +64,7 @@ def _apply_amplitude_power(
     return value, value_r, value_rr
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def _profile_basis_views(
     grid_radial_fields: np.ndarray,
     grid_k_max: int,
@@ -81,7 +81,7 @@ def _profile_basis_views(
     )
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def update_profile(
     out_fields: np.ndarray,
     T: np.ndarray,
@@ -210,7 +210,7 @@ def update_profile(
         out_fields[2, i] = rp_rr * amp + 2.0 * rp_r * amp_r + rp * amp_rr
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def update_profiles_packed_bulk(
     profile_fields: np.ndarray,
     profile_rp_fields: np.ndarray,

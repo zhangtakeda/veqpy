@@ -102,11 +102,11 @@ def prepare(
     CMake. It is the fast validation path used before the nanobind production API is finalized.
     """
 
-    recipe = _BuildPolicy(backend="cxx") if recipe is None else recipe
+    recipe = _BuildPolicy(backend="cxx-relaxed", build="release-relaxed") if recipe is None else recipe
     if not isinstance(recipe, _BuildPolicy):
         raise TypeError(f"recipe must be _BuildPolicy, got {type(recipe).__name__}")
-    if recipe.backend != "cxx":
-        raise ValueError("Cxx artifact preparation requires _BuildPolicy backend='cxx'")
+    if recipe.backend not in {"cxx-strict", "cxx-relaxed"}:
+        raise ValueError("Cxx artifact preparation requires a strict or relaxed Cxx recipe")
     if not dry_run:
         validate_supported_for_cxx_backend(topology)
     source_dir = _default_source_dir() if source_dir is None else source_dir.resolve()
@@ -505,11 +505,11 @@ def _cmake_configure_args(
         f"-DVEQPY_CXX_ANALYSIS_BUILD={_cmake_bool(recipe.analysis)}",
         f"-DVEQ_NR={topology.Nr}",
         f"-DVEQ_NT={topology.Nt}",
-        f"-DVEQ_SOURCE_SAMPLE_COUNT={topology.sample_count}",
+        "-DVEQ_SOURCE_SAMPLE_COUNT=1024",
         f"-DVEQ_SOURCE_ROUTE_CODE={topology.source_route_code}",
         f"-DVEQ_SOURCE_COORDINATE_CODE={topology.source_coordinate_code}",
         f"-DVEQ_SOURCE_CONSTRAINT_CODE={topology.source_constraint_code}",
-        f"-DVEQ_SOURCE_NODES_CODE={topology.source_nodes_code}",
+        "-DVEQ_SOURCE_NODES_CODE=1",
         f"-DVEQ_SOURCE_ACTIVE_FAMILY_CODE={topology.source_active_family_code}",
         f"-DVEQ_SOURCE_PARAMETERIZATION_CODE={topology.source_parameterization_code}",
         f"-DVEQ_H_PROFILE_COUNT={topology.h_count}",
@@ -694,11 +694,11 @@ def _native_build_contract(
             "VEQPY_CXX_ANALYSIS_BUILD": _cmake_bool(recipe.analysis),
             "VEQ_NR": topology.Nr,
             "VEQ_NT": topology.Nt,
-            "VEQ_SOURCE_SAMPLE_COUNT": topology.sample_count,
+            "VEQ_SOURCE_SAMPLE_COUNT": 1024,
             "VEQ_SOURCE_ROUTE_CODE": topology.source_route_code,
             "VEQ_SOURCE_COORDINATE_CODE": topology.source_coordinate_code,
             "VEQ_SOURCE_CONSTRAINT_CODE": topology.source_constraint_code,
-            "VEQ_SOURCE_NODES_CODE": topology.source_nodes_code,
+            "VEQ_SOURCE_NODES_CODE": 1,
             "VEQ_SOURCE_ACTIVE_FAMILY_CODE": topology.source_active_family_code,
             "VEQ_SOURCE_PARAMETERIZATION_CODE": topology.source_parameterization_code,
             "VEQ_H_PROFILE_COUNT": topology.h_count,

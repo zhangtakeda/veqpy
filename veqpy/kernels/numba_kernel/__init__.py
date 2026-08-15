@@ -11,7 +11,8 @@ Public API:
 
 Dependencies:
 - veqpy.kernels for Kernel dataclasses and ABI helpers.
-- veqpy.model for Grid and Equilibrium construction.
+- veqpy.numerics for Grid tables and fusionprime-base for Equilibrium
+  materialization.
 - veqpy.numerics for interpolation and numerical helper routines.
 
 Downstream:

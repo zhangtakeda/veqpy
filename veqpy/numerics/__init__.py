@@ -2,7 +2,7 @@
 Package: veqpy.numerics
 
 Role:
-- Provide shared mathematical helpers for model reconstruction and Kernel runtime binding.
+- Provide shared mathematical helpers for Kernel runtime binding and output materialization.
 - Own axes, quadrature, calculus, interpolation, and projection utilities.
 
 Public API:
@@ -11,13 +11,8 @@ Public API:
 - make_calculus, DEFAULT_CALCULUS, apply_differentiation, and apply_accumulation.
 - Interpolation helpers for source remapping and barycentric weights.
 
-Dependencies:
-- veqpy.base.Registry for keyed helper selection.
-- NumPy and SciPy where used by concrete numerical modules.
-
-Downstream:
-- veqpy.model uses numerics for grid tables and model-side derived fields.
-- veqpy.kernels uses numerics for source interpolation and backend setup helpers.
+The package owns its small private Registry implementation and has no
+dependency on a VEQPy model/base compatibility layer.
 
 Design notes:
 - Keep general numerical helpers here.

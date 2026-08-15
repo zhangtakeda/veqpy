@@ -7,12 +7,8 @@ Role:
 
 from __future__ import annotations
 
-import base64
-import hashlib
 import json
 from typing import Any
-
-_KERNEL_TOPOLOGY_KEY_LENGTH = 32
 
 
 def recipe_identity_payload(recipe: Any) -> dict[str, object]:
@@ -70,9 +66,7 @@ def source_policy_payload(topology: Any) -> dict[str, Any]:
         "supported_constraints": list(topology.source_supported_constraints),
         "uses_Ip": topology.source_uses_ip_constraint,
         "uses_beta": topology.source_uses_beta_constraint,
-        "nodes": topology.nodes,
-        "nodes_code": topology.source_nodes_code,
-        "sample_count": topology.sample_count,
+        "runtime_source": "explicit",
         "active_family": topology.source_active_family,
         "active_family_code": topology.source_active_family_code,
         "parameterization": topology.source_parameterization,
@@ -87,9 +81,3 @@ def topology_json_bytes(topology: Any) -> bytes:
         separators=(",", ":"),
         sort_keys=True,
     ).encode("utf-8")
-
-
-def compute_topology_key(topology: Any) -> str:
-    digest = hashlib.sha256(topology_json_bytes(topology)).digest()
-    encoded = base64.b32encode(digest).decode("ascii").lower().rstrip("=")
-    return encoded[:_KERNEL_TOPOLOGY_KEY_LENGTH]

@@ -53,8 +53,17 @@ def source_case(topology: KernelTopology, value: KernelInput) -> _SourceCase:
     }[coordinate]
     driver_name = _driver_name(topology.route, coordinate)
     kwargs: dict[str, object] = {"Ip": value.Ip, "beta": value.beta}
-    if topology.nodes == "explicit":
-        kwargs["source_nodes"] = np.asarray(value.source_nodes[:stop], dtype=np.float64)
+    kwargs["source_nodes"] = np.asarray(value.source_nodes[:stop], dtype=np.float64)
+    if value.native_source_nodes is not None:
+        kwargs["native_source_nodes"] = np.asarray(
+            value.native_source_nodes[:stop],
+            dtype=np.float64,
+        )
+    if value.source_coordinate_jacobian is not None:
+        kwargs["source_coordinate_jacobian"] = np.asarray(
+            value.source_coordinate_jacobian[:stop],
+            dtype=np.float64,
+        )
     if value.pressure_code == 0:
         kwargs["p"] = pressure
     else:
@@ -65,9 +74,18 @@ def source_case(topology: KernelTopology, value: KernelInput) -> _SourceCase:
 
 
 def build_policy(*, backend: str, layout: str = "degree") -> _BuildPolicy:
-    """Create the private backend build policy from a public backend token."""
+    """Create the private backend recipe from a normalized public token."""
 
-    return _BuildPolicy(backend=backend, layout=layout)
+    normalized = str(backend).strip().lower()
+    if normalized == "cxx":
+        normalized = "cxx-relaxed"
+    if normalized == "numba":
+        return _BuildPolicy(backend="numba", layout=layout, build="numba")
+    if normalized == "cxx-strict":
+        return _BuildPolicy(backend="cxx-strict", layout=layout, build="release-strict")
+    if normalized == "cxx-relaxed":
+        return _BuildPolicy(backend="cxx-relaxed", layout=layout, build="release-relaxed")
+    raise ValueError("backend must be numba, cxx, cxx-strict, or cxx-relaxed")
 
 
 def private_config(value: KernelConfig) -> object:

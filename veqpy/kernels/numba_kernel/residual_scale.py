@@ -23,7 +23,7 @@ from collections.abc import Callable
 
 import numpy as np
 
-from veqpy.base import Registry
+from veqpy.numerics.registry import Registry
 
 # -----------------------------------------------------------------------------
 # Public interface

@@ -25,11 +25,10 @@ from veqpy.kernels.types import (
     _SourceCase,
     kernel_boundary_s_offsets_with_s0,
 )
-from veqpy.model.grid import Grid
 from veqpy.numerics import (
     SOURCE_INTERP_DEFAULT,
-    normalize_source_interpolation_kind,
 )
+from veqpy.numerics.grid import Grid
 
 from . import backend_abi
 from .initialize import build_boundary_slope_initial_state
@@ -144,7 +143,7 @@ class KernelRuntimeCase:
 
     @property
     def nodes(self) -> str:
-        return self.topology.nodes
+        return "explicit"
 
     @property
     def source_nodes(self) -> np.ndarray | None:
@@ -559,7 +558,7 @@ def _build_kernel_runtime_plan(
         raise ValueError(
             f"KernelTopology x_size={topology.x_size} disagrees with packed layout x_size={x_size}"
         )
-    source_route_spec = validate_route(topology.route, topology.coordinate, topology.nodes)
+    source_route_spec = validate_route(topology.route, topology.coordinate, "explicit")
     source_plan = _placeholder_source_plan(
         topology,
         source_route_spec=source_route_spec,
@@ -624,7 +623,7 @@ def _build_kernel_source_plan(
 ) -> SourcePlan:
     if materialized is None:
         materialized = materialize_kernel_source(topology, source)
-    source_route_spec = validate_route(topology.route, topology.coordinate, topology.nodes)
+    source_route_spec = validate_route(topology.route, topology.coordinate, "explicit")
     return SourcePlan(
         route=topology.route,
         kernel=source_kernel_for_topology(
@@ -634,7 +633,7 @@ def _build_kernel_source_plan(
             default_kernel=source_route_spec.implementation,
         ),
         coordinate=topology.coordinate,
-        nodes=topology.nodes,
+        nodes="explicit",
         parameterization=topology.source_parameterization,
         source_sample_count=int(materialized.scaled_pprime.shape[0]),
         source_nodes=materialized.source_nodes,
@@ -654,7 +653,7 @@ def _placeholder_source_plan(
     source_route_spec: object,
     source_interpolation_kind: str,
 ) -> SourcePlan:
-    samples = 2 if topology.nodes == "explicit" else int(topology.sample_count)
+    samples = 2
     placeholder = np.ones(samples, dtype=np.float64)
     placeholder.setflags(write=False)
     return SourcePlan(
@@ -666,14 +665,10 @@ def _placeholder_source_plan(
             default_kernel=source_route_spec.implementation,
         ),
         coordinate=topology.coordinate,
-        nodes=topology.nodes,
+        nodes="explicit",
         parameterization=source_parameterization_for_route_key(topology.source_route_key),
         source_sample_count=samples,
-        source_nodes=(
-            np.linspace(0.0, 1.0, samples, dtype=np.float64)
-            if topology.nodes == "explicit"
-            else None
-        ),
+        source_nodes=np.linspace(0.0, 1.0, samples, dtype=np.float64),
         scaled_pprime=placeholder,
         scaled_driver=placeholder,
         scaled_pressure=None,
@@ -685,9 +680,8 @@ def _placeholder_source_plan(
 
 
 def _interpolation_kind_for(topology: KernelTopology, kind: str) -> str:
-    if topology.nodes in {"grid", "explicit"}:
-        return ""
-    return normalize_source_interpolation_kind(kind)
+    del topology, kind
+    return ""
 
 
 def _readonly_runtime_profile(value: np.ndarray) -> np.ndarray:

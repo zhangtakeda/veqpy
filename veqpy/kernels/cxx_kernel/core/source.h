@@ -120,11 +120,14 @@ namespace source::detail
         double       alpha2 = 0.0;
         double       scaled_effective_p0 = 0.0;
         double       pressure_multiplier = 1.0;
+        size_t       active_count = sample_count;
         bool         source_materialization_initialized = false;
 
         constexpr void set_uniform_sources(std::span<const double, sample_count> pprime,
-                                           std::span<const double, sample_count> driver) noexcept
+                                           std::span<const double, sample_count> driver,
+                                           size_t active_source_count) noexcept
         {
+            active_count = active_source_count < sample_count ? active_source_count : sample_count;
             for (size_t i = 0; i < sample_count; ++i)
             {
                 public_pprime_input[i] = pprime[i];
@@ -137,14 +140,14 @@ namespace source::detail
 
         constexpr void set_pressure_input_scale(double scale) noexcept
         {
-            for (size_t i = 0; i < sample_count; ++i)
+            for (size_t i = 0; i < active_count; ++i)
                 pprime_input[i] = public_pprime_input[i] * scale;
             source_materialization_initialized = false;
         }
 
         constexpr void set_driver_input_scale(double scale) noexcept
         {
-            for (size_t i = 0; i < sample_count; ++i)
+            for (size_t i = 0; i < active_count; ++i)
                 driver_input[i] = public_driver_input[i] * scale;
             source_materialization_initialized = false;
         }
@@ -844,32 +847,44 @@ namespace source::detail
             return value;
         }
 
-        static constexpr size_t local_uniform_stencil_start(double q) noexcept
+        static constexpr size_t local_uniform_stencil_start(double q, size_t count) noexcept
         {
-            if constexpr (stencil_size >= sample_count)
+            const size_t effective_stencil = count < stencil_size ? count : stencil_size;
+            if (effective_stencil >= count)
             {
                 return 0;
             }
             else
             {
-                const double pos    = q * static_cast<double>(sample_count - 1);
+                const double pos    = q * static_cast<double>(count - 1);
                 size_t       center = static_cast<size_t>(pos);
                 if (pos > static_cast<double>(center))
                     ++center;
 
-                constexpr size_t half = stencil_size / 2;
+                const size_t half = effective_stencil / 2;
                 if (center < half)
                     return 0;
 
-                const size_t     start     = center - half;
-                constexpr size_t max_start = sample_count - stencil_size;
+                const size_t start = center - half;
+                const size_t max_start = count - effective_stencil;
                 return start > max_start ? max_start : start;
             }
         }
 
+        static constexpr double local_barycentric_weight(size_t local_index, size_t count) noexcept
+        {
+            double weight = 1.0;
+            for (size_t other = 0; other < count; ++other)
+            {
+                if (other != local_index)
+                    weight /= static_cast<double>(local_index) - static_cast<double>(other);
+            }
+            return weight;
+        }
+
         constexpr void local_barycentric_interpolate_pair() noexcept
         {
-            if constexpr (sample_count == 1)
+            if (active_count <= 1)
             {
                 for (size_t i = 0; i < radial_nodes; ++i)
                 {
@@ -879,12 +894,14 @@ namespace source::detail
             }
             else
             {
-                constexpr double denom_scale = static_cast<double>(sample_count - 1);
+                const size_t effective_stencil = active_count < stencil_size ? active_count : stencil_size;
+                const double denom_scale = static_cast<double>(active_count - 1);
                 for (size_t i = 0; i < radial_nodes; ++i)
                 {
                     const double q         = clip_unit(source_parameter_query[i]);
-                    const size_t start     = local_uniform_stencil_start(q);
-                    const size_t nearest   = static_cast<size_t>(q * denom_scale + 0.5);
+                    const size_t start     = local_uniform_stencil_start(q, active_count);
+                    const size_t nearest_unclipped = static_cast<size_t>(q * denom_scale + 0.5);
+                    const size_t nearest = nearest_unclipped >= active_count ? active_count - 1 : nearest_unclipped;
                     const double x_nearest = static_cast<double>(nearest) / denom_scale;
                     if (math::abs(q - x_nearest) <= 1.0e-14)
                     {
@@ -896,11 +913,12 @@ namespace source::detail
                     double denominator      = 0.0;
                     double numerator_pprime = 0.0;
                     double numerator_driver = 0.0;
-                    for (size_t local_j = 0; local_j < stencil_size; ++local_j)
+                    for (size_t local_j = 0; local_j < effective_stencil; ++local_j)
                     {
                         const size_t j = start + local_j;
                         const double term =
-                            SourceShape::barycentric_weights[local_j] / (q - static_cast<double>(j) / denom_scale);
+                            local_barycentric_weight(local_j, effective_stencil) /
+                            (q - static_cast<double>(j) / denom_scale);
                         denominator += term;
                         numerator_pprime += term * pprime_input[j];
                         numerator_driver += term * driver_input[j];

@@ -1,26 +1,19 @@
-"""
-Module: veqpy.model.grid
+"""Numerical radial/poloidal grid tables used by the private Kernel runtime.
 
 Role:
 - Hold radial-poloidal grid configuration and derived tables.
 - Assemble nodes, weights, spectral matrices, and basis fields.
 
-Public API:
-- Grid
-
-Notes:
-- `Grid` is a reactive model-layer configuration object.
-- Pure mathematical matrix construction is delegated to `veqpy.numerics`.
-- Does not own source routes, residual assembly, or solver runtime state.
+The class is intentionally a private numerical value object.  It has no
+reactive/serialization or visualization dependency; the FusionPRIME base
+``Geometry`` owns public frozen state, while this class only builds the
+collocation tables required by the solver.
 """
 
 from __future__ import annotations
 
 import numpy as np
-from rich.console import Console
-from rich.tree import Tree
 
-from veqpy.base import Reactive, Serial
 from veqpy.numerics import (
     DEFAULT_CALCULUS,
     DEFAULT_QUADRATURE,
@@ -34,7 +27,7 @@ from veqpy.numerics import (
 )
 
 
-class Grid(Reactive, Serial):
+class Grid:
     """Geometric integration grid with coordinate axes ``(r, theta)``."""
 
     root_properties = {
@@ -57,91 +50,13 @@ class Grid(Reactive, Serial):
         quadrature_scheme: str = DEFAULT_QUADRATURE,
         calculus_scheme: str = DEFAULT_CALCULUS,
     ) -> None:
-        super().__init__()
-
-        self.Nr = Nr
-        self.Nt = Nt
-        self.L_max = L_max
-        self.M_max = M_max
-        self.K_max = K_max
-        self.quadrature_scheme = quadrature_scheme
-        self.calculus_scheme = calculus_scheme
-
-    def __rich__(self) -> Tree:
-        tree = Tree("[bold blue]Grid[/]")
-        tree.add(f"Nr: {self.Nr}")
-        tree.add(f"Nt: {self.Nt}")
-        tree.add(f"quadrature_scheme: {self.quadrature_scheme}")
-        tree.add(f"calculus_scheme: {self.calculus_scheme}")
-        if self.K_max is not None:
-            tree.add(f"K_max: {self.K_max}")
-        return tree
-
-    def __str__(self) -> str:
-        console = Console(
-            color_system=None, force_terminal=False, width=120, record=True, soft_wrap=False
-        )
-        with console.capture() as capture:
-            console.print(self.__rich__())
-        return capture.get().rstrip()
-
-    def __repr__(self) -> str:
-        return str(self)
-
-    @classmethod
-    def reactive_inspections(cls, name: str, value: object) -> object:
-        """Normalize and validate root grid attributes on assignment."""
-        match name:
-            case "Nr":
-                value = int(value)
-                if value < 4:
-                    raise ValueError("Nr must be at least 4 for stable spectral methods")
-                return value
-
-            case "Nt":
-                value = int(value)
-                if value < 4:
-                    raise ValueError("Nt must be at least 4 for stable spectral methods")
-                return value
-
-            case "L_max":
-                value = int(value)
-                if value < 0:
-                    raise ValueError("L_max must be non-negative")
-                return value
-
-            case "M_max":
-                value = int(value)
-                if value < 0:
-                    raise ValueError("M_max must be non-negative")
-                return value
-
-            case "K_max":
-                if value is None:
-                    return None
-                value = int(value)
-                if value < 0:
-                    raise ValueError("K_max must be non-negative")
-                return value
-
-            case "quadrature_scheme" | "calculus_scheme":
-                return str(value).lower()
-
-        return value
-
-    @classmethod
-    def serial_attributes(cls) -> dict[str, type]:
-        """Declare serializable root attributes."""
-
-        return {
-            "Nr": int,
-            "Nt": int,
-            "quadrature_scheme": str,
-            "calculus_scheme": str,
-            "L_max": int,
-            "M_max": int,
-            "K_max": int | None,
-        }
+        self.Nr = _positive_int(Nr, "Nr", minimum=4)
+        self.Nt = _positive_int(Nt, "Nt", minimum=4)
+        self.L_max = _nonnegative_int(L_max, "L_max")
+        self.M_max = _nonnegative_int(M_max, "M_max")
+        self.K_max = None if K_max is None else _nonnegative_int(K_max, "K_max")
+        self.quadrature_scheme = str(quadrature_scheme).lower()
+        self.calculus_scheme = str(calculus_scheme).lower()
 
     @property
     def quadrature(self) -> tuple[np.ndarray, np.ndarray]:
@@ -439,3 +354,19 @@ def _build_chebyshev_tables(
     out[1] = T_r
     out[2] = T_rr
     return out
+
+
+def _positive_int(value: object, name: str, *, minimum: int) -> int:
+    if type(value) is not int:
+        raise TypeError(f"{name} must be an int")
+    if value < minimum:
+        raise ValueError(f"{name} must be at least {minimum}")
+    return value
+
+
+def _nonnegative_int(value: object, name: str) -> int:
+    if type(value) is not int:
+        raise TypeError(f"{name} must be an int")
+    if value < 0:
+        raise ValueError(f"{name} must be non-negative")
+    return value

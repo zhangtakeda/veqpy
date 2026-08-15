@@ -32,7 +32,7 @@ from veqpy.kernels.numba_kernel.workspace.field_rows import (
 from veqpy.numerics import interpolation_matrix
 
 if TYPE_CHECKING:
-    from veqpy.model.grid import Grid
+    from veqpy.numerics.grid import Grid
 
 
 @dataclass(frozen=True, slots=True)
@@ -204,7 +204,7 @@ class GridWorkspace:
     def to_grid(self) -> Grid:
         """Rebuild a full Grid from the snapshot for Equilibrium materialization and
         other callers that need a real Grid."""
-        from veqpy.model.grid import Grid
+        from veqpy.numerics.grid import Grid
 
         return Grid(
             Nr=self.Nr,

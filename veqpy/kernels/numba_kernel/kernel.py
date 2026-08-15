@@ -12,6 +12,7 @@ from time import perf_counter
 from typing import Any
 
 import numpy as np
+from fusionprime_base import Equilibrium
 from numpy.linalg import norm
 
 from veqpy.kernels.abi.enums import (
@@ -28,8 +29,7 @@ from veqpy.kernels.types import (
     _SolveSnapshot,
     _SourceCase,
 )
-from veqpy.model.equilibrium import Equilibrium
-from veqpy.model.grid import Grid
+from veqpy.numerics.grid import Grid
 
 from .solver import NumbaSolver
 from .state import coerce_initial_state
@@ -49,7 +49,11 @@ class _NumbaKernelImpl:
         if not isinstance(topology, KernelTopology):
             raise TypeError(f"topology must be KernelTopology, got {type(topology).__name__}")
         self.topology = topology
-        self.recipe = _BuildPolicy(backend="numba", layout="degree") if recipe is None else recipe
+        self.recipe = (
+            _BuildPolicy(backend="numba", layout="degree", build="numba")
+            if recipe is None
+            else recipe
+        )
         if not isinstance(self.recipe, _BuildPolicy):
             raise TypeError(f"recipe must be _BuildPolicy, got {type(self.recipe).__name__}")
         self._validate_numba_recipe(self.recipe)
@@ -315,7 +319,7 @@ def _prepare_boundary(topology: KernelTopology) -> _BoundaryCase:
 
 
 def _prepare_source(topology: KernelTopology) -> _SourceCase:
-    sample_count = 2 if topology.nodes == "explicit" else int(topology.sample_count)
+    sample_count = 2
     pressure_derivative = np.full(sample_count, -1.0e6, dtype=np.float64)
     driver_value = 1.0e6 if topology.route in {"PI", "PJ1", "PJ2", "PJ3"} else 1.0
     driver = np.full(sample_count, driver_value, dtype=np.float64)
@@ -324,11 +328,7 @@ def _prepare_source(topology: KernelTopology) -> _SourceCase:
             PRESSURE_DERIVATIVE_BY_COORDINATE[topology.coordinate]: pressure_derivative,
             source_driver_for(topology.route, topology.coordinate): driver,
         },
-        source_nodes=(
-            np.linspace(0.0, 1.0, sample_count, dtype=np.float64)
-            if topology.nodes == "explicit"
-            else None
-        ),
+        source_nodes=np.linspace(0.0, 1.0, sample_count, dtype=np.float64),
         Ip=1.0e6,
         beta=0.5 if topology.source_uses_beta_constraint else np.nan,
     )

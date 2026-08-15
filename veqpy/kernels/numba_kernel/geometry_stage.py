@@ -79,7 +79,7 @@ def _geometry_grid_poloidal_views(
     )
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def _effective_fourier_limit(
     fields: np.ndarray,
     active_order: int,
@@ -101,7 +101,7 @@ def _effective_fourier_limit(
     return effective_limit
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def update_geometry_hot(
     surface_fields: np.ndarray,
     radial_fields: np.ndarray,
@@ -291,7 +291,7 @@ def update_geometry_hot(
         Ln_r[i] = sum_JdivR * mean_scale
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def update_geometry_hot_c0(
     surface_fields: np.ndarray,
     radial_fields: np.ndarray,
@@ -438,7 +438,7 @@ def update_geometry_hot_c0(
         Ln_r[i] = sum_JdivR * mean_scale
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def update_geometry_hot_s1(
     surface_fields: np.ndarray,
     radial_fields: np.ndarray,
@@ -599,7 +599,7 @@ def update_geometry_hot_s1(
         Ln_r[i] = sum_JdivR * mean_scale
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def update_geometry_hot_auto(
     surface_fields: np.ndarray,
     radial_fields: np.ndarray,

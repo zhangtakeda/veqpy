@@ -23,32 +23,10 @@ from .abi.options import (
 from .types import KernelTopology as _KernelTopology
 from .types import _BackendConfig
 
-
-@dataclass(frozen=True, slots=True)
-class KernelTopology(_KernelTopology):
-    """Immutable structure and capacity metadata for one prepared Kernel."""
-
-    source_capacity: int | None = None
-
-    def __post_init__(self) -> None:
-        _KernelTopology.__post_init__(self)
-        requested = self.source_capacity
-        if requested is None:
-            if self.nodes == "explicit":
-                if self.sample_count is not None:
-                    requested = int(self.sample_count)
-                else:
-                    raise ValueError(
-                        "explicit source topology requires source_capacity"
-                    )
-            else:
-                requested = int(self.sample_count or self.Nr)
-        if type(requested) is not int or requested <= 0:
-            raise ValueError("source_capacity must be a positive int")
-        if self.nodes != "explicit" and self.sample_count is not None:
-            if requested < int(self.sample_count):
-                raise ValueError("source_capacity cannot be smaller than sample_count")
-        object.__setattr__(self, "source_capacity", int(requested))
+# The canonical topology dataclass lives in ``types`` with an internal-only
+# constructor contract.  This alias is the single named ABI binding; keeping
+# one class avoids a second topology record with subtly different fields.
+KernelTopology = _KernelTopology
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,11 +101,10 @@ def lower_config(value: KernelConfig) -> _BackendConfig:
 class KernelInput:
     """Preallocated, numeric-only per-case input buffers.
 
-    The source arrays use the first ``source_count`` entries.  All arrays are
-    allocated to ``KernelTopology.source_capacity`` so an explicit source case
-    never changes object identity or shape during ``solve``.  ``pressure_code``
-    selects the primitive-versus-derivative representation; no strings or
-    Python case objects enter the hot ABI.
+    The source arrays use the first ``source_count`` entries.  They start at
+    capacity 256 and are replaced only by the Adapter's preprocess growth
+    epochs.  ``pressure_code`` selects the primitive-versus-derivative
+    representation; no strings or Python case objects enter the hot ABI.
     """
 
     a: float
@@ -141,6 +118,8 @@ class KernelInput:
     driver: np.ndarray
     source_nodes: np.ndarray
     source_count: int
+    native_source_nodes: np.ndarray | None = None
+    source_coordinate_jacobian: np.ndarray | None = None
     p0: float = 0.0
     Ip: float = np.nan
     beta: float = np.nan
@@ -148,6 +127,7 @@ class KernelInput:
     has_x0: bool = False
     pressure_derivative: np.ndarray | None = None
     pressure_code: int = 1
+    capacity_epoch: int = 0
 
     def __post_init__(self) -> None:
         _pressure_kind_code(self.pressure_code)
@@ -163,6 +143,16 @@ class KernelInput:
         self.pressure = _owned_float_array(self.pressure, "pressure")
         self.driver = _owned_float_array(self.driver, "driver")
         self.source_nodes = _owned_float_array(self.source_nodes, "source_nodes")
+        if self.native_source_nodes is not None:
+            self.native_source_nodes = _owned_float_array(
+                self.native_source_nodes,
+                "native_source_nodes",
+            )
+        if self.source_coordinate_jacobian is not None:
+            self.source_coordinate_jacobian = _owned_float_array(
+                self.source_coordinate_jacobian,
+                "source_coordinate_jacobian",
+            )
         if self.pressure_derivative is not None:
             self.pressure_derivative = _owned_float_array(
                 self.pressure_derivative, "pressure_derivative"
@@ -171,12 +161,26 @@ class KernelInput:
             raise ValueError("pressure and driver must have identical shapes")
         if self.source_nodes.shape != self.pressure.shape:
             raise ValueError("source_nodes and pressure must have identical shapes")
+        if (
+            self.native_source_nodes is not None
+            and self.native_source_nodes.shape != self.pressure.shape
+        ):
+            raise ValueError("native_source_nodes and pressure must have identical shapes")
+        if (
+            self.source_coordinate_jacobian is not None
+            and self.source_coordinate_jacobian.shape != self.pressure.shape
+        ):
+            raise ValueError(
+                "source_coordinate_jacobian and pressure must have identical shapes"
+            )
         if self.pressure_derivative is not None and self.pressure_derivative.shape != self.pressure.shape:
             raise ValueError("pressure_derivative and pressure must have identical shapes")
-        if type(self.source_count) is not int or self.source_count < 1:
-            raise ValueError("source_count must be a positive int")
+        if type(self.source_count) is not int or self.source_count < 0:
+            raise ValueError("source_count must be a non-negative int")
         if self.source_count > self.pressure.size:
             raise ValueError("source_count exceeds the allocated source capacity")
+        if type(self.capacity_epoch) is not int or self.capacity_epoch < 0:
+            raise ValueError("capacity_epoch must be a non-negative int")
         self.p0 = _finite_float(self.p0, "p0")
         self.Ip = float(self.Ip)
         self.beta = float(self.beta)
@@ -188,14 +192,10 @@ class KernelInput:
 
     @classmethod
     def allocate(cls, topology: KernelTopology) -> "KernelInput":
-        """Allocate zeroed case buffers with topology-owned capacities."""
+        """Allocate the initial 256-entry source capacity epoch."""
 
-        capacity = int(topology.source_capacity)
+        capacity = 256
         source_nodes = np.zeros(capacity, dtype=np.float64)
-        if topology.nodes == "uniform":
-            source_nodes[:] = np.linspace(0.0, 1.0, capacity, dtype=np.float64)
-        elif topology.nodes == "grid":
-            source_nodes[:] = np.linspace(0.0, 1.0, capacity, dtype=np.float64)
         return cls(
             a=1.0,
             R0=1.0,
@@ -207,10 +207,46 @@ class KernelInput:
             pressure=np.zeros(capacity, dtype=np.float64),
             driver=np.zeros(capacity, dtype=np.float64),
             source_nodes=source_nodes,
-            source_count=capacity,
+            source_count=0,
+            native_source_nodes=np.zeros(capacity, dtype=np.float64),
+            source_coordinate_jacobian=np.ones(capacity, dtype=np.float64),
             x0=np.zeros(int(topology.x_size), dtype=np.float64),
             has_x0=False,
         )
+
+    @property
+    def source_capacity(self) -> int:
+        """Current resident source capacity, independent of KernelTopology."""
+
+        return int(self.source_nodes.size)
+
+    def grow_source_capacity(self, capacity: int) -> None:
+        """Replace source arrays with one larger power-of-two capacity epoch."""
+
+        capacity = int(capacity)
+        if capacity <= self.source_capacity:
+            return
+        if capacity > 1024:
+            raise ValueError("VEQ source capacity is limited to 1024 nodes")
+        old_count = int(self.source_count)
+        for name in (
+            "pressure",
+            "driver",
+            "source_nodes",
+            "native_source_nodes",
+            "source_coordinate_jacobian",
+        ):
+            old = getattr(self, name)
+            if old is None:
+                continue
+            expanded = np.zeros(capacity, dtype=np.float64)
+            expanded[:old_count] = old[:old_count]
+            setattr(self, name, expanded)
+        if self.pressure_derivative is not None:
+            expanded = np.zeros(capacity, dtype=np.float64)
+            expanded[:old_count] = self.pressure_derivative[:old_count]
+            self.pressure_derivative = expanded
+        self.capacity_epoch += 1
 
     def clear_unused_source_tail(self) -> None:
         """Deterministically zero the unused source capacity suffix."""
@@ -218,6 +254,10 @@ class KernelInput:
         self.pressure[self.source_count :] = 0.0
         self.driver[self.source_count :] = 0.0
         self.source_nodes[self.source_count :] = 0.0
+        if self.native_source_nodes is not None:
+            self.native_source_nodes[self.source_count :] = 0.0
+        if self.source_coordinate_jacobian is not None:
+            self.source_coordinate_jacobian[self.source_count :] = 1.0
         if self.pressure_derivative is not None:
             self.pressure_derivative[self.source_count :] = 0.0
 

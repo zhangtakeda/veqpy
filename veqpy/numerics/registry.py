@@ -1,11 +1,7 @@
-"""
-Module: veqpy.base.registry
+"""Small decorator-backed registry for private numerical method families.
 
 Role:
 - Provide a small decorator-backed registry for finite method families.
-
-Public API:
-- Registry
 
 Design notes:
 - ``Registry`` generalizes decorators shaped like ``read_serializer(*exts)``:

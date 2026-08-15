@@ -46,7 +46,7 @@ from .builder import (
 BOUNDARY_FIT_NATIVE_SCHEMA = "veqpy.boundary_fit_native.v1"
 BOUNDARY_FIT_NATIVE_IDENTITY_SCHEMA = "veqpy.boundary_fit_native_identity.v1"
 BOUNDARY_FIT_MODULE_NAME = "veqpy_boundary_fit_ext"
-BOUNDARY_FIT_BUILD = "fastmath"
+BOUNDARY_FIT_BUILD = "release-relaxed"
 BOUNDARY_FIT_CMAKE_BUILD_TYPE = "Release"
 
 

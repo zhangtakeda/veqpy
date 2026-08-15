@@ -2,9 +2,13 @@ cmake_minimum_required(VERSION 3.24)
 
 project(cxx_kernel LANGUAGES CXX)
 
-if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
-    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+if(CMAKE_CONFIGURATION_TYPES)
+    message(FATAL_ERROR "VEQPy Cxx artifacts require a single-config Release build")
 endif()
+if(CMAKE_BUILD_TYPE AND NOT CMAKE_BUILD_TYPE STREQUAL "Release")
+    message(FATAL_ERROR "VEQPy Cxx artifacts require CMAKE_BUILD_TYPE=Release")
+endif()
+set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 
 option(ENABLE_ENZYME "Load the Enzyme clang plugin and probe autodiff" ON)
 option(VEQPY_CXX_ENABLE_STRICT_CONVERSIONS "Reject implicit narrowing and signedness conversions with clang warnings" ON)
@@ -13,8 +17,8 @@ option(VEQPY_CXX_ENABLE_THIN_LTO "Enable clang ThinLTO and lld for optimized bui
 option(VEQPY_CXX_ANALYSIS_BUILD "Build with source-correlated optimization diagnostics" OFF)
 option(VEQPY_CXX_FORCE_OPENBLAS_SINGLE_THREAD "Force OpenBLAS to one runtime thread inside Cxx backend targets" ON)
 option(VEQPY_CXX_ENABLE_PYTHON_BINDINGS "Build the nanobind Python extension for the Cxx backend" ON)
-set(VEQPY_CXX_FP_MODE "RELAXED" CACHE STRING "Floating-point mode: STRICT, FMA, or RELAXED")
-set_property(CACHE VEQPY_CXX_FP_MODE PROPERTY STRINGS STRICT FMA RELAXED)
+set(VEQPY_CXX_FP_MODE "RELAXED" CACHE STRING "Floating-point mode: STRICT or RELAXED")
+set_property(CACHE VEQPY_CXX_FP_MODE PROPERTY STRINGS STRICT RELAXED)
 set(VEQPY_CXX_ENZYME_PLUGIN "" CACHE FILEPATH "Path to ClangEnzyme shared library")
 set(VEQPY_CXX_ENZYME_INCLUDE_DIR "$ENV{HOME}/opt/Enzyme/enzyme/include" CACHE PATH "Path to Enzyme C++ headers")
 set(VEQPY_CXX_GCEM_ROOT "$ENV{HOME}/opt/gcem-install" CACHE PATH "GCEM install prefix")
@@ -74,10 +78,10 @@ set(
 )
 
 string(TOUPPER "${VEQPY_CXX_FP_MODE}" VEQPY_CXX_FP_MODE_NORMALIZED)
-if(NOT VEQPY_CXX_FP_MODE_NORMALIZED MATCHES "^(STRICT|FMA|RELAXED)$")
-    message(FATAL_ERROR "VEQPY_CXX_FP_MODE must be STRICT, FMA, or RELAXED; got '${VEQPY_CXX_FP_MODE}'")
+if(NOT VEQPY_CXX_FP_MODE_NORMALIZED MATCHES "^(STRICT|RELAXED)$")
+    message(FATAL_ERROR "VEQPY_CXX_FP_MODE must be STRICT or RELAXED; got '${VEQPY_CXX_FP_MODE}'")
 endif()
-set(VEQPY_CXX_FP_MODE "${VEQPY_CXX_FP_MODE_NORMALIZED}" CACHE STRING "Floating-point mode: STRICT, FMA, or RELAXED" FORCE)
+set(VEQPY_CXX_FP_MODE "${VEQPY_CXX_FP_MODE_NORMALIZED}" CACHE STRING "Floating-point mode: STRICT or RELAXED" FORCE)
 
 if(VEQPY_CXX_CONSTEXPR_STEPS GREATER VEQPY_CXX_CONSTEXPR_STEP_LIMIT)
     message(FATAL_ERROR "VEQPY_CXX_CONSTEXPR_STEPS must not exceed ${VEQPY_CXX_CONSTEXPR_STEP_LIMIT}")
@@ -453,14 +457,12 @@ function(cxx_enable_kernel_optimizations target)
             "${target}"
             PRIVATE
                 $<${release_like}:-fno-fast-math>
+                $<${release_like}:-fno-unsafe-math-optimizations>
+                $<${release_like}:-fno-associative-math>
+                $<${release_like}:-fno-reciprocal-math>
+                $<${release_like}:-fno-finite-math-only>
+                $<${release_like}:-frounding-math>
                 $<${release_like}:-ffp-contract=off>
-        )
-    elseif(VEQPY_CXX_FP_MODE STREQUAL "FMA")
-        target_compile_options(
-            "${target}"
-            PRIVATE
-                $<${release_like}:-fno-fast-math>
-                $<${release_like}:-ffp-contract=fast>
         )
     elseif(VEQPY_CXX_FP_MODE STREQUAL "RELAXED")
         target_compile_options(

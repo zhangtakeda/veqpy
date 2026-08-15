@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from veqpy.kernels.abi.enums import PRESSURE_DERIVATIVE_BY_COORDINATE, source_driver_for
 from veqpy.kernels.abi.source_semantics import _MaterializedSource, materialize_kernel_source
 from veqpy.kernels.boundary_materialization import materialize_kernel_boundary
 from veqpy.kernels.types import (
@@ -40,9 +41,12 @@ from .registry import KernelRegistry
 from .solver import CxxSolver
 from .validation import validate_supported_for_cxx_backend
 
+_NATIVE_SOURCE_SAMPLES = 1024
+
 if TYPE_CHECKING:
-    from veqpy.model.equilibrium import Equilibrium
-    from veqpy.model.grid import Grid
+    from fusionprime_base import Equilibrium
+
+    from veqpy.numerics.grid import Grid
 
 
 class _CxxKernelImpl:
@@ -60,11 +64,16 @@ class _CxxKernelImpl:
         pin_cpu: bool | int | None = None,
     ) -> None:
         self.topology = topology
-        self.recipe = _BuildPolicy(backend="cxx") if recipe is None else recipe
+        self.native_topology = _native_topology(topology)
+        self.recipe = (
+            _BuildPolicy(backend="cxx-relaxed", build="release-relaxed")
+            if recipe is None
+            else recipe
+        )
         if not isinstance(self.recipe, _BuildPolicy):
             raise TypeError(f"recipe must be _BuildPolicy, got {type(self.recipe).__name__}")
         self._validate_native_recipe(self.recipe)
-        validate_supported_for_cxx_backend(topology)
+        validate_supported_for_cxx_backend(self.native_topology)
         self.config = _BackendConfig() if config is None else self._kernel_config(config)
         self.pin_cpu = pin_cpu
         self.registry = registry or KernelRegistry(
@@ -76,6 +85,7 @@ class _CxxKernelImpl:
         self._last_snapshot: _SolveSnapshot | None = None
         self._last_boundary: _BoundaryCase | None = None
         self._last_source: _SourceCase | None = None
+        self._last_native_source: _SourceCase | None = None
 
     @property
     def x_size(self) -> int:
@@ -208,6 +218,7 @@ class _CxxKernelImpl:
         self._last_snapshot = None
         self._last_boundary = None
         self._last_source = None
+        self._last_native_source = None
 
     def close(self) -> None:
         if self._solver is not None:
@@ -222,7 +233,7 @@ class _CxxKernelImpl:
     def _cxx_solver(self) -> CxxSolver:
         if self._solver is None:
             self._solver = CxxSolver(
-                self.topology,
+                self.native_topology,
                 recipe=self.recipe,
                 registry=self.registry,
                 pin_cpu=self.pin_cpu,
@@ -267,23 +278,30 @@ class _CxxKernelImpl:
     ) -> CxxSolver:
         kernel_boundary = self._kernel_boundary(boundary)
         kernel_source = self._kernel_source(source, case_name=case_name)
-        materialized_source = materialize_kernel_source(self.topology, kernel_source)
+        source_count = int(kernel_source.pressure_profile.size)
+        native_source = _native_source_case(
+            self.topology,
+            kernel_source,
+            native_topology=self.native_topology,
+        )
+        materialized_source = materialize_kernel_source(self.native_topology, native_source)
         self._validate_runtime_case_adaptability(kernel_boundary, materialized_source)
         solver = self._cxx_solver()
         solver.set_kernel_runtime(
             "" if materialized_source.case_name is None else materialized_source.case_name,
             *boundary_runtime_args(kernel_boundary),
-            *source_runtime_args(materialized_source),
+            *source_runtime_args(materialized_source, source_count),
             *config_runtime_args(config, x_size=self.x_size),
         )
         self._last_boundary = kernel_boundary
         self._last_source = kernel_source
+        self._last_native_source = native_source
         return solver
 
     @staticmethod
     def _validate_native_recipe(recipe: _BuildPolicy) -> None:
-        if recipe.backend != "cxx":
-            raise ValueError("Cxx Kernel requires _BuildPolicy backend='cxx'")
+        if recipe.backend not in {"cxx-strict", "cxx-relaxed"}:
+            raise ValueError("Cxx Kernel requires a strict or relaxed Cxx recipe")
 
     @staticmethod
     def _kernel_config(config: _BackendConfig) -> _BackendConfig:
@@ -325,3 +343,70 @@ class _CxxKernelImpl:
                 f"s_offsets length must be at most M_max ({max_sine_offsets}), "
                 f"got {len(boundary.s_offsets)}"
             )
+
+
+def _native_topology(topology: KernelTopology) -> KernelTopology:
+    """Lower rho to the native-r operator coordinate without changing source count."""
+
+    coordinate = "r" if topology.coordinate == "rho" else topology.coordinate
+    return topology if coordinate == topology.coordinate else replace(topology, coordinate=coordinate)
+
+
+def _native_source_case(
+    topology: KernelTopology,
+    source: _SourceCase,
+    *,
+    native_topology: KernelTopology | None = None,
+) -> _SourceCase:
+    """Pack one explicit source case into the fixed native workspace.
+
+    Cxx uses the r operator coordinate for rho topologies.  The Adapter keeps
+    the corresponding r nodes and d rho / dr in private source buffers, so
+    coordinate derivatives receive the same chain rule as the Numba path.
+    """
+
+    native_topology = topology if native_topology is None else native_topology
+    source_nodes = (
+        np.asarray(
+            source.native_source_nodes
+            if topology.coordinate == "rho" and source.native_source_nodes is not None
+            else source.source_nodes,
+            dtype=np.float64,
+        )
+        if source.source_nodes is not None
+        else np.linspace(0.0, 1.0, source.pressure_profile.size, dtype=np.float64)
+    )
+    source_count = int(source.pressure_profile.size)
+    pressure_profile = np.asarray(source.pressure_profile, dtype=np.float64)
+    driver_profile = np.asarray(source.driver_profile, dtype=np.float64)
+    if topology.coordinate == "rho":
+        jacobian = source.source_coordinate_jacobian
+        if jacobian is None:
+            raise ValueError("rho Cxx source lowering requires d rho / dr source data")
+        jacobian = np.asarray(jacobian, dtype=np.float64)
+        if source.pressure_name == "P_rho":
+            pressure_profile = pressure_profile * jacobian
+        if source.driver_name == "FF_rho":
+            driver_profile = driver_profile * jacobian
+    target = np.linspace(0.0, 1.0, source_count, dtype=np.float64)
+    pressure_active = np.interp(target, source_nodes, pressure_profile)
+    driver_active = np.interp(target, source_nodes, driver_profile)
+    pressure = np.zeros(_NATIVE_SOURCE_SAMPLES, dtype=np.float64)
+    driver = np.zeros(_NATIVE_SOURCE_SAMPLES, dtype=np.float64)
+    pressure[:source_count] = pressure_active
+    driver[:source_count] = driver_active
+    pressure_name = PRESSURE_DERIVATIVE_BY_COORDINATE[native_topology.coordinate]
+    driver_name = source_driver_for(native_topology.route, native_topology.coordinate)
+    values: dict[str, object] = {
+        "Ip": source.Ip,
+        "beta": source.beta,
+        "case_name": source.case_name,
+        "source_nodes": np.linspace(0.0, 1.0, _NATIVE_SOURCE_SAMPLES, dtype=np.float64),
+        driver_name: driver,
+    }
+    if source.pressure_name == "p":
+        values["p"] = pressure
+    else:
+        values[pressure_name] = pressure
+        values["p0"] = source.p0
+    return _SourceCase(**values)

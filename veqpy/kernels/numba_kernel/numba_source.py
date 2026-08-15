@@ -27,7 +27,6 @@ from dataclasses import dataclass
 import numpy as np
 from numba import njit
 
-from veqpy.base import Registry
 from veqpy.kernels.numba_kernel.jit_math import (
     copy_into,
     dot,
@@ -56,6 +55,7 @@ from veqpy.numerics import (
     DEFAULT_LOCAL_BARYCENTRIC_STENCIL,
     build_uniform_source_interpolation_matrix,
 )
+from veqpy.numerics.registry import Registry
 
 # F-coupled PJ2/PJ3 psin-uniform routes materialize psin by a fixed-point
 # loop. Keep these as route constants instead of user-facing
@@ -350,7 +350,7 @@ def _normalize_psin_coordinate_inplace(psin: np.ndarray, scale: float) -> np.nda
     return psin
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def _regularize_axis_linear(profile: np.ndarray, r: np.ndarray, n_fix: int) -> np.ndarray:
     if n_fix <= 0:
         return profile
@@ -375,7 +375,7 @@ def _regularize_axis_linear(profile: np.ndarray, r: np.ndarray, n_fix: int) -> n
     return profile
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def _regularize_psin_r(psin_r: np.ndarray, r: np.ndarray, n_fix: int) -> np.ndarray:
     """Repair and floor ``psin_r`` before downstream divisions.
 
@@ -396,7 +396,7 @@ def _regularize_psin_r(psin_r: np.ndarray, r: np.ndarray, n_fix: int) -> np.ndar
     return psin_r
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def _regularize_psin_r_with_derivative(
     psin_r: np.ndarray,
     psin_rr: np.ndarray,
@@ -428,7 +428,7 @@ def _regularize_psin_r_with_derivative(
     return psin_r, psin_rr
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def _floor_signed_current_primitive(profile: np.ndarray, edge: float) -> np.ndarray:
     """Apply a tiny same-sign floor to cumulative current primitives."""
     floor_value = max(abs(edge), 1.0) * 1.0e-12
@@ -443,7 +443,7 @@ def _floor_signed_current_primitive(profile: np.ndarray, edge: float) -> np.ndar
     return profile
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def _regularize_axis_even(profile: np.ndarray, r: np.ndarray, n_fix: int) -> np.ndarray:
     if n_fix <= 0:
         return profile
@@ -464,12 +464,12 @@ def _regularize_axis_even(profile: np.ndarray, r: np.ndarray, n_fix: int) -> np.
     return profile
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def _regularize_ffn_psin(FFn_psin: np.ndarray, r: np.ndarray, n_fix: int) -> np.ndarray:
     return _regularize_axis_even(FFn_psin, r, n_fix)
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def _enforce_axis_even_profile(profile: np.ndarray, r: np.ndarray) -> np.ndarray:
     if profile.shape[0] < 3:
         return profile
@@ -719,7 +719,7 @@ def _solve_pf_psin_beta_alpha1(
     return root_plus
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def _fill_pf_r_integrand(
     out: np.ndarray,
     Kn: np.ndarray,
@@ -734,7 +734,7 @@ def _fill_pf_r_integrand(
     return out
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def _fill_pf_psin_integrand(
     out: np.ndarray,
     driver_input: np.ndarray,
@@ -748,7 +748,7 @@ def _fill_pf_psin_integrand(
     return out
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def _weighted_profile_sign(values: np.ndarray, weights: np.ndarray) -> float:
     weighted = dot(values, weights)
     if weighted < 0.0:
@@ -756,7 +756,7 @@ def _weighted_profile_sign(values: np.ndarray, weights: np.ndarray) -> float:
     return 1.0
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def _signed_sqrt_ratio(numerator: float, denominator: float) -> float:
     ratio = numerator / denominator
     if ratio < 0.0:
@@ -764,7 +764,7 @@ def _signed_sqrt_ratio(numerator: float, denominator: float) -> float:
     return np.sqrt(ratio)
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def _fill_g1n_psin_integrand(
     out: np.ndarray,
     JdivR: np.ndarray,
@@ -781,7 +781,7 @@ def _fill_g1n_psin_integrand(
     return out
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def _fill_g1n_r_integrand(
     out: np.ndarray,
     JdivR: np.ndarray,
@@ -801,7 +801,7 @@ def _fill_g1n_r_integrand(
     return out
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def _g1n_psin_integral_from_radial_moments(
     FFn_psin: np.ndarray,
     Pn_psin: np.ndarray,
@@ -817,7 +817,7 @@ def _g1n_psin_integral_from_radial_moments(
     return total
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def _g1n_r_integral_from_radial_moments(
     FFn_r: np.ndarray,
     Pn_r: np.ndarray,
@@ -840,7 +840,7 @@ def _g1n_r_integral_from_radial_moments(
     return total
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def _fill_pp_ffn_psin(
     out: np.ndarray,
     psin_r: np.ndarray,
@@ -860,7 +860,7 @@ def _fill_pp_ffn_psin(
     return out
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def _fill_pi_ffn_psin(
     out: np.ndarray,
     Itor_r: np.ndarray,
@@ -877,7 +877,7 @@ def _fill_pi_ffn_psin(
     return out
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def _fill_pj_ffn_psin(
     out: np.ndarray,
     jtor: np.ndarray,
@@ -3663,7 +3663,7 @@ def _update_pj3_strict_from_r_inputs_with_scratch(
     )
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def _materialize_pj3_effective_jpara(
     out: np.ndarray,
     jtotal_input: np.ndarray,
@@ -4344,7 +4344,7 @@ def update_fourier_family_fields(
     return out_c_fields, out_s_fields
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def _update_fixed_point_psin_query_impl(
     query: np.ndarray,
     psin: np.ndarray,
@@ -4359,7 +4359,7 @@ def _update_fixed_point_psin_query_impl(
     return max_abs_diff <= max_residual
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def _update_fixed_point_psin_query_and_spline_uniform_inputs_impl(
     query: np.ndarray,
     psin: np.ndarray,
@@ -4389,7 +4389,7 @@ def _update_fixed_point_psin_query_and_spline_uniform_inputs_impl(
     return max_abs_diff <= max_residual
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def _update_fixed_point_psin_query_and_local_barycentric_inputs_impl(
     query: np.ndarray,
     psin: np.ndarray,
@@ -4456,7 +4456,7 @@ def _update_fixed_point_psin_query_and_local_barycentric_inputs_impl(
     return max_abs_diff <= max_residual
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def _materialize_profile_owned_psin_fields_impl(
     out_psin: np.ndarray,
     out_psin_r: np.ndarray,
@@ -4485,7 +4485,7 @@ def _materialize_profile_owned_psin_fields_impl(
         out_source_psin_query[i] = psin_value
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def _materialize_profile_owned_psin_source_impl(
     out_psin: np.ndarray,
     out_psin_r: np.ndarray,
@@ -4554,7 +4554,7 @@ def _materialize_profile_owned_psin_source_impl(
         )
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def _update_fourier_family_fields_impl(
     out_c_fields: np.ndarray,
     out_s_fields: np.ndarray,
@@ -4604,7 +4604,7 @@ def _update_fourier_family_fields_impl(
                     out_s_fields[order, d, i] = 0.0
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def _uniform_spline_interpolate_pair(
     out0: np.ndarray,
     out1: np.ndarray,
@@ -4653,7 +4653,7 @@ def _uniform_spline_interpolate_pair(
     return out0, out1
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def _explicit_pchip_interpolate_pair_with_derivatives(
     out0: np.ndarray,
     out1: np.ndarray,
@@ -4704,7 +4704,7 @@ def _explicit_pchip_interpolate_pair_with_derivatives(
     return out0, out1
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def _explicit_pchip_interpolate_pair(
     out0: np.ndarray,
     out1: np.ndarray,
@@ -4728,7 +4728,7 @@ def _explicit_pchip_interpolate_pair(
     )
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def _interpolate_retained_source_pair_impl(
     out0: np.ndarray,
     out1: np.ndarray,
@@ -4785,7 +4785,7 @@ def _interpolate_retained_source_pair_impl(
     )
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def _local_barycentric_interpolate_pair(
     out0: np.ndarray,
     out1: np.ndarray,
@@ -4841,7 +4841,7 @@ def _local_barycentric_interpolate_pair(
     return out0, out1
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def _global_barycentric_interpolate_pair(
     out0: np.ndarray,
     out1: np.ndarray,
@@ -5012,7 +5012,7 @@ def _rho_fixed_point_defect(
     return max(value_defect, derivative_defect), value_defect, derivative_defect
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def uniform_barycentric_weights(source_sample_count: int) -> np.ndarray:
     weights = np.empty(source_sample_count, dtype=np.float64)
     weights[0] = 1.0
@@ -5021,7 +5021,7 @@ def uniform_barycentric_weights(source_sample_count: int) -> np.ndarray:
     return weights
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def _local_uniform_stencil_start(q: float, source_sample_count: int, stencil_size: int) -> int:
     if stencil_size >= source_sample_count:
         return 0

@@ -75,7 +75,7 @@ def _residual_grid_poloidal_views(
     return sin_mtheta, cos_mtheta
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def update_residual_compact(
     out_workspace: np.ndarray,
     alpha1: float,
@@ -130,7 +130,7 @@ def update_residual_compact(
             out_Gpsin_R_sin_tb[i, j] = Gpsin_R * sin_tb_surface[i, j]
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def _project_scaled2(
     out_packed: np.ndarray,
     coeff_indices: np.ndarray,
@@ -147,7 +147,7 @@ def _project_scaled2(
     indexed_matvec_into(out_packed, coeff_indices, T, collapsed)
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def _project_scaled3(
     out_packed: np.ndarray,
     coeff_indices: np.ndarray,
@@ -163,13 +163,13 @@ def _project_scaled3(
     indexed_matvec_into(out_packed, coeff_indices, T, collapsed)
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def _copy_row_into(out: np.ndarray, row: np.ndarray) -> None:
     for i in range(out.shape[0]):
         out[i] = row[i]
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def run_residual_blocks_packed_precomputed(
     out_packed: np.ndarray,
     scratch: np.ndarray,
@@ -280,7 +280,7 @@ def run_residual_blocks_packed_precomputed(
             raise ValueError("Unknown residual block code")
 
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def run_residual_blocks_packed_precomputed_auto(
     out_packed: np.ndarray,
     scratch: np.ndarray,
@@ -438,7 +438,7 @@ def run_residual_blocks_packed_precomputed_auto(
         else:
             raise ValueError("Unknown residual block code")
 
-@njit(cache=True, fastmath=True, nogil=True)
+@njit(cache=True, nogil=True)
 def write_weighted_scaled_g_collocation_field_into(
     out: np.ndarray,
     G: np.ndarray,

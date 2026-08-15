@@ -34,7 +34,6 @@ from veqpy.kernels.abi.enums import (
     SUPPORTED_BACKENDS,
     source_driver_for,
 )
-from veqpy.kernels.abi.identity import compute_topology_key
 from veqpy.kernels.abi.options import (
     continue_policy_code,
     initial_policy_code,
@@ -49,36 +48,28 @@ from veqpy.kernels.boundary_fit import normalize_boundary_fit_method
 from veqpy.kernels.errors import TopologyError
 
 _BUILD_PRESET_KWARGS: dict[str, dict[str, object]] = {
-    "fastmath": {
+    "numba": {
         "cmake_build_type": "Release",
-        "fp_mode": "RELAXED",
-        "enable_enzyme": False,
-        "enable_native_optimizations": True,
-        "enable_thin_lto": True,
-        "analysis": False,
-    },
-    "fastmath-enzyme": {
-        "cmake_build_type": "Release",
-        "fp_mode": "RELAXED",
-        "enable_enzyme": True,
-        "enable_native_optimizations": True,
-        "enable_thin_lto": True,
-        "analysis": False,
-    },
-    "release": {
-        "cmake_build_type": "Release",
-        "fp_mode": "STRICT",
-        "enable_enzyme": False,
-        "enable_native_optimizations": True,
-        "enable_thin_lto": True,
-        "analysis": False,
-    },
-    "debug": {
-        "cmake_build_type": "Debug",
         "fp_mode": "STRICT",
         "enable_enzyme": False,
         "enable_native_optimizations": False,
         "enable_thin_lto": False,
+        "analysis": False,
+    },
+    "release-strict": {
+        "cmake_build_type": "Release",
+        "fp_mode": "STRICT",
+        "enable_enzyme": False,
+        "enable_native_optimizations": True,
+        "enable_thin_lto": True,
+        "analysis": False,
+    },
+    "release-relaxed": {
+        "cmake_build_type": "Release",
+        "fp_mode": "RELAXED",
+        "enable_enzyme": False,
+        "enable_native_optimizations": True,
+        "enable_thin_lto": True,
         "analysis": False,
     },
 }
@@ -87,11 +78,11 @@ _DEFAULT_ENZYME_JACOBIAN_BATCH_WIDTH = 0
 
 @dataclass(frozen=True, slots=True)
 class _BuildPolicy:
-    """Artifact recipe and packed-layout configuration for one Kernel."""
+    """Private artifact recipe for one prepared Kernel."""
 
     backend: str = "numba"
     layout: str = "degree"
-    build: str = "fastmath"
+    build: str = "numba"
     cmake_build_type: str | None = None
     fp_mode: str | None = None
     enable_enzyme: bool | None = None
@@ -103,11 +94,24 @@ class _BuildPolicy:
     layout_profile_first: bool = field(init=False)
 
     def __post_init__(self) -> None:
-        build = _normalize_build(self.build)
+        backend = _normalize_backend(self.backend)
+        requested_build = _normalize_build(self.build)
+        if requested_build == "numba" and backend != "numba":
+            requested_build = "release-strict" if backend == "cxx-strict" else "release-relaxed"
+        expected_build = {
+            "numba": "numba",
+            "cxx-strict": "release-strict",
+            "cxx-relaxed": "release-relaxed",
+        }[backend]
+        if requested_build != expected_build:
+            raise TopologyError(
+                f"backend={backend!r} requires build={expected_build!r}, got {requested_build!r}"
+            )
+        build = requested_build
         preset = _BUILD_PRESET_KWARGS[build]
         layout = _normalize_layout(self.layout)
         normalized_values: dict[str, object] = {
-            "backend": _normalize_backend(self.backend),
+            "backend": backend,
             "layout": layout,
             "build": build,
             "cmake_build_type": _normalize_cmake_build_type(
@@ -382,7 +386,12 @@ def kernel_boundary_shape_orders(boundary: _BoundaryCase) -> tuple[int, int]:
 
 @dataclass(frozen=True, slots=True)
 class KernelTopology:
-    """Cxx topology independent from artifact recipe."""
+    """Private fixed numerical topology compiled from a user mapping.
+
+    Source samples are deliberately absent from this record. VEQ always binds
+    an explicit source at preprocess time; source count and source capacity
+    belong to the resident ``KernelInput`` record.
+    """
 
     h_count: int
     v_count: int
@@ -395,15 +404,12 @@ class KernelTopology:
     Nt: int
     route: str
     coordinate: str
-    nodes: str
     constraint: Literal["ip", "beta", "both", "none"] = "none"
-    sample_count: int | None = None
     quadrature: str = "legendre"
     calculus: str = "spectral"
     L_max: int | None = None
     M_max: int | None = None
     K_max: int | None = None
-    key: str | None = None
     active_profiles: tuple[tuple[str, int], ...] = field(init=False)
     x_size: int = field(init=False)
     source_route_key: tuple[str, str, str] = field(init=False)
@@ -443,9 +449,7 @@ class KernelTopology:
         coordinate = _normalize_token(self.coordinate, "coordinate").lower()
         if coordinate not in SOURCE_COORDINATE_CODES:
             raise TopologyError(f"unsupported coordinate {coordinate!r}")
-        nodes = _normalize_token(self.nodes, "nodes").lower()
-        if nodes not in SOURCE_NODES_CODES:
-            raise TopologyError(f"unsupported source nodes {nodes!r}")
+        nodes = "explicit"
         constraint = _normalize_source_constraint(self.constraint)
         ip_constraint, beta_constraint = SOURCE_CONSTRAINT_FLAGS_BY_NAME[constraint]
         _validate_source_constraint(route, ip_constraint, beta_constraint)
@@ -455,7 +459,6 @@ class KernelTopology:
         calculus = _normalize_token(self.calculus, "calculus").lower()
         if calculus != "spectral":
             raise TopologyError("only spectral calculus is supported")
-        sample_count = _canonical_sample_count(nodes, nr, self.sample_count)
         l_max = _canonical_capacity_or_inferred(
             self.L_max,
             _infer_l_max((*profile_counts.values(), *c_counts, *s_counts)),
@@ -486,9 +489,7 @@ class KernelTopology:
             "Nt": nt,
             "route": route,
             "coordinate": coordinate,
-            "nodes": nodes,
             "constraint": constraint,
-            "sample_count": sample_count,
             "quadrature": quadrature,
             "calculus": calculus,
             "L_max": l_max,
@@ -512,13 +513,6 @@ class KernelTopology:
         }
         for name, value in normalized_values.items():
             object.__setattr__(self, name, value)
-        expected_key = compute_topology_key(self)
-        if self.key is not None and self.key != expected_key:
-            raise TopologyError(
-                "key does not match canonical kernel topology: "
-                f"got {self.key!r}, expected {expected_key!r}"
-            )
-        object.__setattr__(self, "key", expected_key)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -555,6 +549,8 @@ class _SourceCase:
     jtotal: np.ndarray | list[float] | tuple[float, ...] | None = None
     q: np.ndarray | list[float] | tuple[float, ...] | None = None
     source_nodes: np.ndarray | list[float] | tuple[float, ...] | None = None
+    native_source_nodes: np.ndarray | list[float] | tuple[float, ...] | None = None
+    source_coordinate_jacobian: np.ndarray | list[float] | tuple[float, ...] | None = None
     p0: float | None = None
     Ip: float = np.nan
     beta: float = np.nan
@@ -623,6 +619,34 @@ class _SourceCase:
                 f"got {source_nodes.shape} and {pressure.shape}"
             )
         object.__setattr__(self, "source_nodes", source_nodes)
+        native_source_nodes = (
+            None
+            if self.native_source_nodes is None
+            else _readonly_1d(self.native_source_nodes, "native_source_nodes")
+        )
+        if native_source_nodes is not None and native_source_nodes.shape != pressure.shape:
+            raise ValueError(
+                "native_source_nodes must share the source-profile shape, "
+                f"got {native_source_nodes.shape} and {pressure.shape}"
+            )
+        object.__setattr__(self, "native_source_nodes", native_source_nodes)
+        source_coordinate_jacobian = (
+            None
+            if self.source_coordinate_jacobian is None
+            else _readonly_1d(
+                self.source_coordinate_jacobian,
+                "source_coordinate_jacobian",
+            )
+        )
+        if (
+            source_coordinate_jacobian is not None
+            and source_coordinate_jacobian.shape != pressure.shape
+        ):
+            raise ValueError(
+                "source_coordinate_jacobian must share the source-profile shape, "
+                f"got {source_coordinate_jacobian.shape} and {pressure.shape}"
+            )
+        object.__setattr__(self, "source_coordinate_jacobian", source_coordinate_jacobian)
         object.__setattr__(self, "p0", p0)
         object.__setattr__(self, "Ip", float(self.Ip))
         object.__setattr__(self, "beta", float(self.beta))
@@ -795,7 +819,7 @@ def _normalize_build(value: str) -> str:
     normalized = _normalize_token(value, "build").lower()
     if normalized in _BUILD_PRESET_KWARGS:
         return normalized
-    raise TopologyError("build must be one of fastmath, fastmath-enzyme, release, or debug")
+    raise TopologyError("internal build must be numba, release-strict, or release-relaxed")
 
 
 def _validate_source_constraint(route: str, ip_constraint: bool, beta_constraint: bool) -> None:
@@ -823,8 +847,8 @@ def _normalize_layout(value: str) -> str:
 def _normalize_backend(value: str) -> str:
     normalized = _normalize_token(value, "backend").lower()
     if normalized in SUPPORTED_BACKENDS:
-        return normalized
-    raise TopologyError("backend must be cxx or numba")
+        return "cxx-relaxed" if normalized == "cxx" else normalized
+    raise TopologyError("backend must be numba, cxx, cxx-strict, or cxx-relaxed")
 
 
 def _source_active_family(
@@ -883,21 +907,19 @@ def _supported_constraint_labels(route: str) -> tuple[str, ...]:
 
 def _normalize_cmake_build_type(value: str | None, *, default: str) -> str:
     if value is None:
-        return default
+        return "Release"
     normalized = _normalize_token(value, "cmake_build_type").lower()
-    if normalized == "debug":
-        return "Debug"
     if normalized == "release":
         return "Release"
-    raise TopologyError("cmake_build_type must be Debug or Release")
+    raise TopologyError("Cxx artifacts must use the Release build type")
 
 
 def _normalize_fp_mode(value: str | None, *, default: str) -> str:
     if value is None:
         return default
     normalized = _normalize_token(value, "fp_mode").upper()
-    if normalized not in {"STRICT", "FMA", "RELAXED"}:
-        raise TopologyError("fp_mode must be STRICT, FMA, or RELAXED")
+    if normalized not in {"STRICT", "RELAXED"}:
+        raise TopologyError("fp_mode must be STRICT or RELAXED")
     return normalized
 
 
@@ -987,26 +1009,6 @@ def _canonical_at_least(value: int | None, minimum: int, name: str) -> int:
     if explicit < minimum:
         raise TopologyError(f"{name} must be >= {minimum}, got {explicit}")
     return explicit
-
-
-def _canonical_sample_count(nodes: str, nr: int, sample_count: int | None) -> int | None:
-    if nodes == "explicit":
-        if sample_count is not None:
-            raise TopologyError(
-                "explicit source sample_count is runtime _SourceCase data; "
-                "leave KernelTopology.sample_count=None"
-            )
-        return None
-    if nodes == "grid":
-        if sample_count is None:
-            return nr
-        value = _positive_int(sample_count, "sample_count")
-        if value != nr:
-            raise TopologyError("grid source nodes require sample_count == Nr")
-        return value
-    if sample_count is None:
-        raise TopologyError(f"{nodes} source nodes require an explicit sample_count")
-    return _positive_int(sample_count, "sample_count")
 
 
 def _active_profiles_tuple(

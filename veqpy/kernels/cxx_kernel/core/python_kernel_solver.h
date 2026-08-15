@@ -165,6 +165,7 @@ namespace cxx_python
                                              RuntimeArrayView   s_offsets,
                                              RuntimeArrayView   scaled_pprime,
                                              RuntimeArrayView   scaled_driver,
+                                             size_t             source_count,
                                              double             scaled_p0,
                                              double             scaled_Ip,
                                              double             beta,
@@ -202,6 +203,10 @@ namespace cxx_python
 
         read_exact_runtime_array(scaled_pprime, "scaled_pprime", input.pprime);
         read_exact_runtime_array(scaled_driver, "scaled_driver", input.driver);
+        if (source_count < 2 || source_count > CompiledSource::sample_count)
+            throw std::runtime_error("source_count must be between 2 and " +
+                                     std::to_string(CompiledSource::sample_count));
+        input.source_count = source_count;
 
         input.p0      = scaled_p0;
         input.Ip      = scaled_Ip;
@@ -510,7 +515,8 @@ namespace cxx_python
         source["constraint_code"] = Topology::source_constraint_code;
         source["nodes"]        = source_nodes_name();
         source["nodes_code"]   = Topology::source_nodes_code;
-        source["sample_count"] = CompiledSource::sample_count;
+        source["source_count"] = input.source_count;
+        source["source_capacity"] = CompiledSource::sample_count;
         source["active_family_code"] = Topology::source_active_family_code;
         source["parameterization_code"] = Topology::source_parameterization_code;
 
@@ -601,6 +607,7 @@ namespace cxx_python
                                 RuntimeArrayView   s_offsets,
                                 RuntimeArrayView   scaled_pprime,
                                 RuntimeArrayView   scaled_driver,
+                                size_t             source_count,
                                 double             scaled_p0,
                                 double             scaled_Ip,
                                 double             beta,
@@ -629,6 +636,7 @@ namespace cxx_python
                                                            s_offsets,
                                                            scaled_pprime,
                                                            scaled_driver,
+                                                           source_count,
                                                            scaled_p0,
                                                            scaled_Ip,
                                                            beta,

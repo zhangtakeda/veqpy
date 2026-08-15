@@ -176,6 +176,7 @@ namespace cxx_kernel_api
             std::string                                    case_name = "PF_psin_uniform_Ip";
             std::array<double, CompiledSource::sample_count> pprime{};
             std::array<double, CompiledSource::sample_count> driver{};
+            size_t                                         source_count = CompiledSource::sample_count;
             std::array<double, CompiledShape::x_size>        x0{};
             std::array<double, CompiledShape::x_size>        x_scale{};
             std::array<double, CompiledShape::x_size>        residual_scale{};

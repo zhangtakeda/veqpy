@@ -39,7 +39,11 @@ class CxxSolver:
     ) -> None:
         validate_supported_for_cxx_backend(topology)
         self.topology = topology
-        self.recipe = _BuildPolicy(backend="cxx") if recipe is None else recipe
+        self.recipe = (
+            _BuildPolicy(backend="cxx-relaxed", build="release-relaxed")
+            if recipe is None
+            else recipe
+        )
         if not isinstance(self.recipe, _BuildPolicy):
             raise TypeError(f"recipe must be _BuildPolicy, got {type(self.recipe).__name__}")
         self.registry = registry or KernelRegistry(

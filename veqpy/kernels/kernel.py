@@ -42,14 +42,14 @@ class Kernel:
         if not isinstance(topology, KernelTopology):
             raise TypeError(f"topology must be KernelTopology, got {type(topology).__name__}")
         selected_backend = str(backend).strip().lower()
-        if selected_backend not in {"numba", "cxx"}:
-            raise ValueError("backend must be 'numba' or 'cxx'")
+        if selected_backend not in {"numba", "cxx", "cxx-strict", "cxx-relaxed"}:
+            raise ValueError("backend must be 'numba', 'cxx', 'cxx-strict', or 'cxx-relaxed'")
         self.topology = topology
         self.input = KernelInput.allocate(topology) if input is None else input
         self.output = KernelOutput.allocate(topology) if output is None else output
         _validate_input(self.input, topology)
         _validate_output(self.output, topology)
-        self.backend = selected_backend
+        self.backend = "cxx-relaxed" if selected_backend == "cxx" else selected_backend
         self.config = KernelConfig() if config is None else _as_config(config)
         self._private_config = private_config(self.config)
         self._policy = (
@@ -82,15 +82,17 @@ class Kernel:
 
         return self._prepared
 
-    def prepare(self) -> None:
+    def prepare(self, *, force: bool = False) -> None:
         """Compile and allocate backend state exactly once per topology."""
 
         self._ensure_open()
+        if force:
+            self._prepared = False
         if not self._prepared:
-            self._impl.prepare()
+            self._impl.prepare(force=force)
             self._prepared = True
 
-    def solve(self) -> KernelOutput:
+    def solve(self, *, config: KernelConfig | None = None) -> KernelOutput:
         """Fill and return the same bound ``KernelOutput`` object."""
 
         self._ensure_open()
@@ -101,10 +103,11 @@ class Kernel:
         boundary = boundary_case(self.topology, self.input)
         source = source_case(self.topology, self.input)
         x0 = self.input.x0 if self.input.has_x0 and self.input.x0 is not None else None
+        active_config = self.config if config is None else _as_config(config)
         snapshot = self._impl.solve(
             boundary,
             source,
-            config=self._private_config,
+            config=private_config(active_config),
             case_name=None,
             x0=x0,
         )
@@ -215,12 +218,12 @@ def _as_config(value: KernelConfig) -> KernelConfig:
 def _validate_input(value: KernelInput, topology: KernelTopology) -> None:
     if not isinstance(value, KernelInput):
         raise TypeError(f"input must be KernelInput, got {type(value).__name__}")
-    if type(value.source_count) is not int or value.source_count < 1:
-        raise ValueError("KernelInput source_count must be a positive int")
-    if value.source_count > int(topology.source_capacity):
-        raise ValueError("KernelInput source_count exceeds topology source_capacity")
-    if value.pressure.size != int(topology.source_capacity):
-        raise ValueError("KernelInput source arrays must match topology source_capacity")
+    if type(value.source_count) is not int or value.source_count < 0:
+        raise ValueError("KernelInput source_count must be a non-negative int")
+    if value.source_count > 1024:
+        raise ValueError("VEQ source count is limited to 1024 nodes")
+    if value.source_count > value.source_capacity:
+        raise ValueError("KernelInput source_count exceeds its resident capacity")
     if value.driver.size != value.pressure.size or value.source_nodes.size != value.pressure.size:
         raise ValueError("KernelInput source arrays must share one capacity")
     if value.x0 is not None and value.x0.shape != (topology.x_size,):

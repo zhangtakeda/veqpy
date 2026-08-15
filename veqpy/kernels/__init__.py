@@ -1,6 +1,8 @@
-"""Public VEQPy Kernel ABI and backend-neutral runtime."""
+"""Private VEQPy numerical kernels.
 
-from .contracts import KernelConfig, KernelInput, KernelOutput, KernelTopology
-from .kernel import Kernel
+The four-buffer ABI is intentionally not re-exported from this package.  The
+Module and Adapter own its construction and ordinary users configure VEQ with
+plain dictionaries.
+"""
 
-__all__ = ["Kernel", "KernelConfig", "KernelInput", "KernelOutput", "KernelTopology"]
+__all__: list[str] = []

@@ -32,10 +32,11 @@ def boundary_runtime_args(boundary: _BoundaryCase) -> tuple[Any, ...]:
     )
 
 
-def source_runtime_args(source: _MaterializedSource) -> tuple[Any, ...]:
+def source_runtime_args(source: _MaterializedSource, source_count: int) -> tuple[Any, ...]:
     return (
         source.scaled_pprime,
         source.scaled_driver,
+        int(source_count),
         source.scaled_p0,
         source.scaled_Ip,
         source.beta,

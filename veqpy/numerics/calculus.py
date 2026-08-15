@@ -32,8 +32,8 @@ from collections.abc import Callable
 
 import numpy as np
 
-from veqpy.base import Registry
 from veqpy.numerics.interpolate import barycentric_log_weights, interpolation_matrix
+from veqpy.numerics.registry import Registry
 
 # -----------------------------------------------------------------------------
 # Public interface

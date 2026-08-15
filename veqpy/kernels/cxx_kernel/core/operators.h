@@ -30,6 +30,7 @@ namespace operators::detail
         ProfileRuntimeParams<Shape>               profile_params{};
         Vector<double, SourceShape::sample_count> pprime{};
         Vector<double, SourceShape::sample_count> driver{};
+        size_t                                      source_count = SourceShape::sample_count;
     };
 
     struct OperatorRuntimeScalars
@@ -147,7 +148,8 @@ namespace operators::detail
         explicit constexpr SourceOperator(const Setup& setup) noexcept : plan(make_plan(setup))
         {
             workspace.profiles.load_fixed_from(plan.fixed_profiles);
-            workspace.source_runtime.set_uniform_sources(source_span(setup.pprime), source_span(setup.driver));
+            workspace.source_runtime.set_uniform_sources(
+                source_span(setup.pprime), source_span(setup.driver), setup.source_count);
         }
 
         constexpr const RuntimeScalars& runtime_scalars() const noexcept { return runtime_scalars_; }
@@ -158,7 +160,8 @@ namespace operators::detail
         {
             plan = make_plan(setup);
             workspace.profiles.load_fixed_from(plan.fixed_profiles);
-            workspace.source_runtime.set_uniform_sources(source_span(setup.pprime), source_span(setup.driver));
+            workspace.source_runtime.set_uniform_sources(
+                source_span(setup.pprime), source_span(setup.driver), setup.source_count);
         }
 
         static constexpr void evaluate_impl(const OperatorPlan&                       plan,

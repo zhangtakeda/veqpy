@@ -23,6 +23,7 @@ NB_MODULE(cxx_ext, module)
              nb::arg("s_offsets"),
              nb::arg("scaled_pprime"),
              nb::arg("scaled_driver"),
+             nb::arg("source_count"),
              nb::arg("scaled_p0"),
              nb::arg("scaled_Ip"),
              nb::arg("beta"),

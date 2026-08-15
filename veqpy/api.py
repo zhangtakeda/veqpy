@@ -1,66 +1,84 @@
-"""Function-style entry points over the four-buffer Kernel API."""
+"""High-level VEQ build and one-shot solve entry points."""
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from .kernels import Kernel, KernelConfig, KernelInput, KernelOutput, KernelTopology
+from fusionprime_base import Plasma
+
+from .module import VEQ, VEQRecord
 
 __all__ = ["build", "solve"]
 
 
 def build(
     *,
-    topology: KernelTopology,
-    input: KernelInput | None = None,
-    output: KernelOutput | None = None,
-    config: KernelConfig | None = None,
+    topology: Mapping[str, Any],
+    solver: Mapping[str, Any] | None = None,
     backend: str = "numba",
-    build_policy: object | None = None,
-    registry: object | None = None,
-    cache_root: Path | None = None,
-    source_dir: Path | None = None,
-    pin_cpu: bool | int | None = None,
-) -> Kernel:
-    """Construct and prepare a reusable Kernel handle."""
+    artifact_dir: str | Path | None = None,
+    cpu_affinity: bool | int | None = None,
+    rebuild: bool = False,
+    materialize: bool = True,
+    verbose: bool = True,
+    report: bool = False,
+    report_dir: str | Path | None = None,
+) -> VEQ:
+    """Build and prepare a reusable VEQ Module from ordinary mappings."""
 
-    kernel = Kernel(
+    return VEQ(
         topology=topology,
-        input=input,
-        output=output,
-        config=config,
+        solver=solver,
         backend=backend,
-        build_policy=build_policy,
-        registry=registry,
-        cache_root=cache_root,
-        source_dir=source_dir,
-        pin_cpu=pin_cpu,
+        artifact_dir=artifact_dir,
+        cpu_affinity=cpu_affinity,
+        rebuild=rebuild,
+        materialize=materialize,
+        verbose=verbose,
+        report=report,
+        report_dir=report_dir,
     )
-    kernel.prepare()
-    return kernel
 
 
 def solve(
     *,
-    topology: KernelTopology,
-    input: KernelInput,
-    output: KernelOutput | None = None,
-    config: KernelConfig | None = None,
+    plasma: Plasma,
+    topology: Mapping[str, Any],
+    solver: Mapping[str, Any] | None = None,
     backend: str = "numba",
-    **_: Any,
-) -> KernelOutput:
-    """Prepare a short-lived Kernel, solve, and release its backend resources."""
+    artifact_dir: str | Path | None = None,
+    cpu_affinity: bool | int | None = None,
+    rebuild: bool = False,
+    materialize: bool = True,
+    verbose: bool = True,
+    report: bool = False,
+    report_dir: str | Path | None = None,
+    solver_override: Mapping[str, Any] | None = None,
+) -> VEQRecord:
+    """Build a short-lived Module, solve one frozen Plasma, and close it."""
 
-    kernel = Kernel(
+    module = build(
         topology=topology,
-        input=input,
-        output=output,
-        config=config,
+        solver=solver,
         backend=backend,
+        artifact_dir=artifact_dir,
+        cpu_affinity=cpu_affinity,
+        rebuild=rebuild,
+        materialize=materialize,
+        verbose=verbose,
+        report=report,
+        report_dir=report_dir,
     )
     try:
-        kernel.prepare()
-        return kernel.solve()
+        return module.solve(
+            plasma=plasma,
+            solver=solver_override,
+            materialize=materialize,
+            verbose=verbose,
+            report=report,
+            report_dir=report_dir,
+        )
     finally:
-        kernel.close()
+        module.close()

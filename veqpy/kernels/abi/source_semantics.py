@@ -85,12 +85,8 @@ def materialize_kernel_source(
     return materialize_source_inputs(
         route=topology.route,
         coordinate=topology.coordinate,
-        nodes=topology.nodes,
-        sample_count=(
-            int(source.pressure_profile.size)
-            if topology.nodes == "explicit"
-            else int(topology.sample_count)
-        ),
+        nodes="explicit",
+        sample_count=int(source.pressure_profile.size),
         grid_size=topology.Nr,
         quadrature=topology.quadrature,
         calculus=topology.calculus,
@@ -110,21 +106,9 @@ def materialize_kernel_source(
 
 
 def _validate_source_length(topology: KernelTopology, source: _SourceCase) -> None:
-    if topology.nodes == "explicit":
-        # _SourceCase already enforces common pressure/driver/source-node
-        # shapes.  Their runtime length is deliberately absent from Topology.
-        return
-    expected_samples = topology.sample_count
-    pressure_length = source.pressure_profile.size
-    driver_length = source.driver_profile.size
-    if pressure_length != expected_samples or driver_length != expected_samples:
-        raise ValueError(
-            f"case does not match kernel topology: {source.pressure_name} "
-            f"and {source.driver_name} "
-            f"must have length {expected_samples} for "
-            f"route={topology.route}/{topology.coordinate}/{topology.nodes}, "
-            f"got {pressure_length} and {driver_length}"
-        )
+    # _SourceCase already enforces common pressure/driver/source-node shapes.
+    # Their runtime length is deliberately absent from KernelTopology.
+    del topology, source
 
 
 def materialize_source_inputs(

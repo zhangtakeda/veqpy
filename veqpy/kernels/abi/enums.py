@@ -68,7 +68,7 @@ SOURCE_CONSTRAINT_FLAGS_BY_ROUTE = {
     "PJ3": frozenset(SOURCE_CONSTRAINT_CODES_BY_FLAGS),
 }
 LAYOUT_CODES = {"degree": 0, "family": 1}
-SUPPORTED_BACKENDS = frozenset({"cxx", "numba"})
+SUPPORTED_BACKENDS = frozenset({"numba", "cxx", "cxx-strict", "cxx-relaxed"})
 
 
 def source_driver_for(route: str, coordinate: str) -> str:
