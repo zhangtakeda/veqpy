@@ -68,6 +68,7 @@ class Kernel:
         )
         self._prepared = False
         self._closed = False
+        self._has_solve = False
         self._last_equilibrium: Equilibrium | None = None
 
     @property
@@ -93,9 +94,20 @@ class Kernel:
             self._prepared = True
 
     def solve(self, *, config: KernelConfig | None = None) -> KernelOutput:
-        """Fill and return the same bound ``KernelOutput`` object."""
+        """Run the numerical solve and return the current KO snapshot.
+
+        Equilibrium materialization is deliberately outside this path.  A
+        caller that needs a frozen State must explicitly call
+        :meth:`build_equilibrium` after this method returns.
+        """
 
         self._ensure_open()
+        # A new solve owns the only valid materialization point.  Invalidate
+        # both the cached State and the KO root snapshot before any backend
+        # work so an exception cannot expose the previous solve's State.
+        self._last_equilibrium = None
+        self._has_solve = False
+        _reset_equilibrium_roots(self.output)
         _validate_input(self.input, self.topology)
         if not self._prepared:
             self.prepare()
@@ -112,8 +124,7 @@ class Kernel:
             x0=x0,
         )
         _copy_snapshot(self.output, snapshot)
-        self._last_equilibrium = self._impl.build_equilibrium()
-        _copy_equilibrium_roots(self.output, self._last_equilibrium)
+        self._has_solve = True
         return self.output
 
     def residual_into(self, out: np.ndarray, x: Any | None = None) -> None:
@@ -172,11 +183,11 @@ class Kernel:
         """Return a newly owned frozen base Equilibrium snapshot."""
 
         self._ensure_open()
+        if not self._has_solve:
+            raise RuntimeError("build_equilibrium requires a previous solve")
         if self._last_equilibrium is None:
             if not self._prepared:
                 self.prepare()
-            if not np.any(np.isfinite(self.output.x)) or self.output.x.size == 0:
-                raise RuntimeError("build_equilibrium requires a previous solve")
             self._last_equilibrium = self._impl.build_equilibrium()
             _copy_equilibrium_roots(self.output, self._last_equilibrium)
         return self._last_equilibrium
@@ -188,6 +199,8 @@ class Kernel:
             return
         self._impl.clear()
         self.output.reset()
+        _reset_equilibrium_roots(self.output)
+        self._has_solve = False
         self._last_equilibrium = None
 
     def close(self) -> None:
@@ -289,6 +302,13 @@ def _copy_equilibrium_roots(output: KernelOutput, equilibrium: object) -> None:
     np.copyto(output.psin_rr, np.asarray(equilibrium.psin_rr, dtype=np.float64))
     np.copyto(output.FF_psi, np.asarray(equilibrium.FF_psi, dtype=np.float64))
     np.copyto(output.P_psi, np.asarray(equilibrium.P_psi, dtype=np.float64))
+
+
+def _reset_equilibrium_roots(output: KernelOutput) -> None:
+    """Mark KO materialization roots unavailable until an explicit build."""
+
+    for name in ("psin", "psin_r", "psin_rr", "FF_psi", "P_psi"):
+        getattr(output, name).fill(np.nan)
 
 
 __all__ = ["Kernel"]
