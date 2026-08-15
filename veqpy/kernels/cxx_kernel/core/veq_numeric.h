@@ -191,26 +191,38 @@ namespace math::detail
 
     inline double relaxed_sin(double value) noexcept
     {
+#if !defined(VEQPY_CXX_FP_MODE_RELAXED)
+        return std::sin(value);
+#else
         const RelaxedTrigReduction reduced = relaxed_trig_reduce(value);
         const bool                 odd     = (reduced.quadrant & 1U) != 0U;
         const double               base =
             odd ? evaluate_taylor_horner<relaxed_cos_order, 0>(reduced.r2)
                 : reduced.reduced * evaluate_taylor_horner<relaxed_sin_order, 1>(reduced.r2);
         return reduced.quadrant < 2U ? base : -base;
+#endif
     }
 
     inline double relaxed_cos(double value) noexcept
     {
+#if !defined(VEQPY_CXX_FP_MODE_RELAXED)
+        return std::cos(value);
+#else
         const RelaxedTrigReduction reduced = relaxed_trig_reduce(value);
         const bool                 odd     = (reduced.quadrant & 1U) != 0U;
         const double               base =
             odd ? reduced.reduced * evaluate_taylor_horner<relaxed_sin_order, 1>(reduced.r2)
                 : evaluate_taylor_horner<relaxed_cos_order, 0>(reduced.r2);
         return reduced.quadrant == 0U || reduced.quadrant == 3U ? base : -base;
+#endif
     }
 
     inline void relaxed_sincos(double value, double& sin_value, double& cos_value) noexcept
     {
+#if !defined(VEQPY_CXX_FP_MODE_RELAXED)
+        sin_value = std::sin(value);
+        cos_value = std::cos(value);
+#else
         const RelaxedTrigReduction reduced = relaxed_trig_reduce(value);
         const double sin_reduced = reduced.reduced * evaluate_taylor_horner<relaxed_sin_order, 1>(reduced.r2);
         const double cos_reduced = evaluate_taylor_horner<relaxed_cos_order, 0>(reduced.r2);
@@ -221,6 +233,7 @@ namespace math::detail
 
         sin_value = reduced.quadrant < 2U ? sin_base : -sin_base;
         cos_value = reduced.quadrant == 0U || reduced.quadrant == 3U ? cos_base : -cos_base;
+#endif
     }
 
     constexpr double tan(double value)
