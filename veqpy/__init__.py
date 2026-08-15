@@ -1,27 +1,4 @@
-"""
-Package: veqpy
-
-Role:
-- Expose VEQPy's canonical base, Kernel, and model surfaces from one package root.
-
-Public API:
-- Reactive, serialization, and registry infrastructure.
-- build, fit, pareto, and solve function-style entrypoints.
-- Kernel, KernelRecipe, and KernelInitial.
-- KernelTopology, KernelBoundary, KernelSource, and KernelConfig.
-- SolveResult, ParetoResult, and ParetoSample result records.
-- Grid, Profile, Geqdsk, and Equilibrium model objects.
-
-Dependencies:
-- veqpy.api for function-style entrypoints.
-- veqpy.base for shared reactive and serialization infrastructure.
-- veqpy.kernels for Kernel dispatch, public Kernel dataclasses, and errors.
-- veqpy.model for equilibrium data models.
-
-Downstream:
-- Examples, benchmarks, docs, and user code can import the public contract from
-  this package root.
-"""
+"""VEQPy 2.x equilibrium Module and its four-buffer numerical Kernel."""
 
 from __future__ import annotations
 
@@ -29,81 +6,49 @@ import tomllib
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
-from veqpy.api import build, fit, pareto, solve
-from veqpy.base import (
-    Reactive,
-    Registry,
-    Serial,
-    depends_on,
-    read_serializer,
-    write_serializer,
-)
-from veqpy.kernels import (
-    Kernel,
-    KernelBoundary,
-    KernelConfig,
-    KernelInitial,
-    KernelRecipe,
-    KernelSource,
-    KernelTopology,
-    ParetoResult,
-    ParetoSample,
-    SolveResult,
-)
-from veqpy.model import (
-    Equilibrium,
-    Geqdsk,
-    Grid,
-    Profile,
-)
+from veqpy.kernels import Kernel, KernelConfig, KernelInput, KernelOutput, KernelTopology
+from veqpy.model.geqdsk import Geqdsk
+from veqpy.module import VEQ, VEQRecord
 
 __all__ = [
-    "Reactive",
-    "Registry",
-    "Serial",
-    "depends_on",
-    "read_serializer",
-    "write_serializer",
-    "build",
-    "fit",
-    "pareto",
-    "solve",
-    "Kernel",
-    "KernelBoundary",
-    "KernelConfig",
-    "KernelInitial",
-    "KernelRecipe",
-    "KernelSource",
-    "KernelTopology",
-    "ParetoResult",
-    "ParetoSample",
-    "SolveResult",
-    "Equilibrium",
     "Geqdsk",
-    "Grid",
-    "Profile",
+    "Kernel",
+    "KernelConfig",
+    "KernelInput",
+    "KernelOutput",
+    "KernelTopology",
+    "VEQ",
+    "VEQRecord",
 ]
 
 
 def _source_tree_version() -> str:
+    """Read the source checkout version when package metadata is unavailable."""
+
     pyproject_path = Path(__file__).resolve().parent.parent / "pyproject.toml"
     with pyproject_path.open("rb") as stream:
         return str(tomllib.load(stream)["project"]["version"])
 
 
 try:
-    __version__ = version("veqpy")
-except PackageNotFoundError:
-    __version__ = _source_tree_version()
+    _checkout_version = _source_tree_version()
+except (FileNotFoundError, tomllib.TOMLDecodeError):
+    _checkout_version = None
+
+if _checkout_version is not None:
+    __version__ = _checkout_version
+else:
+    try:
+        __version__ = version("veqpy")
+    except PackageNotFoundError:
+        __version__ = "0+unknown"
 
 
 def __dir__() -> list[str]:
+    """Return only the supported package-root names."""
+
     return sorted({*globals(), *__all__})
 
 
 if __name__ == "__main__":
-    print(
-        f"VEQPy-v{__version__}:\n"
-        "a fast parametric Grad--Shafranov solver for \n"
-        "fixed-boundary, axisymmetric tokamak equilibria"
-    )
+    print(f"VEQPy-v{__version__}: fixed-boundary axisymmetric equilibrium Module")

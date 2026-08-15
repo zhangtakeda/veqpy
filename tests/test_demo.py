@@ -35,7 +35,7 @@ def test_root_demo_runs_with_tmp_output(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 0, result.stderr + result.stdout
-    assert "VEQPy minimal Kernel demo" in result.stdout
+    assert "VEQPy minimal Module demo" in result.stdout
     assert "success: True" in result.stdout
     assert (tmp_path / "demo_init.png").is_file()
     assert (tmp_path / "demo_result.png").is_file()
@@ -73,7 +73,7 @@ def test_geqdsk_demo_writes_geqdsk_and_comparison(tmp_path: Path) -> None:
     assert output.is_file()
     exported = Geqdsk(output)
     exported.check()
-    reference = Geqdsk(PROJECT_ROOT / "data" / "TEST.geqdsk")
+    reference = Geqdsk(PROJECT_ROOT / "data" / "SOLOVEV.geqdsk")
     assert (exported.NR, exported.NZ) == (reference.NR, reference.NZ)
     assert exported.boundary.shape == (65, 2)
     assert exported.boundary[-1].tolist() == exported.boundary[0].tolist()

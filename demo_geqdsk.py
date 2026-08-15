@@ -1,4 +1,6 @@
-"""Solve the bundled Solovev GEQDSK case with the VEQPy Numba kernel."""
+"""Solve the bundled Solovev GEQDSK case through the VEQPy Module API."""
+
+from __future__ import annotations
 
 from pathlib import Path
 
@@ -8,80 +10,88 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 import numpy as np
+from fusionprime_base import Equilibrium, Geometry, Plasma
 
 import veqpy as veq
+from veqpy.demo_case import make_demo_plasma
+from veqpy.io import export_geqdsk
+from veqpy.kernels.boundary_fit import fit_boundary_params
 
 ROOT = Path(__file__).resolve().parent
-INPUT = ROOT / "data" / "TEST.geqdsk"
+INPUT = ROOT / "data" / "SOLOVEV.geqdsk"
 OUTPUT = ROOT / "data" / "solovev-veqpy.geqdsk"
 FIGURE = ROOT / "data" / "solovev-veqpy-comparison.png"
 
 
-# Read the reference LCFS, PF profiles, machine field, and plasma current.
-reference = veq.Geqdsk(INPUT)
-boundary = veq.KernelBoundary(
-    B0=reference.Bt0,
-    R_boundary=reference.boundary[:, 0],
-    Z_boundary=reference.boundary[:, 1],
-    c_order=10,
-    s_order=10,
-    fit_maxtol=1.0,
-    method="least-square",
-).fit(backend="numba")
-source = veq.KernelSource(
-    P_psin=(reference.psi_bound - reference.psi_axis) * reference.P_psi,
-    p0=float(reference.P[-1]),
-    FF_psin=(reference.psi_bound - reference.psi_axis) * reference.FF_psi,
-    Ip=abs(reference.Ip),
-    case_name="solovev-geqdsk",
-)
+def _reference_plasma(reference: veq.Geqdsk) -> Plasma:
+    """Lower GEQDSK roots into a frozen FusionPRIME Plasma context."""
 
-# Use enough vertical-shift and Fourier freedom for vertically asymmetric g-files.
-topology = veq.KernelTopology(
-    h_count=10,
-    v_count=10,
-    kappa_count=10,
-    psin_count=10,
-    F_count=0,
-    c_counts=(5, 5, 5, 5, 5, 5, 5, 5, 5),
-    s_counts=(5, 5, 5, 5, 5, 5, 5, 5, 5),
-    Nr=32,
-    Nt=32,
-    route="PF",
-    coordinate="psin",
-    nodes="uniform",
-    constraint="ip",
-    sample_count=reference.P_psi.size,
-)
-kernel = veq.build(
-    topology=topology,
-    recipe=veq.KernelRecipe(backend="numba"),
-    config=veq.KernelConfig(
-        method="powell",
-        max_residual=1.0e-6,
-        max_evaluations=2000,
-        initial="cold",
-        continuation="cold",
-    ),
-)
+    order = 8
+    radial_coefficients = 11
+    fit = fit_boundary_params(
+        reference.boundary[:, 0],
+        reference.boundary[:, 1],
+        c_order=order,
+        s_order=order,
+        maxtol=1.0e-2,
+        method="least-square",
+    )
+    delta_psi = float(reference.psi_bound - reference.psi_axis)
+    radial_nodes = np.linspace(0.0, 1.0, reference.P_psi.size, dtype=np.float64)
+    geometry = Geometry(
+        Nr=radial_nodes.size,
+        Nt=64,
+        radial_rule="uniform",
+        radial_calculus="spectral",
+        K_max=None,
+        R0=float(fit["R0"]),
+        Z0=float(fit["Z0"]),
+        a=float(fit["a"]),
+        kappa_lcfs=float(fit["ka"]),
+        c_lcfs=np.asarray(fit["c_offsets"], dtype=np.float64),
+        s_lcfs=np.asarray(fit["s_offsets"], dtype=np.float64)[1:],
+        h_coeffs=np.zeros(radial_coefficients, dtype=np.float64),
+        v_coeffs=np.zeros(radial_coefficients, dtype=np.float64),
+        kappa_coeffs=np.zeros(radial_coefficients, dtype=np.float64),
+        c_coeffs=np.zeros((order + 1, radial_coefficients), dtype=np.float64),
+        s_coeffs=np.zeros((order, radial_coefficients), dtype=np.float64),
+    )
+    equilibrium = Equilibrium(
+        geometry=geometry,
+        FF_psi=np.asarray(reference.FF_psi, dtype=np.float64),
+        P_psi=np.asarray(reference.P_psi, dtype=np.float64),
+        psi_r=delta_psi * 2.0 * radial_nodes,
+        psi_rr=np.full(radial_nodes.size, 2.0 * delta_psi, dtype=np.float64),
+        B0=float(reference.Bt0),
+        P0=float(reference.P[-1]),
+    ).freeze()
+    fixture = make_demo_plasma()
+    return Plasma(
+        equilibrium=equilibrium,
+        kinetic=fixture.kinetic,
+        current=fixture.current,
+        flux=fixture.flux,
+        source=fixture.source,
+    ).freeze()
 
-result = kernel.solve(boundary=boundary, source=source)
-if not result.success:
-    raise RuntimeError(f"VEQPy solve failed with residual {result.raw_norm:.3e}")
 
-equilibrium = kernel.build_equilibrium()
-solved_geqdsk = equilibrium.to_geqdsk(
-    R_range=(reference.Rmin, reference.Rmax),
-    Z_range=(reference.Zmin, reference.Zmax),
-    NR=reference.NR,
-    NZ=reference.NZ,
-    header="Solovev equilibrium solved by VEQPy Numba",
-    limiter=reference.limiter,
-    psi_axis=reference.psi_axis,
-)
-solved_geqdsk.write(OUTPUT)
-exported = veq.Geqdsk(OUTPUT)
-kernel.close()
+def _topology(source_count: int) -> veq.KernelTopology:
+    return veq.KernelTopology(
+        h_count=11,
+        v_count=11,
+        kappa_count=11,
+        psin_count=10,
+        F_count=0,
+        c_counts=(11,) * 9,
+        s_counts=(11,) * 8,
+        Nr=32,
+        Nt=32,
+        route="PF",
+        coordinate="psin",
+        nodes="uniform",
+        constraint="ip",
+        sample_count=source_count,
+    )
 
 
 def plot_geqdsk_comparison(
@@ -121,45 +131,62 @@ def plot_geqdsk_comparison(
             label=label,
         )
         geometry.plot(geqdsk.Raxis, geqdsk.Zaxis, marker="x", color=color)
-    geometry.set(
-        xlabel=r"$R$ [m]",
-        ylabel=r"$Z$ [m]",
-        title=r"Normalized $\psi$ surfaces and LCFS",
-    )
+    geometry.set(xlabel="R [m]", ylabel="Z [m]", title="Normalized flux surfaces and LCFS")
     geometry.set_aspect("equal", adjustable="box")
     geometry.grid(alpha=0.25)
 
     profiles = (
-        (axes[0, 1], "P", 1.0e-6, "Pressure", r"$P$ [MPa]"),
-        (axes[1, 0], "P_psi", 1.0e-3, "Pressure derivative", r"$P_\psi$ [kPa/Wb]"),
-        (axes[1, 1], "FF_psi", 1.0, "Toroidal-field source", r"$FF_\psi$"),
+        (axes[0, 1], "P", 1.0e-6, "Pressure", "P [MPa]"),
+        (axes[1, 0], "P_psi", 1.0e-3, "Pressure derivative", "P_psi [kPa/Wb]"),
+        (axes[1, 1], "FF_psi", 1.0, "Toroidal-field source", "FF_psi"),
     )
     for axis, name, scale, title, ylabel in profiles:
         for geqdsk, label, color, linestyle in cases:
             values = np.asarray(getattr(geqdsk, name), dtype=np.float64)
             psin = np.linspace(0.0, 1.0, values.size)
-            axis.plot(
-                psin,
-                scale * values,
-                color=color,
-                linestyle=linestyle,
-                linewidth=1.8,
-                label=label,
-            )
-        axis.set(xlabel=r"$\psi_n$", ylabel=ylabel, title=title)
+            axis.plot(psin, scale * values, color=color, linestyle=linestyle, linewidth=1.8, label=label)
+        axis.set(xlabel="psin", ylabel=ylabel, title=title)
         axis.grid(alpha=0.25)
         axis.legend()
 
     fig.suptitle("SOLOVEV.geqdsk vs solovev-veqpy.geqdsk")
-    fig.savefig(output, dpi=200, facecolor="white")
+    fig.savefig(output, dpi=180, facecolor="white")
     plt.close(fig)
 
 
-plot_geqdsk_comparison(reference, exported, FIGURE)
+def main() -> int:
+    reference = veq.Geqdsk(INPUT)
+    plasma = _reference_plasma(reference)
+    topology = _topology(reference.P_psi.size)
+    module = veq.VEQ(topology=topology, backend="numba", config=veq.KernelConfig(max_evaluations=2000))
+    try:
+        result = module.run(plasma=plasma)
+        if not result.accepted or result.equilibrium is None:
+            raise RuntimeError(f"VEQPy solve failed with residual {result.residual_norm:.3e}")
+        solved = export_geqdsk(
+            result.equilibrium,
+            R_range=(reference.Rmin, reference.Rmax),
+            Z_range=(reference.Zmin, reference.Zmax),
+            NR=reference.NR,
+            NZ=reference.NZ,
+            header="Solovev equilibrium solved by VEQPy Numba",
+            limiter=reference.limiter,
+            psi_axis=reference.psi_axis,
+        )
+        solved.write(OUTPUT)
+    finally:
+        module.close()
 
-print("VEQPy Numba GEQDSK demo")
-print(f"success: {result.success}")
-print(f"residual: {result.raw_norm:.3e}")
-print(f"nfev: {result.nfev}")
-print(f"output: {OUTPUT.resolve()}")
-print(f"comparison: {FIGURE.resolve()}")
+    exported = veq.Geqdsk(OUTPUT)
+    plot_geqdsk_comparison(reference, exported, FIGURE)
+    print("VEQPy Numba GEQDSK demo")
+    print(f"success: {result.accepted}")
+    print(f"residual: {result.residual_norm:.3e}")
+    print(f"nfev: {result.evaluations}")
+    print(f"output: {OUTPUT.resolve()}")
+    print(f"comparison: {FIGURE.resolve()}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

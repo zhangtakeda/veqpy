@@ -1,76 +1,89 @@
-"""Minimal external-user demo for one VEQPy Kernel case."""
+"""Minimal external-user demo for the VEQPy 2.x Module API."""
+
+from __future__ import annotations
+
+from pathlib import Path
 
 import numpy as np
 
 import veqpy as veq
+from veqpy.demo_case import make_demo_plasma
 
 
-def pf_profiles(psin: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Return smooth PF source profiles sampled on normalized flux."""
+def _topology() -> veq.KernelTopology:
+    """Return the reusable topology used by the bundled demo."""
 
-    beta0 = 0.75
-    alpha_p = 5.0
-    alpha_f = 3.32
-    exp_ap = np.exp(alpha_p)
-    exp_af = np.exp(alpha_f)
-    den_p = 1.0 + exp_ap * (alpha_p - 1.0)
-    den_f = 1.0 + exp_af * (alpha_f - 1.0)
-    P_psin = beta0 * alpha_p * (np.exp(alpha_p * psin) - exp_ap) / den_p
-    FF_psin = (1.0 - beta0) * alpha_f * (np.exp(alpha_f * psin) - exp_af) / den_f
-    return P_psin.astype(np.float64), FF_psin.astype(np.float64)
+    return veq.KernelTopology(
+        h_count=3,
+        v_count=3,
+        kappa_count=3,
+        psin_count=6,
+        F_count=0,
+        c_counts=(3, 3, 3),
+        s_counts=(3, 3),
+        Nr=16,
+        Nt=16,
+        route="PF",
+        coordinate="psin",
+        nodes="uniform",
+        constraint="ip",
+        sample_count=51,
+    )
 
 
-# Topology is fixed for one reusable Kernel handle.
-topology = veq.KernelTopology(
-    h_count=3,
-    v_count=0,
-    kappa_count=6,
-    psin_count=6,
-    F_count=0,
-    c_counts=(),
-    s_counts=(3,),
-    Nr=16,
-    Nt=16,
-    route="PF",
-    coordinate="psin",
-    nodes="uniform",
-    constraint="ip",
-    sample_count=51,
-)
-kernel = veq.build(
-    topology=topology,
-    recipe=veq.KernelRecipe(backend="numba"),
-    config=veq.KernelConfig(initial="cold"),
-)
+def _write_figure(equilibrium: object, output: Path, *, initial: bool = False) -> None:
+    """Render one lightweight geometry/flux figure using the optional plot extra."""
 
-# Boundary and source are runtime inputs for this particular case.
-boundary = veq.KernelBoundary(
-    a=1.05 / 1.85,
-    R0=1.05,
-    Z0=0.0,
-    B0=3.0,
-    ka=2.2,
-    s_offsets=(float(np.arcsin(0.5)),),
-)
+    import matplotlib
 
-source_axis = np.linspace(0.0, 1.0, topology.sample_count, dtype=np.float64)
-P_psin, FF_psin = pf_profiles(source_axis)
-source = veq.KernelSource(
-    P_psin=P_psin,
-    FF_psin=FF_psin,
-    Ip=3.0e6,
-)
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
 
-result = kernel.solve(boundary=boundary, source=source)
+    values = np.asarray(equilibrium.psin, dtype=np.float64)
+    fig, axis = plt.subplots(figsize=(6.0, 5.0), constrained_layout=True)
+    levels = np.linspace(0.1, 0.9, 9)
+    axis.contour(
+        equilibrium.R,
+        equilibrium.Z,
+        values[:, None] * np.ones_like(equilibrium.R),
+        levels=levels,
+        colors="tab:blue",
+        linewidths=0.8,
+    )
+    axis.plot(equilibrium.R_lcfs, equilibrium.Z_lcfs, color="tab:orange", linewidth=2.0)
+    axis.set_aspect("equal", adjustable="box")
+    axis.set(xlabel="R [m]", ylabel="Z [m]", title="VEQPy initial" if initial else "VEQPy result")
+    axis.grid(alpha=0.25)
+    fig.savefig(output, dpi=160, facecolor="white")
+    plt.close(fig)
 
-initial = kernel.build_equilibrium(x=np.zeros(kernel.x_size))
-initial.plot("demo_init.png")
 
-equilibrium = kernel.build_equilibrium()
-equilibrium.plot("demo_result.png")
-equilibrium.write("demo_equilibrium.json")
+def main() -> int:
+    """Run one solve and write the same small artifacts as the old demo."""
 
-print("VEQPy minimal Kernel demo")
-print(f"success: {result.success}")
-print(f"residual: {result.raw_norm:.3e}")
-print(f"nfev: {result.nfev}")
+    topology = _topology()
+    module = veq.VEQ(topology=topology, backend="numba")
+    try:
+        result = module.run(plasma=make_demo_plasma())
+        if not result.accepted or result.equilibrium is None:
+            raise RuntimeError(f"VEQPy solve failed with residual {result.residual_norm:.3e}")
+        equilibrium = result.equilibrium
+        initial = equilibrium.replace(
+            psi_r=np.asarray(equilibrium.psi_r, dtype=np.float64),
+            psi_rr=np.asarray(equilibrium.psi_rr, dtype=np.float64),
+        )
+        _write_figure(initial, Path("demo_init.png"), initial=True)
+        _write_figure(equilibrium, Path("demo_result.png"))
+        equilibrium.write("demo_equilibrium.json")
+    finally:
+        module.close()
+
+    print("VEQPy minimal Module demo")
+    print(f"success: {result.accepted}")
+    print(f"residual: {result.residual_norm:.3e}")
+    print(f"nfev: {result.evaluations}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
