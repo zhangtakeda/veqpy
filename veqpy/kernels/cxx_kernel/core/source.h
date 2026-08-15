@@ -100,12 +100,16 @@ namespace source::detail
 
         using RadialVector = Vector<double, radial_nodes>;
         using SourceVector = Vector<double, sample_count>;
+        using CoefficientVector = Vector<double, sample_count * 4>;
         using RootFields   = Matrix<double, root_field_count, radial_nodes>;
 
         SourceVector public_pprime_input{};
         SourceVector pprime_input{};
         SourceVector public_driver_input{};
         SourceVector driver_input{};
+        SourceVector source_coordinate_nodes{};
+        CoefficientVector pprime_coefficients{};
+        CoefficientVector driver_coefficients{};
         RadialVector source_psin_query{};
         RadialVector source_parameter_query{};
         RadialVector materialized_pprime_input{};
@@ -121,19 +125,31 @@ namespace source::detail
         double       scaled_effective_p0 = 0.0;
         double       pressure_multiplier = 1.0;
         size_t       active_count = sample_count;
+        bool         explicit_source_interpolation = false;
         bool         source_materialization_initialized = false;
 
         constexpr void set_uniform_sources(std::span<const double, sample_count> pprime,
                                            std::span<const double, sample_count> driver,
-                                           size_t active_source_count) noexcept
+                                           std::span<const double, sample_count> source_nodes,
+                                           std::span<const double, sample_count * 4> pprime_coeff,
+                                           std::span<const double, sample_count * 4> driver_coeff,
+                                           size_t active_source_count,
+                                           bool   use_explicit_interpolation) noexcept
         {
             active_count = active_source_count < sample_count ? active_source_count : sample_count;
+            explicit_source_interpolation = use_explicit_interpolation;
             for (size_t i = 0; i < sample_count; ++i)
             {
                 public_pprime_input[i] = pprime[i];
                 pprime_input[i] = pprime[i];
                 public_driver_input[i] = driver[i];
                 driver_input[i] = driver[i];
+                source_coordinate_nodes[i] = source_nodes[i];
+            }
+            for (size_t i = 0; i < sample_count * 4; ++i)
+            {
+                pprime_coefficients[i] = pprime_coeff[i];
+                driver_coefficients[i] = driver_coeff[i];
             }
             source_materialization_initialized = false;
         }
@@ -158,7 +174,7 @@ namespace source::detail
                 return;
             for (size_t i = 0; i < radial_nodes; ++i)
                 source_parameter_query[i] = GridType::nodes[i];
-            local_barycentric_interpolate_pair();
+            interpolate_source_pair();
             source_materialization_initialized = true;
         }
 
@@ -216,7 +232,7 @@ namespace source::detail
                 }
             }
 
-            local_barycentric_interpolate_pair();
+            interpolate_source_pair();
         }
 
         template <typename ProfilesRuntime>
@@ -557,7 +573,7 @@ namespace source::detail
                 for (size_t i = 0; i < radial_nodes; ++i)
                     source_parameter_query[i] = source_psin_query[i];
                 if constexpr (SourceConstraintCode == 1 || SourceConstraintCode == 3)
-                    local_barycentric_interpolate_pair();
+                    interpolate_source_pair();
                 else
                     local_polynomial_interpolate_pair();
 
@@ -615,7 +631,7 @@ namespace source::detail
                 for (size_t i = 0; i < radial_nodes; ++i)
                     source_parameter_query[i] = source_psin_query[i];
                 if constexpr (SourceConstraintCode == 1 || SourceConstraintCode == 3)
-                    local_barycentric_interpolate_pair();
+                    interpolate_source_pair();
                 else
                     local_polynomial_interpolate_pair();
 
@@ -927,6 +943,70 @@ namespace source::detail
                     materialized_driver_input[i] = numerator_driver / denominator;
                 }
             }
+        }
+
+        constexpr void local_pchip_interpolate_pair() noexcept
+        {
+            if (active_count <= 1)
+            {
+                for (size_t i = 0; i < radial_nodes; ++i)
+                {
+                    materialized_pprime_input[i] = pprime_input[0];
+                    materialized_driver_input[i] = driver_input[0];
+                }
+                return;
+            }
+
+            const size_t last_interval = active_count - 2;
+            for (size_t i = 0; i < radial_nodes; ++i)
+            {
+                double query = source_parameter_query[i];
+                size_t interval = 0;
+                if (query <= source_coordinate_nodes[0])
+                {
+                    query = source_coordinate_nodes[0];
+                }
+                else if (query >= source_coordinate_nodes[active_count - 1])
+                {
+                    interval = last_interval;
+                    query = source_coordinate_nodes[active_count - 1];
+                }
+                else
+                {
+                    size_t low = 0;
+                    size_t high = active_count - 1;
+                    while (high - low > 1)
+                    {
+                        const size_t middle = (low + high) / 2;
+                        if (source_coordinate_nodes[middle] <= query)
+                            low = middle;
+                        else
+                            high = middle;
+                    }
+                    interval = low;
+                }
+
+                const double dx = query - source_coordinate_nodes[interval];
+                const size_t offset = interval * 4;
+                materialized_pprime_input[i] =
+                    ((pprime_coefficients[offset + 3] * dx + pprime_coefficients[offset + 2]) * dx +
+                     pprime_coefficients[offset + 1]) *
+                        dx +
+                    pprime_coefficients[offset];
+                materialized_driver_input[i] =
+                    ((driver_coefficients[offset + 3] * dx + driver_coefficients[offset + 2]) * dx +
+                     driver_coefficients[offset + 1]) *
+                        dx +
+                    driver_coefficients[offset];
+            }
+        }
+
+        constexpr void interpolate_source_pair() noexcept
+        {
+            if (explicit_source_interpolation)
+                local_pchip_interpolate_pair();
+            else
+                local_barycentric_interpolate_pair();
         }
 
         constexpr void local_polynomial_interpolate_pair() noexcept

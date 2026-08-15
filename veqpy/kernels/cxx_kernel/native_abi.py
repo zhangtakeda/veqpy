@@ -18,6 +18,7 @@ from veqpy.kernels.types import (
     _SolveSnapshot,
     kernel_boundary_s_offsets_with_s0,
 )
+from veqpy.numerics import build_explicit_source_interpolation_coefficients
 
 
 def boundary_runtime_args(boundary: _BoundaryCase) -> tuple[Any, ...]:
@@ -33,9 +34,21 @@ def boundary_runtime_args(boundary: _BoundaryCase) -> tuple[Any, ...]:
 
 
 def source_runtime_args(source: _MaterializedSource, source_count: int) -> tuple[Any, ...]:
+    nodes = np.ascontiguousarray(source.source_nodes[:source_count], dtype=np.float64)
+    pprime_coefficients = build_explicit_source_interpolation_coefficients(
+        nodes,
+        np.asarray(source.scaled_pprime[:source_count], dtype=np.float64),
+    )
+    driver_coefficients = build_explicit_source_interpolation_coefficients(
+        nodes,
+        np.asarray(source.scaled_driver[:source_count], dtype=np.float64),
+    )
     return (
-        source.scaled_pprime,
-        source.scaled_driver,
+        np.ascontiguousarray(source.scaled_pprime[:source_count], dtype=np.float64),
+        np.ascontiguousarray(source.scaled_driver[:source_count], dtype=np.float64),
+        nodes,
+        np.ascontiguousarray(pprime_coefficients.ravel(), dtype=np.float64),
+        np.ascontiguousarray(driver_coefficients.ravel(), dtype=np.float64),
         int(source_count),
         source.scaled_p0,
         source.scaled_Ip,

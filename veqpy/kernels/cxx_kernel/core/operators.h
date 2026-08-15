@@ -30,7 +30,11 @@ namespace operators::detail
         ProfileRuntimeParams<Shape>               profile_params{};
         Vector<double, SourceShape::sample_count> pprime{};
         Vector<double, SourceShape::sample_count> driver{};
+        Vector<double, SourceShape::sample_count> source_nodes{};
+        Vector<double, SourceShape::sample_count * 4> pprime_coefficients{};
+        Vector<double, SourceShape::sample_count * 4> driver_coefficients{};
         size_t                                      source_count = SourceShape::sample_count;
+        bool                                        explicit_source_interpolation = false;
     };
 
     struct OperatorRuntimeScalars
@@ -149,7 +153,13 @@ namespace operators::detail
         {
             workspace.profiles.load_fixed_from(plan.fixed_profiles);
             workspace.source_runtime.set_uniform_sources(
-                source_span(setup.pprime), source_span(setup.driver), setup.source_count);
+                source_span(setup.pprime),
+                source_span(setup.driver),
+                source_span(setup.source_nodes),
+                source_span(setup.pprime_coefficients),
+                source_span(setup.driver_coefficients),
+                setup.source_count,
+                setup.explicit_source_interpolation);
         }
 
         constexpr const RuntimeScalars& runtime_scalars() const noexcept { return runtime_scalars_; }
@@ -161,7 +171,13 @@ namespace operators::detail
             plan = make_plan(setup);
             workspace.profiles.load_fixed_from(plan.fixed_profiles);
             workspace.source_runtime.set_uniform_sources(
-                source_span(setup.pprime), source_span(setup.driver), setup.source_count);
+                source_span(setup.pprime),
+                source_span(setup.driver),
+                source_span(setup.source_nodes),
+                source_span(setup.pprime_coefficients),
+                source_span(setup.driver_coefficients),
+                setup.source_count,
+                setup.explicit_source_interpolation);
         }
 
         static constexpr void evaluate_impl(const OperatorPlan&                       plan,
@@ -477,6 +493,13 @@ namespace operators::detail
         source_span(const Vector<double, SourceShape::sample_count>& values) noexcept
         {
             return std::span<const double, SourceShape::sample_count>{values.data(), SourceShape::sample_count};
+        }
+
+        template <size_t Count>
+        static constexpr std::span<const double, Count>
+        source_span(const Vector<double, Count>& values) noexcept
+        {
+            return std::span<const double, Count>{values.data(), Count};
         }
 
         RuntimeScalars runtime_scalars_{};

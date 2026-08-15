@@ -408,7 +408,24 @@ namespace grid::detail
     template <size_t Degree>
     constexpr Vector<double, Degree> legendre_roots()
     {
-        return symmetric_gst_jacobi_roots<Degree, 0, 0>();
+        auto roots = symmetric_gst_jacobi_roots<Degree, 0, 0>();
+        for (size_t i = 0; i < Degree; ++i)
+        {
+            double previous = 1.0;
+            double current  = roots[i];
+            for (size_t degree = 2; degree <= Degree; ++degree)
+            {
+                const double nd   = static_cast<double>(degree);
+                const double next = ((2.0 * nd - 1.0) * roots[i] * current - (nd - 1.0) * previous) / nd;
+                previous          = current;
+                current           = next;
+            }
+
+            const double nd         = static_cast<double>(Degree);
+            const double derivative = nd * (previous - roots[i] * current) / (1.0 - roots[i] * roots[i]);
+            roots[i] -= current / derivative;
+        }
+        return roots;
     }
 
     template <size_t N>

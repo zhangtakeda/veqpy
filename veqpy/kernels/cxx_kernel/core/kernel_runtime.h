@@ -65,8 +65,15 @@ namespace cxx_kernel_api
             {
                 setup.pprime[i] = input.pprime[i];
                 setup.driver[i] = input.driver[i];
+                setup.source_nodes[i] = input.source_nodes[i];
+            }
+            for (size_t i = 0; i < CompiledSource::sample_count * 4; ++i)
+            {
+                setup.pprime_coefficients[i] = input.pprime_coefficients[i];
+                setup.driver_coefficients[i] = input.driver_coefficients[i];
             }
             setup.source_count = input.source_count;
+            setup.explicit_source_interpolation = input.explicit_source_interpolation;
             return setup;
         }
 

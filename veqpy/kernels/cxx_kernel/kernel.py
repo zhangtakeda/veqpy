@@ -41,8 +41,6 @@ from .registry import KernelRegistry
 from .solver import CxxSolver
 from .validation import validate_supported_for_cxx_backend
 
-_NATIVE_SOURCE_SAMPLES = 1024
-
 if TYPE_CHECKING:
     from fusionprime_base import Equilibrium
 
@@ -388,25 +386,22 @@ def _native_source_case(
             pressure_profile = pressure_profile * jacobian
         if source.driver_name == "FF_rho":
             driver_profile = driver_profile * jacobian
-    target = np.linspace(0.0, 1.0, source_count, dtype=np.float64)
-    pressure_active = np.interp(target, source_nodes, pressure_profile)
-    driver_active = np.interp(target, source_nodes, driver_profile)
-    pressure = np.zeros(_NATIVE_SOURCE_SAMPLES, dtype=np.float64)
-    driver = np.zeros(_NATIVE_SOURCE_SAMPLES, dtype=np.float64)
-    pressure[:source_count] = pressure_active
-    driver[:source_count] = driver_active
     pressure_name = PRESSURE_DERIVATIVE_BY_COORDINATE[native_topology.coordinate]
     driver_name = source_driver_for(native_topology.route, native_topology.coordinate)
     values: dict[str, object] = {
         "Ip": source.Ip,
         "beta": source.beta,
         "case_name": source.case_name,
-        "source_nodes": np.linspace(0.0, 1.0, _NATIVE_SOURCE_SAMPLES, dtype=np.float64),
-        driver_name: driver,
+        # Keep the explicit source coordinate and values intact.  The native
+        # runtime receives matching PCHIP coefficients and evaluates them at
+        # its changing physical queries; resampling to a fictitious uniform
+        # grid here changes the source function before Cxx sees it.
+        "source_nodes": np.ascontiguousarray(source_nodes[:source_count], dtype=np.float64),
+        driver_name: np.ascontiguousarray(driver_profile[:source_count], dtype=np.float64),
     }
     if source.pressure_name == "p":
-        values["p"] = pressure
+        values["p"] = np.ascontiguousarray(pressure_profile[:source_count], dtype=np.float64)
     else:
-        values[pressure_name] = pressure
+        values[pressure_name] = np.ascontiguousarray(pressure_profile[:source_count], dtype=np.float64)
         values["p0"] = source.p0
     return _SourceCase(**values)

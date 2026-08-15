@@ -122,16 +122,19 @@ namespace cxx_python
         return context;
     }
 
-    inline void read_exact_runtime_array(RuntimeArrayView values,
-                                         const char*      name,
-                                         std::array<double, CompiledSource::sample_count>& out)
+    template <size_t N>
+    void read_runtime_prefix_array(RuntimeArrayView values,
+                                   const char*      name,
+                                   std::array<double, N>& out,
+                                   size_t            required_length)
     {
         const size_t length = values.shape(0);
-        if (length != CompiledSource::sample_count)
+        if (length != required_length || length > N)
             throw std::runtime_error(std::string{name} + " length mismatch: expected " +
-                                     std::to_string(CompiledSource::sample_count) + ", got " +
+                                     std::to_string(required_length) + ", got " +
                                      std::to_string(length));
-        for (size_t i = 0; i < CompiledSource::sample_count; ++i)
+        out.fill(0.0);
+        for (size_t i = 0; i < length; ++i)
             out[i] = values.data()[i];
     }
 
@@ -165,6 +168,9 @@ namespace cxx_python
                                              RuntimeArrayView   s_offsets,
                                              RuntimeArrayView   scaled_pprime,
                                              RuntimeArrayView   scaled_driver,
+                                             RuntimeArrayView   source_nodes,
+                                             RuntimeArrayView   pprime_coefficients,
+                                             RuntimeArrayView   driver_coefficients,
                                              size_t             source_count,
                                              double             scaled_p0,
                                              double             scaled_Ip,
@@ -201,12 +207,24 @@ namespace cxx_python
         if constexpr (CompiledShape::M_max >= 1)
             input.s1_offset = input.s_offsets[1];
 
-        read_exact_runtime_array(scaled_pprime, "scaled_pprime", input.pprime);
-        read_exact_runtime_array(scaled_driver, "scaled_driver", input.driver);
         if (source_count < 2 || source_count > CompiledSource::sample_count)
             throw std::runtime_error("source_count must be between 2 and " +
                                      std::to_string(CompiledSource::sample_count));
+        read_runtime_prefix_array(scaled_pprime, "scaled_pprime", input.pprime, source_count);
+        read_runtime_prefix_array(scaled_driver, "scaled_driver", input.driver, source_count);
+        read_runtime_prefix_array(source_nodes, "source_nodes", input.source_nodes, source_count);
+        read_runtime_prefix_array(
+            pprime_coefficients,
+            "pprime_coefficients",
+            input.pprime_coefficients,
+            4 * (source_count - 1));
+        read_runtime_prefix_array(
+            driver_coefficients,
+            "driver_coefficients",
+            input.driver_coefficients,
+            4 * (source_count - 1));
         input.source_count = source_count;
+        input.explicit_source_interpolation = true;
 
         input.p0      = scaled_p0;
         input.Ip      = scaled_Ip;
@@ -607,6 +625,9 @@ namespace cxx_python
                                 RuntimeArrayView   s_offsets,
                                 RuntimeArrayView   scaled_pprime,
                                 RuntimeArrayView   scaled_driver,
+                                RuntimeArrayView   source_nodes,
+                                RuntimeArrayView   pprime_coefficients,
+                                RuntimeArrayView   driver_coefficients,
                                 size_t             source_count,
                                 double             scaled_p0,
                                 double             scaled_Ip,
@@ -636,6 +657,9 @@ namespace cxx_python
                                                            s_offsets,
                                                            scaled_pprime,
                                                            scaled_driver,
+                                                           source_nodes,
+                                                           pprime_coefficients,
+                                                           driver_coefficients,
                                                            source_count,
                                                            scaled_p0,
                                                            scaled_Ip,
@@ -798,6 +822,16 @@ namespace cxx_python
             return true;
         }
 
+        template <size_t N>
+        bool same_fixed_array(const std::array<double, N>& lhs,
+                              const std::array<double, N>& rhs) const noexcept
+        {
+            for (size_t i = 0; i < N; ++i)
+                if (lhs[i] != rhs[i])
+                    return false;
+            return true;
+        }
+
         bool same_offsets(const std::array<double, CompiledShape::M_max + 1>& lhs,
                           const std::array<double, CompiledShape::M_max + 1>& rhs) const noexcept
         {
@@ -817,7 +851,11 @@ namespace cxx_python
                    old.ka == now.ka && old.c0_offset == now.c0_offset && old.s1_offset == now.s1_offset &&
                    old.p0 == now.p0 &&
                    same_offsets(old.c_offsets, now.c_offsets) && same_offsets(old.s_offsets, now.s_offsets) &&
-                   same_array(old.pprime, now.pprime) && same_array(old.driver, now.driver);
+                   old.explicit_source_interpolation == now.explicit_source_interpolation &&
+                   same_array(old.pprime, now.pprime) && same_array(old.driver, now.driver) &&
+                   same_array(old.source_nodes, now.source_nodes) &&
+                   same_fixed_array(old.pprime_coefficients, now.pprime_coefficients) &&
+                   same_fixed_array(old.driver_coefficients, now.driver_coefficients);
         }
 
         void fill_certified_result(SolveResult&                                   result,
