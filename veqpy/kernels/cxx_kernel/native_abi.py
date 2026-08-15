@@ -11,16 +11,16 @@ from typing import Any
 
 import numpy as np
 
-from veqpy.kernels.abi.source_semantics import MaterializedKernelSource
+from veqpy.kernels.abi.source_semantics import _MaterializedSource
 from veqpy.kernels.types import (
-    KernelBoundary,
-    KernelConfig,
-    SolveResult,
+    _BackendConfig,
+    _BoundaryCase,
+    _SolveSnapshot,
     kernel_boundary_s_offsets_with_s0,
 )
 
 
-def boundary_runtime_args(boundary: KernelBoundary) -> tuple[Any, ...]:
+def boundary_runtime_args(boundary: _BoundaryCase) -> tuple[Any, ...]:
     return (
         boundary.a,
         boundary.R0,
@@ -32,7 +32,7 @@ def boundary_runtime_args(boundary: KernelBoundary) -> tuple[Any, ...]:
     )
 
 
-def source_runtime_args(source: MaterializedKernelSource) -> tuple[Any, ...]:
+def source_runtime_args(source: _MaterializedSource) -> tuple[Any, ...]:
     return (
         source.scaled_pprime,
         source.scaled_driver,
@@ -42,7 +42,7 @@ def source_runtime_args(source: MaterializedKernelSource) -> tuple[Any, ...]:
     )
 
 
-def config_runtime_args(config: KernelConfig, *, x_size: int) -> tuple[Any, ...]:
+def config_runtime_args(config: _BackendConfig, *, x_size: int) -> tuple[Any, ...]:
     max_evaluations = x_size * x_size if config.max_evaluations is None else config.max_evaluations
     return (
         config.method_code,
@@ -69,7 +69,7 @@ def solve_result_from_native(
     preprocess_ms: float = 0.0,
     solver_ms: float | None = None,
     postprocess_ms: float = 0.0,
-) -> SolveResult:
+) -> _SolveSnapshot:
     (
         native_solver_ms,
         success,
@@ -88,7 +88,7 @@ def solve_result_from_native(
         alpha,
     ) = value
     elapsed_ms = float(native_solver_ms) if full_elapsed_ms is None else float(full_elapsed_ms)
-    return SolveResult(
+    return _SolveSnapshot(
         elapsed_ms=elapsed_ms,
         success=bool(success),
         info=int(info),

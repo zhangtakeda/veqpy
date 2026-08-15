@@ -2,7 +2,7 @@
 Module: veqpy.kernels.abi.source_semantics
 
 Role:
-- Lower public raw ``KernelSource`` inputs into backend-internal source units.
+- Lower public raw ``_SourceCase`` inputs into backend-internal source units.
 
 Notes:
 - Source route validation and mu0 scaling are centralized here so Cxx and Numba
@@ -17,7 +17,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from veqpy.kernels.abi.enums import PRESSURE_DERIVATIVE_BY_COORDINATE
-from veqpy.kernels.types import KernelSource, KernelTopology
+from veqpy.kernels.types import KernelTopology, _SourceCase
 from veqpy.numerics import (
     build_explicit_source_interpolation_coefficients,
     interpolation_matrix,
@@ -33,12 +33,12 @@ SETUP_PHYSICAL_ABS_MIN = SETUP_NORMALIZED_ABS_MIN / MU0
 SETUP_PHYSICAL_ABS_MAX = SETUP_NORMALIZED_ABS_MAX / MU0
 MU0_SCALED_DRIVER_ROUTES = frozenset({"PI", "PJ1", "PJ2", "PJ3"})
 KERNEL_SOURCE_ADVICE = (
-    "Pass raw case values to KernelSource; source lowering applies mu0 scaling once."
+    "Pass raw case values to _SourceCase; source lowering applies mu0 scaling once."
 )
 
 
 @dataclass(frozen=True, slots=True)
-class MaterializedKernelSource:
+class _MaterializedSource:
     """Backend-internal source arrays after route-dependent scaling."""
 
     scaled_pprime: np.ndarray
@@ -68,16 +68,16 @@ class MaterializedKernelSource:
 
 def materialize_kernel_source(
     topology: KernelTopology,
-    source: KernelSource,
+    source: _SourceCase,
     *,
     case_name: str | None = None,
-) -> MaterializedKernelSource:
+) -> _MaterializedSource:
     """Validate one raw source case and lower it to backend-internal units."""
 
     if not isinstance(topology, KernelTopology):
         raise TypeError(f"topology must be KernelTopology, got {type(topology).__name__}")
-    if not isinstance(source, KernelSource):
-        raise TypeError(f"source must be KernelSource, got {type(source).__name__}")
+    if not isinstance(source, _SourceCase):
+        raise TypeError(f"source must be _SourceCase, got {type(source).__name__}")
     driver = source.driver_for(topology.route, topology.coordinate)
     _validate_source_length(topology, source)
     pressure_derivative_name = PRESSURE_DERIVATIVE_BY_COORDINATE[topology.coordinate]
@@ -109,9 +109,9 @@ def materialize_kernel_source(
     )
 
 
-def _validate_source_length(topology: KernelTopology, source: KernelSource) -> None:
+def _validate_source_length(topology: KernelTopology, source: _SourceCase) -> None:
     if topology.nodes == "explicit":
-        # KernelSource already enforces common pressure/driver/source-node
+        # _SourceCase already enforces common pressure/driver/source-node
         # shapes.  Their runtime length is deliberately absent from Topology.
         return
     expected_samples = topology.sample_count
@@ -148,7 +148,7 @@ def materialize_source_inputs(
     calculus: str = "spectral",
     parameterization: str = "identity",
     source_nodes: np.ndarray | None = None,
-) -> MaterializedKernelSource:
+) -> _MaterializedSource:
     """Lower raw route inputs to the shared backend-internal source units."""
 
     route_key = str(route).upper()
@@ -180,7 +180,7 @@ def materialize_source_inputs(
             "A non-zero pressure profile is required until the current-based "
             "alpha fallback is implemented."
         )
-    return MaterializedKernelSource(
+    return _MaterializedSource(
         scaled_pprime=_scale_pressure_like_input(raw_pprime, name=pprime_name, advice=advice),
         scaled_driver=_scale_driver_input(
             driver,
@@ -389,7 +389,7 @@ def _validate_explicit_source_nodes(
             raise ValueError("source_nodes is only valid when topology nodes='explicit'")
         return None
     if source_nodes is None:
-        raise ValueError("nodes='explicit' requires KernelSource.source_nodes")
+        raise ValueError("nodes='explicit' requires _SourceCase.source_nodes")
     axis = np.asarray(source_nodes, dtype=np.float64)
     if axis.ndim != 1 or axis.size != sample_count:
         raise ValueError(f"source_nodes must have shape ({sample_count},), got {axis.shape}")

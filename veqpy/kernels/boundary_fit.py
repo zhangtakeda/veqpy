@@ -2,7 +2,7 @@
 Module: veqpy.kernels.boundary_fit
 
 Role:
-- Fit discrete RZ boundary points into KernelBoundary-compatible parameters.
+- Fit discrete RZ boundary points into _BoundaryCase-compatible parameters.
 
 Notes:
 - This module is an internal Kernel helper, not a model-layer object.

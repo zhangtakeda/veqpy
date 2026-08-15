@@ -2,7 +2,7 @@
 Module: veqpy.kernels.numba_kernel.result
 
 Role:
-- Convert Numba runtime outcomes into public ``SolveResult`` values.
+- Convert Numba runtime outcomes into public ``_SolveSnapshot`` values.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 from numpy.linalg import norm
 
-from veqpy.kernels.types import KernelConfig, SolveResult
+from veqpy.kernels.types import _BackendConfig, _SolveSnapshot
 
 from .residual_scale import make_residual_scale
 
@@ -32,18 +32,18 @@ def solve_result_from_runtime(
     iterations: int,
     elapsed_ms: float,
     runtime: NumbaRuntime,
-    config: KernelConfig,
+    config: _BackendConfig,
     preprocess_ms: float = 0.0,
     solver_ms: float | None = None,
     postprocess_ms: float = 0.0,
-) -> SolveResult:
-    """Build a ``SolveResult`` from a direct residual runtime."""
+) -> _SolveSnapshot:
+    """Build a ``_SolveSnapshot`` from a direct residual runtime."""
 
     x_final = runtime.coerce_x(x).copy()
     raw_final = np.asarray(raw, dtype=np.float64).copy()
     x_reference = runtime.coerce_x(x0).copy()
     scaled = _scaled_residual_snapshot(raw_final, x_reference, runtime, config)
-    return SolveResult(
+    return _SolveSnapshot(
         elapsed_ms=float(elapsed_ms),
         success=bool(success),
         info=1 if success else 0,
@@ -69,7 +69,7 @@ def _scaled_residual_snapshot(
     raw: np.ndarray,
     x_reference: np.ndarray,
     runtime: NumbaRuntime,
-    config: KernelConfig,
+    config: _BackendConfig,
 ) -> np.ndarray:
     mode = config.norm
     if mode == "none":
@@ -86,7 +86,7 @@ def _reference_residual_scale(
     reference_raw: np.ndarray,
     x_reference: np.ndarray,
     runtime: NumbaRuntime,
-    config: KernelConfig,
+    config: _BackendConfig,
     block_lengths: np.ndarray | None,
 ) -> np.ndarray | None:
     params: dict[str, object] = {}

@@ -20,11 +20,10 @@ from types import ModuleType
 from typing import Any
 
 from veqpy.kernels.abi.options import solver_method_code
-from veqpy.kernels.types import KernelRecipe as Recipe
-from veqpy.kernels.types import KernelTopology as Topology
+from veqpy.kernels.types import KernelTopology, _BuildPolicy
 
 from .affinity import cpu_pin_scope_active, pinned_cpu
-from .builder import PrepareResult, touch_artifact_used
+from .builder import _ArtifactPreparation, touch_artifact_used
 from .builder import prepare as prepare_kernel
 
 
@@ -44,7 +43,7 @@ class SolverClosedError(RuntimeError):
 class LoadedKernel:
     """A process-cached nanobind module and its artifact metadata."""
 
-    artifact: PrepareResult
+    artifact: _ArtifactPreparation
     module: ModuleType
 
 
@@ -163,12 +162,12 @@ class KernelRegistry:
 
     def prepare_artifact(
         self,
-        topology: Topology,
+        topology: KernelTopology,
         *,
-        recipe: Recipe | None = None,
+        recipe: _BuildPolicy | None = None,
         force: bool = False,
         dry_run: bool = False,
-    ) -> PrepareResult:
+    ) -> _ArtifactPreparation:
         return prepare_kernel(
             topology,
             recipe=recipe,
@@ -180,9 +179,9 @@ class KernelRegistry:
 
     def load_kernel(
         self,
-        topology: Topology,
+        topology: KernelTopology,
         *,
-        recipe: Recipe | None = None,
+        recipe: _BuildPolicy | None = None,
         force: bool = False,
     ) -> LoadedKernel:
         artifact = self.prepare_artifact(topology, recipe=recipe, force=force, dry_run=False)
@@ -199,9 +198,9 @@ class KernelRegistry:
 
     def create_solver(
         self,
-        topology: Topology,
+        topology: KernelTopology,
         *,
-        recipe: Recipe | None = None,
+        recipe: _BuildPolicy | None = None,
         solver: str = "powell",
         force: bool = False,
         pin_cpu: bool | int | None = None,
@@ -216,9 +215,9 @@ class KernelRegistry:
 
     def get_thread_solver(
         self,
-        topology: Topology,
+        topology: KernelTopology,
         *,
-        recipe: Recipe | None = None,
+        recipe: _BuildPolicy | None = None,
         solver: str = "powell",
         force: bool = False,
         pin_cpu: bool | int | None = None,
@@ -246,7 +245,7 @@ class KernelRegistry:
         return solvers
 
 
-def _load_artifact_module(artifact: PrepareResult) -> ModuleType:
+def _load_artifact_module(artifact: _ArtifactPreparation) -> ModuleType:
     if not artifact.shared_library_path.exists():
         raise KernelLoadError(f"Cxx shared library is missing: {artifact.shared_library_path}")
     module_name = _module_name_for_artifact(artifact.artifact_id)

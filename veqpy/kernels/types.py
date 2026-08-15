@@ -86,7 +86,7 @@ _DEFAULT_ENZYME_JACOBIAN_BATCH_WIDTH = 0
 
 
 @dataclass(frozen=True, slots=True)
-class KernelRecipe:
+class _BuildPolicy:
     """Artifact recipe and packed-layout configuration for one Kernel."""
 
     backend: str = "numba"
@@ -146,7 +146,7 @@ class KernelRecipe:
 
 
 @dataclass(frozen=True, slots=True)
-class KernelBoundary:
+class _BoundaryCase:
     """Runtime boundary scalars and Fourier offsets.
 
     ``c_offsets`` is indexed by cosine order and starts at c0. ``s_offsets`` is
@@ -258,7 +258,7 @@ class KernelBoundary:
         c_order: int | None = None,
         s_order: int | None = None,
         maxtol: float | None = None,
-    ) -> KernelBoundary:
+    ) -> _BoundaryCase:
         """Return a parameterized boundary fitted from stored R/Z points."""
 
         from veqpy.kernels.boundary_materialization import fit_kernel_boundary
@@ -321,14 +321,14 @@ class KernelBoundary:
 
 
 def _kernel_boundary_with_fit_metadata(
-    boundary: KernelBoundary,
+    boundary: _BoundaryCase,
     *,
     fit_rms: float,
     fit_max_curve_error: float,
     fit_c_order: int,
     fit_s_order: int,
     fit_method: str,
-) -> KernelBoundary:
+) -> _BoundaryCase:
     """Attach fitter-owned diagnostics to a freshly parameterized boundary."""
 
     object.__setattr__(boundary, "fit_rms", float(fit_rms))
@@ -339,20 +339,20 @@ def _kernel_boundary_with_fit_metadata(
     return boundary
 
 
-def kernel_boundary_s_offsets_with_s0(boundary: KernelBoundary) -> np.ndarray:
+def kernel_boundary_s_offsets_with_s0(boundary: _BoundaryCase) -> np.ndarray:
     """Return backend runtime sine offsets indexed directly by Fourier order."""
 
     return boundary._s_offsets_with_s0
 
 
-def kernel_boundary_has_raw_points(boundary: KernelBoundary) -> bool:
-    """Return whether a KernelBoundary stores R/Z scatter input for fitting."""
+def kernel_boundary_has_raw_points(boundary: _BoundaryCase) -> bool:
+    """Return whether a _BoundaryCase stores R/Z scatter input for fitting."""
 
     return boundary._raw_R_boundary is not None
 
 
 def kernel_boundary_raw_fit_spec(
-    boundary: KernelBoundary,
+    boundary: _BoundaryCase,
 ) -> tuple[np.ndarray, np.ndarray, int, int, float, str] | None:
     """Return raw R/Z fit input for internal Kernel materialization."""
 
@@ -370,7 +370,7 @@ def kernel_boundary_raw_fit_spec(
     )
 
 
-def kernel_boundary_shape_orders(boundary: KernelBoundary) -> tuple[int, int]:
+def kernel_boundary_shape_orders(boundary: _BoundaryCase) -> tuple[int, int]:
     """Return highest c/s boundary orders without forcing R/Z fitting."""
 
     raw = kernel_boundary_raw_fit_spec(boundary)
@@ -522,7 +522,7 @@ class KernelTopology:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class KernelSource:
+class _SourceCase:
     """One pressure representation, one explicit route driver, and constraints.
 
     The PF driver is selected by the topology coordinate: ``FF_r``,
@@ -578,7 +578,7 @@ class KernelSource:
         if len(pressure_values) != 1:
             supplied = ", ".join(pressure_values) if pressure_values else "none"
             raise ValueError(
-                "KernelSource requires exactly one pressure input "
+                "_SourceCase requires exactly one pressure input "
                 f"(p, P_r, P_rho, or P_psin); got {supplied}"
             )
         pressure_name, pressure_value = next(iter(pressure_values.items()))
@@ -599,7 +599,7 @@ class KernelSource:
             supplied = ", ".join(driver_values) if driver_values else "none"
             choices = ", ".join(SOURCE_DRIVER_NAMES)
             raise ValueError(
-                f"KernelSource requires exactly one route driver ({choices}); got {supplied}"
+                f"_SourceCase requires exactly one route driver ({choices}); got {supplied}"
             )
         driver_name, driver_value = next(iter(driver_values.items()))
         driver = _readonly_1d(driver_value, driver_name)
@@ -674,7 +674,7 @@ class KernelSource:
 
 
 @dataclass(frozen=True, slots=True)
-class KernelConfig:
+class _BackendConfig:
     """Runtime configuration for one Kernel invocation."""
 
     method: str = "powell"
@@ -734,12 +734,12 @@ class KernelConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class KernelPrepareResult:
+class _PrepareDiagnostics:
     """Public preparation snapshot returned by Kernel handles for all backends."""
 
     backend: str
     topology: KernelTopology
-    recipe: KernelRecipe
+    recipe: _BuildPolicy
     x_size: int
     residual_size: int
     prepared: bool
@@ -750,7 +750,7 @@ class KernelPrepareResult:
 
 
 @dataclass(frozen=True, slots=True)
-class SolveResult:
+class _SolveSnapshot:
     """Python-owned snapshot of one Kernel solve result."""
 
     elapsed_ms: float
@@ -773,12 +773,12 @@ class SolveResult:
     postprocess_ms: float = 0.0
 
 
-def config_with_overrides(config: KernelConfig, **overrides: Any) -> KernelConfig:
+def config_with_overrides(config: _BackendConfig, **overrides: Any) -> _BackendConfig:
     field_names = {item.name for item in fields(config) if item.init}
     unknown = sorted(name for name in overrides if name not in field_names)
     if unknown:
         names = ", ".join(unknown)
-        raise TypeError(f"Unsupported KernelConfig override(s): {names}")
+        raise TypeError(f"Unsupported _BackendConfig override(s): {names}")
     return replace(config, **overrides)
 
 
@@ -993,7 +993,7 @@ def _canonical_sample_count(nodes: str, nr: int, sample_count: int | None) -> in
     if nodes == "explicit":
         if sample_count is not None:
             raise TopologyError(
-                "explicit source sample_count is runtime KernelSource data; "
+                "explicit source sample_count is runtime _SourceCase data; "
                 "leave KernelTopology.sample_count=None"
             )
         return None

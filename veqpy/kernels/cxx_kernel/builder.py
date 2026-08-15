@@ -31,8 +31,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from veqpy.kernels.abi.identity import recipe_identity_payload, topology_identity_payload
-from veqpy.kernels.types import KernelRecipe as Recipe
-from veqpy.kernels.types import KernelTopology as Topology
+from veqpy.kernels.types import KernelTopology, _BuildPolicy
 
 from .validation import validate_supported_for_cxx_backend
 
@@ -49,11 +48,11 @@ class PrepareError(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
-class PrepareResult:
+class _ArtifactPreparation:
     """Resolved on-disk Kernel artifact."""
 
-    topology: Topology
-    recipe: Recipe
+    topology: KernelTopology
+    recipe: _BuildPolicy
     artifact_id: str
     root_dir: Path
     cmake_build_dir: Path
@@ -89,25 +88,25 @@ def default_kernel_cache_root() -> Path:
 
 
 def prepare(
-    topology: Topology,
+    topology: KernelTopology,
     *,
-    recipe: Recipe | None = None,
+    recipe: _BuildPolicy | None = None,
     cache_root: Path | None = None,
     source_dir: Path | None = None,
     force: bool = False,
     dry_run: bool = False,
-) -> PrepareResult:
+) -> _ArtifactPreparation:
     """Resolve, optionally build, and record a Cxx artifact for ``topology``/``recipe``.
 
     ``dry_run=True`` writes the same planning metadata and CMake arguments but does not invoke
     CMake. It is the fast validation path used before the nanobind production API is finalized.
     """
 
-    recipe = Recipe(backend="cxx") if recipe is None else recipe
-    if not isinstance(recipe, Recipe):
-        raise TypeError(f"recipe must be KernelRecipe, got {type(recipe).__name__}")
+    recipe = _BuildPolicy(backend="cxx") if recipe is None else recipe
+    if not isinstance(recipe, _BuildPolicy):
+        raise TypeError(f"recipe must be _BuildPolicy, got {type(recipe).__name__}")
     if recipe.backend != "cxx":
-        raise ValueError("Cxx artifact preparation requires KernelRecipe backend='cxx'")
+        raise ValueError("Cxx artifact preparation requires _BuildPolicy backend='cxx'")
     if not dry_run:
         validate_supported_for_cxx_backend(topology)
     source_dir = _default_source_dir() if source_dir is None else source_dir.resolve()
@@ -137,7 +136,7 @@ def prepare(
             metadata = _read_json(paths["metadata_path"])
             _stamp_artifact_metadata(metadata, "last_reused_at")
             _write_json(paths["metadata_path"], metadata)
-            return PrepareResult(
+            return _ArtifactPreparation(
                 topology=topology,
                 recipe=recipe,
                 artifact_id=artifact_id,
@@ -204,7 +203,7 @@ def prepare(
             built = True
 
         _write_json(paths["metadata_path"], metadata)
-        return PrepareResult(
+        return _ArtifactPreparation(
             topology=topology,
             recipe=recipe,
             artifact_id=artifact_id,
@@ -288,7 +287,7 @@ def clean(
     )
 
 
-def touch_artifact_used(artifact: PrepareResult) -> None:
+def touch_artifact_used(artifact: _ArtifactPreparation) -> None:
     """Update the advisory ``last_used_at`` timestamp for a built artifact."""
 
     lock_path = _artifact_lock_path(artifact.root_dir, artifact.artifact_id)
@@ -410,8 +409,8 @@ def _directory_size(path: Path) -> int:
 
 def _metadata_payload(
     *,
-    topology: Topology,
-    recipe: Recipe,
+    topology: KernelTopology,
+    recipe: _BuildPolicy,
     artifact_id: str,
     source_dir: Path,
     build_identity: dict[str, Any],
@@ -476,8 +475,8 @@ def load():
 
 
 def _cmake_configure_args(
-    topology: Topology,
-    recipe: Recipe,
+    topology: KernelTopology,
+    recipe: _BuildPolicy,
     source_dir: Path,
     build_dir: Path,
     cxx: str,
@@ -665,7 +664,12 @@ nanobind_build_library(nanobind-static AS_SYSINCLUDE)
 """
 
 
-def _native_build_contract(topology: Topology, recipe: Recipe, *, cxx: str) -> dict[str, Any]:
+def _native_build_contract(
+    topology: KernelTopology,
+    recipe: _BuildPolicy,
+    *,
+    cxx: str,
+) -> dict[str, Any]:
     """Return the Python-emitted native contract that participates in artifact identity.
 
     Python helper source changes should not force a native rebuild by themselves.
@@ -713,8 +717,8 @@ def _native_build_contract(topology: Topology, recipe: Recipe, *, cxx: str) -> d
 
 
 def _build_identity(
-    topology: Topology,
-    recipe: Recipe,
+    topology: KernelTopology,
+    recipe: _BuildPolicy,
     *,
     source_dir: Path,
     cxx: str,
@@ -739,8 +743,8 @@ def _build_identity(
 
 
 def _compute_artifact_id(
-    topology: Topology,
-    recipe: Recipe,
+    topology: KernelTopology,
+    recipe: _BuildPolicy,
     build_identity: dict[str, Any],
 ) -> str:
     payload = {

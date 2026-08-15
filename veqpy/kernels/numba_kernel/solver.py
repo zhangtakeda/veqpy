@@ -14,13 +14,14 @@ import numpy as np
 from scipy.optimize import least_squares, root
 
 from veqpy.kernels.types import (
-    KernelBoundary,
-    KernelConfig,
-    KernelSource,
     KernelTopology,
-    SolveResult,
+    _BackendConfig,
+    _BoundaryCase,
+    _SolveSnapshot,
+    _SourceCase,
 )
-from veqpy.model import Equilibrium, Grid
+from veqpy.model.equilibrium import Equilibrium
+from veqpy.model.grid import Grid
 
 from .residual_scale import make_residual_scale
 from .result import solve_result_from_runtime
@@ -47,26 +48,20 @@ class NumbaSolver:
         self.topology = topology
         self.runtime = NumbaRuntime(topology)
 
-    def variant(self, topology: KernelTopology) -> bool:
-        if self.runtime.variant(topology):
-            self.topology = topology
-            return True
-        return False
-
     def residual_into(
         self,
         out: np.ndarray,
         x: np.ndarray,
-        boundary: KernelBoundary,
-        source: KernelSource,
+        boundary: _BoundaryCase,
+        source: _SourceCase,
     ) -> None:
         self.runtime.residual_into(out, x, boundary, source)
 
     def prepare(
         self,
-        boundary: KernelBoundary,
-        source: KernelSource,
-        config: KernelConfig,
+        boundary: _BoundaryCase,
+        source: _SourceCase,
+        config: _BackendConfig,
     ) -> tuple[np.ndarray, np.ndarray]:
         x = self.runtime.initial_state(
             boundary,
@@ -79,14 +74,14 @@ class NumbaSolver:
 
     def solve(
         self,
-        boundary: KernelBoundary,
-        source: KernelSource,
-        config: KernelConfig,
+        boundary: _BoundaryCase,
+        source: _SourceCase,
+        config: _BackendConfig,
         *,
         x0: np.ndarray | None,
         preprocess_ms: float = 0.0,
         elapsed_started: float | None = None,
-    ) -> SolveResult:
+    ) -> _SolveSnapshot:
         preprocess_started = perf_counter()
         x_guess = self.runtime.initial_state(
             boundary,
@@ -132,13 +127,13 @@ class NumbaSolver:
         )
         return replace(result, elapsed_ms=float(elapsed_ms), postprocess_ms=float(postprocess_ms))
 
-    def _solve_once(self, x_guess: np.ndarray, config: KernelConfig) -> _SolveOutcome:
+    def _solve_once(self, x_guess: np.ndarray, config: _BackendConfig) -> _SolveOutcome:
         return self._try_solve_once(x_guess, config, method=_solver_method(config))
 
     def _try_solve_once(
         self,
         x_guess: np.ndarray,
-        config: KernelConfig,
+        config: _BackendConfig,
         *,
         method: str,
     ) -> _SolveOutcome:
@@ -188,14 +183,14 @@ class NumbaSolver:
     def build_equilibrium(
         self,
         x: np.ndarray,
-        boundary: KernelBoundary,
-        source: KernelSource,
+        boundary: _BoundaryCase,
+        source: _SourceCase,
         *,
         grid: Grid | None = None,
     ) -> Equilibrium:
         return self.runtime.build_equilibrium(x, boundary, source, grid=grid)
 
-    def _residual_function(self, x_reference: np.ndarray, config: KernelConfig):
+    def _residual_function(self, x_reference: np.ndarray, config: _BackendConfig):
         if config.norm == "none":
             return self.runtime.residual_for_current_case
 
@@ -216,7 +211,7 @@ class NumbaSolver:
 
         return residual_fun
 
-    def _optimizer_problem(self, x_initial: np.ndarray, config: KernelConfig, *, method: str):
+    def _optimizer_problem(self, x_initial: np.ndarray, config: _BackendConfig, *, method: str):
         residual_fun = self._residual_function(x_initial, config)
         if method != "hybr":
             return residual_fun, x_initial, None
@@ -234,7 +229,7 @@ class NumbaSolver:
         return transformed_residual_fun, optimizer_x0, decode_x
 
 
-def _run_optimizer(residual_fun, x_guess: np.ndarray, config: KernelConfig, *, method: str):
+def _run_optimizer(residual_fun, x_guess: np.ndarray, config: _BackendConfig, *, method: str):
     if method == "hybr":
         return root(
             residual_fun,
@@ -255,17 +250,17 @@ def _run_optimizer(residual_fun, x_guess: np.ndarray, config: KernelConfig, *, m
     )
 
 
-def _solver_method(config: KernelConfig) -> str:
+def _solver_method(config: _BackendConfig) -> str:
     if config.method == "powell":
         return "hybr"
     if config.method == "levenberg-marquardt":
         return "lm"
     raise NotImplementedError(
-        f"Numba backend does not support KernelConfig.method={config.method!r}"
+        f"Numba backend does not support _BackendConfig.method={config.method!r}"
     )
 
 
-def _root_options(config: KernelConfig, *, default_max_evaluations: int) -> dict[str, object]:
+def _root_options(config: _BackendConfig, *, default_max_evaluations: int) -> dict[str, object]:
     options: dict[str, object] = {"eps": 1.0e-6}
     max_evaluations = _max_evaluations(config, default=default_max_evaluations)
     if max_evaluations > 0:
@@ -276,7 +271,7 @@ def _root_options(config: KernelConfig, *, default_max_evaluations: int) -> dict
 
 
 def _least_squares_kwargs(
-    config: KernelConfig,
+    config: _BackendConfig,
     *,
     method: str,
     default_max_evaluations: int,
@@ -294,7 +289,7 @@ def _least_squares_kwargs(
     return kwargs
 
 
-def _max_evaluations(config: KernelConfig, *, default: int) -> int:
+def _max_evaluations(config: _BackendConfig, *, default: int) -> int:
     if config.max_evaluations is None:
         return int(default)
     return int(config.max_evaluations)
@@ -314,7 +309,7 @@ def _safe_raw_norm(runtime: NumbaRuntime, x: np.ndarray) -> float:
         return float("inf")
 
 
-def _residual_within_acceptance(residual_norm: float, config: KernelConfig) -> bool:
+def _residual_within_acceptance(residual_norm: float, config: _BackendConfig) -> bool:
     accepted = max(
         float(config.max_residual) * float(config.accepted_residual_factor),
         float(config.accepted_residual_floor),
@@ -326,7 +321,7 @@ def _reference_residual_scale(
     reference_raw: np.ndarray,
     x_reference: np.ndarray,
     runtime: NumbaRuntime,
-    config: KernelConfig,
+    config: _BackendConfig,
 ) -> np.ndarray | None:
     params: dict[str, object] = {}
     if config.norm in {"balanced", "safe"}:

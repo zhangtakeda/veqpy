@@ -2,7 +2,7 @@
 Module: veqpy.kernels.boundary_materialization
 
 Role:
-- Lower public KernelBoundary inputs into coefficient boundaries for backends.
+- Lower public _BoundaryCase inputs into coefficient boundaries for backends.
 
 Notes:
 - Explicit coefficient boundaries pass through unchanged.
@@ -20,7 +20,7 @@ import numpy as np
 
 from veqpy.kernels.boundary_fit import fit_boundary_params
 from veqpy.kernels.types import (
-    KernelBoundary,
+    _BoundaryCase,
     _kernel_boundary_with_fit_metadata,
     _nonnegative_int,
     kernel_boundary_raw_fit_spec,
@@ -28,10 +28,10 @@ from veqpy.kernels.types import (
 
 
 @dataclass(frozen=True, slots=True)
-class MaterializedKernelBoundary:
+class _MaterializedBoundary:
     """Private boundary lowering result consumed by Kernel backend implementations."""
 
-    boundary: KernelBoundary
+    boundary: _BoundaryCase
     fit_backend: str
     fit_elapsed_ms: float
     fit_rms: float | None
@@ -45,7 +45,7 @@ BoundaryFitter = Callable[..., dict[str, float | np.ndarray | str]]
 
 
 def materialize_kernel_boundary(
-    boundary: KernelBoundary,
+    boundary: _BoundaryCase,
     *,
     fit_backend: str = "numpy",
     fitter: BoundaryFitter | None = None,
@@ -53,11 +53,11 @@ def materialize_kernel_boundary(
     c_order: int | None = None,
     s_order: int | None = None,
     maxtol: float | None = None,
-) -> MaterializedKernelBoundary:
+) -> _MaterializedBoundary:
     """Return a backend-ready coefficient boundary plus optional fit metadata."""
 
-    if not isinstance(boundary, KernelBoundary):
-        raise TypeError(f"boundary must be KernelBoundary, got {type(boundary).__name__}")
+    if not isinstance(boundary, _BoundaryCase):
+        raise TypeError(f"boundary must be _BoundaryCase, got {type(boundary).__name__}")
     raw = kernel_boundary_raw_fit_spec(boundary)
     if raw is None:
         _reject_parameterized_fit_overrides(
@@ -66,7 +66,7 @@ def materialize_kernel_boundary(
             s_order=s_order,
             maxtol=maxtol,
         )
-        return MaterializedKernelBoundary(
+        return _MaterializedBoundary(
             boundary=boundary,
             fit_backend="explicit",
             fit_elapsed_ms=0.0,
@@ -102,7 +102,7 @@ def materialize_kernel_boundary(
     elapsed_ms = (perf_counter() - started) * 1000.0
     fit_method = str(fitted.get("method", fit_method))
     materialized_boundary = _kernel_boundary_with_fit_metadata(
-        KernelBoundary(
+        _BoundaryCase(
             a=float(fitted["a"]),
             R0=float(fitted["R0"]),
             Z0=float(fitted["Z0"]),
@@ -117,7 +117,7 @@ def materialize_kernel_boundary(
         fit_s_order=int(fitted["s_order"]),
         fit_method=fit_method,
     )
-    return MaterializedKernelBoundary(
+    return _MaterializedBoundary(
         boundary=materialized_boundary,
         fit_backend=str(fit_backend),
         fit_elapsed_ms=float(elapsed_ms),
@@ -130,7 +130,7 @@ def materialize_kernel_boundary(
 
 
 def fit_kernel_boundary(
-    boundary: KernelBoundary,
+    boundary: _BoundaryCase,
     *,
     fit_backend: str = "numba",
     method: str | None = None,
@@ -138,8 +138,8 @@ def fit_kernel_boundary(
     s_order: int | None = None,
     maxtol: float | None = None,
     fitter: BoundaryFitter | None = None,
-) -> KernelBoundary:
-    """Return a parameterized KernelBoundary by explicitly fitting raw R/Z input."""
+) -> _BoundaryCase:
+    """Return a parameterized _BoundaryCase by explicitly fitting raw R/Z input."""
 
     return materialize_kernel_boundary(
         boundary,
@@ -190,7 +190,7 @@ def _resolve_fit_options(
 
 
 def materialized_boundary_fit_payload(
-    materialized: MaterializedKernelBoundary,
+    materialized: _MaterializedBoundary,
 ) -> dict[str, float | int | str | np.ndarray | None]:
     """Return script/benchmark-friendly fit metadata for one materialized boundary."""
 

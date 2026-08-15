@@ -2,7 +2,7 @@
 Package: veqpy.kernels.numba_kernel
 
 Role:
-- Implement the private Numba backend selected by KernelRecipe.backend.
+- Implement the private Numba backend selected by _BuildPolicy.backend.
 - Own packed layouts, runtime workspaces, source routes, initialization,
   residual assembly, solve adapters, and equilibrium snapshot construction.
 

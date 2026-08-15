@@ -16,10 +16,9 @@ from pathlib import Path
 from typing import Any
 
 from veqpy.kernels.abi.options import normalize_solver_method, solver_method_code
-from veqpy.kernels.types import KernelRecipe as Recipe
-from veqpy.kernels.types import KernelTopology as Topology
+from veqpy.kernels.types import KernelTopology, _BuildPolicy
 
-from .builder import PrepareResult
+from .builder import _ArtifactPreparation
 from .registry import KernelRegistry, SolverThreadError, ThreadOwnedNativeSolver
 from .validation import validate_supported_for_cxx_backend
 
@@ -29,9 +28,9 @@ class CxxSolver:
 
     def __init__(
         self,
-        topology: Topology,
+        topology: KernelTopology,
         *,
-        recipe: Recipe | None = None,
+        recipe: _BuildPolicy | None = None,
         registry: KernelRegistry | None = None,
         cache_root: Path | None = None,
         source_dir: Path | None = None,
@@ -40,9 +39,9 @@ class CxxSolver:
     ) -> None:
         validate_supported_for_cxx_backend(topology)
         self.topology = topology
-        self.recipe = Recipe(backend="cxx") if recipe is None else recipe
-        if not isinstance(self.recipe, Recipe):
-            raise TypeError(f"recipe must be KernelRecipe, got {type(self.recipe).__name__}")
+        self.recipe = _BuildPolicy(backend="cxx") if recipe is None else recipe
+        if not isinstance(self.recipe, _BuildPolicy):
+            raise TypeError(f"recipe must be _BuildPolicy, got {type(self.recipe).__name__}")
         self.registry = registry or KernelRegistry(
             cache_root=cache_root,
             source_dir=source_dir,
@@ -67,7 +66,7 @@ class CxxSolver:
                 f"current={current}"
             )
 
-    def prepare(self, *, force: bool = False, dry_run: bool = False) -> PrepareResult:
+    def prepare(self, *, force: bool = False, dry_run: bool = False) -> _ArtifactPreparation:
         self.check_thread()
         return self.registry.prepare_artifact(
             self.topology,

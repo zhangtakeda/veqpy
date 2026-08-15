@@ -2,7 +2,7 @@
 Package: veqpy.kernels.cxx_kernel
 
 Role:
-- Implement the private Cxx backend selected by KernelRecipe.backend.
+- Implement the private Cxx backend selected by _BuildPolicy.backend.
 - Own native artifact preparation, nanobind ABI lowering, solver lifecycle, and
   generated C++ core sources.
 

@@ -30,7 +30,7 @@ from veqpy.base import Registry
 # -----------------------------------------------------------------------------
 
 _RESIDUAL_SCALE_BUILDER: Registry[str, Callable] = Registry(str, Callable)
-# KernelConfig, benchmarks, and GEQDSK workflows all use this same default.
+# _BackendConfig, benchmarks, and GEQDSK workflows all use this same default.
 DEFAULT_RESIDUAL_NORMALIZATION = "fast"
 
 # -----------------------------------------------------------------------------

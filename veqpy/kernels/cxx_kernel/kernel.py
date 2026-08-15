@@ -7,29 +7,28 @@ Role:
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from contextlib import AbstractContextManager
 from dataclasses import replace
 from pathlib import Path
 from time import perf_counter
-from typing import TYPE_CHECKING, Any, NoReturn
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from veqpy.kernels.abi.source_semantics import MaterializedKernelSource, materialize_kernel_source
+from veqpy.kernels.abi.source_semantics import _MaterializedSource, materialize_kernel_source
 from veqpy.kernels.boundary_materialization import materialize_kernel_boundary
-from veqpy.kernels.initial import KernelInitial, materialize_initial_state
 from veqpy.kernels.types import (
-    KernelBoundary,
-    KernelConfig,
-    KernelPrepareResult,
-    KernelRecipe,
-    KernelSource,
     KernelTopology,
-    SolveResult,
+    _BackendConfig,
+    _BoundaryCase,
+    _BuildPolicy,
+    _PrepareDiagnostics,
+    _SolveSnapshot,
+    _SourceCase,
     config_with_overrides,
 )
 
+from ..numba_kernel.state import coerce_initial_state
 from .affinity import pinned_cpu
 from .native_abi import (
     boundary_runtime_args,
@@ -42,7 +41,8 @@ from .solver import CxxSolver
 from .validation import validate_supported_for_cxx_backend
 
 if TYPE_CHECKING:
-    from veqpy.model import Equilibrium, Grid
+    from veqpy.model.equilibrium import Equilibrium
+    from veqpy.model.grid import Grid
 
 
 class _CxxKernelImpl:
@@ -52,20 +52,20 @@ class _CxxKernelImpl:
         self,
         *,
         topology: KernelTopology,
-        recipe: KernelRecipe | None = None,
-        config: KernelConfig | None = None,
+        recipe: _BuildPolicy | None = None,
+        config: _BackendConfig | None = None,
         registry: KernelRegistry | None = None,
         cache_root: Path | None = None,
         source_dir: Path | None = None,
         pin_cpu: bool | int | None = None,
     ) -> None:
         self.topology = topology
-        self.recipe = KernelRecipe(backend="cxx") if recipe is None else recipe
-        if not isinstance(self.recipe, KernelRecipe):
-            raise TypeError(f"recipe must be KernelRecipe, got {type(self.recipe).__name__}")
+        self.recipe = _BuildPolicy(backend="cxx") if recipe is None else recipe
+        if not isinstance(self.recipe, _BuildPolicy):
+            raise TypeError(f"recipe must be _BuildPolicy, got {type(self.recipe).__name__}")
         self._validate_native_recipe(self.recipe)
         validate_supported_for_cxx_backend(topology)
-        self.config = KernelConfig() if config is None else self._kernel_config(config)
+        self.config = _BackendConfig() if config is None else self._kernel_config(config)
         self.pin_cpu = pin_cpu
         self.registry = registry or KernelRegistry(
             cache_root=cache_root,
@@ -73,18 +73,17 @@ class _CxxKernelImpl:
             pin_cpu=pin_cpu,
         )
         self._solver: CxxSolver | None = None
-        self.history: list[SolveResult] = []
-        self.result: SolveResult | None = None
-        self._last_boundary: KernelBoundary | None = None
-        self._last_source: KernelSource | None = None
+        self._last_snapshot: _SolveSnapshot | None = None
+        self._last_boundary: _BoundaryCase | None = None
+        self._last_source: _SourceCase | None = None
 
     @property
     def x_size(self) -> int:
         return self.topology.x_size
 
-    def prepare(self, *, force: bool = False, dry_run: bool = False) -> KernelPrepareResult:
+    def prepare(self, *, force: bool = False, dry_run: bool = False) -> _PrepareDiagnostics:
         artifact = self._cxx_solver().prepare(force=force, dry_run=dry_run)
-        return KernelPrepareResult(
+        return _PrepareDiagnostics(
             backend=self.recipe.backend,
             topology=self.topology,
             recipe=self.recipe,
@@ -95,36 +94,21 @@ class _CxxKernelImpl:
             artifact=artifact,
         )
 
-    def variant(
-        self,
-        *,
-        h_count: int | None = None,
-        v_count: int | None = None,
-        kappa_count: int | None = None,
-        psin_count: int | None = None,
-        F_count: int | None = None,
-        c_counts: tuple[int, ...] | None = None,
-        s_counts: tuple[int, ...] | None = None,
-    ) -> "_CxxKernelImpl":
-        raise NotImplementedError(
-            "Kernel.variant() is currently supported only by the Numba backend"
-        )
-
     def solve(
         self,
-        boundary: KernelBoundary,
-        source: KernelSource,
+        boundary: _BoundaryCase,
+        source: _SourceCase,
         *,
-        config: KernelConfig | None = None,
+        config: _BackendConfig | None = None,
         case_name: str | None = None,
-        x0: KernelInitial | None = None,
+        x0: np.ndarray | None = None,
         **config_overrides: Any,
-    ) -> SolveResult:
+    ) -> _SolveSnapshot:
         elapsed_started = perf_counter()
         kernel_config = self._runtime_config(config, config_overrides)
         solver = self._set_runtime(boundary, source, kernel_config, case_name=case_name)
         if x0 is not None:
-            solver.set_initial_state(materialize_initial_state(x0, self.topology, self.recipe))
+            solver.set_initial_state(coerce_initial_state(x0, self.x_size))
         preprocess_ms = (perf_counter() - elapsed_started) * 1000.0
         native_value = solver.solve_direct()
         postprocess_started = perf_counter()
@@ -133,45 +117,17 @@ class _CxxKernelImpl:
             preprocess_ms=preprocess_ms,
             solver_ms=float(native_value[0]),
         )
-        self.history.append(result)
         postprocess_ms = (perf_counter() - postprocess_started) * 1000.0
-        self.result = replace(
+        self._last_snapshot = replace(
             result,
             elapsed_ms=(perf_counter() - elapsed_started) * 1000.0,
             postprocess_ms=postprocess_ms,
         )
-        self.history[-1] = self.result
-        return self.result
-
-    def pareto(
-        self,
-        boundary: KernelBoundary,
-        source: KernelSource,
-        *,
-        candidates: Sequence[object] | object,
-        config: KernelConfig | None = None,
-        case_name: str | None = None,
-        reference: SolveResult | None = None,
-        target: str = "counts",
-        metric: str = "rms",
-        **config_overrides: Any,
-    ) -> NoReturn:
-        del (
-            boundary,
-            source,
-            candidates,
-            config,
-            case_name,
-            reference,
-            target,
-            metric,
-            config_overrides,
-        )
-        raise NotImplementedError("Kernel.pareto is currently supported only by the Numba backend")
+        return self._last_snapshot
 
     # Raw numerical APIs use the handle default config to install the native
     # current-case context required before residual/JVP/Jacobian kernels run.
-    def residual(self, x: Any, boundary: KernelBoundary, source: KernelSource) -> np.ndarray:
+    def residual(self, x: Any, boundary: _BoundaryCase, source: _SourceCase) -> np.ndarray:
         out = np.empty(self.x_size, dtype=np.float64)
         self.residual_into(out, x, boundary, source)
         return out
@@ -180,15 +136,15 @@ class _CxxKernelImpl:
         self,
         out: np.ndarray,
         x: Any,
-        boundary: KernelBoundary,
-        source: KernelSource,
+        boundary: _BoundaryCase,
+        source: _SourceCase,
     ) -> None:
         packed_out = self._packed_output(out, (self.x_size,), "out")
         packed_x = self._packed_input(x, "x")
         self._set_runtime(boundary, source, self.config, case_name=None)
         self._cxx_solver().residual_var_into(packed_out, packed_x)
 
-    def jvp(self, x: Any, v: Any, boundary: KernelBoundary, source: KernelSource) -> np.ndarray:
+    def jvp(self, x: Any, v: Any, boundary: _BoundaryCase, source: _SourceCase) -> np.ndarray:
         out = np.empty(self.x_size, dtype=np.float64)
         self.jvp_into(out, x, v, boundary, source)
         return out
@@ -198,8 +154,8 @@ class _CxxKernelImpl:
         out: np.ndarray,
         x: Any,
         v: Any,
-        boundary: KernelBoundary,
-        source: KernelSource,
+        boundary: _BoundaryCase,
+        source: _SourceCase,
     ) -> None:
         packed_out = self._packed_output(out, (self.x_size,), "out")
         packed_x = self._packed_input(x, "x")
@@ -207,7 +163,7 @@ class _CxxKernelImpl:
         self._set_runtime(boundary, source, self.config, case_name=None)
         self._cxx_solver().jvp_into(packed_out, packed_x, packed_v)
 
-    def jacobian(self, x: Any, boundary: KernelBoundary, source: KernelSource) -> np.ndarray:
+    def jacobian(self, x: Any, boundary: _BoundaryCase, source: _SourceCase) -> np.ndarray:
         out = np.empty((self.x_size, self.x_size), dtype=np.float64)
         self.jacobian_into(out, x, boundary, source)
         return out
@@ -216,8 +172,8 @@ class _CxxKernelImpl:
         self,
         out: np.ndarray,
         x: Any,
-        boundary: KernelBoundary,
-        source: KernelSource,
+        boundary: _BoundaryCase,
+        source: _SourceCase,
     ) -> None:
         matrix_out = self._packed_output(out, (self.x_size, self.x_size), "out")
         packed_x = self._packed_input(x, "x")
@@ -233,9 +189,9 @@ class _CxxKernelImpl:
         if self._last_boundary is None or self._last_source is None:
             raise RuntimeError("build_equilibrium requires a previous Kernel runtime case")
         if x is None:
-            if self.result is None:
+            if self._last_snapshot is None:
                 raise RuntimeError("build_equilibrium(x=None) requires a previous solve result")
-            packed_x = self.result.x
+            packed_x = self._last_snapshot.x
         else:
             packed_x = self._packed_input(x, "x")
         from veqpy.kernels.numba_kernel.runtime import NumbaRuntime
@@ -249,8 +205,7 @@ class _CxxKernelImpl:
         )
 
     def clear(self) -> None:
-        self.history.clear()
-        self.result = None
+        self._last_snapshot = None
         self._last_boundary = None
         self._last_source = None
 
@@ -294,9 +249,9 @@ class _CxxKernelImpl:
 
     def _runtime_config(
         self,
-        config: KernelConfig | None,
+        config: _BackendConfig | None,
         overrides: dict[str, Any],
-    ) -> KernelConfig:
+    ) -> _BackendConfig:
         kernel_config = self.config if config is None else self._kernel_config(config)
         if overrides:
             kernel_config = config_with_overrides(kernel_config, **overrides)
@@ -304,9 +259,9 @@ class _CxxKernelImpl:
 
     def _set_runtime(
         self,
-        boundary: KernelBoundary,
-        source: KernelSource,
-        config: KernelConfig,
+        boundary: _BoundaryCase,
+        source: _SourceCase,
+        config: _BackendConfig,
         *,
         case_name: str | None,
     ) -> CxxSolver:
@@ -326,34 +281,34 @@ class _CxxKernelImpl:
         return solver
 
     @staticmethod
-    def _validate_native_recipe(recipe: KernelRecipe) -> None:
+    def _validate_native_recipe(recipe: _BuildPolicy) -> None:
         if recipe.backend != "cxx":
-            raise ValueError("Cxx Kernel requires KernelRecipe backend='cxx'")
+            raise ValueError("Cxx Kernel requires _BuildPolicy backend='cxx'")
 
     @staticmethod
-    def _kernel_config(config: KernelConfig) -> KernelConfig:
-        if not isinstance(config, KernelConfig):
-            raise TypeError(f"config must be KernelConfig, got {type(config).__name__}")
+    def _kernel_config(config: _BackendConfig) -> _BackendConfig:
+        if not isinstance(config, _BackendConfig):
+            raise TypeError(f"config must be _BackendConfig, got {type(config).__name__}")
         return config
 
     @staticmethod
-    def _kernel_boundary(boundary: KernelBoundary) -> KernelBoundary:
-        if not isinstance(boundary, KernelBoundary):
-            raise TypeError(f"boundary must be KernelBoundary, got {type(boundary).__name__}")
+    def _kernel_boundary(boundary: _BoundaryCase) -> _BoundaryCase:
+        if not isinstance(boundary, _BoundaryCase):
+            raise TypeError(f"boundary must be _BoundaryCase, got {type(boundary).__name__}")
         return materialize_kernel_boundary(boundary, fit_backend="cxx").boundary
 
     @staticmethod
-    def _kernel_source(source: KernelSource, *, case_name: str | None) -> KernelSource:
-        if not isinstance(source, KernelSource):
-            raise TypeError(f"source must be KernelSource, got {type(source).__name__}")
+    def _kernel_source(source: _SourceCase, *, case_name: str | None) -> _SourceCase:
+        if not isinstance(source, _SourceCase):
+            raise TypeError(f"source must be _SourceCase, got {type(source).__name__}")
         if case_name is None:
             return source
         return replace(source, case_name=case_name)
 
     def _validate_runtime_case_adaptability(
         self,
-        boundary: KernelBoundary,
-        source: MaterializedKernelSource,
+        boundary: _BoundaryCase,
+        source: _MaterializedSource,
     ) -> None:
         topology = self.topology
         max_cosine_offsets = topology.M_max + 1

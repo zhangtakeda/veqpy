@@ -14,19 +14,18 @@ import numpy as np
 from veqpy.kernels.abi.source_semantics import (
     DEFAULT_SOURCE_FIX_R,
     MU0,
-    MaterializedKernelSource,
+    _MaterializedSource,
     materialize_kernel_source,
 )
 from veqpy.kernels.numba_kernel.workspace.allocation import allocate_runtime_state
 from veqpy.kernels.numba_kernel.workspace.grid_workspace import GridWorkspace
 from veqpy.kernels.types import (
-    KernelBoundary,
-    KernelSource,
     KernelTopology,
+    _BoundaryCase,
+    _SourceCase,
     kernel_boundary_s_offsets_with_s0,
 )
-from veqpy.kernels.variant import topology_counts_contained_by_capacity
-from veqpy.model import Grid
+from veqpy.model.grid import Grid
 from veqpy.numerics import (
     SOURCE_INTERP_DEFAULT,
     normalize_source_interpolation_kind,
@@ -129,8 +128,8 @@ class KernelRuntimeCase:
     """Runtime case object with the scalar attributes layout binders need."""
 
     topology: KernelTopology
-    boundary: KernelBoundary
-    source: KernelSource
+    boundary: _BoundaryCase
+    source: _SourceCase
     pprime_input: np.ndarray
     driver_input: np.ndarray
     p0: float
@@ -194,8 +193,6 @@ class NumbaRuntime:
         fix_r: float = DEFAULT_SOURCE_FIX_R,
         source_interpolation_kind: str = SOURCE_INTERP_DEFAULT,
     ) -> None:
-        self.capacity_topology = topology
-        self.active_topology = topology
         self.topology = topology
         self.fix_r = float(fix_r)
         self.source_interpolation_kind = source_interpolation_kind
@@ -221,8 +218,8 @@ class NumbaRuntime:
         self.c_effective_order = 0
         self.s_effective_order = 0
         self._case: KernelRuntimeCase | None = None
-        self._case_boundary_identity: KernelBoundary | None = None
-        self._case_source_identity: KernelSource | None = None
+        self._case_boundary_identity: _BoundaryCase | None = None
+        self._case_source_identity: _SourceCase | None = None
 
     @property
     def x_size(self) -> int:
@@ -231,28 +228,6 @@ class NumbaRuntime:
     @property
     def alpha(self) -> np.ndarray:
         return self.source_workspace.alpha_state
-
-    def contains(self, topology: KernelTopology) -> bool:
-        return topology_counts_contained_by_capacity(topology, self.capacity_topology)
-
-    def variant(self, topology: KernelTopology) -> bool:
-        if not self.contains(topology):
-            return False
-        self.active_topology = topology
-        self.topology = topology
-        self.plan = _build_kernel_runtime_plan(
-            topology,
-            source_interpolation_kind=self.source_interpolation_kind,
-            grid_workspace=self.plan.grid_workspace,
-        )
-        self.profile_workspace.configure_active_metadata(self.plan.active_profile_ids)
-        self.layout = KernelLayout.empty(self.plan.x_size)
-        self.c_effective_order = 0
-        self.s_effective_order = 0
-        self._case = None
-        self._case_boundary_identity = None
-        self._case_source_identity = None
-        return True
 
     def zero_state(self) -> np.ndarray:
         return np.zeros(self.plan.x_size, dtype=np.float64)
@@ -277,13 +252,13 @@ class NumbaRuntime:
     def active_profile_blocks(self) -> tuple[tuple[int, str, np.ndarray, float, float], ...]:
         return self.profile_workspace.active_profile_blocks()
 
-    def set_case(self, boundary: KernelBoundary, source: KernelSource) -> None:
+    def set_case(self, boundary: _BoundaryCase, source: _SourceCase) -> None:
         if (
             self._case is not None
             and boundary is self._case_boundary_identity
             and source is self._case_source_identity
         ):
-            # KernelBoundary/KernelSource are immutable snapshot contracts. An
+            # _BoundaryCase/_SourceCase are immutable snapshot contracts. An
             # identity hit therefore reuses validated lowering, native-source
             # coefficients, and bound runners without risking stale values.
             return
@@ -293,7 +268,7 @@ class NumbaRuntime:
             and self._case is not None
             and _equivalent_kernel_sources(source, self._case.source)
         ):
-            # Adapters commonly materialize a fresh immutable KernelSource for
+            # Adapters commonly materialize a fresh immutable _SourceCase for
             # every workflow snapshot even when no source value changed.  Keep
             # the already validated/bound numerical state and merely recognize
             # the new snapshot identity; three short array comparisons are much
@@ -331,8 +306,8 @@ class NumbaRuntime:
         self,
         out: np.ndarray,
         x: np.ndarray,
-        boundary: KernelBoundary,
-        source: KernelSource,
+        boundary: _BoundaryCase,
+        source: _SourceCase,
     ) -> None:
         self.set_case(boundary, source)
         x_eval = self.coerce_x(x)
@@ -341,8 +316,8 @@ class NumbaRuntime:
     def residual(
         self,
         x: np.ndarray,
-        boundary: KernelBoundary,
-        source: KernelSource,
+        boundary: _BoundaryCase,
+        source: _SourceCase,
     ) -> np.ndarray:
         out = np.empty(self.plan.x_size, dtype=np.float64)
         self.residual_into(out, x, boundary, source)
@@ -359,8 +334,8 @@ class NumbaRuntime:
 
     def initial_state(
         self,
-        boundary: KernelBoundary,
-        source: KernelSource,
+        boundary: _BoundaryCase,
+        source: _SourceCase,
         *,
         initial: str,
         x0: np.ndarray | None,
@@ -378,14 +353,14 @@ class NumbaRuntime:
         if initial == "cold-geometric":
             return self._build_geometric_initial_state()
         raise NotImplementedError(
-            f"Numba backend does not support KernelConfig.initial={initial!r}"
+            f"Numba backend does not support _BackendConfig.initial={initial!r}"
         )
 
     def build_equilibrium(
         self,
         x: np.ndarray,
-        boundary: KernelBoundary,
-        source: KernelSource,
+        boundary: _BoundaryCase,
+        source: _SourceCase,
         *,
         grid: Grid | None = None,
     ):
@@ -642,10 +617,10 @@ def _build_kernel_runtime_plan(
 
 def _build_kernel_source_plan(
     topology: KernelTopology,
-    source: KernelSource,
+    source: _SourceCase,
     *,
     source_interpolation_kind: str,
-    materialized: MaterializedKernelSource | None = None,
+    materialized: _MaterializedSource | None = None,
 ) -> SourcePlan:
     if materialized is None:
         materialized = materialize_kernel_source(topology, source)
@@ -721,7 +696,7 @@ def _readonly_runtime_profile(value: np.ndarray) -> np.ndarray:
     return profile
 
 
-def _equivalent_kernel_sources(left: KernelSource, right: KernelSource) -> bool:
+def _equivalent_kernel_sources(left: _SourceCase, right: _SourceCase) -> bool:
     """Return exact numerical equivalence for immutable source snapshots."""
     if left.pressure_name != right.pressure_name or left.driver_name != right.driver_name:
         return False
@@ -786,7 +761,7 @@ def _build_profile_config(
     return profile_static_kwargs_by_name, dict(PROFILE_OFFSET_SPECS)
 
 
-def _boundary_curve_strain(boundary: KernelBoundary) -> float:
+def _boundary_curve_strain(boundary: _BoundaryCase) -> float:
     c_offsets = _boundary_offset_array(boundary.c_offsets)
     s_offsets = _boundary_offset_array(kernel_boundary_s_offsets_with_s0(boundary))
     if c_offsets is None or s_offsets is None:

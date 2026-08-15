@@ -1,253 +1,291 @@
-"""
-Module: veqpy.kernels.kernel
-
-Role:
-- Provide the backend-neutral public ``Kernel`` handle.
-
-Notes:
-- The wrapper owns lifecycle, validation, and result shape; private backends own execution.
-"""
+"""Backend-neutral four-buffer Kernel handle."""
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
 from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from veqpy.kernels.initial import KernelInitial
-from veqpy.kernels.pareto import ParetoResult
-from veqpy.kernels.solve_map import solve_jvp as solve_map_jvp
-from veqpy.kernels.types import (
-    KernelBoundary,
-    KernelConfig,
-    KernelPrepareResult,
-    KernelRecipe,
-    KernelSource,
-    KernelTopology,
-    SolveResult,
-)
-
+from .contracts import KernelConfig, KernelInput, KernelOutput, KernelTopology
 from .dispatch import _make_kernel_impl
+from .lowering import boundary_case, private_config, source_case
+from .lowering import build_policy as build_private_policy
 
 if TYPE_CHECKING:
-    from veqpy.model import Equilibrium, Grid
+    from fusionprime_base import Equilibrium
 
 
 class Kernel:
-    """Backend-neutral public Kernel wrapper selected by ``KernelRecipe.backend``."""
+    """Prepared numerical runtime bound to exactly four public data objects.
+
+    ``KernelInput`` and ``KernelOutput`` are retained by identity for the
+    lifetime of this handle.  Backend lowering may create private read-only
+    views, but no old boundary/source/result object crosses this public API.
+    """
 
     def __init__(
         self,
         *,
         topology: KernelTopology,
-        recipe: KernelRecipe | None = None,
+        input: KernelInput | None = None,
         config: KernelConfig | None = None,
+        output: KernelOutput | None = None,
+        backend: str = "numba",
+        build_policy: object | None = None,
         registry: object | None = None,
         cache_root: Path | None = None,
         source_dir: Path | None = None,
         pin_cpu: bool | int | None = None,
     ) -> None:
+        if not isinstance(topology, KernelTopology):
+            raise TypeError(f"topology must be KernelTopology, got {type(topology).__name__}")
+        selected_backend = str(backend).strip().lower()
+        if selected_backend not in {"numba", "cxx"}:
+            raise ValueError("backend must be 'numba' or 'cxx'")
+        self.topology = topology
+        self.input = KernelInput.allocate(topology) if input is None else input
+        self.output = KernelOutput.allocate(topology) if output is None else output
+        _validate_input(self.input, topology)
+        _validate_output(self.output, topology)
+        self.backend = selected_backend
+        self.config = KernelConfig() if config is None else _as_config(config)
+        self._private_config = private_config(self.config)
+        self._policy = (
+            build_private_policy(backend=selected_backend)
+            if build_policy is None
+            else build_policy
+        )
         self._impl = _make_kernel_impl(
             topology=topology,
-            recipe=recipe,
-            config=config,
+            recipe=self._policy,
+            config=self._private_config,
             registry=registry,
             cache_root=cache_root,
             source_dir=source_dir,
             pin_cpu=pin_cpu,
         )
-
-    @property
-    def topology(self) -> KernelTopology:
-        return self._impl.topology
-
-    @property
-    def recipe(self) -> KernelRecipe:
-        return self._impl.recipe
-
-    @property
-    def config(self) -> KernelConfig:
-        return self._impl.config
-
-    @property
-    def history(self) -> list[SolveResult]:
-        return self._impl.history
-
-    @property
-    def result(self) -> SolveResult | None:
-        return self._impl.result
+        self._prepared = False
+        self._closed = False
+        self._last_equilibrium: Equilibrium | None = None
 
     @property
     def x_size(self) -> int:
-        return self._impl.x_size
+        """Packed unknown vector size fixed by ``KernelTopology``."""
 
-    def prepare(self, *, force: bool = False, dry_run: bool = False) -> KernelPrepareResult:
-        return self._impl.prepare(force=force, dry_run=dry_run)
+        return int(self.topology.x_size)
 
-    def variant(
-        self,
-        *,
-        h_count: int | None = None,
-        v_count: int | None = None,
-        kappa_count: int | None = None,
-        psin_count: int | None = None,
-        F_count: int | None = None,
-        c_counts: tuple[int, ...] | None = None,
-        s_counts: tuple[int, ...] | None = None,
-    ) -> "Kernel":
-        self._impl.variant(
-            h_count=h_count,
-            v_count=v_count,
-            kappa_count=kappa_count,
-            psin_count=psin_count,
-            F_count=F_count,
-            c_counts=c_counts,
-            s_counts=s_counts,
-        )
-        return self
+    @property
+    def prepared(self) -> bool:
+        """Whether backend compilation and workspace preparation completed."""
 
-    def solve(
-        self,
-        boundary: KernelBoundary,
-        source: KernelSource,
-        *,
-        config: KernelConfig | None = None,
-        case_name: str | None = None,
-        x0: KernelInitial | None = None,
-        **config_overrides: Any,
-    ) -> SolveResult:
-        return self._impl.solve(
+        return self._prepared
+
+    def prepare(self) -> None:
+        """Compile and allocate backend state exactly once per topology."""
+
+        self._ensure_open()
+        if not self._prepared:
+            self._impl.prepare()
+            self._prepared = True
+
+    def solve(self) -> KernelOutput:
+        """Fill and return the same bound ``KernelOutput`` object."""
+
+        self._ensure_open()
+        _validate_input(self.input, self.topology)
+        if not self._prepared:
+            self.prepare()
+        self.input.clear_unused_source_tail()
+        boundary = boundary_case(self.topology, self.input)
+        source = source_case(self.topology, self.input)
+        x0 = self.input.x0 if self.input.has_x0 and self.input.x0 is not None else None
+        snapshot = self._impl.solve(
             boundary,
             source,
-            config=config,
-            case_name=case_name,
+            config=self._private_config,
+            case_name=None,
             x0=x0,
-            **config_overrides,
+        )
+        _copy_snapshot(self.output, snapshot)
+        self._last_equilibrium = self._impl.build_equilibrium()
+        _copy_equilibrium_roots(self.output, self._last_equilibrium)
+        return self.output
+
+    def residual_into(self, out: np.ndarray, x: Any | None = None) -> None:
+        """Write the residual for a packed state into caller-owned ``out``."""
+
+        self._ensure_open()
+        _validate_input(self.input, self.topology)
+        if not self._prepared:
+            self.prepare()
+        packed = self.output.x if x is None else _packed_x(x, self.x_size)
+        self._impl.residual_into(
+            _packed_out(out, (self.x_size,), "out"),
+            packed,
+            boundary_case(self.topology, self.input),
+            source_case(self.topology, self.input),
         )
 
-    def pareto(
-        self,
-        boundary: KernelBoundary,
-        source: KernelSource,
-        *,
-        candidates: Sequence[object] | object,
-        config: KernelConfig | None = None,
-        case_name: str | None = None,
-        reference: SolveResult | None = None,
-        target: str = "counts",
-        metric: str = "rms",
-        **config_overrides: Any,
-    ) -> ParetoResult:
-        return self._impl.pareto(
-            boundary,
-            source,
-            candidates=candidates,
-            config=config,
-            case_name=case_name,
-            reference=reference,
-            target=target,
-            metric=metric,
-            **config_overrides,
+    def residual(self, x: Any | None = None) -> np.ndarray:
+        """Convenience residual allocation outside the hot path."""
+
+        out = np.empty(self.x_size, dtype=np.float64)
+        self.residual_into(out, x)
+        return out
+
+    def residual_jvp_into(self, out: np.ndarray, x: Any, v: Any) -> None:
+        """Write the residual Jacobian-vector product into ``out``."""
+
+        self._ensure_open()
+        _validate_input(self.input, self.topology)
+        if not self._prepared:
+            self.prepare()
+        self._impl.jvp_into(
+            _packed_out(out, (self.x_size,), "out"),
+            _packed_x(x, self.x_size),
+            _packed_x(v, self.x_size),
+            boundary_case(self.topology, self.input),
+            source_case(self.topology, self.input),
         )
 
-    def residual(self, x: Any, boundary: KernelBoundary, source: KernelSource) -> np.ndarray:
-        return self._impl.residual(x, boundary, source)
+    def jacobian_into(self, out: np.ndarray, x: Any | None = None) -> None:
+        """Write the residual Jacobian into a caller-owned matrix."""
 
-    def residual_into(
-        self,
-        out: np.ndarray,
-        x: Any,
-        boundary: KernelBoundary,
-        source: KernelSource,
-    ) -> None:
-        self._impl.residual_into(out, x, boundary, source)
-
-    def jvp(self, x: Any, v: Any, boundary: KernelBoundary, source: KernelSource) -> np.ndarray:
-        return self._impl.jvp(x, v, boundary, source)
-
-    def jvp_into(
-        self,
-        out: np.ndarray,
-        x: Any,
-        v: Any,
-        boundary: KernelBoundary,
-        source: KernelSource,
-    ) -> None:
-        self._impl.jvp_into(out, x, v, boundary, source)
-
-    def solve_jvp(
-        self,
-        boundary: KernelBoundary,
-        source: KernelSource,
-        *,
-        boundary_tangent: Mapping[str, Any] | None = None,
-        source_tangent: Mapping[str, Any] | None = None,
-        output: Callable[["Kernel", SolveResult], Any] | None = None,
-        base_result: SolveResult | None = None,
-        relative_step: float = 1.0e-5,
-        config: KernelConfig | None = None,
-        case_name: str | None = None,
-        x0: KernelInitial | None = None,
-        **config_overrides: Any,
-    ) -> np.ndarray:
-        """Evaluate a numerical JVP of the converged solve map.
-
-        This method differentiates runtime ``boundary`` and ``source`` inputs,
-        unlike :meth:`jvp`, which applies the residual Jacobian only to an
-        internal packed-state direction. Tangent mappings use the corresponding
-        dataclass field names. By default the output is ``SolveResult.x``; an
-        ``output`` callable may instead encode any fixed-shape numeric result,
-        including fields materialized through :meth:`build_equilibrium`.
-
-        The central finite difference uses the same converged base state as the
-        initial guess for both perturbations. Public result, history, and last
-        runtime-case state are restored before returning.
-        """
-
-        return solve_map_jvp(
-            self,
-            boundary,
-            source,
-            boundary_tangent=boundary_tangent,
-            source_tangent=source_tangent,
-            output=output,
-            base_result=base_result,
-            relative_step=relative_step,
-            config=config,
-            case_name=case_name,
-            x0=x0,
-            **config_overrides,
+        self._ensure_open()
+        _validate_input(self.input, self.topology)
+        if not self._prepared:
+            self.prepare()
+        packed = self.output.x if x is None else _packed_x(x, self.x_size)
+        self._impl.jacobian_into(
+            _packed_out(out, (self.x_size, self.x_size), "out"),
+            packed,
+            boundary_case(self.topology, self.input),
+            source_case(self.topology, self.input),
         )
 
-    def jacobian(self, x: Any, boundary: KernelBoundary, source: KernelSource) -> np.ndarray:
-        return self._impl.jacobian(x, boundary, source)
+    def build_equilibrium(self) -> "Equilibrium":
+        """Return a newly owned frozen base Equilibrium snapshot."""
 
-    def jacobian_into(
-        self,
-        out: np.ndarray,
-        x: Any,
-        boundary: KernelBoundary,
-        source: KernelSource,
-    ) -> None:
-        self._impl.jacobian_into(out, x, boundary, source)
-
-    def build_equilibrium(
-        self,
-        x: Any | None = None,
-        *,
-        grid: Grid | None = None,
-    ) -> Equilibrium:
-        """Materialize the latest or supplied state on the requested output grid."""
-        return self._impl.build_equilibrium(x, grid=grid)
+        self._ensure_open()
+        if self._last_equilibrium is None:
+            if not self._prepared:
+                self.prepare()
+            if not np.any(np.isfinite(self.output.x)) or self.output.x.size == 0:
+                raise RuntimeError("build_equilibrium requires a previous solve")
+            self._last_equilibrium = self._impl.build_equilibrium()
+            _copy_equilibrium_roots(self.output, self._last_equilibrium)
+        return self._last_equilibrium
 
     def clear(self) -> None:
+        """Clear transient backend state while retaining ABI buffer identity."""
+
+        if self._closed:
+            return
         self._impl.clear()
+        self.output.reset()
+        self._last_equilibrium = None
 
     def close(self) -> None:
+        """Release backend resources; repeated close is harmless."""
+
+        if self._closed:
+            return
         self._impl.close()
+        self._closed = True
 
     def pinned(self) -> AbstractContextManager[None, bool | None]:
+        """Return the optional backend CPU-affinity scope."""
+
+        self._ensure_open()
         return self._impl.pinned()
+
+    def _ensure_open(self) -> None:
+        if self._closed:
+            raise RuntimeError("Kernel is closed")
+
+
+def _as_config(value: KernelConfig) -> KernelConfig:
+    if not isinstance(value, KernelConfig):
+        raise TypeError(f"config must be KernelConfig, got {type(value).__name__}")
+    return value
+
+
+def _validate_input(value: KernelInput, topology: KernelTopology) -> None:
+    if not isinstance(value, KernelInput):
+        raise TypeError(f"input must be KernelInput, got {type(value).__name__}")
+    if type(value.source_count) is not int or value.source_count < 1:
+        raise ValueError("KernelInput source_count must be a positive int")
+    if value.source_count > int(topology.source_capacity):
+        raise ValueError("KernelInput source_count exceeds topology source_capacity")
+    if value.pressure.size != int(topology.source_capacity):
+        raise ValueError("KernelInput source arrays must match topology source_capacity")
+    if value.driver.size != value.pressure.size or value.source_nodes.size != value.pressure.size:
+        raise ValueError("KernelInput source arrays must share one capacity")
+    if value.x0 is not None and value.x0.shape != (topology.x_size,):
+        raise ValueError(f"KernelInput.x0 must have shape {(topology.x_size,)}")
+
+
+def _validate_output(value: KernelOutput, topology: KernelTopology) -> None:
+    if not isinstance(value, KernelOutput):
+        raise TypeError(f"output must be KernelOutput, got {type(value).__name__}")
+    for name in ("x", "raw", "scaled"):
+        array = getattr(value, name)
+        if array.shape != (topology.x_size,) or array.dtype != np.float64 or not array.flags.c_contiguous:
+            raise ValueError(f"KernelOutput.{name} must be C-contiguous float64 shape {(topology.x_size,)}")
+    for name in ("psin", "psin_r", "psin_rr", "FF_psi", "P_psi"):
+        array = getattr(value, name)
+        if array.shape != (topology.Nr,) or array.dtype != np.float64 or not array.flags.c_contiguous:
+            raise ValueError(f"KernelOutput.{name} must be C-contiguous float64 shape {(topology.Nr,)}")
+
+
+def _packed_x(value: Any, size: int) -> np.ndarray:
+    array = np.asarray(value, dtype=np.float64)
+    if array.shape != (size,):
+        raise ValueError(f"packed state must have shape {(size,)}, got {array.shape}")
+    return np.ascontiguousarray(array, dtype=np.float64)
+
+
+def _packed_out(value: np.ndarray, shape: tuple[int, ...], name: str) -> np.ndarray:
+    if not isinstance(value, np.ndarray) or value.dtype != np.float64 or value.shape != shape:
+        raise ValueError(f"{name} must be a C-contiguous float64 array with shape {shape}")
+    if not value.flags.c_contiguous or not value.flags.writeable:
+        raise ValueError(f"{name} must be writable and C-contiguous")
+    return value
+
+
+def _copy_snapshot(output: KernelOutput, snapshot: object) -> None:
+    """Copy private solver diagnostics without exposing the snapshot object."""
+
+    output.success = bool(snapshot.success)
+    output.info = int(snapshot.info)
+    output.nfev = int(snapshot.nfev)
+    output.njev = int(snapshot.njev)
+    output.callbacks = int(snapshot.callbacks)
+    output.jacobian_component_evaluations = int(snapshot.jacobian_component_evaluations)
+    output.jvp_evaluations = int(snapshot.jvp_evaluations)
+    output.linear_iterations = int(snapshot.linear_iterations)
+    output.raw_norm = float(snapshot.raw_norm)
+    output.scaled_norm = float(snapshot.scaled_norm)
+    output.elapsed_ms = float(snapshot.elapsed_ms)
+    output.preprocess_ms = float(snapshot.preprocess_ms)
+    output.solve_ms = float(snapshot.solver_ms)
+    output.postprocess_ms = float(snapshot.postprocess_ms)
+    np.copyto(output.x, snapshot.x)
+    np.copyto(output.raw, snapshot.raw)
+    np.copyto(output.scaled, snapshot.scaled)
+    np.copyto(output.alpha, snapshot.alpha)
+
+
+def _copy_equilibrium_roots(output: KernelOutput, equilibrium: object) -> None:
+    """Copy materialization roots into output-owned arrays."""
+
+    np.copyto(output.psin, np.asarray(equilibrium.psin, dtype=np.float64))
+    np.copyto(output.psin_r, np.asarray(equilibrium.psin_r, dtype=np.float64))
+    np.copyto(output.psin_rr, np.asarray(equilibrium.psin_rr, dtype=np.float64))
+    np.copyto(output.FF_psi, np.asarray(equilibrium.FF_psi, dtype=np.float64))
+    np.copyto(output.P_psi, np.asarray(equilibrium.P_psi, dtype=np.float64))
+
+
+__all__ = ["Kernel"]
