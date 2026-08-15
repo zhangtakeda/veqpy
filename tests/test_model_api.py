@@ -6,7 +6,9 @@ import numpy as np
 import pytest
 from numpy.testing import assert_allclose
 
-from veqpy.model import Geqdsk, Grid, Profile
+from veqpy import Geqdsk
+from veqpy.model.grid import Grid
+from veqpy.model.profile import Profile
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 

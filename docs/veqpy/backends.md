@@ -1,60 +1,22 @@
 # Backends
 
-`veqpy.Kernel` is the public runtime handle. Backend selection is a recipe
-choice, not a user-visible class split:
+Numba is the required and default execution path:
 
 ```python
-from veqpy import KernelRecipe
-
-KernelRecipe(backend="numba")
-KernelRecipe(backend="cxx")
+module = veqpy.VEQ(topology=topology, backend="numba")
 ```
 
-`KernelRecipe()`, `Kernel(..., recipe=None)`, and the function-style build/solve
-entrypoints default to Numba. Cxx imports, artifact preparation, and native
-dependencies are reached only after explicitly selecting `backend="cxx"`.
+Cxx uses the same `KernelInput`/`KernelOutput` binding and is parity-tested on
+the supported intersection. The current native capability boundary explicitly
+rejects `nodes="explicit"` and `coordinate="rho"`; it does not silently
+switch to Numba. A missing native toolchain is reported by the CLI and by the
+benchmark command.
 
-The Numba backend is the direct Python runtime used for development, route
-coverage, and pure-Python deployment. It owns packed layout metadata, source
-runtime arrays, residual workspaces, finite-difference JVP/Jacobian calls, and
-equilibrium snapshot assembly behind the common `Kernel` surface. It supports
-`Kernel.variant(...)` for count-only active topology switches. Contained
-variants reuse capacity-sized workspaces while refreshing active layout
-metadata.
+```bash
+.venv/bin/python -m veqpy --demo numba
+.venv/bin/python -m veqpy --demo cxx
+```
 
-The Cxx backend is the native C++/nanobind runtime used for topology-specific
-shared-library kernels and performance measurements. It uses the same public
-Kernel dataclasses and method surface as the Numba backend. Native artifacts are
-cached under `.veqpy-kernel-cache/` in the current working directory by default,
-or under `VEQPY_KERNEL_CACHE` when that environment variable is set. The Cxx
-backend does not currently support `Kernel.variant(...)` or capacity-style
-`L_max` values larger than the active count requirement.
-
-Source lowering is shared before backend dispatch. Both runtimes receive one
-canonical pressure derivative plus its LCFS integration constant, one
-route-specific driver, and the selected global constraints. The native Cxx
-source runtime retains the common pressure multiplier, effective scaled LCFS
-pressure, and final alpha factors from its latest residual evaluation so
-backend-parity tests can inspect the physical state directly. This diagnostic
-surface remains a low-level Cxx implementation detail rather than a package-root
-API.
-
-Benchmark entry points use backend names directly:
-
-- `benchmarks/numba_routes.py`: Numba geometric-r route matrix.
-- `benchmarks/numba_variant_sweep.py`: Numba `Kernel.variant()` switch cost vs
-  fresh Kernel construction benchmark.
-- `benchmarks/cxx_routes.py`: Cxx geometric-r route matrix compared with
-  Numba. psin routes retain focused physics/API coverage but are excluded from
-  route performance and pass-rate summaries.
-- `benchmarks/cxx_geqdsk.py`: Cxx GEQDSK matrix compared with Numba.
-- `benchmarks/cxx_continuation.py`: Cxx continuation-policy nfev benchmark.
-- `benchmarks/cxx_boundary_fitters.py`: raw-boundary `qr`/`gnqr`/`least-square`
-  fitter timing and diff matrix across Numba and Cxx.
-
-The native backend needs a C++20 toolchain plus CMake, nanobind, GCEM,
-CMINPACK, LAPACKE/LAPACK, and OpenBLAS. Its Powell hybrid and
-Levenberg-Marquardt solvers compile the bundled MINPACK-derived primitives into
-each native artifact; the fixed 8096-variable compile-time threshold retains
-the standard CMINPACK drivers as a fallback. Normal Numba usage does not
-require compiling native artifacts.
+The Cxx wheel includes its native source and third-party notices. Building a
+wheel does not claim that every host has the compiler and native libraries
+needed to prepare a Cxx artifact.

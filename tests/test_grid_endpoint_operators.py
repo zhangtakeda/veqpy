@@ -3,8 +3,9 @@ from __future__ import annotations
 import numpy as np
 from numpy.testing import assert_allclose
 
-from veqpy import Equilibrium, Grid
 from veqpy.kernels.numba_kernel.numba_source import _update_psin_coordinate
+from veqpy.model.equilibrium import Equilibrium
+from veqpy.model.grid import Grid
 
 
 def test_gauss_grid_endpoint_operators_do_not_alias_interior_nodes() -> None:

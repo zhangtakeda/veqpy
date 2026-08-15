@@ -4,7 +4,8 @@ import numpy as np
 import pytest
 from numpy.testing import assert_allclose
 
-from veqpy.model import Grid, Profile
+from veqpy.model.grid import Grid
+from veqpy.model.profile import Profile
 from veqpy.numerics import (
     apply_differentiation,
     build_uniform_source_interpolation_matrix,

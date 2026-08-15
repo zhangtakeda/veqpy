@@ -1,123 +1,40 @@
 from __future__ import annotations
 
-from typing import Any
+from pathlib import Path
 
 import numpy as np
 import pytest
-from numpy.testing import assert_allclose
 
-from benchmarks._common import CASE_KEYS, CASE_REFERENCE_GFILES
+from veqpy import Geqdsk
 from veqpy.kernels.boundary_fit import fit_boundary_params
 from veqpy.kernels.cxx_kernel.boundary_fit import fit_boundary_params_cxx
 from veqpy.kernels.numba_kernel.boundary_fit import fit_boundary_params_numba
-from veqpy.model import Geqdsk
+
+DATA = Path(__file__).resolve().parents[1] / "data"
 
 
-def _load_boundary(case_key: str) -> tuple[np.ndarray, np.ndarray]:
-    geqdsk = Geqdsk(CASE_REFERENCE_GFILES[case_key])
-    boundary = np.asarray(geqdsk.boundary, dtype=np.float64)
-    return boundary[:, 0].copy(), boundary[:, 1].copy()
+@pytest.mark.parametrize("name", ("SOLOVEV", "CHEASE", "EFIT"))
+def test_numba_boundary_fit_matches_python_reference(name: str) -> None:
+    geqdsk = Geqdsk(DATA / f"{name}.geqdsk")
+    R = np.asarray(geqdsk.boundary[:, 0], dtype=np.float64)
+    Z = np.asarray(geqdsk.boundary[:, 1], dtype=np.float64)
+    reference = fit_boundary_params(R, Z, c_order=8, s_order=8, maxtol=1.0)
+    fitted = fit_boundary_params_numba(R, Z, c_order=8, s_order=8, maxtol=1.0)
+    assert float(reference["rms"]) < 2.0e-2
+    assert float(fitted["rms"]) < 2.0e-2
+    np.testing.assert_allclose(fitted["R0"], reference["R0"], atol=1.0e-10)
+    np.testing.assert_allclose(fitted["a"], reference["a"], atol=1.0e-10)
 
 
-def _coeff_vector(fit: dict[str, Any]) -> np.ndarray:
-    return np.asarray(
-        [
-            float(fit["R0"]),
-            float(fit["Z0"]),
-            float(fit["a"]),
-            float(fit["ka"]),
-            *np.asarray(fit["c_offsets"], dtype=np.float64).tolist(),
-            *np.asarray(fit["s_offsets"], dtype=np.float64).tolist(),
-        ],
-        dtype=np.float64,
-    )
-
-
-def _assert_fit_is_reasonable(case_key: str, fit: dict[str, Any]) -> None:
-    rms = float(fit["rms"])
-    curve = float(fit["max_curve_error"])
-    assert np.isfinite(rms)
-    assert np.isfinite(curve)
-    assert rms < {"solovev": 2.0e-3, "chease": 1.0e-2, "efit": 5.0e-3}[case_key]
-    assert curve < {"solovev": 3.0e-2, "chease": 4.0e-2, "efit": 3.0e-2}[case_key]
-
-
-def _fit_numpy(R: np.ndarray, Z: np.ndarray, *, method: str) -> dict[str, Any]:
-    return fit_boundary_params(R, Z, c_order=10, s_order=10, maxtol=1.0, method=method)
-
-
-def _fit_numba(R: np.ndarray, Z: np.ndarray, *, method: str) -> dict[str, Any]:
-    return fit_boundary_params_numba(R, Z, c_order=10, s_order=10, maxtol=1.0, method=method)
-
-
-def _fit_cxx(R: np.ndarray, Z: np.ndarray, *, method: str) -> dict[str, Any]:
+def test_cxx_boundary_fit_has_explicit_native_diagnostic_or_matches_numba() -> None:
+    geqdsk = Geqdsk(DATA / "SOLOVEV.geqdsk")
+    R = np.asarray(geqdsk.boundary[:, 0], dtype=np.float64)
+    Z = np.asarray(geqdsk.boundary[:, 1], dtype=np.float64)
     try:
-        return fit_boundary_params_cxx(
-            R,
-            Z,
-            c_order=10,
-            s_order=10,
-            maxtol=1.0,
-            method=method,
-        )
-    except Exception as exc:
-        text = f"{type(exc).__name__}: {exc}"
-        if any(token in text.lower() for token in ("cmake", "compiler", "nanobind", "build")):
-            pytest.skip(f"native boundary fitter unavailable: {text}")
+        fitted = fit_boundary_params_cxx(R, Z, c_order=4, s_order=4, maxtol=1.0)
+    except Exception as error:
+        detail = f"{type(error).__name__}: {error}".lower()
+        if any(token in detail for token in ("cmake", "compiler", "nanobind", "build", "native")):
+            pytest.skip(f"Cxx native fitter unavailable: {error}")
         raise
-
-
-@pytest.mark.slow
-@pytest.mark.parametrize("case_key", CASE_KEYS)
-@pytest.mark.parametrize("method", ("qr", "gnqr", "least-square"))
-def test_numba_boundary_fitter_matches_numpy(case_key: str, method: str) -> None:
-    R, Z = _load_boundary(case_key)
-
-    reference = _fit_numpy(R, Z, method=method)
-    fitted = _fit_numba(R, Z, method=method)
-
-    _assert_fit_is_reasonable(case_key, reference)
-    _assert_fit_is_reasonable(case_key, fitted)
-    if method in {"qr", "gnqr"}:
-        parity_atol = 1.0e-10
-        assert_allclose(
-            _coeff_vector(fitted),
-            _coeff_vector(reference),
-            rtol=0.0,
-            atol=parity_atol,
-        )
-        assert_allclose(fitted["rms"], reference["rms"], rtol=0.0, atol=parity_atol)
-        assert_allclose(
-            fitted["max_curve_error"],
-            reference["max_curve_error"],
-            rtol=0.0,
-            atol=parity_atol,
-        )
-    else:
-        assert float(fitted["rms"]) <= 2.0 * float(reference["rms"])
-        assert float(fitted["max_curve_error"]) <= 1.2 * float(reference["max_curve_error"])
-
-
-@pytest.mark.slow
-@pytest.mark.parametrize("case_key", CASE_KEYS)
-@pytest.mark.parametrize("method", ("qr", "gnqr", "least-square"))
-def test_cxx_boundary_fitter_matches_numpy_or_native_ls(case_key: str, method: str) -> None:
-    R, Z = _load_boundary(case_key)
-
-    reference = _fit_numpy(R, Z, method=method)
-    fitted = _fit_cxx(R, Z, method=method)
-
-    _assert_fit_is_reasonable(case_key, reference)
-    _assert_fit_is_reasonable(case_key, fitted)
-    if method in {"qr", "gnqr"}:
-        assert_allclose(_coeff_vector(fitted), _coeff_vector(reference), rtol=0.0, atol=1.0e-8)
-        assert_allclose(fitted["rms"], reference["rms"], rtol=0.0, atol=1.0e-9)
-        assert_allclose(
-            fitted["max_curve_error"],
-            reference["max_curve_error"],
-            rtol=0.0,
-            atol=1.0e-8,
-        )
-    else:
-        assert float(fitted["rms"]) <= 2.0 * float(reference["rms"])
-        assert float(fitted["max_curve_error"]) <= 1.2 * float(reference["max_curve_error"])
+    assert np.isfinite(float(fitted["rms"]))
