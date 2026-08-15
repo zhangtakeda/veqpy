@@ -47,8 +47,9 @@ capacity epochs 256, 512, and 1024; a larger source is rejected before solve,
 and growing the buffer does not rebuild the topology or backend artifact.
 
 Build defaults are `materialize=True`, `verbose=True`, `report=False`, and
-`report_dir=None`. `solve()` accepts one-call overrides, including a partial
-solver mapping. `verbose=True` prints a compact Rich KernelOutput diagnostic;
+`report_dir=None`. Each `run()`/`solve()` call can override materialization,
+verbosity, reporting, report directory, and (for `solve()`) a partial solver
+mapping. `verbose=True` prints a compact Rich KernelOutput diagnostic;
 `report=True` writes a complete KT/KC/KI/KO JSON snapshot through
 `veqpy.io.write_report`. The default report directory is `Path.cwd()/report`
 and the filename is `veqpy-YYYYMMDD-HHMMSS-ffffff.json`; an exact timestamp
