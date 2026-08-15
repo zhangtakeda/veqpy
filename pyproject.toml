@@ -44,14 +44,10 @@ dependencies = [
 dev = [
     "build>=1.5",
     "packaging>=26.3",
-    "pytest>=9.1",
     "ruff>=0.15.22",
     "twine>=7",
     "nanobind>=2.13",
     "openmdao>=3.45",
-]
-plot = [
-    "matplotlib>=3.11",
 ]
 
 [project.urls]
@@ -86,12 +82,3 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-pythonpath = ["."]
-addopts = "-p no:cacheprovider"
-markers = [
-    "slow: tests that may build kernels or run nonlinear solves",
-    "demo: tests that execute the user-facing root demo",
-]

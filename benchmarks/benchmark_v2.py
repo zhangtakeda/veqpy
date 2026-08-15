@@ -1,4 +1,4 @@
-"""Small repeatable benchmark for the VEQPy 2.x Module and Kernel paths."""
+"""Repeatable benchmark for the public VEQPy dictionary and Module paths."""
 
 from __future__ import annotations
 
@@ -15,33 +15,37 @@ import veqpy
 from veqpy.demo_case import make_demo_plasma
 
 
-def topology() -> veqpy.KernelTopology:
-    return veqpy.KernelTopology(
-        h_count=3,
-        v_count=3,
-        kappa_count=3,
-        psin_count=6,
-        F_count=0,
-        c_counts=(3, 3, 3),
-        s_counts=(3, 3),
-        Nr=16,
-        Nt=16,
-        route="PF",
-        coordinate="psin",
-        nodes="uniform",
-        constraint="ip",
-        sample_count=51,
-    )
+def topology() -> dict[str, object]:
+    """Return the ordinary topology mapping used by the benchmark."""
+
+    return {
+        "h_count": 3,
+        "v_count": 3,
+        "kappa_count": 3,
+        "psin_count": 6,
+        "F_count": 0,
+        "c_counts": (3, 3, 3),
+        "s_counts": (3, 3),
+        "Nr": 8,
+        "Nt": 12,
+        "route": "PF",
+        "coordinate": "psin",
+        "constraint": "ip",
+        "quadrature": "legendre",
+        "calculus": "spectral",
+    }
 
 
 def measure(backend: str, repeats: int) -> dict[str, object]:
-    module = veqpy.VEQ(topology=topology(), backend=backend)
+    """Measure repeated non-materializing solves on one prepared Module."""
+
+    module = veqpy.build(topology=topology(), backend=backend, verbose=False)
     try:
         plasma = make_demo_plasma()
         rows = []
         for _ in range(repeats):
             started = perf_counter()
-            record = module.run(plasma=plasma, materialize=False)
+            record = module.solve(plasma=plasma, materialize=False, verbose=False)
             rows.append(
                 {
                     "elapsed_ms": (perf_counter() - started) * 1000.0,
@@ -57,8 +61,14 @@ def measure(backend: str, repeats: int) -> dict[str, object]:
 
 
 def main() -> int:
+    """Run the selected backend benchmark."""
+
     parser = argparse.ArgumentParser()
-    parser.add_argument("--backend", choices=("numba", "cxx"), default="numba")
+    parser.add_argument(
+        "--backend",
+        choices=("numba", "cxx", "cxx-strict", "cxx-relaxed"),
+        default="numba",
+    )
     parser.add_argument("--repeat", type=int, default=3)
     args = parser.parse_args()
     if args.repeat < 1:
@@ -67,7 +77,7 @@ def main() -> int:
         result = measure(args.backend, args.repeat)
     except Exception as error:
         print(json.dumps({"backend": args.backend, "status": "unavailable", "error": str(error)}))
-        return 2 if args.backend == "cxx" else 1
+        return 2 if args.backend != "numba" else 1
     print(json.dumps(result, indent=2))
     return 0
 

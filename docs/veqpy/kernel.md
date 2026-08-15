@@ -1,34 +1,41 @@
-# Four-buffer Kernel API
+# Kernel boundary
 
-The low-level numerical boundary has exactly four named data types:
-
-- `KernelTopology`: frozen compile-time structure and `source_capacity`;
-- `KernelInput`: mutable, preallocated per-case numeric buffers;
-- `KernelConfig`: frozen integer option codes and numeric tolerances;
-- `KernelOutput`: mutable, preallocated diagnostics and materialization roots.
+VEQPy exposes the Module boundary, not the low-level buffer constructors. A
+caller supplies an ordinary topology mapping and an optional solver mapping:
 
 ```python
 import veqpy
 
-topology = veqpy.KernelTopology(
-    h_count=2, v_count=0, kappa_count=2, psin_count=3, F_count=0,
-    c_counts=(), s_counts=(2, 2), Nr=8, Nt=12,
-    route="PF", coordinate="psin", nodes="uniform",
-    constraint="ip", sample_count=8,
+module = veqpy.build(
+    topology={
+        "Nr": 8,
+        "Nt": 12,
+        "route": "PF",
+        "coordinate": "psin",
+        "constraint": "ip",
+        "h_count": 2,
+        "kappa_count": 2,
+        "psin_count": 3,
+        "s_counts": (2, 2),
+    },
+    solver={"max_evaluations": 800},
+    backend="numba",
 )
-kernel = veqpy.Kernel(topology=topology, backend="numba")
-kernel.prepare()
-output = kernel.solve()
-assert output is kernel.output
+record = module.solve(plasma=plasma)
 ```
 
-The Adapter normally fills `KernelInput` from a frozen Plasma. All source
-arrays have the topology capacity. For a dynamic or explicit source grid,
-`source_count` selects the active prefix and the unused suffix is zeroed before
-the solve. Overflow is an error requiring a new topology and preparation.
+Inside the Module, the numerical boundary has exactly four named records:
+`KernelTopology`, `KernelInput`, `KernelConfig`, and `KernelOutput`. They are
+private implementation records. `KernelTopology` contains only structural
+quadrature/calculus and basis information; source nodes and source counts are
+runtime data in `KernelInput`.
 
-`residual_into`, `residual_jvp_into`, and `jacobian_into` write into caller
-owned numeric arrays. Structural variants require a new Kernel; a prepared
-Kernel never changes topology. Backend build policy is private to dispatch.
+The Adapter owns one resident input buffer. It starts with capacity 256,
+grows to 512 and then 1024 when a prepared source requires it, and never
+shrinks. The source count selects the active prefix. Growing the buffer
+increments its capacity epoch but preserves the array identities and does not
+change topology identity or trigger compilation.
 
-The former multi-object case/result contracts are not part of the 2.x API.
+The solve and JVP paths use the same ABI. JVP scratch Modules are silent and
+never write reports. A normal call can request materialization, Rich
+diagnostics, and a complete JSON report independently of the build defaults.

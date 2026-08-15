@@ -1,7 +1,7 @@
 # VEQPy 2.x benchmarks
 
-`benchmark_v2.py` measures the public `VEQ` Module with the fixed four-buffer
-Kernel contract. The benchmark reuses one prepared Module and one frozen
+`benchmark_v2.py` measures the public dictionary-based `VEQ` Module. The
+benchmark reuses one prepared Module and one frozen
 `Plasma` context, so the reported rows include Adapter, solve, and Record
 overhead for repeated calls.
 
@@ -10,6 +10,5 @@ overhead for repeated calls.
 .venv/bin/python benchmarks/benchmark_v2.py --backend cxx --repeat 5
 ```
 
-Numba is the required backend. Cxx is measured only for its supported
-intersection; explicit source nodes and `rho` coordinate closure are rejected
-with a diagnostic rather than silently falling back to Numba.
+Numba is the required backend. The Cxx variants accept the same runtime
+explicit source contract; `cxx` is the relaxed Release spelling.

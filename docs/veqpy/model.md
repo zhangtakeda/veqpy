@@ -1,16 +1,15 @@
-# Physical State and GEQDSK I/O
+# Physical State and file payloads
 
-Physical State ownership belongs to `fusionprime-base`. VEQPy's materializer
-constructs a frozen base `Geometry` and `Equilibrium` with SI roots:
-`FF_psi`, `P_psi`, `psi_r`, `psi_rr`, `B0`, and `P0`.
+Physical State ownership belongs to `fusionprime-base`. VEQPy materialization
+returns a frozen base `Equilibrium` with the roots required by the Module
+contract. Numerical grid, interpolation, calculus, and equilibrium resampling
+helpers are private implementation details under `veqpy.numerics`.
 
-`Geqdsk` remains a passive VEQ-specific interchange payload. Use
-`veqpy.io.export_geqdsk(base_equilibrium, ...)` to write a base State without
-making the old VEQPy model classes part of the public physical API.
+GEQDSK is a file payload, not a VEQPy physical-state model. Pure
+`Geqdsk`/`load_geqdsk`/`save_geqdsk` support lives in
+`fusionprime_base.io.geqdsk`; it only reads and writes the file payload and
+does not convert to or from `Equilibrium`.
 
-Matplotlib is optional and is imported only by the demos or plotting helpers;
-`import veqpy` does not import it.
-
-The version-controlled fixtures are `data/SOLOVEV.geqdsk`,
-`data/CHEASE.geqdsk`, and `data/EFIT.geqdsk`. Generated GEQDSK and figure files
-are local artifacts.
+VEQPy has no plotting layer, Matplotlib dependency, or visualization API.
+The checked-in GEQDSK files under `data/` are parser fixtures for the base
+I/O smoke gate.

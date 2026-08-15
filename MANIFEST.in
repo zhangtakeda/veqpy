@@ -5,14 +5,12 @@ recursive-include veqpy/kernels/cxx_kernel/core CMakeLists.txt *.c *.cpp *.h *.i
 recursive-include docs *.md *.svg *.py
 include data/CHEASE.geqdsk data/EFIT.geqdsk data/SOLOVEV.geqdsk
 recursive-include benchmarks *.py *.md
-recursive-include tests *.py
-
 prune benchmarks/results
 prune .veqpy-kernel-cache
 global-exclude *.py[cod]
 global-exclude __pycache__
 global-exclude .DS_Store
 exclude demo_equilibrium.json demo_init.png demo_result.png
-exclude data/solovev-veqpy.geqdsk data/solovev-veqpy-comparison.png
+exclude data/solovev-veqpy.geqdsk data/solovev-veqpy-comparison.png data/solovev-veqpy-roundtrip.geqdsk
 exclude Zhang2026-VEQ.*
 exclude texput.fls
