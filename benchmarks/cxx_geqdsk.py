@@ -44,6 +44,9 @@ from benchmarks._common import (
 )
 
 DEFAULT_OUTPUT = benchmark_result_path("cxx_geqdsk")
+VALIDATION_ATOL = 1.0e-6
+STRICT_SAME_INPUT_ATOL = 1.0e-10
+RELAXED_SAME_INPUT_ATOL = 1.0e-8
 
 
 def _snapshot_output(output: Any) -> dict[str, Any]:
@@ -55,6 +58,10 @@ def _snapshot_output(output: Any) -> dict[str, Any]:
         "njev": int(output.njev),
         "raw_norm": float(output.raw_norm),
         "scaled_norm": float(output.scaled_norm),
+        "elapsed_ms": float(output.elapsed_ms),
+        "preprocess_ms": float(output.preprocess_ms),
+        "solve_ms": float(output.solve_ms),
+        "postprocess_ms": float(output.postprocess_ms),
         "alpha": np.asarray(output.alpha, dtype=np.float64).tolist(),
         "x": np.asarray(output.x, dtype=np.float64).tolist(),
         "raw": np.asarray(output.raw, dtype=np.float64).tolist(),
@@ -123,6 +130,10 @@ def _measure_case(
         measurements: dict[str, dict[str, Any]] = {
             backend: {
                 "core_times_ms": [],
+                "core_elapsed_ms": [],
+                "core_preprocess_ms": [],
+                "core_solve_ms": [],
+                "core_postprocess_ms": [],
                 "module_times_ms": [],
                 "core_nfev": [],
                 "module_nfev": [],
@@ -151,6 +162,10 @@ def _measure_case(
                 module_snapshot = _snapshot_record(record)
                 row = measurements[backend]
                 row["core_times_ms"].append(core_elapsed_ms)
+                row["core_elapsed_ms"].append(core_snapshot["elapsed_ms"])
+                row["core_preprocess_ms"].append(core_snapshot["preprocess_ms"])
+                row["core_solve_ms"].append(core_snapshot["solve_ms"])
+                row["core_postprocess_ms"].append(core_snapshot["postprocess_ms"])
                 row["module_times_ms"].append(module_elapsed_ms)
                 row["core_nfev"].append(core_snapshot["nfev"])
                 row["module_nfev"].append(module_snapshot["nfev"])
@@ -166,7 +181,17 @@ def _measure_case(
                 {
                     "status": "passed" if all(measured["core_accepted"]) else "failed",
                     "core": {
-                        "timing_ms": statistics_payload(measured["core_times_ms"]),
+                        "wall_timing_ms": statistics_payload(measured["core_times_ms"]),
+                        # Matches the historical benchmark's result.elapsed_ms
+                        # comparison while retaining wall time independently.
+                        "timing_ms": statistics_payload(measured["core_elapsed_ms"]),
+                        "preprocess_timing_ms": statistics_payload(
+                            measured["core_preprocess_ms"]
+                        ),
+                        "solve_timing_ms": statistics_payload(measured["core_solve_ms"]),
+                        "postprocess_timing_ms": statistics_payload(
+                            measured["core_postprocess_ms"]
+                        ),
                         "nfev": integer_statistics(measured["core_nfev"]),
                         "accepted_all": all(measured["core_accepted"]),
                         "last": measured["last_core"],
@@ -180,6 +205,13 @@ def _measure_case(
                     },
                 }
             )
+            input_buffer = modules[backend]._kernel.input
+            engines[backend]["runtime_input"] = {
+                "x_size": int(modules[backend]._kernel.x_size),
+                "source_count": int(input_buffer.source_count),
+                "source_capacity": int(input_buffer.source_capacity),
+                "capacity_epoch": int(input_buffer.capacity_epoch),
+            }
 
         numba_core = measurements.get("numba", {}).get("last_core")
         if numba_core is not None:
@@ -228,7 +260,7 @@ def _measure_case(
                 ),
             }
 
-    return {
+    row = {
         "case": case.case_key,
         "config": case.config_label,
         "label": case.label,
@@ -241,9 +273,51 @@ def _measure_case(
         "boundary_fit": case.boundary_fit,
         "backends": engines,
     }
+    row["correctness"] = _correctness(row)
+    row["status"] = "passed" if row["correctness"]["status"] == "passed" else "failed"
+    return row
+
+
+def _correctness(row: dict[str, Any]) -> dict[str, Any]:
+    backend_checks: dict[str, dict[str, Any]] = {}
+    for backend in RUNNABLE_BACKENDS:
+        engine = row.get("backends", {}).get(backend, {})
+        core = engine.get("core", {})
+        module = engine.get("module_materialize_false", {})
+        parity = engine.get("parity_to_numba", {})
+        same_input = engine.get("same_input_residual", {})
+        residual_atol = (
+            RELAXED_SAME_INPUT_ATOL if backend == "cxx-relaxed" else STRICT_SAME_INPUT_ATOL
+        )
+        checks = {
+            "engine_passed": engine.get("status") == "passed",
+            "core_accepted_all": core.get("accepted_all") is True,
+            "module_accepted_all": module.get("accepted_all") is True,
+            "materialize_false_kept_equilibrium_none": module.get("equilibrium_none_all") is True,
+            "solution_parity": float(parity.get("x_max_abs", float("inf"))) <= VALIDATION_ATOL,
+            "solution_residual_parity": float(parity.get("raw_max_abs", float("inf")))
+            <= VALIDATION_ATOL,
+            "same_input_residual_parity": float(
+                same_input.get("raw_max_abs_to_numba", float("inf"))
+            )
+            <= residual_atol,
+        }
+        backend_checks[backend] = {
+            "status": "passed" if all(checks.values()) else "failed",
+            "checks": checks,
+            "same_input_residual_atol": residual_atol,
+        }
+    passed = all(item["status"] == "passed" for item in backend_checks.values())
+    return {
+        "status": "passed" if passed else "failed",
+        "solution_atol": VALIDATION_ATOL,
+        "backends": backend_checks,
+    }
 
 
 def _speedup(row: dict[str, Any]) -> float | None:
+    if row.get("correctness", {}).get("status") != "passed":
+        return None
     engines = row.get("backends", {})
     numba = engines.get("numba", {}).get("core", {}).get("timing_ms", {}).get("median_ms")
     relaxed = engines.get("cxx-relaxed", {}).get("core", {}).get("timing_ms", {}).get("median_ms")
@@ -253,11 +327,22 @@ def _speedup(row: dict[str, Any]) -> float | None:
 
 
 def _qualification(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    correctness_passed = bool(rows) and all(
+        row.get("correctness", {}).get("status") == "passed" for row in rows
+    )
     speedups = [value for row in rows if (value := _speedup(row)) is not None]
-    clear_advantage = bool(speedups) and all(value > 1.0 for value in speedups)
-    historical_scale = bool(speedups) and min(speedups) >= HISTORICAL_SPEEDUP_RANGE[0]
+    complete_speedups = len(speedups) == len(rows)
+    clear_advantage = complete_speedups and bool(speedups) and all(value > 1.0 for value in speedups)
+    historical_scale = (
+        complete_speedups
+        and bool(speedups)
+        and min(speedups) >= HISTORICAL_SPEEDUP_RANGE[0]
+    )
     return {
-        "status": "passed" if clear_advantage and historical_scale else "failed",
+        "status": (
+            "passed" if correctness_passed and clear_advantage and historical_scale else "failed"
+        ),
+        "correctness_status": "passed" if correctness_passed else "failed",
         "reference": "historical main README reports approximately 5–11x Cxx advantage",
         "historical_range_x": list(HISTORICAL_SPEEDUP_RANGE),
         "speedups_numba_over_cxx_relaxed": speedups,
@@ -359,7 +444,11 @@ def main(argv: list[str] | None = None) -> int:
         "repeat": int(args.repeat),
         "cold_per_formal_solve": True,
         "timed_paths": {
-            "primary": "prepared Module._kernel.solve after Adapter.fill; no State materialization",
+            "primary": (
+                "KernelOutput.elapsed_ms for prepared Module._kernel.solve after Adapter.fill; "
+                "matches historical result.elapsed_ms semantics"
+            ),
+            "wall": "wall time around prepared Module._kernel.solve after Adapter.fill",
             "secondary": "public VEQ.solve(materialize=False)",
         },
         "backends": list(BACKENDS),

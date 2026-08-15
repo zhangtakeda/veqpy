@@ -185,8 +185,8 @@ GEQDSK_CONFIG_SIGNATURES: dict[tuple[str, str], dict[str, int]] = {
 
 # Frozen fits restored from the historical benchmark.  GEQDSK contains a
 # scatter LCFS, while the base Geometry contract consumes the fitted phase
-# harmonics.  The base Geometry convention has the opposite sign for the sine
-# phase offsets, so the Plasma fixture applies that explicit convention change.
+# harmonics. Geometry and the VEQ Kernel both use ``+ s_m sin(m theta)``, so
+# the stored sine coefficients pass through without a sign conversion.
 BOUNDARY_FITS: dict[str, dict[str, Any]] = {
     "solovev": {
         "a": 1.999991815361528,
@@ -394,9 +394,8 @@ def _make_plasma(geqdsk: Geqdsk, case_key: str, *, nr: int, nt: int) -> Plasma:
         a=float(fit["a"]),
         kappa_lcfs=float(fit["kappa"]),
         c_lcfs=np.asarray(fit["c"], dtype=np.float64),
-        # Geometry's phase convention is opposite to the historical fitter's
-        # sine sign; retain the same physical fit after the explicit conversion.
-        s_lcfs=-np.asarray(fit["s"], dtype=np.float64),
+        # Geometry and VEQ both use +s_m sin(m*theta) in the poloidal phase.
+        s_lcfs=np.asarray(fit["s"], dtype=np.float64),
         h_coeffs=np.zeros(radial_order + 1, dtype=np.float64),
         v_coeffs=np.zeros(radial_order + 1, dtype=np.float64),
         kappa_coeffs=np.zeros(radial_order + 1, dtype=np.float64),
@@ -413,9 +412,15 @@ def _make_plasma(geqdsk: Geqdsk, case_key: str, *, nr: int, nt: int) -> Plasma:
         geometry=geometry,
         FF_psi=ff_psi,
         P_psi=p_psi,
-        # A constant physical psi_r makes the benchmark source coordinate
-        # exactly psin=r on the uniform Plasma grid.
-        psi_r=np.ones(nr, dtype=np.float64),
+        # A constant physical psi_r keeps psin=r on the uniform Plasma grid,
+        # while its integral retains the GEQDSK axis-to-LCFS flux span.  The
+        # Adapter therefore supplies the historical d/dpsin source values
+        # rather than silently treating d/dpsi as d/dpsin.
+        psi_r=np.full(
+            nr,
+            float(geqdsk.psi_bound - geqdsk.psi_axis),
+            dtype=np.float64,
+        ),
         B0=float(geqdsk.Bt0) if geqdsk.Bt0 != 0.0 else 1.0,
         P0=float(geqdsk.P[-1]) if geqdsk.P.size else 0.0,
     )
@@ -512,7 +517,16 @@ def geqdsk_kernel_case(
         case_key=case_key,
         config_label=config_label,
         geqdsk=geqdsk,
-        plasma=_make_plasma(geqdsk, case_key, nr=nr, nt=nt),
+        # The Module topology remains the requested 32x32 solve layout.  The
+        # external Plasma deliberately retains the GEQDSK profile grid so the
+        # benchmark exercises runtime explicit-source counts and capacity
+        # growth (128 for CHEASE, 257 for SOLOVEV/EFIT).
+        plasma=_make_plasma(
+            geqdsk,
+            case_key,
+            nr=int(geqdsk.P_psi.size),
+            nt=nt,
+        ),
         topology=topology,
         solver=solver,
         signature=signature,
