@@ -28,7 +28,10 @@ class VEQAdapter:
         # equilibrium grid is the default source representation, but the
         # KernelInput owner may receive any strictly increasing source grid in
         # the same normalized coordinate domain.
-        source_nodes = np.asarray(coordinate_values[0], dtype=np.float64)
+        source_nodes = _canonical_normalized_nodes(
+            coordinate_values[0],
+            name="source nodes",
+        )
         pressure = np.asarray(pressure_values[1], dtype=np.float64)
         driver = _remap(driver_values[0], driver_values[1], source_nodes)
         native_source_nodes, source_coordinate_jacobian = _native_source_mapping(
@@ -36,15 +39,13 @@ class VEQAdapter:
             self.topology.coordinate,
             source_nodes,
         )
+        native_source_nodes = _canonical_normalized_nodes(
+            native_source_nodes,
+            name="native source nodes",
+        )
         count = int(source_nodes.size)
         if count > 1024:
             raise ValueError("VEQ source input has more than the supported 1024 nodes")
-        if count < 2 or not np.all(np.isfinite(source_nodes)):
-            raise ValueError("source nodes must contain at least two finite values")
-        if np.any(np.diff(source_nodes) <= 0.0):
-            raise ValueError("source nodes must be strictly increasing")
-        if source_nodes[0] < -1.0e-12 or source_nodes[-1] > 1.0 + 1.0e-12:
-            raise ValueError("source nodes must cover the normalized [0, 1] domain")
 
         capacity = 256
         while capacity < count:
@@ -171,6 +172,21 @@ def _copy_resized(destination: np.ndarray, source: np.ndarray, name: str) -> Non
         raise ValueError(f"{name} has {source.size} entries but topology stores {destination.size}")
     destination.fill(0.0)
     destination[: source.size] = source
+
+
+def _canonical_normalized_nodes(values: np.ndarray, *, name: str) -> np.ndarray:
+    """Validate normalized source nodes and snap accepted endpoints to 0/1."""
+
+    nodes = np.array(values, dtype=np.float64, copy=True)
+    if nodes.ndim != 1 or nodes.size < 2 or not np.all(np.isfinite(nodes)):
+        raise ValueError(f"{name} must contain at least two finite values")
+    if np.any(np.diff(nodes) <= 0.0):
+        raise ValueError(f"{name} must be strictly increasing")
+    if abs(float(nodes[0])) > 1.0e-12 or abs(float(nodes[-1]) - 1.0) > 1.0e-12:
+        raise ValueError(f"{name} must cover the normalized [0, 1] domain")
+    nodes[0] = 0.0
+    nodes[-1] = 1.0
+    return nodes
 
 
 def _finite_or_default(value: float, default: float) -> float:

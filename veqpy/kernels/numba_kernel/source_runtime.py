@@ -17,13 +17,14 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from veqpy.numerics import (
+    DEFAULT_LOCAL_BARYCENTRIC_STENCIL,
     barycentric_log_weights,
-    build_explicit_source_interpolation_coefficients,
     build_uniform_source_interpolation_coefficients,
 )
+from veqpy.numerics.interpolate import uniform_barycentric_weights
 
 from .numba_source import (
-    _explicit_pchip_interpolate_pair_with_derivatives,
+    _explicit_local_barycentric_interpolate_pair_with_derivatives,
     build_source_remap_cache,
     resolve_source_inputs,
 )
@@ -50,56 +51,64 @@ def refresh_source_runtime(
             dtype=np.float64,
             copy=True,
         )
-        source_workspace.source_coordinate_weights = np.empty(0, dtype=np.float64)
-        source_workspace.barycentric_weights = np.empty(0, dtype=np.float64)
+        stencil_size = min(
+            int(source_workspace.source_coordinate_nodes.size),
+            DEFAULT_LOCAL_BARYCENTRIC_STENCIL,
+        )
+        local_weights = uniform_barycentric_weights(stencil_size)
+        source_span = float(
+            source_workspace.source_coordinate_nodes[-1]
+            - source_workspace.source_coordinate_nodes[0]
+        )
+        uniform_tolerance = 1.0e-12 * max(
+            1.0,
+            abs(source_span),
+        )
+        expected_nodes = source_workspace.source_coordinate_nodes[0] + source_span * (
+            np.arange(source_workspace.source_coordinate_nodes.size, dtype=np.float64)
+            / float(source_workspace.source_coordinate_nodes.size - 1)
+        )
+        source_workspace.source_coordinate_weights = (
+            local_weights.copy()
+            if np.all(
+                np.abs(source_workspace.source_coordinate_nodes - expected_nodes)
+                <= uniform_tolerance
+            )
+            else np.empty(0, dtype=np.float64)
+        )
+        source_workspace.barycentric_weights = local_weights
         source_workspace.fixed_remap_matrix = np.empty((0, 0), dtype=np.float64)
-        source_workspace.pprime_spline_coeff = (
-            build_explicit_source_interpolation_coefficients(
-                source_workspace.source_coordinate_nodes,
-                source_plan.scaled_pprime,
-            )
-            if source_plan.scaled_pressure is None
-            else np.empty((0, 4), dtype=np.float64)
-        )
-        source_workspace.driver_spline_coeff = build_explicit_source_interpolation_coefficients(
-            source_workspace.source_coordinate_nodes,
-            source_plan.scaled_driver,
-        )
-        source_workspace.pressure_spline_coeff = (
-            build_explicit_source_interpolation_coefficients(
-                source_workspace.source_coordinate_nodes,
-                source_plan.scaled_pressure,
-            )
-            if source_plan.scaled_pressure is not None
-            else np.empty((0, 4), dtype=np.float64)
-        )
+        source_workspace.pprime_spline_coeff = np.empty((0, 4), dtype=np.float64)
+        source_workspace.driver_spline_coeff = np.empty((0, 4), dtype=np.float64)
+        source_workspace.pressure_spline_coeff = np.empty((0, 4), dtype=np.float64)
         source_workspace.cache_key = (
             source_plan.coordinate,
             source_plan.nodes,
             source_plan.source_sample_count,
-            "pchip",
+            "local-barycentric",
         )
         if source_plan.is_rho_coordinate:
             return
         if source_plan.coordinate == "r":
-            coefficient0 = (
-                source_workspace.pressure_spline_coeff
+            values0 = (
+                source_plan.scaled_pressure
                 if source_plan.scaled_pressure is not None
-                else source_workspace.pprime_spline_coeff
+                else source_plan.scaled_pprime
             )
             driver_derivative = (
                 source_workspace.materialized_driver_derivative
                 if source_plan.route in {"PP", "PI"}
                 else source_workspace.materialized_driver_input
             )
-            _explicit_pchip_interpolate_pair_with_derivatives(
+            _explicit_local_barycentric_interpolate_pair_with_derivatives(
                 source_workspace.materialized_pprime_input,
                 source_workspace.materialized_driver_input,
                 source_workspace.materialized_pprime_input,
                 driver_derivative,
+                values0,
+                source_plan.scaled_driver,
                 source_workspace.source_coordinate_nodes,
-                coefficient0,
-                source_workspace.driver_spline_coeff,
+                source_workspace.source_coordinate_weights,
                 grid_r,
                 source_plan.scaled_pressure is not None,
                 source_plan.route in {"PP", "PI"},

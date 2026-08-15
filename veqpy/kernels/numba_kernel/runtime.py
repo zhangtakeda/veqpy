@@ -271,7 +271,7 @@ class NumbaRuntime:
             # every workflow snapshot even when no source value changed.  Keep
             # the already validated/bound numerical state and merely recognize
             # the new snapshot identity; three short array comparisons are much
-            # cheaper than rebuilding PCHIP coefficients and Python closures.
+            # cheaper than rebuilding interpolation caches and Python closures.
             self._case_source_identity = source
             return
         materialized = materialize_kernel_source(self.topology, source)

@@ -24,8 +24,6 @@ NB_MODULE(cxx_ext, module)
              nb::arg("scaled_pprime"),
              nb::arg("scaled_driver"),
              nb::arg("source_nodes"),
-             nb::arg("pprime_coefficients"),
-             nb::arg("driver_coefficients"),
              nb::arg("source_count"),
              nb::arg("scaled_p0"),
              nb::arg("scaled_Ip"),

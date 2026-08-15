@@ -37,7 +37,7 @@ from veqpy.kernels.numba_kernel.numba_source import (
     PJ2_PSIN_UNIFORM_FIXED_POINT_MAX_ITER,
     PJ2_PSIN_UNIFORM_FIXED_POINT_MAX_RESIDUAL,
     PSIN_DERIVATIVE_FIXED_POINT_MAX_RESIDUAL,
-    _explicit_pchip_interpolate_pair_with_derivatives,
+    _explicit_local_barycentric_interpolate_pair_with_derivatives,
     _local_barycentric_interpolate_pair,
     _materialize_profile_owned_psin_fields_impl,
     _materialize_profile_owned_psin_source_impl,
@@ -482,8 +482,9 @@ def _run_pj2_psin_explicit_with_scratch_impl(
     materialized_pprime_input: np.ndarray,
     materialized_driver_input: np.ndarray,
     source_nodes: np.ndarray,
-    pprime_spline_coeff: np.ndarray,
-    driver_spline_coeff: np.ndarray,
+    pprime_input: np.ndarray,
+    driver_input: np.ndarray,
+    uniform_weights: np.ndarray,
     differentiate_pressure: bool,
     coordinate_code: int,
     R0: float,
@@ -504,14 +505,15 @@ def _run_pj2_psin_explicit_with_scratch_impl(
     use_jtotal_semantics: bool,
 ) -> tuple[float, float]:
     """Run the sampled-psin current closure from retained arbitrary nodes."""
-    _explicit_pchip_interpolate_pair_with_derivatives(
+    _explicit_local_barycentric_interpolate_pair_with_derivatives(
         materialized_pprime_input,
         materialized_driver_input,
         materialized_pprime_input,
         materialized_driver_input,
+        pprime_input,
+        driver_input,
         source_nodes,
-        pprime_spline_coeff,
-        driver_spline_coeff,
+        uniform_weights,
         source_psin_query,
         differentiate_pressure,
         False,
@@ -553,14 +555,15 @@ def _run_pj2_psin_explicit_with_scratch_impl(
             psin,
             PJ2_PSIN_UNIFORM_FIXED_POINT_MAX_RESIDUAL,
         )
-        _explicit_pchip_interpolate_pair_with_derivatives(
+        _explicit_local_barycentric_interpolate_pair_with_derivatives(
             materialized_pprime_input,
             materialized_driver_input,
             materialized_pprime_input,
             materialized_driver_input,
+            pprime_input,
+            driver_input,
             source_nodes,
-            pprime_spline_coeff,
-            driver_spline_coeff,
+            uniform_weights,
             source_psin_query,
             differentiate_pressure,
             False,
@@ -837,19 +840,20 @@ def _bind_profile_owned_psin_residual_runner_core(
                 grid_workspace.weights,
                 n_axis_fix,
             )
-            coefficient0 = (
-                profile_owned_psin_binding.pressure_spline_coeff
+            values0 = (
+                source_plan.scaled_pressure
                 if profile_owned_psin_binding.differentiate_pressure
-                else profile_owned_psin_binding.pprime_spline_coeff
+                else source_plan.scaled_pprime
             )
-            _explicit_pchip_interpolate_pair_with_derivatives(
+            _explicit_local_barycentric_interpolate_pair_with_derivatives(
                 profile_owned_psin_binding.materialized_pprime_input,
                 profile_owned_psin_binding.materialized_driver_input,
                 profile_owned_psin_binding.materialized_pprime_input,
                 profile_owned_psin_binding.materialized_driver_input,
+                values0,
+                source_plan.scaled_driver,
                 source_workspace.source_coordinate_nodes,
-                coefficient0,
-                profile_owned_psin_binding.driver_spline_coeff,
+                source_workspace.source_coordinate_weights,
                 profile_owned_psin_binding.source_psin_query,
                 profile_owned_psin_binding.differentiate_pressure,
                 False,
@@ -939,11 +943,11 @@ def _bind_pj2_psin_uniform_residual_runner_core(
     driver_input = source_plan.scaled_driver
     if source_plan.is_explicit_nodes:
         pprime_spline_coeff = (
-            source_workspace.pressure_spline_coeff
+            source_plan.scaled_pressure
             if source_plan.scaled_pressure is not None
-            else source_workspace.pprime_spline_coeff
+            else source_plan.scaled_pprime
         )
-        driver_spline_coeff = source_workspace.driver_spline_coeff
+        driver_spline_coeff = source_plan.scaled_driver
     else:
         pprime_spline_coeff = build_uniform_source_interpolation_coefficients(
             pprime_input,
@@ -998,6 +1002,7 @@ def _bind_pj2_psin_uniform_residual_runner_core(
                 source_workspace.source_coordinate_nodes,
                 pprime_spline_coeff,
                 driver_spline_coeff,
+                source_workspace.source_coordinate_weights,
                 source_plan.scaled_pressure is not None,
                 coordinate_code,
                 R0,
@@ -1166,7 +1171,7 @@ def _bind_r_explicit_derivative_source_eval_runner(
     driver_derivative: np.ndarray,
     source_kernel: Callable,
 ) -> Callable:
-    """Bind a r/explicit route with a derivative from its retained PCHIP."""
+    """Bind an r/explicit route from its retained local barycentric source."""
 
     def runner(
         out_root_fields: np.ndarray,

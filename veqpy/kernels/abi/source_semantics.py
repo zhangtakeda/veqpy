@@ -19,7 +19,7 @@ import numpy as np
 from veqpy.kernels.abi.enums import PRESSURE_DERIVATIVE_BY_COORDINATE
 from veqpy.kernels.types import KernelTopology, _SourceCase
 from veqpy.numerics import (
-    build_explicit_source_interpolation_coefficients,
+    DEFAULT_LOCAL_BARYCENTRIC_STENCIL,
     interpolation_matrix,
     make_calculus,
     make_quadrature,
@@ -177,7 +177,8 @@ def materialize_source_inputs(
         beta=beta,
         # Retain an explicit-node primitive in every public coordinate.  Static
         # r routes differentiate it at the operator nodes during refresh;
-        # dynamic psin/rho routes differentiate the same PCHIP at their
+        # dynamic psin/rho routes differentiate the same local barycentric
+        # representation at their
         # current nonlinear query.  Thus p and dp/dcoord never become two
         # independently interpolated functions.
         scaled_pressure=(
@@ -277,21 +278,14 @@ def _differentiate_pressure_profile(
         return np.zeros_like(pressure), float(pressure[0])
 
     if nodes == "explicit":
-        # The retained native representation is PCHIP, so its derivative must
-        # come from those same interval polynomials in r, psin, or rho.
-        # A dense global
-        # differentiator on arbitrary clustered nodes is both a different
-        # function and can be severely ill-conditioned near a pedestal grid.
-        coefficients = build_explicit_source_interpolation_coefficients(
+        # Differentiate the same bounded local barycentric representation
+        # retained by both backends. A dense global differentiator on
+        # arbitrary clustered nodes is a different function and can be
+        # severely ill-conditioned near a pedestal grid.
+        pressure_derivative = _explicit_local_barycentric_derivative_at_nodes(
             coordinate_nodes,
             pressure,
         )
-        pressure_derivative = np.empty_like(pressure)
-        pressure_derivative[:-1] = coefficients[:, 1]
-        dx = coordinate_nodes[-1] - coordinate_nodes[-2]
-        pressure_derivative[-1] = (
-            3.0 * coefficients[-1, 3] * dx + 2.0 * coefficients[-1, 2]
-        ) * dx + coefficients[-1, 1]
     elif coordinate == "psin" and parameterization == "sqrt_psin":
         parameter_nodes = np.linspace(
             0.0,
@@ -315,6 +309,54 @@ def _differentiate_pressure_profile(
         )
         pressure_derivative = differentiator @ pressure
     return np.asarray(pressure_derivative, dtype=np.float64), edge_pressure
+
+
+def _explicit_local_barycentric_derivative_at_nodes(
+    nodes: np.ndarray,
+    values: np.ndarray,
+    *,
+    stencil_size: int = DEFAULT_LOCAL_BARYCENTRIC_STENCIL,
+) -> np.ndarray:
+    """Differentiate a bounded local barycentric interpolant at its nodes."""
+
+    axis = np.asarray(nodes, dtype=np.float64)
+    samples = np.asarray(values, dtype=np.float64)
+    if axis.ndim != 1 or samples.ndim != 1 or axis.shape != samples.shape:
+        raise ValueError(
+            f"Expected matching 1D nodes/values, got {axis.shape} and {samples.shape}"
+        )
+    count = int(axis.size)
+    if count < 2:
+        raise ValueError("explicit source interpolation requires at least two nodes")
+    local_size = min(count, int(stencil_size))
+    half = local_size // 2
+    max_start = count - local_size
+    derivative = np.empty_like(samples)
+    for index in range(count):
+        start = min(max(index - half, 0), max_start)
+        stop = start + local_size
+        local_nodes = axis[start:stop]
+        local_values = samples[start:stop]
+        weights = np.ones(local_size, dtype=np.float64)
+        for local_j in range(local_size):
+            for local_k in range(local_size):
+                if local_j != local_k:
+                    weights[local_j] /= local_nodes[local_j] - local_nodes[local_k]
+        local_index = index - start
+        node = local_nodes[local_index]
+        value = local_values[local_index]
+        node_weight = weights[local_index]
+        result = 0.0
+        for local_j in range(local_size):
+            if local_j == local_index:
+                continue
+            result += (
+                weights[local_j]
+                * (local_values[local_j] - value)
+                / (node_weight * (node - local_nodes[local_j]))
+            )
+        derivative[index] = result
+    return derivative
 
 
 def _pressure_coordinate_nodes(

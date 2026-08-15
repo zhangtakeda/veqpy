@@ -82,7 +82,7 @@ PSIN_DERIVATIVE_FIXED_POINT_MAX_RESIDUAL = 1.0e-10
 RETAINED_SOURCE_UNIFORM_SPLINE = 0
 RETAINED_SOURCE_LOCAL_BARYCENTRIC = 1
 RETAINED_SOURCE_GRID_BARYCENTRIC = 2
-RETAINED_SOURCE_EXPLICIT_PCHIP = 3
+RETAINED_SOURCE_EXPLICIT_BARYCENTRIC = 3
 
 R_COORDINATE = 0
 PSIN_COORDINATE = 1
@@ -1962,7 +1962,7 @@ def _update_pp_from_r_explicit_inputs_with_scratch(
     array_scratch: np.ndarray,
     matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
-    """PP-r closure with PCHIP and axis-consistent psi_r derivatives."""
+    """PP-r closure with barycentric and axis-consistent psi_r derivatives."""
     return _update_pp_from_r_inputs_impl(
         out_root_fields,
         out_FFn_psin,
@@ -2344,7 +2344,7 @@ def _update_pi_from_r_explicit_inputs_with_scratch(
     array_scratch: np.ndarray,
     matrix_scratch: np.ndarray,
 ) -> tuple[float, float]:
-    """PI-r closure using the derivative of its retained PCHIP primitive."""
+    """PI-r closure using the derivative of its retained barycentric primitive."""
     return _update_pi_from_r_inputs_impl(
         out_root_fields,
         out_FFn_psin,
@@ -4654,78 +4654,132 @@ def _uniform_spline_interpolate_pair(
 
 
 @njit(cache=True, nogil=True)
-def _explicit_pchip_interpolate_pair_with_derivatives(
+def _explicit_local_barycentric_interpolate_pair_with_derivatives(
     out0: np.ndarray,
     out1: np.ndarray,
     out0_derivative: np.ndarray,
     out1_derivative: np.ndarray,
+    values0: np.ndarray,
+    values1: np.ndarray,
     source_nodes: np.ndarray,
-    coeff0: np.ndarray,
-    coeff1: np.ndarray,
+    uniform_weights: np.ndarray,
     query: np.ndarray,
     evaluate_derivative0: bool,
     evaluate_derivative1: bool,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Evaluate retained PCHIP values and selected derivatives in one lookup."""
-    last_interval = source_nodes.shape[0] - 2
-    for i in range(out0.shape[0]):
+    """Evaluate a bounded local barycentric stencil on arbitrary explicit nodes."""
+
+    count = source_nodes.shape[0]
+    local_size = min(count, DEFAULT_LOCAL_BARYCENTRIC_STENCIL)
+    half = local_size // 2
+    max_start = count - local_size
+    nodes_are_uniform = uniform_weights.shape[0] == local_size
+    if nodes_are_uniform and not evaluate_derivative0 and not evaluate_derivative1:
+        return _local_barycentric_interpolate_pair(
+            out0,
+            out1,
+            values0,
+            values1,
+            query,
+            uniform_weights,
+        )
+    weights = np.empty(DEFAULT_LOCAL_BARYCENTRIC_STENCIL, dtype=np.float64)
+    for i in range(query.shape[0]):
         q = query[i]
-        if q <= source_nodes[0]:
-            interval = 0
+        if q < source_nodes[0]:
             q = source_nodes[0]
-        elif q >= source_nodes[-1]:
-            interval = last_interval
+        elif q > source_nodes[-1]:
             q = source_nodes[-1]
-        else:
-            low = 0
-            high = source_nodes.shape[0] - 1
-            while high - low > 1:
-                middle = (low + high) // 2
-                if source_nodes[middle] <= q:
-                    low = middle
-                else:
-                    high = middle
-            interval = low
-        dx = q - source_nodes[interval]
-        out0[i] = (
-            (coeff0[interval, 3] * dx + coeff0[interval, 2]) * dx + coeff0[interval, 1]
-        ) * dx + coeff0[interval, 0]
-        out1[i] = (
-            (coeff1[interval, 3] * dx + coeff1[interval, 2]) * dx + coeff1[interval, 1]
-        ) * dx + coeff1[interval, 0]
+
+        low = 0
+        high = count - 1
+        while high - low > 1:
+            middle = (low + high) // 2
+            if source_nodes[middle] <= q:
+                low = middle
+            else:
+                high = middle
+        center = high if q > source_nodes[low] else low
+        start = center - half
+        if start < 0:
+            start = 0
+        elif start > max_start:
+            start = max_start
+
+        hit = -1
+        hit_local = -1
+        for local_j in range(local_size):
+            j = start + local_j
+            if abs(q - source_nodes[j]) <= 1.0e-14:
+                hit = j
+                hit_local = local_j
+                break
+
+        for local_j in range(local_size):
+            if nodes_are_uniform:
+                weights[local_j] = uniform_weights[local_j]
+            else:
+                j = start + local_j
+                weight = 1.0
+                for local_k in range(local_size):
+                    if local_k != local_j:
+                        weight /= source_nodes[j] - source_nodes[start + local_k]
+                weights[local_j] = weight
+
+        if hit >= 0:
+            value0 = values0[hit]
+            value1 = values1[hit]
+            out0[i] = value0
+            out1[i] = value1
+            if evaluate_derivative0 or evaluate_derivative1:
+                derivative0 = 0.0
+                derivative1 = 0.0
+                hit_weight = weights[hit_local]
+                for local_j in range(local_size):
+                    if local_j == hit_local:
+                        continue
+                    j = start + local_j
+                    factor = weights[local_j] / (
+                        hit_weight * (source_nodes[hit] - source_nodes[j])
+                    )
+                    derivative0 += factor * (values0[j] - value0)
+                    derivative1 += factor * (values1[j] - value1)
+                if evaluate_derivative0:
+                    out0_derivative[i] = derivative0
+                if evaluate_derivative1:
+                    out1_derivative[i] = derivative1
+            continue
+
+        denominator = 0.0
+        numerator0 = 0.0
+        numerator1 = 0.0
+        denominator_derivative = 0.0
+        numerator0_derivative = 0.0
+        numerator1_derivative = 0.0
+        for local_j in range(local_size):
+            j = start + local_j
+            inverse = 1.0 / (q - source_nodes[j])
+            term = weights[local_j] * inverse
+            derivative_term = -term * inverse
+            denominator += term
+            numerator0 += term * values0[j]
+            numerator1 += term * values1[j]
+            denominator_derivative += derivative_term
+            numerator0_derivative += derivative_term * values0[j]
+            numerator1_derivative += derivative_term * values1[j]
+        value0 = numerator0 / denominator
+        value1 = numerator1 / denominator
+        out0[i] = value0
+        out1[i] = value1
         if evaluate_derivative0:
             out0_derivative[i] = (
-                3.0 * coeff0[interval, 3] * dx + 2.0 * coeff0[interval, 2]
-            ) * dx + coeff0[interval, 1]
+                numerator0_derivative - value0 * denominator_derivative
+            ) / denominator
         if evaluate_derivative1:
             out1_derivative[i] = (
-                3.0 * coeff1[interval, 3] * dx + 2.0 * coeff1[interval, 2]
-            ) * dx + coeff1[interval, 1]
+                numerator1_derivative - value1 * denominator_derivative
+            ) / denominator
     return out0, out1
-
-
-@njit(cache=True, nogil=True)
-def _explicit_pchip_interpolate_pair(
-    out0: np.ndarray,
-    out1: np.ndarray,
-    source_nodes: np.ndarray,
-    coeff0: np.ndarray,
-    coeff1: np.ndarray,
-    query: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Evaluate two retained arbitrary-node PCHIP representations in place."""
-    return _explicit_pchip_interpolate_pair_with_derivatives(
-        out0,
-        out1,
-        out0,
-        out1,
-        source_nodes,
-        coeff0,
-        coeff1,
-        query,
-        False,
-        False,
-    )
 
 
 @njit(cache=True, nogil=True)
@@ -4744,15 +4798,16 @@ def _interpolate_retained_source_pair_impl(
     differentiate_first: bool,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Evaluate one retained source representation without Python dispatch."""
-    if interpolation_code == RETAINED_SOURCE_EXPLICIT_PCHIP:
-        return _explicit_pchip_interpolate_pair_with_derivatives(
+    if interpolation_code == RETAINED_SOURCE_EXPLICIT_BARYCENTRIC:
+        return _explicit_local_barycentric_interpolate_pair_with_derivatives(
             out0,
             out1,
             out0,
             out1,
+            values0,
+            values1,
             source_nodes,
-            coeff0,
-            coeff1,
+            source_weights,
             query,
             differentiate_first,
             False,

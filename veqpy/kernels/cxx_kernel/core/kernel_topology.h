@@ -177,8 +177,6 @@ namespace cxx_kernel_api
             std::array<double, CompiledSource::sample_count> pprime{};
             std::array<double, CompiledSource::sample_count> driver{};
             std::array<double, CompiledSource::sample_count> source_nodes{};
-            std::array<double, CompiledSource::sample_count * 4> pprime_coefficients{};
-            std::array<double, CompiledSource::sample_count * 4> driver_coefficients{};
             size_t                                         source_count = CompiledSource::sample_count;
             bool                                            explicit_source_interpolation = false;
             std::array<double, CompiledShape::x_size>        x0{};

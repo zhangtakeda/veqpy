@@ -169,8 +169,6 @@ namespace cxx_python
                                              RuntimeArrayView   scaled_pprime,
                                              RuntimeArrayView   scaled_driver,
                                              RuntimeArrayView   source_nodes,
-                                             RuntimeArrayView   pprime_coefficients,
-                                             RuntimeArrayView   driver_coefficients,
                                              size_t             source_count,
                                              double             scaled_p0,
                                              double             scaled_Ip,
@@ -213,16 +211,6 @@ namespace cxx_python
         read_runtime_prefix_array(scaled_pprime, "scaled_pprime", input.pprime, source_count);
         read_runtime_prefix_array(scaled_driver, "scaled_driver", input.driver, source_count);
         read_runtime_prefix_array(source_nodes, "source_nodes", input.source_nodes, source_count);
-        read_runtime_prefix_array(
-            pprime_coefficients,
-            "pprime_coefficients",
-            input.pprime_coefficients,
-            4 * (source_count - 1));
-        read_runtime_prefix_array(
-            driver_coefficients,
-            "driver_coefficients",
-            input.driver_coefficients,
-            4 * (source_count - 1));
         input.source_count = source_count;
         input.explicit_source_interpolation = true;
 
@@ -631,8 +619,6 @@ namespace cxx_python
                                 RuntimeArrayView   scaled_pprime,
                                 RuntimeArrayView   scaled_driver,
                                 RuntimeArrayView   source_nodes,
-                                RuntimeArrayView   pprime_coefficients,
-                                RuntimeArrayView   driver_coefficients,
                                 size_t             source_count,
                                 double             scaled_p0,
                                 double             scaled_Ip,
@@ -663,8 +649,6 @@ namespace cxx_python
                                                            scaled_pprime,
                                                            scaled_driver,
                                                            source_nodes,
-                                                           pprime_coefficients,
-                                                           driver_coefficients,
                                                            source_count,
                                                            scaled_p0,
                                                            scaled_Ip,
@@ -827,16 +811,6 @@ namespace cxx_python
             return true;
         }
 
-        template <size_t N>
-        bool same_fixed_array(const std::array<double, N>& lhs,
-                              const std::array<double, N>& rhs) const noexcept
-        {
-            for (size_t i = 0; i < N; ++i)
-                if (lhs[i] != rhs[i])
-                    return false;
-            return true;
-        }
-
         bool same_offsets(const std::array<double, CompiledShape::M_max + 1>& lhs,
                           const std::array<double, CompiledShape::M_max + 1>& rhs) const noexcept
         {
@@ -858,9 +832,7 @@ namespace cxx_python
                    same_offsets(old.c_offsets, now.c_offsets) && same_offsets(old.s_offsets, now.s_offsets) &&
                    old.explicit_source_interpolation == now.explicit_source_interpolation &&
                    same_array(old.pprime, now.pprime) && same_array(old.driver, now.driver) &&
-                   same_array(old.source_nodes, now.source_nodes) &&
-                   same_fixed_array(old.pprime_coefficients, now.pprime_coefficients) &&
-                   same_fixed_array(old.driver_coefficients, now.driver_coefficients);
+                   same_array(old.source_nodes, now.source_nodes);
         }
 
         void fill_certified_result(SolveResult&                                   result,

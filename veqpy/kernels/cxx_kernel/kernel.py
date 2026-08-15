@@ -393,9 +393,8 @@ def _native_source_case(
         "beta": source.beta,
         "case_name": source.case_name,
         # Keep the explicit source coordinate and values intact.  The native
-        # runtime receives matching PCHIP coefficients and evaluates them at
-        # its changing physical queries; resampling to a fictitious uniform
-        # grid here changes the source function before Cxx sees it.
+        # runtime evaluates a bounded local barycentric stencil at its changing
+        # physical queries; resampling here would change the source function.
         "source_nodes": np.ascontiguousarray(source_nodes[:source_count], dtype=np.float64),
         driver_name: np.ascontiguousarray(driver_profile[:source_count], dtype=np.float64),
     }

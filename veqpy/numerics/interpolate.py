@@ -12,7 +12,6 @@ Public API:
 - source_interpolation_kind_is_barycentric
 - build_uniform_source_interpolation_coefficients
 - build_uniform_source_interpolation_matrix
-- build_explicit_source_interpolation_coefficients
 
 Design notes:
 - Interpolation matrices use source nodes as columns and evaluation nodes as
@@ -400,31 +399,6 @@ def build_uniform_source_interpolation_matrix(
         )
         basis[j] = 0.0
     return matrix
-
-
-def build_explicit_source_interpolation_coefficients(
-    nodes: np.ndarray,
-    values: np.ndarray,
-) -> np.ndarray:
-    """Build shape-preserving cubic coefficients on arbitrary source nodes.
-
-    Rows store ascending powers of ``dx = query - nodes[interval]`` so the
-    Numba hot path can evaluate them without SciPy objects or allocations.
-    """
-
-    from scipy.interpolate import PchipInterpolator
-
-    axis = np.asarray(nodes, dtype=np.float64)
-    samples = np.asarray(values, dtype=np.float64)
-    if axis.ndim != 1 or samples.ndim != 1 or axis.shape != samples.shape:
-        raise ValueError(f"Expected matching 1D nodes/values, got {axis.shape} and {samples.shape}")
-    if axis.size < 2:
-        raise ValueError("explicit source interpolation requires at least two nodes")
-    if np.any(np.diff(axis) <= 0.0):
-        raise ValueError("explicit source nodes must be strictly increasing")
-    # scipy stores descending powers [cubic, quadratic, linear, constant].
-    coefficients = PchipInterpolator(axis, samples, extrapolate=False).c[::-1].T
-    return np.ascontiguousarray(coefficients, dtype=np.float64)
 
 
 @uniform_source_interpolation_generator(SOURCE_INTERP_BARYCENTRIC)

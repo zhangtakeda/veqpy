@@ -31,8 +31,6 @@ namespace operators::detail
         Vector<double, SourceShape::sample_count> pprime{};
         Vector<double, SourceShape::sample_count> driver{};
         Vector<double, SourceShape::sample_count> source_nodes{};
-        Vector<double, SourceShape::sample_count * 4> pprime_coefficients{};
-        Vector<double, SourceShape::sample_count * 4> driver_coefficients{};
         size_t                                      source_count = SourceShape::sample_count;
         bool                                        explicit_source_interpolation = false;
     };
@@ -156,8 +154,6 @@ namespace operators::detail
                 source_span(setup.pprime),
                 source_span(setup.driver),
                 source_span(setup.source_nodes),
-                source_span(setup.pprime_coefficients),
-                source_span(setup.driver_coefficients),
                 setup.source_count,
                 setup.explicit_source_interpolation);
         }
@@ -174,8 +170,6 @@ namespace operators::detail
                 source_span(setup.pprime),
                 source_span(setup.driver),
                 source_span(setup.source_nodes),
-                source_span(setup.pprime_coefficients),
-                source_span(setup.driver_coefficients),
                 setup.source_count,
                 setup.explicit_source_interpolation);
         }

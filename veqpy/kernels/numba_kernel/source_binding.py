@@ -27,7 +27,7 @@ from .workspace.field_rows import (
 
 def _retained_source_interpolation_code(source_plan) -> int:
     if source_plan.is_explicit_nodes:
-        return numba_source.RETAINED_SOURCE_EXPLICIT_PCHIP
+        return numba_source.RETAINED_SOURCE_EXPLICIT_BARYCENTRIC
     if source_plan.is_grid_nodes:
         return numba_source.RETAINED_SOURCE_GRID_BARYCENTRIC
     if source_plan.uses_barycentric_interpolation:
@@ -534,19 +534,20 @@ def _interpolate_retained_source(
 ) -> None:
     """Evaluate the native source representation at one changing coordinate."""
     if source_plan.is_explicit_nodes:
-        coefficient0 = (
-            source_workspace.pressure_spline_coeff
+        values0 = (
+            source_plan.scaled_pressure
             if source_plan.scaled_pressure is not None
-            else source_workspace.pprime_spline_coeff
+            else source_plan.scaled_pprime
         )
-        numba_source._explicit_pchip_interpolate_pair_with_derivatives(
+        numba_source._explicit_local_barycentric_interpolate_pair_with_derivatives(
             out_pprime,
             out_driver,
             out_pprime,
             out_driver,
+            values0,
+            source_plan.scaled_driver,
             source_workspace.source_coordinate_nodes,
-            coefficient0,
-            source_workspace.driver_spline_coeff,
+            source_workspace.source_coordinate_weights,
             query,
             source_plan.scaled_pressure is not None,
             False,

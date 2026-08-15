@@ -100,7 +100,6 @@ namespace source::detail
 
         using RadialVector = Vector<double, radial_nodes>;
         using SourceVector = Vector<double, sample_count>;
-        using CoefficientVector = Vector<double, sample_count * 4>;
         using RootFields   = Matrix<double, root_field_count, radial_nodes>;
 
         SourceVector public_pprime_input{};
@@ -108,8 +107,6 @@ namespace source::detail
         SourceVector public_driver_input{};
         SourceVector driver_input{};
         SourceVector source_coordinate_nodes{};
-        CoefficientVector pprime_coefficients{};
-        CoefficientVector driver_coefficients{};
         RadialVector source_psin_query{};
         RadialVector source_parameter_query{};
         RadialVector materialized_pprime_input{};
@@ -126,19 +123,18 @@ namespace source::detail
         double       pressure_multiplier = 1.0;
         size_t       active_count = sample_count;
         bool         explicit_source_interpolation = false;
+        bool         source_nodes_uniform = false;
         bool         source_materialization_initialized = false;
 
         constexpr void set_uniform_sources(std::span<const double, sample_count> pprime,
                                            std::span<const double, sample_count> driver,
                                            std::span<const double, sample_count> source_nodes,
-                                           std::span<const double, sample_count * 4> pprime_coeff,
-                                           std::span<const double, sample_count * 4> driver_coeff,
                                            size_t active_source_count,
                                            bool   use_explicit_interpolation) noexcept
         {
             active_count = active_source_count < sample_count ? active_source_count : sample_count;
             explicit_source_interpolation = use_explicit_interpolation;
-            for (size_t i = 0; i < sample_count; ++i)
+            for (size_t i = 0; i < active_count; ++i)
             {
                 public_pprime_input[i] = pprime[i];
                 pprime_input[i] = pprime[i];
@@ -146,10 +142,26 @@ namespace source::detail
                 driver_input[i] = driver[i];
                 source_coordinate_nodes[i] = source_nodes[i];
             }
-            for (size_t i = 0; i < sample_count * 4; ++i)
+            source_nodes_uniform = active_count > 1;
+            if (source_nodes_uniform)
             {
-                pprime_coefficients[i] = pprime_coeff[i];
-                driver_coefficients[i] = driver_coeff[i];
+                const double span = source_nodes[active_count - 1] - source_nodes[0];
+                source_nodes_uniform = math::is_finite(span) && span > 0.0;
+                if (source_nodes_uniform)
+                {
+                    const double tolerance = 1.0e-12 * (math::abs(span) > 1.0 ? math::abs(span) : 1.0);
+                    for (size_t i = 1; i + 1 < active_count; ++i)
+                    {
+                        const double expected =
+                            source_nodes[0] + span * static_cast<double>(i) /
+                                                  static_cast<double>(active_count - 1);
+                        if (math::abs(source_nodes[i] - expected) > tolerance)
+                        {
+                            source_nodes_uniform = false;
+                            break;
+                        }
+                    }
+                }
             }
             source_materialization_initialized = false;
         }
@@ -932,9 +944,10 @@ namespace source::detail
                     for (size_t local_j = 0; local_j < effective_stencil; ++local_j)
                     {
                         const size_t j = start + local_j;
-                        const double term =
-                            local_barycentric_weight(local_j, effective_stencil) /
-                            (q - static_cast<double>(j) / denom_scale);
+                        const double weight = effective_stencil == stencil_size
+                                                  ? SourceShape::barycentric_weights[local_j]
+                                                  : local_barycentric_weight(local_j, effective_stencil);
+                        const double term = weight / (q - static_cast<double>(j) / denom_scale);
                         denominator += term;
                         numerator_pprime += term * pprime_input[j];
                         numerator_driver += term * driver_input[j];
@@ -945,7 +958,7 @@ namespace source::detail
             }
         }
 
-        constexpr void local_pchip_interpolate_pair() noexcept
+        constexpr void local_explicit_barycentric_interpolate_pair() noexcept
         {
             if (active_count <= 1)
             {
@@ -956,55 +969,78 @@ namespace source::detail
                 }
                 return;
             }
+            if (source_nodes_uniform)
+            {
+                local_barycentric_interpolate_pair();
+                return;
+            }
 
-            const size_t last_interval = active_count - 2;
+            const size_t effective_stencil = active_count < stencil_size ? active_count : stencil_size;
+            const size_t half = effective_stencil / 2;
+            const size_t max_start = active_count - effective_stencil;
             for (size_t i = 0; i < radial_nodes; ++i)
             {
                 double query = source_parameter_query[i];
-                size_t interval = 0;
-                if (query <= source_coordinate_nodes[0])
-                {
+                if (query < source_coordinate_nodes[0])
                     query = source_coordinate_nodes[0];
-                }
-                else if (query >= source_coordinate_nodes[active_count - 1])
-                {
-                    interval = last_interval;
+                else if (query > source_coordinate_nodes[active_count - 1])
                     query = source_coordinate_nodes[active_count - 1];
-                }
-                else
-                {
-                    size_t low = 0;
-                    size_t high = active_count - 1;
-                    while (high - low > 1)
-                    {
-                        const size_t middle = (low + high) / 2;
-                        if (source_coordinate_nodes[middle] <= query)
-                            low = middle;
-                        else
-                            high = middle;
-                    }
-                    interval = low;
-                }
 
-                const double dx = query - source_coordinate_nodes[interval];
-                const size_t offset = interval * 4;
-                materialized_pprime_input[i] =
-                    ((pprime_coefficients[offset + 3] * dx + pprime_coefficients[offset + 2]) * dx +
-                     pprime_coefficients[offset + 1]) *
-                        dx +
-                    pprime_coefficients[offset];
-                materialized_driver_input[i] =
-                    ((driver_coefficients[offset + 3] * dx + driver_coefficients[offset + 2]) * dx +
-                     driver_coefficients[offset + 1]) *
-                        dx +
-                    driver_coefficients[offset];
+                size_t low = 0;
+                size_t high = active_count - 1;
+                while (high - low > 1)
+                {
+                    const size_t middle = (low + high) / 2;
+                    if (source_coordinate_nodes[middle] <= query)
+                        low = middle;
+                    else
+                        high = middle;
+                }
+                const size_t center = query > source_coordinate_nodes[low] ? high : low;
+                const size_t unclipped_start = center > half ? center - half : 0;
+                const size_t start = unclipped_start < max_start ? unclipped_start : max_start;
+
+                bool hit = false;
+                for (size_t local_j = 0; local_j < effective_stencil; ++local_j)
+                {
+                    const size_t j = start + local_j;
+                    if (math::abs(query - source_coordinate_nodes[j]) <= 1.0e-14)
+                    {
+                        materialized_pprime_input[i] = pprime_input[j];
+                        materialized_driver_input[i] = driver_input[j];
+                        hit = true;
+                        break;
+                    }
+                }
+                if (hit)
+                    continue;
+
+                double denominator = 0.0;
+                double numerator_pprime = 0.0;
+                double numerator_driver = 0.0;
+                for (size_t local_j = 0; local_j < effective_stencil; ++local_j)
+                {
+                    const size_t j = start + local_j;
+                    double weight = 1.0;
+                    for (size_t local_k = 0; local_k < effective_stencil; ++local_k)
+                    {
+                        if (local_k != local_j)
+                            weight /= source_coordinate_nodes[j] - source_coordinate_nodes[start + local_k];
+                    }
+                    const double term = weight / (query - source_coordinate_nodes[j]);
+                    denominator += term;
+                    numerator_pprime += term * pprime_input[j];
+                    numerator_driver += term * driver_input[j];
+                }
+                materialized_pprime_input[i] = numerator_pprime / denominator;
+                materialized_driver_input[i] = numerator_driver / denominator;
             }
         }
 
         constexpr void interpolate_source_pair() noexcept
         {
             if (explicit_source_interpolation)
-                local_pchip_interpolate_pair();
+                local_explicit_barycentric_interpolate_pair();
             else
                 local_barycentric_interpolate_pair();
         }
