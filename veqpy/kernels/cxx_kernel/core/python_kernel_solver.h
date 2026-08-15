@@ -303,11 +303,16 @@ namespace cxx_python
                 constexpr double value_margin          = 5.0e-2;
                 constexpr double monotonic_tol         = 1.0e-10;
 
-                const double target_offset =
-                    context.op.workspace.source_runtime.source_target_root_fields(source::root_psin, 0);
-                const double target_scale = context.op.workspace.source_runtime.source_target_root_fields(
-                                                source::root_psin, CompiledGrid::radial_nodes - 1) -
-                                            target_offset;
+                double target_offset = 0.0;
+                double target_edge   = 0.0;
+                for (size_t i = 0; i < CompiledGrid::radial_nodes; ++i)
+                {
+                    const double value =
+                        context.op.workspace.source_runtime.source_target_root_fields(source::root_psin, i);
+                    target_offset += CompiledGrid::axis_interpolation_weights[i] * value;
+                    target_edge += CompiledGrid::edge_interpolation_weights[i] * value;
+                }
+                const double target_scale = target_edge - target_offset;
                 if (local_abs(target_scale) <= tiny)
                     return false;
 

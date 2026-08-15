@@ -318,22 +318,23 @@ namespace cxx_kernel_api
         }
 
         template <size_t N>
-        double relative_abs_rms(const std::array<double, N>& values) noexcept
+        double relative_abs_rms(const std::array<double, N>& values, size_t count) noexcept
         {
-            if constexpr (N == 0)
+            const size_t active = std::min(count, N);
+            if (active == 0)
                 return 0.0;
             double mean = 0.0;
-            for (double value : values)
-                mean += std::abs(value);
-            mean /= static_cast<double>(N);
+            for (size_t i = 0; i < active; ++i)
+                mean += std::abs(values[i]);
+            mean /= static_cast<double>(active);
 
             double variance = 0.0;
-            for (double value : values)
+            for (size_t i = 0; i < active; ++i)
             {
-                const double centered = std::abs(value) - mean;
+                const double centered = std::abs(values[i]) - mean;
                 variance += centered * centered;
             }
-            const double relative = std::sqrt(variance / static_cast<double>(N)) / (mean + 1.0e-16);
+            const double relative = std::sqrt(variance / static_cast<double>(active)) / (mean + 1.0e-16);
             return relative <= 1.0e-6 ? 0.0 : relative;
         }
 
@@ -343,7 +344,8 @@ namespace cxx_kernel_api
             const double kappa             = std::abs(input.ka);
             const double elongation_factor = (1.0 + kappa * kappa) != 0.0 ? 2.0 * kappa / (1.0 + kappa * kappa) : 0.0;
             const double source_drive =
-                std::hypot(relative_abs_rms(input.pprime), 0.5 * relative_abs_rms(input.driver));
+                std::hypot(relative_abs_rms(input.pprime, input.source_count),
+                           0.5 * relative_abs_rms(input.driver, input.source_count));
             const double h0           = epsilon * elongation_factor * std::tanh(source_drive);
             return std::abs(h0) <= 1.0e-6 ? 0.0 : h0;
         }
