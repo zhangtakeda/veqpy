@@ -20,7 +20,18 @@ option(VEQPY_CXX_ENABLE_PYTHON_BINDINGS "Build the nanobind Python extension for
 set(VEQPY_CXX_FP_MODE "RELAXED" CACHE STRING "Floating-point mode: STRICT or RELAXED")
 set_property(CACHE VEQPY_CXX_FP_MODE PROPERTY STRINGS STRICT RELAXED)
 set(VEQPY_CXX_ENZYME_PLUGIN "" CACHE FILEPATH "Path to ClangEnzyme shared library")
-set(VEQPY_CXX_ENZYME_INCLUDE_DIR "$ENV{HOME}/opt/Enzyme/enzyme/include" CACHE PATH "Path to Enzyme C++ headers")
+set(_veqpy_cxx_default_enzyme_include "$ENV{HOME}/opt/Enzyme/enzyme/include")
+if(APPLE AND EXISTS "/opt/homebrew/opt/enzyme/include/enzyme/enzyme")
+    set(_veqpy_cxx_default_enzyme_include "/opt/homebrew/opt/enzyme/include")
+elseif(APPLE AND EXISTS "/usr/local/opt/enzyme/include/enzyme/enzyme")
+    set(_veqpy_cxx_default_enzyme_include "/usr/local/opt/enzyme/include")
+endif()
+set(
+    VEQPY_CXX_ENZYME_INCLUDE_DIR
+    "${_veqpy_cxx_default_enzyme_include}"
+    CACHE PATH
+    "Path to Enzyme C++ headers"
+)
 set(VEQPY_CXX_GCEM_ROOT "$ENV{HOME}/opt/gcem-install" CACHE PATH "GCEM install prefix")
 set(VEQPY_CXX_NB_DOMAIN "veqpy_cxx_default" CACHE STRING "nanobind type registry domain for this extension")
 set(
@@ -333,10 +344,14 @@ function(cxx_find_enzyme out_var)
     endif()
 
     string(REGEX MATCH "^[0-9]+" clang_major "${CMAKE_CXX_COMPILER_VERSION}")
-    set(enzyme_names ClangEnzyme.so)
+    set(enzyme_names ClangEnzyme.dylib ClangEnzyme.so)
     set(enzyme_path_suffixes lib)
     if(clang_major)
-        list(PREPEND enzyme_names "ClangEnzyme-${clang_major}.so")
+        list(PREPEND
+            enzyme_names
+            "ClangEnzyme-${clang_major}.dylib"
+            "ClangEnzyme-${clang_major}.so"
+        )
         list(PREPEND enzyme_path_suffixes "llvm-${clang_major}/lib")
     endif()
 
@@ -348,6 +363,8 @@ function(cxx_find_enzyme out_var)
         PATHS
             "${PROJECT_SOURCE_DIR}/../.."
             "$ENV{HOME}/opt/Enzyme/enzyme/build-llvm18/Enzyme"
+            /opt/homebrew/opt/enzyme
+            /usr/local/opt/enzyme
             /usr/lib
             /usr/local/lib
             /opt/homebrew/lib
@@ -371,12 +388,35 @@ function(cxx_enable_enzyme target)
         message(FATAL_ERROR "Cxx backend direct clang++ workflow requires ClangEnzyme, got ${enzyme_plugin}")
     endif()
 
+    string(REGEX MATCH "^ClangEnzyme-([0-9]+)" enzyme_version_match "${enzyme_plugin_name}")
+    set(enzyme_llvm_major "${CMAKE_MATCH_1}")
+    string(REGEX MATCH "^[0-9]+" clang_major "${CMAKE_CXX_COMPILER_VERSION}")
+    if(enzyme_llvm_major AND clang_major AND NOT enzyme_llvm_major STREQUAL clang_major)
+        message(
+            FATAL_ERROR
+            "ClangEnzyme LLVM major ${enzyme_llvm_major} cannot be loaded by Clang ${clang_major}; "
+            "use a compiler and Enzyme plugin built for the same LLVM major"
+        )
+    endif()
+    if(APPLE AND NOT clang_major STREQUAL "22")
+        message(
+            FATAL_ERROR
+            "VEQPy cxx-enzyme on macOS requires Homebrew Clang/LLVM 22, got "
+            "${CMAKE_CXX_COMPILER_VERSION}"
+        )
+    endif()
+
+    if(NOT EXISTS "${VEQPY_CXX_ENZYME_INCLUDE_DIR}/enzyme/enzyme")
+        message(
+            FATAL_ERROR
+            "Enzyme C++ headers not found; set VEQPY_CXX_ENZYME_INCLUDE_DIR to the prefix include directory"
+        )
+    endif()
+
     message(STATUS "Using Enzyme plugin: ${enzyme_plugin}")
     target_compile_options("${target}" PRIVATE "-fplugin=${enzyme_plugin}")
     target_compile_definitions("${target}" PRIVATE ENABLE_ENZYME=1)
-    if(VEQPY_CXX_ENZYME_INCLUDE_DIR AND EXISTS "${VEQPY_CXX_ENZYME_INCLUDE_DIR}")
-        target_include_directories("${target}" PRIVATE "${VEQPY_CXX_ENZYME_INCLUDE_DIR}")
-    endif()
+    target_include_directories("${target}" PRIVATE "${VEQPY_CXX_ENZYME_INCLUDE_DIR}")
 endfunction()
 
 function(cxx_enable_strict_conversions target)
@@ -490,8 +530,10 @@ function(cxx_enable_kernel_optimizations target)
             "${target}"
             PRIVATE
                 $<${release_like}:-flto=thin>
-                $<${release_like}:-fuse-ld=lld>
         )
+        if(NOT APPLE)
+            target_link_options("${target}" PRIVATE $<${release_like}:-fuse-ld=lld>)
+        endif()
     endif()
 
     if(VEQPY_CXX_ANALYSIS_BUILD)
