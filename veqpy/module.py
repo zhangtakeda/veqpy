@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from functools import wraps
 from pathlib import Path
 from time import perf_counter
 from typing import Any
@@ -139,7 +140,11 @@ class VEQ:
         if options is None:
             options = {
                 "solver": None,
-                "materialize": self._materialize_default if materialize is True else materialize,
+                "materialize": (
+                    materialize
+                    if getattr(self, "_materialize_argument_explicit", False)
+                    else self._materialize_default
+                ),
                 "verbose": self._verbose_default,
                 "report": self._report_default,
                 "report_dir": self._report_dir_default,
@@ -280,6 +285,26 @@ def _print_kernel_diagnostics(backend: str, output: object, source_count: int, c
         f"scaled_norm={float(output.scaled_norm):.3e} evaluations={int(output.nfev)} "
         f"source_count={source_count} capacity={capacity}"
     )
+
+
+def _track_explicit_materialize_argument(cls: type[VEQ]) -> type[VEQ]:
+    """Preserve the base run signature while distinguishing omitted True."""
+
+    checked_run = cls.run
+
+    @wraps(checked_run)
+    def tracked_run(instance: VEQ, *args: object, **kwargs: object) -> VEQRecord:
+        instance._materialize_argument_explicit = "materialize" in kwargs
+        try:
+            return checked_run(instance, *args, **kwargs)
+        finally:
+            instance._materialize_argument_explicit = False
+
+    cls.run = tracked_run  # type: ignore[method-assign]
+    return cls
+
+
+VEQ = _track_explicit_materialize_argument(VEQ)
 
 
 __all__ = ["VEQ", "VEQRecord"]
