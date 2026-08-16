@@ -60,7 +60,7 @@ namespace residual::detail
 
         constexpr void pack_into(std::span<double, Shape::x_size> out, double a, double R0, double B0) noexcept
         {
-            pack_profile<0, 0>(out, a, R0, B0, nullptr);
+            pack_profile<false, 0, 0>(out, a, R0, B0, nullptr);
         }
 
         constexpr void pack_scaled_into(std::span<double, Shape::x_size> out,
@@ -69,7 +69,7 @@ namespace residual::detail
                                         double                           B0,
                                         const double*                    output_scale) noexcept
         {
-            pack_profile<0, 0>(out, a, R0, B0, output_scale);
+            pack_profile<true, 0, 0>(out, a, R0, B0, output_scale);
         }
 
     private:
@@ -128,7 +128,7 @@ namespace residual::detail
             }
         }
 
-        template <size_t ProfileId, size_t ActiveIndex>
+        template <bool ScaleOutput, size_t ProfileId, size_t ActiveIndex>
         constexpr void pack_profile(std::span<double, Shape::x_size> out,
                                     double                           a,
                                     double                           R0,
@@ -140,15 +140,18 @@ namespace residual::detail
                 constexpr profiles::ProfileSlot slot = Shape::slot_for_profile_id(ProfileId);
                 if constexpr (slot.optimized())
                 {
-                    pack_one<ProfileId, ActiveIndex, slot.coefficient_count>(out, a, R0, B0, output_scale);
-                    pack_profile<ProfileId + 1, ActiveIndex + 1>(out, a, R0, B0, output_scale);
+                    pack_one<ScaleOutput, ProfileId, ActiveIndex, slot.coefficient_count>(
+                        out, a, R0, B0, output_scale);
+                    pack_profile<ScaleOutput, ProfileId + 1, ActiveIndex + 1>(
+                        out, a, R0, B0, output_scale);
                 }
                 else
-                    pack_profile<ProfileId + 1, ActiveIndex>(out, a, R0, B0, output_scale);
+                    pack_profile<ScaleOutput, ProfileId + 1, ActiveIndex>(
+                        out, a, R0, B0, output_scale);
             }
         }
 
-        template <size_t ProfileId, size_t ActiveIndex, size_t Count>
+        template <bool ScaleOutput, size_t ProfileId, size_t ActiveIndex, size_t Count>
         constexpr void pack_one(std::span<double, Shape::x_size> out,
                                 double                           a,
                                 double                           R0,
@@ -160,27 +163,27 @@ namespace residual::detail
 
             if constexpr (code == block_h)
             {
-                project_scaled<Count, ProfileId, ActiveIndex>(
+                project_scaled<ScaleOutput, Count, ProfileId, ActiveIndex>(
                     out, GridType::y, unit_weights(), unit_weights(), a * base_scale(), output_scale);
             }
             else if constexpr (code == block_v)
             {
-                project_scaled<Count, ProfileId, ActiveIndex>(
+                project_scaled<ScaleOutput, Count, ProfileId, ActiveIndex>(
                     out, GridType::y, unit_weights(), unit_weights(), a * base_scale(), output_scale);
             }
             else if constexpr (code == block_kappa)
             {
-                project_scaled<Count, ProfileId, ActiveIndex>(
+                project_scaled<ScaleOutput, Count, ProfileId, ActiveIndex>(
                     out, r_power<1>(), GridType::y, unit_weights(), -a * base_scale(), output_scale);
             }
             else if constexpr (code == block_c0)
             {
-                project_scaled<Count, ProfileId, ActiveIndex>(
+                project_scaled<ScaleOutput, Count, ProfileId, ActiveIndex>(
                     out, r_power<1>(), GridType::y, unit_weights(), -a * base_scale(), output_scale);
             }
             else if constexpr (code == block_c)
             {
-                project_scaled<Count, ProfileId, ActiveIndex>(
+                project_scaled<ScaleOutput, Count, ProfileId, ActiveIndex>(
                     out,
                     r_power<radial_power + 1>(),
                     GridType::y,
@@ -190,7 +193,7 @@ namespace residual::detail
             }
             else if constexpr (code == block_s)
             {
-                project_scaled<Count, ProfileId, ActiveIndex>(
+                project_scaled<ScaleOutput, Count, ProfileId, ActiveIndex>(
                     out,
                     r_power<radial_power + 1>(),
                     GridType::y,
@@ -200,12 +203,12 @@ namespace residual::detail
             }
             else if constexpr (code == block_psin)
             {
-                project_scaled<Count, ProfileId, ActiveIndex>(
+                project_scaled<ScaleOutput, Count, ProfileId, ActiveIndex>(
                     out, r_power<2>(), GridType::y, unit_weights(), base_scale(), output_scale);
             }
             else if constexpr (code == block_F)
             {
-                project_scaled<Count, ProfileId, ActiveIndex>(
+                project_scaled<ScaleOutput, Count, ProfileId, ActiveIndex>(
                     out,
                     GridType::y,
                     GridType::y,
@@ -296,7 +299,8 @@ namespace residual::detail
                 return order < GridType::r_power_rows ? order : GridType::r_power_rows;
         }
 
-        template <size_t Count,
+        template <bool ScaleOutput,
+                  size_t Count,
                   size_t ProfileId,
                   size_t ActiveIndex,
                   typename WeightA,
@@ -318,7 +322,7 @@ namespace residual::detail
                              weight_c[i] * GridType::weights[i];
                 }
                 const size_t output_index = static_cast<size_t>(Shape::coeff_index[ProfileId][degree]);
-                if (output_scale == nullptr)
+                if constexpr (!ScaleOutput)
                     out[output_index] = total * scalar;
 #if defined(VEQPY_CXX_FP_MODE_RELAXED)
                 else

@@ -34,8 +34,7 @@ REFERENCE_LAYOUT_NR = 32
 REFERENCE_LAYOUT_NT = 32
 REFERENCE_SOLVER_MAXFEV = 2000
 BACKENDS = ("numba", "cxx-strict", "cxx-relaxed", "cxx-enzyme")
-RUNNABLE_BACKENDS = ("numba", "cxx-strict", "cxx-relaxed")
-ENZYME_SKIP_REASON = "cxx-enzyme is intentionally deferred and is not implemented in this task"
+RUNNABLE_BACKENDS = BACKENDS
 HISTORICAL_SPEEDUP_RANGE = (5.0, 11.0)
 
 # These are the historical manuscript signatures restored from main.  The
@@ -642,7 +641,6 @@ __all__ = [
     "CASE_REFERENCE_GFILES",
     "CONFIG_LABELS",
     "CORE_DIR",
-    "ENZYME_SKIP_REASON",
     "GeqdskBenchmarkCase",
     "HISTORICAL_SPEEDUP_RANGE",
     "REFERENCE_LAYOUT_NR",

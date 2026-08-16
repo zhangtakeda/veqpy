@@ -84,12 +84,15 @@ The supported backend strings are:
 - `numba`: required strict floating-point path;
 - `cxx`: normalized to the Release relaxed artifact;
 - `cxx-strict`: independent Release strict artifact;
-- `cxx-relaxed`: independent Release relaxed artifact.
+- `cxx-relaxed`: independent Release relaxed artifact;
+- `cxx-enzyme`: independent Release relaxed primal plus Enzyme residual derivatives.
 
-The next native backend work adds `cxx-enzyme` as a fifth public token. It is
-not exposed by the current migration snapshot yet. Its contract is a distinct
-Release relaxed artifact whose residual JVP/Jacobian is provided by Enzyme;
-plugin failure must not fall back to finite differences or `cxx-relaxed`.
+`cxx-enzyme` preserves its own backend token, report metadata, cache namespace,
+and artifact identity. Its public Kernel residual JVP/Jacobian and nonlinear
+solver derivatives both use Enzyme; plugin or version failure during a new
+build is fatal and never falls back to finite differences or `cxx-relaxed`.
+These are residual derivatives with respect to the packed unknowns, not the
+complete implicit Module solve-map derivative.
 
 `artifact_dir`, `cpu_affinity`, and `rebuild` are build-only Module options.
 Numba contains no fast-math decorators. Cxx relaxed may use fast-math where
@@ -117,8 +120,15 @@ The reference versions are LLVM `22.1.8` and Enzyme `0.0.290`. ClangEnzyme is
 an LLVM compiler plugin, so its LLVM major must match the compiler major. It is
 a system build dependency rather than a Python package dependency. All VEQPy
 Cxx environments use LLVM major 22; Ubuntu 24.04 CI installs `clang-22` and
-`lld-22` from the official apt.llvm.org repository. That job still covers only
-the non-Enzyme Cxx backends; Linux Enzyme support is deliberately deferred.
+`lld-22` from the official apt.llvm.org repository. Enzyme builds on every
+platform require a ClangEnzyme plugin and headers built for the same LLVM 22
+major; there is no platform-specific fallback or alternate compiler contract.
+For this reference toolchain the production dense Jacobian uses scalar forward
+columns. Enzyme's vector-width intrinsic remains outside the supported build
+contract because `0.0.290` crashes LLVM 22 type analysis on the full residual.
+The plugin binary hash, Enzyme header hash, paths, version, compiler version,
+and generated flags participate in new artifact identity. Cached artifacts
+still load through the build-tool-free pointer without probing that toolchain.
 
 ## Development gates
 
@@ -135,7 +145,7 @@ configuration. Structural evidence is collected with:
 ```
 
 The benchmark entry point is `benchmarks/benchmark_v2.py`; it measures one
-prepared Module and accepts all four backend tokens. This development branch
+prepared Module and accepts all five backend tokens. This development branch
 is not declared release-ready solely because these structural gates pass.
 
 ## Repository boundary

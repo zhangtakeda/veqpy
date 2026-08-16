@@ -49,11 +49,14 @@ namespace math::detail
 
     inline constexpr std::uint64_t double_exponent_mask = 0x7ff0'0000'0000'0000ULL;
 
-    constexpr std::uint64_t double_bits(double value) noexcept
+    // Keep runtime finite checks outside optimized residual bodies.  Besides
+    // preserving the guards under finite-math, this prevents Enzyme from
+    // assigning floating activity to the byte-wise object representation.
+#if defined(__clang__)
+    __attribute__((noinline, optnone))
+#endif
+    inline std::uint64_t runtime_double_bits(double value) noexcept
     {
-        if (std::is_constant_evaluated())
-            return std::bit_cast<std::uint64_t>(value);
-
         // Volatile byte reads keep finite-math optimizers from folding this predicate to true.
         const auto* bytes = reinterpret_cast<const volatile unsigned char*>(&value);
         std::uint64_t bits = 0;
@@ -68,6 +71,13 @@ namespace math::detail
                 bits = (bits << 8U) | static_cast<std::uint64_t>(bytes[i]);
         }
         return bits;
+    }
+
+    constexpr std::uint64_t double_bits(double value) noexcept
+    {
+        if (std::is_constant_evaluated())
+            return std::bit_cast<std::uint64_t>(value);
+        return runtime_double_bits(value);
     }
 
     constexpr bool is_finite(double value) noexcept

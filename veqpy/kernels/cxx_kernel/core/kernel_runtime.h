@@ -276,6 +276,19 @@ namespace cxx_kernel_api
         using RuntimeScalars = CompiledOperator::RuntimeScalars;
         using OperatorWorkspace   = CompiledOperator::OperatorWorkspace;
 
+        OperatorWorkspace enzyme_workspace_for_context(const SolveState& context) noexcept
+        {
+            OperatorWorkspace workspace = context.op.workspace;
+            // Runtime profile caching compares primal coefficients.  AD must
+            // execute the coefficient-to-profile map even when the preceding
+            // residual evaluated the same x; otherwise its fresh zero shadow
+            // workspace would incorrectly produce zero columns.
+            workspace.profiles.active_coefficients_valid = false;
+            workspace.profiles.geometry_coefficients_changed = true;
+            workspace.profiles.boundary_coefficients_changed = true;
+            return workspace;
+        }
+
         double scaled_residual_raw_x_for_enzyme(double*                  x,
                                                 double*                  fvec,
                                                 OperatorWorkspace*         workspace,
@@ -324,7 +337,7 @@ namespace cxx_kernel_api
         {
             std::array<double, CompiledShape::x_size> x_primal;
             std::array<double, CompiledShape::x_size> x_dot;
-            std::array<double, CompiledShape::x_size> f_primal;
+            std::array<double, CompiledShape::x_size> f_primal{};
             const auto&                             x_scale = context.input.x_scale;
             for (size_t i = 0; i < CompiledShape::x_size; ++i)
             {
@@ -332,6 +345,7 @@ namespace cxx_kernel_api
                 x_dot[i]    = v[i] * x_scale[i];
             }
 
+            OperatorWorkspace jvp_workspace = enzyme_workspace_for_context(context);
             OperatorWorkspace jvp_workspace_dot{};
             const OperatorPlan&        plan         = context.op.plan;
             const RuntimeScalars& runtime_scalars = context.op.runtime_scalars();
@@ -339,7 +353,7 @@ namespace cxx_kernel_api
                 scaled_residual_raw_x_for_enzyme,
                 enzyme::Duplicated<double*>{x_primal.data(), x_dot.data()},
                 enzyme::Duplicated<double*>{f_primal.data(), jv},
-                enzyme::Duplicated<OperatorWorkspace*>{&context.op.workspace, &jvp_workspace_dot},
+                enzyme::Duplicated<OperatorWorkspace*>{&jvp_workspace, &jvp_workspace_dot},
                 enzyme::Const<const OperatorPlan*>{&plan},
                 enzyme::Const<const RuntimeScalars*>{&runtime_scalars},
                 enzyme::Const<const double*>{context.input.residual_scale.data()});
@@ -373,8 +387,9 @@ namespace cxx_kernel_api
             for (size_t first_col = 0; first_col < n; first_col += Width)
             {
                 std::array<double, Width * n>     x_dot{};
-                std::array<double, n>             f_primal;
-                std::array<double, Width * n>     f_dot;
+                std::array<double, n>             f_primal{};
+                std::array<double, Width * n>     f_dot{};
+                OperatorWorkspace                 chunk_workspace = enzyme_workspace_for_context(context);
                 std::array<OperatorWorkspace, Width> chunk_workspace_dot{};
 
                 const size_t lane_count = std::min(Width, n - first_col);
@@ -394,7 +409,7 @@ namespace cxx_kernel_api
                                        f_dot.data(),
                                        enzyme_dupv,
                                        static_cast<int>(sizeof(OperatorWorkspace)),
-                                       &context.op.workspace,
+                                       &chunk_workspace,
                                        chunk_workspace_dot.data(),
                                        enzyme_const,
                                        &plan,
@@ -426,15 +441,16 @@ namespace cxx_kernel_api
             for (size_t col = 0; col < CompiledShape::x_size; ++col)
             {
                 std::array<double, CompiledShape::x_size> x_dot{};
-                std::array<double, CompiledShape::x_size> f_primal;
-                std::array<double, CompiledShape::x_size> f_dot;
+                std::array<double, CompiledShape::x_size> f_primal{};
+                std::array<double, CompiledShape::x_size> f_dot{};
+                OperatorWorkspace                         column_workspace = enzyme_workspace_for_context(context);
                 OperatorWorkspace                         column_workspace_dot{};
                 x_dot[col] = x_scale[col];
                 (void)enzyme::autodiff<enzyme::Forward, enzyme::Const<double>>(
                     scaled_residual_raw_x_for_enzyme,
                     enzyme::Duplicated<double*>{x_primal.data(), x_dot.data()},
                     enzyme::Duplicated<double*>{f_primal.data(), f_dot.data()},
-                    enzyme::Duplicated<OperatorWorkspace*>{&context.op.workspace, &column_workspace_dot},
+                    enzyme::Duplicated<OperatorWorkspace*>{&column_workspace, &column_workspace_dot},
                     enzyme::Const<const OperatorPlan*>{&plan},
                     enzyme::Const<const RuntimeScalars*>{&runtime_scalars},
                     enzyme::Const<const double*>{context.input.residual_scale.data()});

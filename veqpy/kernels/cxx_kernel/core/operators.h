@@ -178,6 +178,7 @@ namespace operators::detail
                 setup.explicit_source_interpolation);
         }
 
+        template <bool ScaleOutput>
         static constexpr void evaluate_impl(const OperatorPlan&                       plan,
                                             const RuntimeScalars&                      runtime_scalars,
                                             OperatorWorkspace&                        workspace,
@@ -553,7 +554,7 @@ namespace operators::detail
                 workspace.source_runtime.publish_source_target_root_fields();
 
             workspace.residual.update_compact(workspace.source_runtime, workspace.geometry);
-            if (output_scale == nullptr)
+            if constexpr (!ScaleOutput)
                 workspace.residual.pack_into(out, runtime_scalars.a, runtime_scalars.R0, runtime_scalars.B0);
             else
                 workspace.residual.pack_scaled_into(
@@ -566,7 +567,7 @@ namespace operators::detail
                                             std::span<const double, Shape::x_size>     x,
                                             PackedVector&                              out) noexcept
         {
-            evaluate_impl(plan, runtime_scalars, workspace, x, out.span(), nullptr);
+            evaluate_impl<false>(plan, runtime_scalars, workspace, x, out.span(), nullptr);
         }
 
         static constexpr void evaluate_scaled_with(const OperatorPlan&                   plan,
@@ -576,7 +577,7 @@ namespace operators::detail
                                                    std::span<double, Shape::x_size>       out,
                                                    const double*                          output_scale) noexcept
         {
-            evaluate_impl(plan, runtime_scalars, workspace, x, out, output_scale);
+            evaluate_impl<true>(plan, runtime_scalars, workspace, x, out, output_scale);
         }
 
         constexpr void evaluate(std::span<const double, Shape::x_size> x, PackedVector& out) noexcept

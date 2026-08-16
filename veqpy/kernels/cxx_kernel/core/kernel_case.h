@@ -686,7 +686,7 @@ namespace cxx_kernel_api
             {
             case SolverKind::LevenbergMarquardt:
 #ifdef ENABLE_ENZYME
-                return "Enzyme batched dense Jacobian through nonlinear::LevenbergMarquardt";
+                return "Enzyme forward dense Jacobian through nonlinear::LevenbergMarquardt";
 #else
                 return "in-tree MINPACK forward difference through nonlinear::LevenbergMarquardt";
 #endif
@@ -698,13 +698,13 @@ namespace cxx_kernel_api
 #endif
             case SolverKind::NewtonRaphson:
 #ifdef ENABLE_ENZYME
-                return "Enzyme batched dense Jacobian through dense Newton";
+                return "Enzyme forward dense Jacobian through dense Newton";
 #else
                 return "finite-difference dense Jacobian through dense Newton";
 #endif
             case SolverKind::Powell:
 #ifdef ENABLE_ENZYME
-                return "Enzyme batched dense Jacobian through nonlinear::Powell";
+                return "Enzyme forward dense Jacobian through nonlinear::Powell";
 #else
                 return "in-tree MINPACK forward difference through nonlinear::Powell";
 #endif

@@ -79,6 +79,8 @@ namespace cxx_python
     using cxx_kernel_api::kernel_s_counts;
 #ifdef ENABLE_ENZYME
     using cxx_kernel_api::enzyme_dense_jacobian_batch_width;
+    using cxx_kernel_api::fill_enzyme_jacobian_z;
+    using cxx_kernel_api::fill_enzyme_jvp_z;
 #endif
 
     using tensor::uninitialized;
@@ -747,6 +749,19 @@ namespace cxx_python
         void jvp_into(MutablePackedArrayView out, PackedArrayView x, PackedArrayView v)
         {
             constexpr size_t n = CompiledShape::x_size;
+#ifdef ENABLE_ENZYME
+            std::array<double, n> z{};
+            std::array<double, n> z_direction{};
+            std::array<double, n> scaled_jvp{};
+            for (size_t i = 0; i < n; ++i)
+            {
+                z[i]           = x.data()[i] / context_->input.x_scale[i];
+                z_direction[i] = v.data()[i] / context_->input.x_scale[i];
+            }
+            fill_enzyme_jvp_z(*context_, z.data(), z_direction.data(), scaled_jvp.data());
+            for (size_t row = 0; row < n; ++row)
+                out.data()[row] = scaled_jvp[row] * context_->input.residual_scale[row];
+#else
             double           v_norm_sq = 0.0;
             double           x_norm_sq = 0.0;
             for (size_t i = 0; i < n; ++i)
@@ -773,11 +788,25 @@ namespace cxx_python
                                    std::span<double, n>{f_plus.data(), n});
             for (size_t i = 0; i < n; ++i)
                 out.data()[i] = (f_plus[i] - f_base[i]) / eps;
+#endif
         }
 
         void jacobian_into(MutableJacobianArrayView out, PackedArrayView x)
         {
             constexpr size_t n = CompiledShape::x_size;
+#ifdef ENABLE_ENZYME
+            std::array<double, n>     z{};
+            std::array<double, n * n> scaled_jacobian_column_major{};
+            for (size_t i = 0; i < n; ++i)
+                z[i] = x.data()[i] / context_->input.x_scale[i];
+            fill_enzyme_jacobian_z(
+                *context_, z.data(), scaled_jacobian_column_major.data(), static_cast<int>(n));
+            for (size_t row = 0; row < n; ++row)
+                for (size_t col = 0; col < n; ++col)
+                    out.data()[row * n + col] =
+                        scaled_jacobian_column_major[row + n * col] *
+                        context_->input.residual_scale[row] / context_->input.x_scale[col];
+#else
             PackedVector     x_plus{uninitialized};
             PackedVector     f_base{uninitialized};
             PackedVector     f_plus{uninitialized};
@@ -795,6 +824,7 @@ namespace cxx_python
                 for (size_t row = 0; row < n; ++row)
                     out.data()[row * n + col] = (f_plus[row] - f_base[row]) / step;
             }
+#endif
         }
 
         double last_elapsed_ms() const noexcept { return last_elapsed_ms_; }

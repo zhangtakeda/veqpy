@@ -42,8 +42,16 @@ class Kernel:
         if not isinstance(topology, KernelTopology):
             raise TypeError(f"topology must be KernelTopology, got {type(topology).__name__}")
         selected_backend = str(backend).strip().lower()
-        if selected_backend not in {"numba", "cxx", "cxx-strict", "cxx-relaxed"}:
-            raise ValueError("backend must be 'numba', 'cxx', 'cxx-strict', or 'cxx-relaxed'")
+        if selected_backend not in {
+            "numba",
+            "cxx",
+            "cxx-strict",
+            "cxx-relaxed",
+            "cxx-enzyme",
+        }:
+            raise ValueError(
+                "backend must be 'numba', 'cxx', 'cxx-strict', 'cxx-relaxed', or 'cxx-enzyme'"
+            )
         self.topology = topology
         self.input = KernelInput.allocate(topology) if input is None else input
         self.output = KernelOutput.allocate(topology) if output is None else output

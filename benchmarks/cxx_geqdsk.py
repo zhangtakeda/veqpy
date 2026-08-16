@@ -23,7 +23,6 @@ if __package__ in {None, ""}:
 
 from benchmarks._common import (
     BACKENDS,
-    ENZYME_SKIP_REASON,
     HISTORICAL_SPEEDUP_RANGE,
     REFERENCE_SOLVER_MAXFEV,
     RUNNABLE_BACKENDS,
@@ -110,8 +109,6 @@ def _measure_case(
             message = f"{type(error).__name__}: {error}"
             build_errors[backend] = message
             engines[backend] = _empty_engine("failed", reason=message)
-
-    engines["cxx-enzyme"] = _empty_engine("skipped", reason=ENZYME_SKIP_REASON)
 
     active = tuple(backend for backend in RUNNABLE_BACKENDS if backend in modules)
     try:
@@ -287,7 +284,9 @@ def _correctness(row: dict[str, Any]) -> dict[str, Any]:
         parity = engine.get("parity_to_numba", {})
         same_input = engine.get("same_input_residual", {})
         residual_atol = (
-            RELAXED_SAME_INPUT_ATOL if backend == "cxx-relaxed" else STRICT_SAME_INPUT_ATOL
+            RELAXED_SAME_INPUT_ATOL
+            if backend in {"cxx-relaxed", "cxx-enzyme"}
+            else STRICT_SAME_INPUT_ATOL
         )
         checks = {
             "engine_passed": engine.get("status") == "passed",
@@ -418,10 +417,7 @@ def main(argv: list[str] | None = None) -> int:
                         "signature": case.signature,
                         "boundary_fit": case.boundary_fit,
                         "backends": {
-                            backend: _empty_engine(
-                                "skipped",
-                                reason="--no-run" if backend != "cxx-enzyme" else ENZYME_SKIP_REASON,
-                            )
+                            backend: _empty_engine("skipped", reason="--no-run")
                             for backend in BACKENDS
                         },
                     }
@@ -456,7 +452,6 @@ def main(argv: list[str] | None = None) -> int:
         "artifact_dir": str(args.artifact_dir.expanduser().resolve()),
         "cpu_affinity": cpu_affinity(),
         "env": runtime_env(),
-        "cxx_enzyme": {"status": "skipped", "reason": ENZYME_SKIP_REASON},
         "performance_qualification": qualification,
         "rows": rows,
     }
@@ -467,7 +462,6 @@ def main(argv: list[str] | None = None) -> int:
     if not args.no_run:
         console.print(f"performance qualification: {qualification['status']}")
     if not args.no_run and qualification["status"] == "failed":
-        console.print("cxx-enzyme remains deferred; no enzyme implementation was started")
         return 2
     return 0
 

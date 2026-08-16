@@ -29,7 +29,7 @@ def _make_kernel_impl(
     kernel_recipe = _BuildPolicy() if recipe is None else recipe
     if not isinstance(kernel_recipe, _BuildPolicy):
         raise TypeError(f"recipe must be _BuildPolicy, got {type(kernel_recipe).__name__}")
-    if kernel_recipe.backend in {"cxx-strict", "cxx-relaxed"}:
+    if kernel_recipe.backend in {"cxx-strict", "cxx-relaxed", "cxx-enzyme"}:
         from veqpy.kernels.cxx_kernel.kernel import _CxxKernelImpl
 
         return _CxxKernelImpl(
@@ -45,4 +45,6 @@ def _make_kernel_impl(
         from veqpy.kernels.numba_kernel.kernel import _NumbaKernelImpl
 
         return _NumbaKernelImpl(topology=topology, recipe=kernel_recipe, config=config)
-    raise ValueError("_BuildPolicy backend selection supports numba, cxx-strict, or cxx-relaxed")
+    raise ValueError(
+        "_BuildPolicy backend selection supports numba, cxx-strict, cxx-relaxed, or cxx-enzyme"
+    )

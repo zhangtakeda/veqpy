@@ -83,9 +83,9 @@ set(
 set(VEQ_LAYOUT_PROFILE_FIRST "0" CACHE STRING "Packed layout switch: 0=degree-first, 1=profile/family-first")
 set(
     VEQ_ENZYME_JACOBIAN_BATCH_WIDTH
-    "0"
+    "1"
     CACHE STRING
-    "Enzyme dense Jacobian batch width; 0 lets the generated kernel choose from x_size"
+    "Enzyme dense Jacobian forward width; production LLVM 22 artifacts use 1"
 )
 
 string(TOUPPER "${VEQPY_CXX_FP_MODE}" VEQPY_CXX_FP_MODE_NORMALIZED)
@@ -386,7 +386,7 @@ function(cxx_enable_enzyme target)
 
     cxx_find_enzyme(enzyme_plugin)
     if(NOT enzyme_plugin)
-        message(FATAL_ERROR "ClangEnzyme plugin not found; set VEQPY_CXX_ENZYME_PLUGIN=/path/to/ClangEnzyme-18.so")
+        message(FATAL_ERROR "ClangEnzyme plugin not found; set VEQPY_CXX_ENZYME_PLUGIN=/path/to/ClangEnzyme-22.so")
     endif()
 
     get_filename_component(enzyme_plugin_name "${enzyme_plugin}" NAME)

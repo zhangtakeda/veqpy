@@ -288,8 +288,8 @@ class _CxxKernelImpl:
 
     @staticmethod
     def _validate_native_recipe(recipe: _BuildPolicy) -> None:
-        if recipe.backend not in {"cxx-strict", "cxx-relaxed"}:
-            raise ValueError("Cxx Kernel requires a strict or relaxed Cxx recipe")
+        if recipe.backend not in {"cxx-strict", "cxx-relaxed", "cxx-enzyme"}:
+            raise ValueError("Cxx Kernel requires a strict, relaxed, or Enzyme Cxx recipe")
 
     @staticmethod
     def _kernel_config(config: _BackendConfig) -> _BackendConfig:

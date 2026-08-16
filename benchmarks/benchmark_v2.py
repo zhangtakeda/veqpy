@@ -66,7 +66,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--backend",
-        choices=("numba", "cxx", "cxx-strict", "cxx-relaxed"),
+        choices=("numba", "cxx", "cxx-strict", "cxx-relaxed", "cxx-enzyme"),
         default="numba",
     )
     parser.add_argument("--repeat", type=int, default=3)

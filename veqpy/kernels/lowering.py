@@ -75,7 +75,9 @@ def build_policy(*, backend: str, layout: str = "degree") -> _BuildPolicy:
         return _BuildPolicy(backend="cxx-strict", layout=layout, build="release-strict")
     if normalized == "cxx-relaxed":
         return _BuildPolicy(backend="cxx-relaxed", layout=layout, build="release-relaxed")
-    raise ValueError("backend must be numba, cxx, cxx-strict, or cxx-relaxed")
+    if normalized == "cxx-enzyme":
+        return _BuildPolicy(backend="cxx-enzyme", layout=layout, build="release-enzyme")
+    raise ValueError("backend must be numba, cxx, cxx-strict, cxx-relaxed, or cxx-enzyme")
 
 
 def private_config(value: KernelConfig) -> object:

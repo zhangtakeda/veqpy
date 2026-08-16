@@ -16,10 +16,10 @@ The JSON contains the SOLOVEV, CHEASE, and EFIT rows, historical profile
 signatures and LCFS-fit metadata, p25/median/p75 timings, nfev, acceptance,
 same-input residual parity, CPU/compiler/artifact metadata, and the secondary
 nonmaterializing Module timings. The backend columns are `numba`,
-`cxx-strict`, `cxx-relaxed`, and `cxx-enzyme`; the last is always explicitly
-`skipped` while cxx-enzyme remains deferred.
+`cxx-strict`, `cxx-relaxed`, and `cxx-enzyme`. Enzyme is executed when
+selected, with plugin/build failures recorded as backend failures.
 
 The performance qualification compares `numba / cxx-relaxed` directly with the
 historical main-branch README range of about 5–11x. A clear Cxx advantage below
-that scale is recorded as a failed qualification; the benchmark then stops and
-does not start enzyme work.
+that scale is recorded as a failed qualification without deleting the measured
+backend evidence.

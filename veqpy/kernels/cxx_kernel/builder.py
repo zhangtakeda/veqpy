@@ -21,6 +21,7 @@ import importlib.metadata
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -92,6 +93,15 @@ class _ArtifactPreparation:
 
 
 @dataclass(frozen=True, slots=True)
+class _EnzymeToolchain:
+    """Resolved build-time Enzyme inputs captured by artifact identity."""
+
+    plugin_path: Path
+    include_dir: Path
+    identity: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
 class CleanResult:
     """Summary returned by :func:`clean` for kernel artifact cache cleanup."""
 
@@ -130,8 +140,8 @@ def prepare(
     recipe = _BuildPolicy(backend="cxx-relaxed", build="release-relaxed") if recipe is None else recipe
     if not isinstance(recipe, _BuildPolicy):
         raise TypeError(f"recipe must be _BuildPolicy, got {type(recipe).__name__}")
-    if recipe.backend not in {"cxx-strict", "cxx-relaxed"}:
-        raise ValueError("Cxx artifact preparation requires a strict or relaxed Cxx recipe")
+    if recipe.backend not in {"cxx-strict", "cxx-relaxed", "cxx-enzyme"}:
+        raise ValueError("Cxx artifact preparation requires a strict, relaxed, or Enzyme recipe")
     if not dry_run:
         validate_supported_for_cxx_backend(topology)
     source_dir = _default_source_dir() if source_dir is None else source_dir.resolve()
@@ -147,7 +157,14 @@ def prepare(
             return _preparation_from_reference(topology, recipe, reference)
 
     cxx = DEFAULT_CXX_COMPILER
-    build_identity = _build_identity(topology, recipe, source_dir=source_dir, cxx=cxx)
+    enzyme_toolchain = _resolve_enzyme_toolchain(recipe, cxx=cxx)
+    build_identity = _build_identity(
+        topology,
+        recipe,
+        source_dir=source_dir,
+        cxx=cxx,
+        enzyme_toolchain=enzyme_toolchain,
+    )
     artifact_id = _compute_artifact_id(topology, recipe, build_identity)
     nanobind_static = _get_or_build_nanobind_static(
         root,
@@ -195,6 +212,7 @@ def prepare(
             cxx,
             artifact_id=artifact_id,
             prebuilt_nanobind_static=nanobind_static["archive_path"],
+            enzyme_toolchain=enzyme_toolchain,
         )
         build_command = [
             "cmake",
@@ -639,6 +657,7 @@ def _cmake_configure_args(
     *,
     artifact_id: str,
     prebuilt_nanobind_static: str | None,
+    enzyme_toolchain: _EnzymeToolchain | None,
 ) -> list[str]:
     kmax_limit = max(2, topology.K_max or 2)
     return [
@@ -652,6 +671,10 @@ def _cmake_configure_args(
         f"-DPython_EXECUTABLE={sys.executable}",
         "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
         f"-DENABLE_ENZYME={_cmake_bool(recipe.enable_enzyme)}",
+        "-DVEQPY_CXX_ENZYME_PLUGIN="
+        + ("" if enzyme_toolchain is None else str(enzyme_toolchain.plugin_path)),
+        "-DVEQPY_CXX_ENZYME_INCLUDE_DIR="
+        + ("" if enzyme_toolchain is None else str(enzyme_toolchain.include_dir)),
         "-DVEQPY_CXX_ENABLE_PYTHON_BINDINGS=ON",
         f"-DVEQPY_CXX_ENABLE_NATIVE_OPTIMIZATIONS={_cmake_bool(recipe.enable_native_optimizations)}",
         f"-DVEQPY_CXX_FP_MODE={recipe.fp_mode}",
@@ -872,12 +895,139 @@ def _native_build_contract(
     }
 
 
+def _resolve_enzyme_toolchain(
+    recipe: _BuildPolicy,
+    *,
+    cxx: str,
+) -> _EnzymeToolchain | None:
+    """Resolve one LLVM-major-matched ClangEnzyme toolchain for a new build.
+
+    This runs only after the build-tool-free artifact pointer misses, so an
+    already compiled ``cxx-enzyme`` artifact remains loadable without a local
+    compiler or plugin installation.
+    """
+
+    if not recipe.enable_enzyme:
+        return None
+
+    cxx_version = _command_version([cxx, "--version"])
+    if cxx_version is None:
+        raise PrepareError(f"cannot execute Cxx compiler required by cxx-enzyme: {cxx}")
+    version_match = re.search(r"(?:Homebrew )?clang version ([0-9]+)", cxx_version)
+    if version_match is None:
+        raise PrepareError(f"cannot determine Clang major from: {cxx_version}")
+    clang_major = int(version_match.group(1))
+    if clang_major != 22:
+        raise PrepareError(f"cxx-enzyme requires LLVM/Clang 22, got Clang {clang_major}")
+
+    names = (
+        f"ClangEnzyme-{clang_major}.dylib",
+        f"ClangEnzyme-{clang_major}.so",
+        "ClangEnzyme.dylib",
+        "ClangEnzyme.so",
+    )
+    candidates: list[Path] = []
+
+    def add_candidate(value: str | Path | None) -> None:
+        if value is None or not str(value).strip():
+            return
+        path = Path(value).expanduser()
+        if path.is_dir():
+            candidates.extend(path / name for name in names)
+        else:
+            candidates.append(path)
+
+    configured_plugin = os.environ.get("VEQPY_CXX_ENZYME_PLUGIN")
+    if configured_plugin is not None:
+        configured_path = Path(configured_plugin).expanduser()
+        if not configured_path.is_file():
+            raise PrepareError(
+                f"VEQPY_CXX_ENZYME_PLUGIN does not name a file: {configured_path}"
+            )
+        add_candidate(configured_path)
+    else:
+        add_candidate(os.environ.get("ENZYME_PLUGIN"))
+        for value in os.environ.get("ENZYME_PLUGIN_PATH", "").split(os.pathsep):
+            add_candidate(value)
+        for directory in (
+            Path("/opt/homebrew/opt/enzyme/lib"),
+            Path("/usr/local/opt/enzyme/lib"),
+            Path("/opt/homebrew/lib"),
+            Path("/usr/local/lib"),
+            Path(f"/usr/lib/llvm-{clang_major}/lib"),
+            Path("/usr/lib"),
+        ):
+            add_candidate(directory)
+
+    plugin_path = next((path.resolve() for path in candidates if path.is_file()), None)
+    if plugin_path is None:
+        raise PrepareError(
+            "ClangEnzyme 22 plugin not found; install a matching Enzyme toolchain or set "
+            "VEQPY_CXX_ENZYME_PLUGIN"
+        )
+    plugin_major_match = re.match(r"ClangEnzyme-([0-9]+)", plugin_path.name)
+    if plugin_major_match is not None and int(plugin_major_match.group(1)) != clang_major:
+        raise PrepareError(
+            f"ClangEnzyme LLVM major {plugin_major_match.group(1)} cannot be loaded by "
+            f"Clang {clang_major}"
+        )
+
+    include_candidates: list[Path] = []
+    configured_include = os.environ.get("VEQPY_CXX_ENZYME_INCLUDE_DIR")
+    if configured_include:
+        configured_include_path = Path(configured_include).expanduser()
+        if not (configured_include_path / "enzyme" / "enzyme").is_file():
+            raise PrepareError(
+                "VEQPY_CXX_ENZYME_INCLUDE_DIR does not contain enzyme/enzyme: "
+                f"{configured_include_path}"
+            )
+        include_candidates.append(configured_include_path)
+    else:
+        include_candidates.extend(
+            (
+                plugin_path.parent.parent / "include",
+                Path("/opt/homebrew/opt/enzyme/include"),
+                Path("/usr/local/opt/enzyme/include"),
+                Path(f"/usr/lib/llvm-{clang_major}/include"),
+                Path("/usr/local/include"),
+            )
+        )
+    include_dir = next(
+        (
+            path.resolve()
+            for path in include_candidates
+            if (path / "enzyme" / "enzyme").is_file()
+        ),
+        None,
+    )
+    if include_dir is None:
+        raise PrepareError(
+            "Enzyme C++ headers not found; set VEQPY_CXX_ENZYME_INCLUDE_DIR to the include prefix"
+        )
+    header_path = include_dir / "enzyme" / "enzyme"
+    identity = {
+        "schema": "veqpy.cxx.enzyme_toolchain.v1",
+        "clang_major": clang_major,
+        "plugin_path": str(plugin_path),
+        "plugin_sha256": _file_sha256(plugin_path),
+        "include_dir": str(include_dir),
+        "header_sha256": _file_sha256(header_path),
+        "version": _command_version(["brew", "list", "--versions", "enzyme"]),
+    }
+    return _EnzymeToolchain(
+        plugin_path=plugin_path,
+        include_dir=include_dir,
+        identity=identity,
+    )
+
+
 def _build_identity(
     topology: KernelTopology,
     recipe: _BuildPolicy,
     *,
     source_dir: Path,
     cxx: str,
+    enzyme_toolchain: _EnzymeToolchain | None,
 ) -> dict[str, Any]:
     return {
         "schema": "veqpy.cxx.kernel_build_identity.v2",
@@ -892,6 +1042,7 @@ def _build_identity(
             "cxx": cxx,
             "cxx_version": _command_version([cxx, "--version"]),
             "nanobind": _package_version("nanobind"),
+            "enzyme": None if enzyme_toolchain is None else enzyme_toolchain.identity,
         },
         "native_build_contract": _native_build_contract(topology, recipe, cxx=cxx),
         "cxx_source_digest": _source_digest(source_dir),

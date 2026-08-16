@@ -19,7 +19,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--links", action="store_true", help="print project links")
     parser.add_argument(
         "--demo",
-        choices=("numba", "cxx", "cxx-strict", "cxx-relaxed"),
+        choices=("numba", "cxx", "cxx-strict", "cxx-relaxed", "cxx-enzyme"),
         help="run the minimal Module demo",
     )
     args = parser.parse_args(argv)

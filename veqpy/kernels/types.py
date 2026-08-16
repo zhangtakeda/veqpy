@@ -72,8 +72,17 @@ _BUILD_PRESET_KWARGS: dict[str, dict[str, object]] = {
         "enable_thin_lto": True,
         "analysis": False,
     },
+    "release-enzyme": {
+        "cmake_build_type": "Release",
+        "fp_mode": "RELAXED",
+        "enable_enzyme": True,
+        "enable_native_optimizations": True,
+        "enable_thin_lto": True,
+        "analysis": False,
+    },
 }
 _DEFAULT_ENZYME_JACOBIAN_BATCH_WIDTH = 0
+_PRODUCTION_ENZYME_JACOBIAN_BATCH_WIDTH = 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,11 +106,16 @@ class _BuildPolicy:
         backend = _normalize_backend(self.backend)
         requested_build = _normalize_build(self.build)
         if requested_build == "numba" and backend != "numba":
-            requested_build = "release-strict" if backend == "cxx-strict" else "release-relaxed"
+            requested_build = {
+                "cxx-strict": "release-strict",
+                "cxx-relaxed": "release-relaxed",
+                "cxx-enzyme": "release-enzyme",
+            }[backend]
         expected_build = {
             "numba": "numba",
             "cxx-strict": "release-strict",
             "cxx-relaxed": "release-relaxed",
+            "cxx-enzyme": "release-enzyme",
         }[backend]
         if requested_build != expected_build:
             raise TopologyError(
@@ -140,11 +154,34 @@ class _BuildPolicy:
                 name="analysis",
             ),
             "enzyme_jacobian_batch_width": _canonical_enzyme_jacobian_batch_width(
-                self.enzyme_jacobian_batch_width
+                self.enzyme_jacobian_batch_width,
+                default=(
+                    _PRODUCTION_ENZYME_JACOBIAN_BATCH_WIDTH
+                    if backend == "cxx-enzyme"
+                    else _DEFAULT_ENZYME_JACOBIAN_BATCH_WIDTH
+                ),
             ),
             "layout_code": LAYOUT_CODES[layout],
             "layout_profile_first": layout == "family",
         }
+        expected_enzyme = backend == "cxx-enzyme"
+        if bool(normalized_values["enable_enzyme"]) != expected_enzyme:
+            raise TopologyError(
+                f"backend={backend!r} requires enable_enzyme={expected_enzyme!r}"
+            )
+        expected_enzyme_width = (
+            _PRODUCTION_ENZYME_JACOBIAN_BATCH_WIDTH if expected_enzyme else 0
+        )
+        if normalized_values["enzyme_jacobian_batch_width"] != expected_enzyme_width:
+            raise TopologyError(
+                f"backend={backend!r} requires "
+                f"enzyme_jacobian_batch_width={expected_enzyme_width}"
+            )
+        expected_fp_mode = "RELAXED" if backend in {"cxx-relaxed", "cxx-enzyme"} else "STRICT"
+        if normalized_values["fp_mode"] != expected_fp_mode:
+            raise TopologyError(
+                f"backend={backend!r} requires fp_mode={expected_fp_mode!r}"
+            )
         for name, value in normalized_values.items():
             object.__setattr__(self, name, value)
 
@@ -789,7 +826,9 @@ def _normalize_build(value: str) -> str:
     normalized = _normalize_token(value, "build").lower()
     if normalized in _BUILD_PRESET_KWARGS:
         return normalized
-    raise TopologyError("internal build must be numba, release-strict, or release-relaxed")
+    raise TopologyError(
+        "internal build must be numba, release-strict, release-relaxed, or release-enzyme"
+    )
 
 
 def _validate_source_constraint(route: str, ip_constraint: bool, beta_constraint: bool) -> None:
@@ -818,7 +857,7 @@ def _normalize_backend(value: str) -> str:
     normalized = _normalize_token(value, "backend").lower()
     if normalized in SUPPORTED_BACKENDS:
         return "cxx-relaxed" if normalized == "cxx" else normalized
-    raise TopologyError("backend must be numba, cxx, cxx-strict, or cxx-relaxed")
+    raise TopologyError("backend must be numba, cxx, cxx-strict, cxx-relaxed, or cxx-enzyme")
 
 
 def _source_active_family(
@@ -905,9 +944,9 @@ def _canonical_bool_or_default(value: bool | None, *, default: bool, name: str) 
     return _canonical_bool(value, name)
 
 
-def _canonical_enzyme_jacobian_batch_width(value: int | None) -> int:
+def _canonical_enzyme_jacobian_batch_width(value: int | None, *, default: int) -> int:
     if value is None:
-        return _DEFAULT_ENZYME_JACOBIAN_BATCH_WIDTH
+        return default
     return _nonnegative_int(value, "enzyme_jacobian_batch_width")
 
 

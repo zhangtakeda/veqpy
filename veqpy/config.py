@@ -155,7 +155,7 @@ def solver_config(value: Mapping[str, Any] | None = None) -> KernelConfig:
 
 
 def normalize_backend(value: str) -> str:
-    """Normalize the four supported backend tokens."""
+    """Normalize the five supported backend tokens and the ``cxx`` alias."""
 
     normalized = str(value).strip().lower()
     if normalized not in SUPPORTED_BACKENDS:
