@@ -159,8 +159,10 @@ configuration. Structural evidence is collected with:
 .venv/bin/twine check dist/*
 ```
 
-The benchmark entry point is `benchmarks/benchmark_v2.py`; it measures one
-prepared Module and accepts all five backend tokens. This development branch
+The maintained benchmark entry points are `benchmarks/cxx_geqdsk.py` for
+three-file backend qualification and `benchmarks/kernel_routes.py` for the
+fixed `4 Kernel x 7 route x 3 coordinate` matrix. Formal timings exclude
+artifact builds, imports, and Numba JIT preparation. This development branch
 is not declared release-ready solely because these structural gates pass.
 
 ## Repository boundary
