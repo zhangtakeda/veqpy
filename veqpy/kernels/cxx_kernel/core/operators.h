@@ -199,7 +199,7 @@ namespace operators::detail
                 {
                     if constexpr ((SourceRouteCode == source_route_pj2 || SourceRouteCode == source_route_pj3) &&
                                   SourceCoordinateCode == source_coordinate_psin &&
-                                  SourceNodesCode == source_nodes_uniform)
+                                  SourceNodesCode != source_nodes_grid)
                     {
                         // PJ2/PJ3 remap their effective source samples inside
                         // the coupled psin/current fixed-point loop.
@@ -211,8 +211,12 @@ namespace operators::detail
                     }
                     else if constexpr (SourceNodesCode == source_nodes_grid)
                         workspace.source_runtime.materialize_grid_sources();
+                    else if constexpr (SourceCoordinateCode == source_coordinate_r &&
+                                       (SourceRouteCode == source_route_pp ||
+                                        SourceRouteCode == source_route_pi))
+                        workspace.source_runtime.template materialize_r_sources<true>();
                     else
-                        workspace.source_runtime.materialize_r_uniform_sources();
+                        workspace.source_runtime.materialize_r_sources();
                 }
                 if constexpr (SourceActiveFamilyCode == source_active_F)
                     workspace.source_runtime.materialize_active_F(workspace.profiles);
@@ -241,9 +245,16 @@ namespace operators::detail
             }
             else if constexpr (SourceRouteCode == source_route_pp)
             {
-                if constexpr (SourceCoordinateCode == source_coordinate_r ||
-                              SourceCoordinateCode == source_coordinate_rho)
-                    workspace.source_runtime.template update_pp_r<SourceConstraintCode>(
+                if constexpr (SourceCoordinateCode == source_coordinate_r)
+                    workspace.source_runtime.template update_pp_r<SourceConstraintCode, true>(
+                        workspace.geometry,
+                        runtime_scalars.p0,
+                        runtime_scalars.Ip,
+                        runtime_scalars.beta,
+                        runtime_scalars.B0,
+                        plan.n_axis_fix);
+                else if constexpr (SourceCoordinateCode == source_coordinate_rho)
+                    workspace.source_runtime.template update_pp_r<SourceConstraintCode, false>(
                         workspace.geometry,
                         runtime_scalars.p0,
                         runtime_scalars.Ip,
@@ -261,9 +272,16 @@ namespace operators::detail
             }
             else if constexpr (SourceRouteCode == source_route_pi)
             {
-                if constexpr (SourceCoordinateCode == source_coordinate_r ||
-                              SourceCoordinateCode == source_coordinate_rho)
-                    workspace.source_runtime.template update_pi_r<SourceConstraintCode>(
+                if constexpr (SourceCoordinateCode == source_coordinate_r)
+                    workspace.source_runtime.template update_pi_r<SourceConstraintCode, true>(
+                        workspace.geometry,
+                        runtime_scalars.p0,
+                        runtime_scalars.Ip,
+                        runtime_scalars.beta,
+                        runtime_scalars.B0,
+                        plan.n_axis_fix);
+                else if constexpr (SourceCoordinateCode == source_coordinate_rho)
+                    workspace.source_runtime.template update_pi_r<SourceConstraintCode, false>(
                         workspace.geometry,
                         runtime_scalars.p0,
                         runtime_scalars.Ip,
@@ -311,8 +329,8 @@ namespace operators::detail
                         runtime_scalars.beta,
                         runtime_scalars.B0,
                         plan.n_axis_fix);
-                else if constexpr (SourceNodesCode == source_nodes_uniform)
-                    workspace.source_runtime.template update_pj2_psin_uniform_fixed_point<SourceConstraintCode>(
+                else if constexpr (SourceNodesCode != source_nodes_grid)
+                    workspace.source_runtime.template update_pj2_psin_fixed_point<SourceConstraintCode>(
                         workspace.geometry,
                         runtime_scalars.R0,
                         runtime_scalars.p0,
@@ -342,8 +360,8 @@ namespace operators::detail
                         runtime_scalars.beta,
                         runtime_scalars.B0,
                         plan.n_axis_fix);
-                else if constexpr (SourceNodesCode == source_nodes_uniform)
-                    workspace.source_runtime.template update_pj3_psin_uniform_fixed_point<SourceConstraintCode>(
+                else if constexpr (SourceNodesCode != source_nodes_grid)
+                    workspace.source_runtime.template update_pj3_psin_fixed_point<SourceConstraintCode>(
                         workspace.geometry,
                         runtime_scalars.R0,
                         runtime_scalars.p0,

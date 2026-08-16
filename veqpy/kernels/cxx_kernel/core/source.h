@@ -33,8 +33,8 @@ namespace source::detail
     inline constexpr size_t profile_radial  = 1;
     inline constexpr size_t profile_radial2 = 2;
 
-    inline constexpr size_t pj2_psin_uniform_fixed_point_max_iter = 16;
-    inline constexpr double pj2_psin_uniform_fixed_point_max_residual = 1.0e-10;
+    inline constexpr size_t pj23_psin_fixed_point_max_iter = 16;
+    inline constexpr double pj23_psin_fixed_point_max_residual = 1.0e-10;
     inline constexpr size_t rho_fixed_point_max_iter = 16;
     inline constexpr double rho_fixed_point_max_residual = 1.0e-6;
     // Fixed axis cutoff: radial nodes with r below this value use axis-regularized profiles.
@@ -127,6 +127,7 @@ namespace source::detail
         RadialVector source_rho_rc1{};
         RadialVector materialized_pprime_input{};
         RadialVector materialized_driver_input{};
+        RadialVector materialized_driver_derivative{};
         RootFields   profile_root_fields{};
         RootFields   source_target_root_fields{};
         RadialVector active_F{};
@@ -200,13 +201,14 @@ namespace source::detail
             source_materialization_initialized = false;
         }
 
-        constexpr void materialize_r_uniform_sources() noexcept
+        template <bool DifferentiateDriver = false>
+        constexpr void materialize_r_sources() noexcept
         {
             if (source_materialization_initialized)
                 return;
             for (size_t i = 0; i < radial_nodes; ++i)
                 source_parameter_query[i] = GridType::nodes[i];
-            interpolate_source_pair();
+            interpolate_source_pair<DifferentiateDriver>();
             source_materialization_initialized = true;
         }
 
@@ -720,7 +722,9 @@ namespace source::detail
             }
         }
 
-        template <int SourceConstraintCode, typename GeometryRuntime>
+        template <int SourceConstraintCode,
+                  bool UseMaterializedDriverDerivative = false,
+                  typename GeometryRuntime>
         constexpr void update_pp_r(const GeometryRuntime& geometry,
                                      double                 p0,
                                      double                 Ip,
@@ -728,7 +732,8 @@ namespace source::detail
                                      double                 B0,
                                      size_t                 n_axis_fix) noexcept
         {
-            update_pp<SourceConstraintCode, true>(geometry, p0, Ip, beta, B0, n_axis_fix);
+            update_pp<SourceConstraintCode, true, UseMaterializedDriverDerivative>(
+                geometry, p0, Ip, beta, B0, n_axis_fix);
         }
 
         template <int SourceConstraintCode, typename GeometryRuntime>
@@ -739,10 +744,13 @@ namespace source::detail
                                       double                 B0,
                                       size_t                 n_axis_fix) noexcept
         {
-            update_pp<SourceConstraintCode, false>(geometry, p0, Ip, beta, B0, n_axis_fix);
+            update_pp<SourceConstraintCode, false, false>(
+                geometry, p0, Ip, beta, B0, n_axis_fix);
         }
 
-        template <int SourceConstraintCode, typename GeometryRuntime>
+        template <int SourceConstraintCode,
+                  bool UseMaterializedDriverDerivative = false,
+                  typename GeometryRuntime>
         constexpr void update_pi_r(const GeometryRuntime& geometry,
                                      double                 p0,
                                      double                 Ip,
@@ -750,7 +758,8 @@ namespace source::detail
                                      double                 B0,
                                      size_t                 n_axis_fix) noexcept
         {
-            update_pi<SourceConstraintCode, true>(geometry, p0, Ip, beta, B0, n_axis_fix);
+            update_pi<SourceConstraintCode, true, UseMaterializedDriverDerivative>(
+                geometry, p0, Ip, beta, B0, n_axis_fix);
         }
 
         template <int SourceConstraintCode, typename GeometryRuntime>
@@ -761,7 +770,8 @@ namespace source::detail
                                       double                 B0,
                                       size_t                 n_axis_fix) noexcept
         {
-            update_pi<SourceConstraintCode, false>(geometry, p0, Ip, beta, B0, n_axis_fix);
+            update_pi<SourceConstraintCode, false, false>(
+                geometry, p0, Ip, beta, B0, n_axis_fix);
         }
 
         template <int SourceConstraintCode, typename GeometryRuntime>
@@ -811,13 +821,13 @@ namespace source::detail
         }
 
         template <int SourceConstraintCode, typename GeometryRuntime>
-        constexpr void update_pj2_psin_uniform_fixed_point(const GeometryRuntime& geometry,
-                                                           double                 R0,
-                                                           double                 p0,
-                                                           double                 Ip,
-                                                           double                 beta,
-                                                           double                 B0,
-                                                           size_t                 n_axis_fix) noexcept
+        constexpr void update_pj2_psin_fixed_point(const GeometryRuntime& geometry,
+                                                   double                 R0,
+                                                   double                 p0,
+                                                   double                 Ip,
+                                                   double                 beta,
+                                                   double                 B0,
+                                                   size_t                 n_axis_fix) noexcept
         {
             static_assert(GeometryRuntime::radial_nodes == radial_nodes, "source/geometry radial grids must match");
 
@@ -826,18 +836,27 @@ namespace source::detail
                 seed_psin_query_from_passive_psin_profile();
                 source_materialization_initialized = true;
             }
-            for (size_t iter = 0; iter < pj2_psin_uniform_fixed_point_max_iter; ++iter)
+            bool converged = false;
+            for (size_t iter = 0; iter < pj23_psin_fixed_point_max_iter; ++iter)
             {
                 for (size_t i = 0; i < radial_nodes; ++i)
                     source_parameter_query[i] = source_psin_query[i];
-                if constexpr (SourceConstraintCode == 1 || SourceConstraintCode == 3)
-                    interpolate_source_pair();
-                else
-                    local_polynomial_interpolate_pair();
+                interpolate_source_pair();
 
                 update_pj2_psin<SourceConstraintCode>(geometry, R0, p0, Ip, beta, B0, n_axis_fix);
                 if (update_fixed_point_psin_query())
+                {
+                    converged = true;
                     break;
+                }
+            }
+
+            if (!converged)
+            {
+                alpha1 = std::numeric_limits<double>::quiet_NaN();
+                alpha2 = std::numeric_limits<double>::quiet_NaN();
+                source_target_root_fields.fill(std::numeric_limits<double>::quiet_NaN());
+                return;
             }
 
             for (size_t i = 0; i < radial_nodes; ++i)
@@ -869,13 +888,13 @@ namespace source::detail
         }
 
         template <int SourceConstraintCode, typename GeometryRuntime>
-        constexpr void update_pj3_psin_uniform_fixed_point(const GeometryRuntime& geometry,
-                                                           double                 R0,
-                                                           double                 p0,
-                                                           double                 Ip,
-                                                           double                 beta,
-                                                           double                 B0,
-                                                           size_t                 n_axis_fix) noexcept
+        constexpr void update_pj3_psin_fixed_point(const GeometryRuntime& geometry,
+                                                   double                 R0,
+                                                   double                 p0,
+                                                   double                 Ip,
+                                                   double                 beta,
+                                                   double                 B0,
+                                                   size_t                 n_axis_fix) noexcept
         {
             static_assert(GeometryRuntime::radial_nodes == radial_nodes, "source/geometry radial grids must match");
 
@@ -884,18 +903,27 @@ namespace source::detail
                 seed_psin_query_from_passive_psin_profile();
                 source_materialization_initialized = true;
             }
-            for (size_t iter = 0; iter < pj2_psin_uniform_fixed_point_max_iter; ++iter)
+            bool converged = false;
+            for (size_t iter = 0; iter < pj23_psin_fixed_point_max_iter; ++iter)
             {
                 for (size_t i = 0; i < radial_nodes; ++i)
                     source_parameter_query[i] = source_psin_query[i];
-                if constexpr (SourceConstraintCode == 1 || SourceConstraintCode == 3)
-                    interpolate_source_pair();
-                else
-                    local_polynomial_interpolate_pair();
+                interpolate_source_pair();
 
                 update_pj3_psin<SourceConstraintCode>(geometry, R0, p0, Ip, beta, B0, n_axis_fix);
                 if (update_fixed_point_psin_query())
+                {
+                    converged = true;
                     break;
+                }
+            }
+
+            if (!converged)
+            {
+                alpha1 = std::numeric_limits<double>::quiet_NaN();
+                alpha2 = std::numeric_limits<double>::quiet_NaN();
+                source_target_root_fields.fill(std::numeric_limits<double>::quiet_NaN());
+                return;
             }
 
             for (size_t i = 0; i < radial_nodes; ++i)
@@ -1249,6 +1277,40 @@ namespace source::detail
                     source_target_root_fields(root_psin_r, i) = 1.0e-10;
         }
 
+        static constexpr void regularize_psin_r_with_derivative(
+            RadialVector& psin_r,
+            RadialVector& psin_rr,
+            size_t        n_axis_fix) noexcept
+        {
+            if (n_axis_fix > 0 && n_axis_fix + 1 < radial_nodes)
+            {
+                const size_t anchor0 = n_axis_fix;
+                const size_t anchor1 = n_axis_fix + 1;
+                const double r0 = GridType::nodes[anchor0];
+                const double r1 = GridType::nodes[anchor1];
+                const double x0 = r0 * r0;
+                const double x1 = r1 * r1;
+                const double slope0 = psin_r[anchor0] / r0;
+                const double slope1 = psin_r[anchor1] / r1;
+                const double gradient = (slope1 - slope0) / (x1 - x0);
+                for (size_t i = 0; i < n_axis_fix; ++i)
+                {
+                    const double r_i = GridType::nodes[i];
+                    const double x_i = r_i * r_i;
+                    psin_r[i] = r_i * (slope0 + gradient * (x_i - x0));
+                    psin_rr[i] = slope0 + gradient * (3.0 * x_i - x0);
+                }
+            }
+            for (size_t i = 0; i < radial_nodes; ++i)
+            {
+                if (psin_r[i] < 1.0e-10)
+                {
+                    psin_r[i] = 1.0e-10;
+                    psin_rr[i] = 0.0;
+                }
+            }
+        }
+
         constexpr void update_psin_coordinate() noexcept
         {
             const auto   psin_r = const_root_row<root_psin_r>();
@@ -1368,6 +1430,7 @@ namespace source::detail
             return weight;
         }
 
+        template <bool DifferentiateDriver = false>
         constexpr void local_barycentric_interpolate_pair() noexcept
         {
             if (active_count <= 1)
@@ -1376,6 +1439,8 @@ namespace source::detail
                 {
                     materialized_pprime_input[i] = pprime_input[0];
                     materialized_driver_input[i] = driver_input[0];
+                    if constexpr (DifferentiateDriver)
+                        materialized_driver_derivative[i] = 0.0;
                 }
             }
             else
@@ -1393,12 +1458,37 @@ namespace source::detail
                     {
                         materialized_pprime_input[i] = pprime_input[nearest];
                         materialized_driver_input[i] = driver_input[nearest];
+                        if constexpr (DifferentiateDriver)
+                        {
+                            const size_t hit_local = nearest - start;
+                            const double hit_weight =
+                                effective_stencil == stencil_size
+                                    ? SourceShape::barycentric_weights[hit_local]
+                                    : local_barycentric_weight(hit_local, effective_stencil);
+                            double derivative = 0.0;
+                            for (size_t local_j = 0; local_j < effective_stencil; ++local_j)
+                            {
+                                if (local_j == hit_local)
+                                    continue;
+                                const size_t j = start + local_j;
+                                const double weight =
+                                    effective_stencil == stencil_size
+                                        ? SourceShape::barycentric_weights[local_j]
+                                        : local_barycentric_weight(local_j, effective_stencil);
+                                const double x_j = static_cast<double>(j) / denom_scale;
+                                const double factor = weight / (hit_weight * (x_nearest - x_j));
+                                derivative += factor * (driver_input[j] - driver_input[nearest]);
+                            }
+                            materialized_driver_derivative[i] = derivative;
+                        }
                         continue;
                     }
 
                     double denominator      = 0.0;
                     double numerator_pprime = 0.0;
                     double numerator_driver = 0.0;
+                    double denominator_derivative = 0.0;
+                    double numerator_driver_derivative = 0.0;
                     for (size_t local_j = 0; local_j < effective_stencil; ++local_j)
                     {
                         const size_t j = start + local_j;
@@ -1409,13 +1499,28 @@ namespace source::detail
                         denominator += term;
                         numerator_pprime += term * pprime_input[j];
                         numerator_driver += term * driver_input[j];
+                        if constexpr (DifferentiateDriver)
+                        {
+                            const double inverse = 1.0 / (q - static_cast<double>(j) / denom_scale);
+                            const double derivative_term = -term * inverse;
+                            denominator_derivative += derivative_term;
+                            numerator_driver_derivative += derivative_term * driver_input[j];
+                        }
                     }
                     materialized_pprime_input[i] = numerator_pprime / denominator;
                     materialized_driver_input[i] = numerator_driver / denominator;
+                    if constexpr (DifferentiateDriver)
+                    {
+                        materialized_driver_derivative[i] =
+                            (numerator_driver_derivative -
+                             materialized_driver_input[i] * denominator_derivative) /
+                            denominator;
+                    }
                 }
             }
         }
 
+        template <bool DifferentiateDriver = false>
         constexpr void local_explicit_barycentric_interpolate_pair() noexcept
         {
             if (active_count <= 1)
@@ -1424,12 +1529,14 @@ namespace source::detail
                 {
                     materialized_pprime_input[i] = pprime_input[0];
                     materialized_driver_input[i] = driver_input[0];
+                    if constexpr (DifferentiateDriver)
+                        materialized_driver_derivative[i] = 0.0;
                 }
                 return;
             }
             if (source_nodes_uniform)
             {
-                local_barycentric_interpolate_pair();
+                local_barycentric_interpolate_pair<DifferentiateDriver>();
                 return;
             }
 
@@ -1459,6 +1566,8 @@ namespace source::detail
                 const size_t start = unclipped_start < max_start ? unclipped_start : max_start;
 
                 bool hit = false;
+                size_t hit_local = 0;
+                size_t hit_index = 0;
                 for (size_t local_j = 0; local_j < effective_stencil; ++local_j)
                 {
                     const size_t j = start + local_j;
@@ -1467,15 +1576,56 @@ namespace source::detail
                         materialized_pprime_input[i] = pprime_input[j];
                         materialized_driver_input[i] = driver_input[j];
                         hit = true;
+                        hit_local = local_j;
+                        hit_index = j;
                         break;
                     }
                 }
                 if (hit)
+                {
+                    if constexpr (DifferentiateDriver)
+                    {
+                        double hit_weight = 1.0;
+                        for (size_t local_k = 0; local_k < effective_stencil; ++local_k)
+                        {
+                            if (local_k != hit_local)
+                            {
+                                hit_weight /= source_coordinate_nodes[hit_index] -
+                                              source_coordinate_nodes[start + local_k];
+                            }
+                        }
+                        double derivative = 0.0;
+                        for (size_t local_j = 0; local_j < effective_stencil; ++local_j)
+                        {
+                            if (local_j == hit_local)
+                                continue;
+                            const size_t j = start + local_j;
+                            double weight = 1.0;
+                            for (size_t local_k = 0; local_k < effective_stencil; ++local_k)
+                            {
+                                if (local_k != local_j)
+                                {
+                                    weight /= source_coordinate_nodes[j] -
+                                              source_coordinate_nodes[start + local_k];
+                                }
+                            }
+                            const double factor =
+                                weight /
+                                (hit_weight *
+                                 (source_coordinate_nodes[hit_index] - source_coordinate_nodes[j]));
+                            derivative += factor *
+                                          (driver_input[j] - driver_input[hit_index]);
+                        }
+                        materialized_driver_derivative[i] = derivative;
+                    }
                     continue;
+                }
 
                 double denominator = 0.0;
                 double numerator_pprime = 0.0;
                 double numerator_driver = 0.0;
+                double denominator_derivative = 0.0;
+                double numerator_driver_derivative = 0.0;
                 for (size_t local_j = 0; local_j < effective_stencil; ++local_j)
                 {
                     const size_t j = start + local_j;
@@ -1485,143 +1635,37 @@ namespace source::detail
                         if (local_k != local_j)
                             weight /= source_coordinate_nodes[j] - source_coordinate_nodes[start + local_k];
                     }
-                    const double term = weight / (query - source_coordinate_nodes[j]);
+                    const double inverse = 1.0 / (query - source_coordinate_nodes[j]);
+                    const double term = weight * inverse;
                     denominator += term;
                     numerator_pprime += term * pprime_input[j];
                     numerator_driver += term * driver_input[j];
+                    if constexpr (DifferentiateDriver)
+                    {
+                        const double derivative_term = -term * inverse;
+                        denominator_derivative += derivative_term;
+                        numerator_driver_derivative += derivative_term * driver_input[j];
+                    }
                 }
                 materialized_pprime_input[i] = numerator_pprime / denominator;
                 materialized_driver_input[i] = numerator_driver / denominator;
+                if constexpr (DifferentiateDriver)
+                {
+                    materialized_driver_derivative[i] =
+                        (numerator_driver_derivative -
+                         materialized_driver_input[i] * denominator_derivative) /
+                        denominator;
+                }
             }
         }
 
+        template <bool DifferentiateDriver = false>
         constexpr void interpolate_source_pair() noexcept
         {
             if (explicit_source_interpolation)
-                local_explicit_barycentric_interpolate_pair();
+                local_explicit_barycentric_interpolate_pair<DifferentiateDriver>();
             else
-                local_barycentric_interpolate_pair();
-        }
-
-        constexpr void local_polynomial_interpolate_pair() noexcept
-        {
-            if constexpr (sample_count == 1)
-            {
-                for (size_t i = 0; i < radial_nodes; ++i)
-                {
-                    materialized_pprime_input[i] = pprime_input[0];
-                    materialized_driver_input[i] = driver_input[0];
-                }
-            }
-            else
-            {
-                constexpr double interval_count = static_cast<double>(sample_count - 1);
-                constexpr size_t last_interval  = sample_count - 2;
-                for (size_t i = 0; i < radial_nodes; ++i)
-                {
-                    const double q = clip_unit(source_parameter_query[i]);
-                    double       t = 0.0;
-                    size_t       interval = static_cast<size_t>(q * interval_count);
-                    if (interval > last_interval)
-                    {
-                        interval = last_interval;
-                        t        = 1.0;
-                    }
-                    else
-                    {
-                        t = q * interval_count - static_cast<double>(interval);
-                    }
-                    materialized_pprime_input[i] =
-                        evaluate_local_polynomial_value(pprime_input, interval, t);
-                    materialized_driver_input[i] =
-                        evaluate_local_polynomial_value(driver_input, interval, t);
-                }
-            }
-        }
-
-        static constexpr double evaluate_local_polynomial_value(const SourceVector& samples,
-                                                                size_t              interval,
-                                                                double              t) noexcept
-        {
-            if constexpr (sample_count == 1)
-            {
-                (void)interval;
-                (void)t;
-                return samples[0];
-            }
-            else if constexpr (sample_count == 2)
-            {
-                (void)interval;
-                const double y0 = samples[0];
-                const double y1 = samples[1];
-                return y0 + t * (y1 - y0);
-            }
-            else if constexpr (sample_count == 3)
-            {
-                double c0 = 0.0;
-                double c1 = 0.0;
-                double c2 = 0.0;
-                if (interval == 0)
-                {
-                    const double y0 = samples[0];
-                    const double y1 = samples[1];
-                    const double y2 = samples[2];
-                    c0              = y0;
-                    c1              = -1.5 * y0 + 2.0 * y1 - 0.5 * y2;
-                    c2              = 0.5 * y0 - y1 + 0.5 * y2;
-                }
-                else
-                {
-                    const double y0 = samples[interval - 1];
-                    const double y1 = samples[interval];
-                    const double y2 = samples[interval + 1];
-                    c0              = y1;
-                    c1              = -0.5 * y0 + 0.5 * y2;
-                    c2              = 0.5 * y0 - y1 + 0.5 * y2;
-                }
-                return (c2 * t + c1) * t + c0;
-            }
-            else
-            {
-                double c0 = 0.0;
-                double c1 = 0.0;
-                double c2 = 0.0;
-                double c3 = 0.0;
-                if (interval == 0)
-                {
-                    const double y0 = samples[0];
-                    const double y1 = samples[1];
-                    const double y2 = samples[2];
-                    const double y3 = samples[3];
-                    c0              = y0;
-                    c1              = (-11.0 * y0 + 18.0 * y1 - 9.0 * y2 + 2.0 * y3) / 6.0;
-                    c2              = y0 - 2.5 * y1 + 2.0 * y2 - 0.5 * y3;
-                    c3              = (-y0 + 3.0 * y1 - 3.0 * y2 + y3) / 6.0;
-                }
-                else if (interval == sample_count - 2)
-                {
-                    const double y0 = samples[interval - 2];
-                    const double y1 = samples[interval - 1];
-                    const double y2 = samples[interval];
-                    const double y3 = samples[interval + 1];
-                    c0              = y2;
-                    c1              = (y0 - 6.0 * y1 + 3.0 * y2 + 2.0 * y3) / 6.0;
-                    c2              = 0.5 * y1 - y2 + 0.5 * y3;
-                    c3              = (-y0 + 3.0 * y1 - 3.0 * y2 + y3) / 6.0;
-                }
-                else
-                {
-                    const double y0 = samples[interval - 1];
-                    const double y1 = samples[interval];
-                    const double y2 = samples[interval + 1];
-                    const double y3 = samples[interval + 2];
-                    c0              = y1;
-                    c1              = (-2.0 * y0 - 3.0 * y1 + 6.0 * y2 - y3) / 6.0;
-                    c2              = 0.5 * y0 - y1 + 0.5 * y2;
-                    c3              = (-y0 + 3.0 * y1 - 3.0 * y2 + y3) / 6.0;
-                }
-                return ((c3 * t + c2) * t + c1) * t + c0;
-            }
+                local_barycentric_interpolate_pair<DifferentiateDriver>();
         }
 
         constexpr void seed_psin_query_from_passive_psin_profile() noexcept
@@ -1641,7 +1685,7 @@ namespace source::detail
                     max_abs_diff = diff;
                 source_psin_query[i] = psin;
             }
-            return max_abs_diff <= pj2_psin_uniform_fixed_point_max_residual;
+            return max_abs_diff <= pj23_psin_fixed_point_max_residual;
         }
 
         constexpr void copy_source_target_to_profile_root() noexcept
@@ -1844,7 +1888,10 @@ namespace source::detail
             return pressure_scale / flux_scale;
         }
 
-        template <int SourceConstraintCode, bool RCoordinate, typename GeometryRuntime>
+        template <int SourceConstraintCode,
+                  bool RCoordinate,
+                  bool UseMaterializedDriverDerivative,
+                  typename GeometryRuntime>
         constexpr void update_pp(const GeometryRuntime& geometry,
                                  double                 p0,
                                  double                 Ip,
@@ -1872,9 +1919,24 @@ namespace source::detail
                 (void)Ip;
             }
 
-            store_root_row<root_psin_r>(psin_r);
-            regularize_psin_r(n_axis_fix);
-            psin_r = const_root_row<root_psin_r>();
+            RadialVector psin_rr{uninitialized};
+            if constexpr (UseMaterializedDriverDerivative)
+            {
+                const double derivative_scale =
+                    SourceConstraintCode == 1 || SourceConstraintCode == 3
+                        ? 1.0
+                        : 1.0 / alpha2;
+                for (size_t i = 0; i < radial_nodes; ++i)
+                    psin_rr[i] = materialized_driver_derivative[i] * derivative_scale;
+                regularize_psin_r_with_derivative(psin_r, psin_rr, n_axis_fix);
+                store_root_row<root_psin_r>(psin_r);
+            }
+            else
+            {
+                store_root_row<root_psin_r>(psin_r);
+                regularize_psin_r(n_axis_fix);
+                psin_r = const_root_row<root_psin_r>();
+            }
             if constexpr (SourceConstraintCode == 1 || SourceConstraintCode == 3)
             {
                 alpha2 = Ip /
@@ -1882,9 +1944,15 @@ namespace source::detail
                           edge_geometry_field(geometry, geometry::radial_Kn) * edge_eval(psin_r));
             }
 
-            RadialVector psin_rr{uninitialized};
             RadialVector integrated{uninitialized};
-            radial_grid_multi_matvec_into<GridType>(psin_rr, integrated, psin_r);
+            if constexpr (UseMaterializedDriverDerivative)
+            {
+                radial_grid_accumulator_matvec_into<GridType>(integrated, psin_r);
+            }
+            else
+            {
+                radial_grid_multi_matvec_into<GridType>(psin_rr, integrated, psin_r);
+            }
             store_root_row<root_psin_rr>(psin_rr);
             store_psin_coordinate(integrated, full_integral(psin_r));
 
@@ -1948,7 +2016,10 @@ namespace source::detail
                 regularize_ffn_psin(n_axis_fix);
         }
 
-        template <int SourceConstraintCode, bool RCoordinate, typename GeometryRuntime>
+        template <int SourceConstraintCode,
+                  bool RCoordinate,
+                  bool UseMaterializedDriverDerivative,
+                  typename GeometryRuntime>
         constexpr void update_pi(const GeometryRuntime& geometry,
                                  double                 p0,
                                  double                 Ip,
@@ -1997,7 +2068,19 @@ namespace source::detail
             store_psin_coordinate(integrated, full_integral(psin_r));
 
             RadialVector Itor_r{uninitialized};
-            matvec_into(Itor_r, GridType::differentiator, Itor);
+            if constexpr (UseMaterializedDriverDerivative)
+            {
+                const double driver_scale =
+                    SourceConstraintCode == 1 || SourceConstraintCode == 3
+                        ? Ip / edge_eval(materialized_driver_input)
+                        : 1.0;
+                for (size_t i = 0; i < radial_nodes; ++i)
+                    Itor_r[i] = materialized_driver_derivative[i] * driver_scale;
+            }
+            else
+            {
+                matvec_into(Itor_r, GridType::differentiator, Itor);
+            }
             regularize_axis_linear(Itor_r, n_axis_fix);
 
             if constexpr (SourceConstraintCode == 2 || SourceConstraintCode == 3)
