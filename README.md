@@ -86,10 +86,39 @@ The supported backend strings are:
 - `cxx-strict`: independent Release strict artifact;
 - `cxx-relaxed`: independent Release relaxed artifact.
 
+The next native backend work adds `cxx-enzyme` as a fifth public token. It is
+not exposed by the current migration snapshot yet. Its contract is a distinct
+Release relaxed artifact whose residual JVP/Jacobian is provided by Enzyme;
+plugin failure must not fall back to finite differences or `cxx-relaxed`.
+
 `artifact_dir`, `cpu_affinity`, and `rebuild` are build-only Module options.
 Numba contains no fast-math decorators. Cxx relaxed may use fast-math where
 safe and keeps standard-library fallbacks for special functions that require
 strict evaluation.
+
+After the first successful build, VEQPy publishes a build-tool-free runtime
+pointer and loads the selected extension through `fusionprime_base.native`.
+A normal cached `prepare()` therefore does not probe Clang/CMake, hash sources
+or binaries, update artifact metadata, or repeat preparation before the first
+solve. A missing or malformed selected artifact is reported directly instead
+of triggering a silent rebuild. In an editable checkout, native source changes
+must be made explicit with `rebuild=True`; released package versions and native
+runtime schemas invalidate their runtime pointers independently.
+
+On macOS arm64, native preparation uses the matching Homebrew LLVM/Clang 22
+and Enzyme toolchain:
+
+```bash
+brew install enzyme
+$(brew --prefix llvm@22)/bin/clang++ --version
+```
+
+The reference versions are LLVM `22.1.8` and Enzyme `0.0.290`. ClangEnzyme is
+an LLVM compiler plugin, so its LLVM major must match the compiler major. It is
+a system build dependency rather than a Python package dependency. All VEQPy
+Cxx environments use LLVM major 22; Ubuntu 24.04 CI installs `clang-22` and
+`lld-22` from the official apt.llvm.org repository. That job still covers only
+the non-Enzyme Cxx backends; Linux Enzyme support is deliberately deferred.
 
 ## Development gates
 

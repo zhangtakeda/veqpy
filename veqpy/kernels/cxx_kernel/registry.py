@@ -11,19 +11,19 @@ Notes:
 
 from __future__ import annotations
 
-import importlib.util
-import sys
 import threading
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 from typing import Any
 
+from fusionprime_base.native import NativeArtifactLoadError, load_native_artifact
+
 from veqpy.kernels.abi.options import solver_method_code
 from veqpy.kernels.types import KernelTopology, _BuildPolicy
 
 from .affinity import cpu_pin_scope_active, pinned_cpu
-from .builder import _ArtifactPreparation, touch_artifact_used
+from .builder import _ArtifactPreparation, _native_artifact_reference
 from .builder import prepare as prepare_kernel
 
 
@@ -185,13 +185,21 @@ class KernelRegistry:
         force: bool = False,
     ) -> LoadedKernel:
         artifact = self.prepare_artifact(topology, recipe=recipe, force=force, dry_run=False)
+        return self.load_artifact(artifact, force=force)
+
+    def load_artifact(
+        self,
+        artifact: _ArtifactPreparation,
+        *,
+        force: bool = False,
+    ) -> LoadedKernel:
+        """Load one already-resolved artifact without repeating preparation."""
+
         with self._lock:
             cached = self._modules.get(artifact.artifact_id)
             if cached is not None and not force:
-                touch_artifact_used(cached.artifact)
                 return cached
             module = _load_artifact_module(artifact)
-            touch_artifact_used(artifact)
             loaded = LoadedKernel(artifact=artifact, module=module)
             self._modules[artifact.artifact_id] = loaded
             return loaded
@@ -206,6 +214,26 @@ class KernelRegistry:
         pin_cpu: bool | int | None = None,
     ) -> ThreadOwnedNativeSolver:
         loaded = self.load_kernel(topology, recipe=recipe, force=force)
+        return self.create_solver_from_loaded(loaded, solver=solver, pin_cpu=pin_cpu)
+
+    def create_solver_from_artifact(
+        self,
+        artifact: _ArtifactPreparation,
+        *,
+        solver: str = "powell",
+        force: bool = False,
+        pin_cpu: bool | int | None = None,
+    ) -> ThreadOwnedNativeSolver:
+        loaded = self.load_artifact(artifact, force=force)
+        return self.create_solver_from_loaded(loaded, solver=solver, pin_cpu=pin_cpu)
+
+    def create_solver_from_loaded(
+        self,
+        loaded: LoadedKernel,
+        *,
+        solver: str = "powell",
+        pin_cpu: bool | int | None = None,
+    ) -> ThreadOwnedNativeSolver:
         solver_code = solver_method_code(solver)
         pin_policy = self.pin_cpu if pin_cpu is None else pin_cpu
         cpp_solver = loaded.module.NativeSolver(
@@ -246,28 +274,10 @@ class KernelRegistry:
 
 
 def _load_artifact_module(artifact: _ArtifactPreparation) -> ModuleType:
-    if not artifact.shared_library_path.exists():
-        raise KernelLoadError(f"Cxx shared library is missing: {artifact.shared_library_path}")
-    module_name = _module_name_for_artifact(artifact.artifact_id)
-    cached = sys.modules.get(module_name)
-    if cached is not None:
-        return cached
-    spec = importlib.util.spec_from_file_location(module_name, artifact.shared_library_path)
-    if spec is None or spec.loader is None:
-        raise KernelLoadError(f"cannot create import spec for {artifact.shared_library_path}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
     try:
-        spec.loader.exec_module(module)
-    except Exception:
-        sys.modules.pop(module_name, None)
-        raise
-    return module
-
-
-def _module_name_for_artifact(artifact_id: str) -> str:
-    safe_id = artifact_id.replace("-", "_")
-    return f"veqpy._kernel_cache.k_{safe_id}.cxx_ext"
+        return load_native_artifact(_native_artifact_reference(artifact))
+    except NativeArtifactLoadError as error:
+        raise KernelLoadError(str(error)) from error
 
 
 def _pinning_cache_key(policy: bool | int | None) -> object:

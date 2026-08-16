@@ -38,12 +38,22 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y \
-            clang-18 \
+            ca-certificates \
             cmake \
+            curl \
             git \
+            gnupg \
             libcminpack-dev \
             liblapacke-dev \
             libopenblas-dev
+          curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key \
+            | gpg --dearmor \
+            | sudo tee /usr/share/keyrings/apt.llvm.org.gpg >/dev/null
+          echo "deb [signed-by=/usr/share/keyrings/apt.llvm.org.gpg] https://apt.llvm.org/noble/ llvm-toolchain-noble-22 main" \
+            | sudo tee /etc/apt/sources.list.d/apt.llvm.org.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y clang-22 lld-22 llvm-22-dev
+          clang++-22 --version
           git clone --depth 1 --branch v1.18.0 https://github.com/kthohr/gcem.git "${RUNNER_TEMP}/gcem"
           cmake -S "${RUNNER_TEMP}/gcem" -B "${RUNNER_TEMP}/gcem-build" \
             -DCMAKE_INSTALL_PREFIX="${HOME}/opt/gcem-install"

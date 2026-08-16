@@ -30,6 +30,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
+from fusionprime_base.native import (
+    NativeArtifactRef,
+    native_artifact_pointer_path,
+    native_runtime_key,
+    read_native_artifact_pointer,
+    write_native_artifact_pointer,
+)
+
 from veqpy.kernels.abi.identity import recipe_identity_payload, topology_identity_payload
 from veqpy.kernels.types import KernelTopology, _BuildPolicy
 
@@ -40,7 +48,24 @@ ARTIFACT_SCHEMA = "veqpy.cxx.kernel_artifact.v2"
 SOURCE_DIGEST_SCHEMA = "veqpy.cxx.source_digest.v2"
 PYTHON_SOURCE_DIGEST_SCHEMA = "veqpy.cxx.kernel_python_source_digest.v2"
 NANOBIND_STATIC_SCHEMA = "veqpy.cxx.nanobind_static_artifact.v2"
-DEFAULT_CXX_COMPILER = "clang++-18"
+NATIVE_RUNTIME_SCHEMA = "veqpy.cxx.native_runtime.v1"
+NATIVE_RUNTIME_LOCATOR_SCHEMA = "veqpy.cxx.native_runtime_locator.v1"
+
+
+def _default_cxx_compiler() -> str:
+    """Return an LLVM 22 compiler without varying the supported major by platform."""
+
+    versioned = shutil.which("clang++-22")
+    if versioned is not None:
+        return versioned
+    for prefix in (Path("/opt/homebrew"), Path("/usr/local")):
+        compiler = prefix / "opt" / "llvm@22" / "bin" / "clang++"
+        if compiler.is_file():
+            return str(compiler)
+    return "clang++-22"
+
+
+DEFAULT_CXX_COMPILER = _default_cxx_compiler()
 
 
 class PrepareError(RuntimeError):
@@ -113,10 +138,17 @@ def prepare(
     if not source_dir.exists():
         raise PrepareError(f"Cxx source directory does not exist: {source_dir}")
 
+    root = (cache_root or default_kernel_cache_root()).expanduser()
+    runtime_key = _native_runtime_key(topology, recipe, source_dir=source_dir)
+    pointer_path = _native_pointer_path(root, recipe, runtime_key)
+    if not force and not dry_run:
+        reference = read_native_artifact_pointer(pointer_path, runtime_key=runtime_key)
+        if reference is not None:
+            return _preparation_from_reference(topology, recipe, reference)
+
     cxx = DEFAULT_CXX_COMPILER
     build_identity = _build_identity(topology, recipe, source_dir=source_dir, cxx=cxx)
     artifact_id = _compute_artifact_id(topology, recipe, build_identity)
-    root = (cache_root or default_kernel_cache_root()).expanduser()
     nanobind_static = _get_or_build_nanobind_static(
         root,
         cxx=cxx,
@@ -136,7 +168,7 @@ def prepare(
             metadata = _read_json(paths["metadata_path"])
             _stamp_artifact_metadata(metadata, "last_reused_at")
             _write_json(paths["metadata_path"], metadata)
-            return _ArtifactPreparation(
+            artifact = _ArtifactPreparation(
                 topology=topology,
                 recipe=recipe,
                 artifact_id=artifact_id,
@@ -151,6 +183,8 @@ def prepare(
                 reused=True,
                 built=False,
             )
+            _publish_native_pointer(pointer_path, runtime_key, artifact)
+            return artifact
 
         started = time.perf_counter()
         cmake_args = _cmake_configure_args(
@@ -203,7 +237,7 @@ def prepare(
             built = True
 
         _write_json(paths["metadata_path"], metadata)
-        return _ArtifactPreparation(
+        artifact = _ArtifactPreparation(
             topology=topology,
             recipe=recipe,
             artifact_id=artifact_id,
@@ -218,6 +252,9 @@ def prepare(
             reused=False,
             built=built,
         )
+        if not dry_run:
+            _publish_native_pointer(pointer_path, runtime_key, artifact)
+        return artifact
 
 
 def clean(
@@ -277,6 +314,9 @@ def clean(
         except Exception as exc:  # pragma: no cover - exercised through concrete errors.
             errors.append(f"{root_dir}: {exc}")
 
+    if not dry_run and removed:
+        _remove_native_pointers_to(tuple(removed), root=root, build=build, errors=errors)
+
     return CleanResult(
         removed=tuple(removed),
         skipped_recent=tuple(skipped_recent),
@@ -319,6 +359,122 @@ def _artifact_paths(root_dir: Path) -> dict[str, Path]:
         "configure_log_path": root_dir / "configure.log",
         "build_log_path": root_dir / "build.log",
     }
+
+
+def _native_runtime_key(
+    topology: KernelTopology,
+    recipe: _BuildPolicy,
+    *,
+    source_dir: Path,
+) -> str:
+    return native_runtime_key(
+        {
+            "schema": NATIVE_RUNTIME_LOCATOR_SCHEMA,
+            "runtime_schema": NATIVE_RUNTIME_SCHEMA,
+            "package_version": _package_version("veqpy"),
+            "python": {
+                "cache_tag": sys.implementation.cache_tag,
+                "abi_flags": getattr(sys, "abiflags", ""),
+            },
+            "platform": {
+                "system": platform.system(),
+                "machine": platform.machine(),
+            },
+            "source_dir": str(source_dir),
+            "topology": topology_identity_payload(topology),
+            "recipe": recipe_identity_payload(recipe),
+        }
+    )
+
+
+def _native_pointer_path(root: Path, recipe: _BuildPolicy, runtime_key: str) -> Path:
+    return native_artifact_pointer_path(
+        root / recipe.build,
+        namespace="veqpy",
+        runtime_key=runtime_key,
+    )
+
+
+def _native_artifact_reference(artifact: _ArtifactPreparation) -> NativeArtifactRef:
+    metadata_artifact = artifact.metadata.get("artifact", {})
+    module_name = metadata_artifact.get("module_name")
+    if not isinstance(module_name, str) or not module_name:
+        module_name = f"veqpy._kernel_cache.k_{artifact.artifact_id}.cxx_ext"
+    return NativeArtifactRef(
+        artifact_id=artifact.artifact_id,
+        module_name=module_name,
+        library_path=artifact.shared_library_path,
+        metadata_path=artifact.metadata_path,
+        runtime_schema=NATIVE_RUNTIME_SCHEMA,
+    )
+
+
+def _publish_native_pointer(
+    pointer_path: Path,
+    runtime_key: str,
+    artifact: _ArtifactPreparation,
+) -> None:
+    write_native_artifact_pointer(
+        pointer_path,
+        runtime_key=runtime_key,
+        artifact=_native_artifact_reference(artifact),
+    )
+
+
+def _preparation_from_reference(
+    topology: KernelTopology,
+    recipe: _BuildPolicy,
+    reference: NativeArtifactRef,
+) -> _ArtifactPreparation:
+    if reference.runtime_schema != NATIVE_RUNTIME_SCHEMA:
+        raise PrepareError(
+            f"cached Cxx artifact runtime schema is incompatible: {reference.runtime_schema!r}"
+        )
+    if reference.metadata_path is None:
+        raise PrepareError(f"cached Cxx artifact {reference.artifact_id} has no metadata path")
+    metadata = _read_json(reference.metadata_path)
+    root_dir = reference.metadata_path.parent
+    paths = _artifact_paths(root_dir)
+    return _ArtifactPreparation(
+        topology=topology,
+        recipe=recipe,
+        artifact_id=reference.artifact_id,
+        root_dir=root_dir,
+        cmake_build_dir=paths["cmake_build_dir"],
+        metadata_path=reference.metadata_path,
+        topology_path=paths["topology_path"],
+        build_path=paths["build_path"],
+        kernel_py_path=paths["kernel_py_path"],
+        shared_library_path=reference.library_path,
+        metadata=metadata,
+        reused=True,
+        built=False,
+    )
+
+
+def _remove_native_pointers_to(
+    removed: tuple[Path, ...],
+    *,
+    root: Path,
+    build: str | None,
+    errors: list[str],
+) -> None:
+    removed_roots = {path.resolve() for path in removed}
+    build_roots = [root / build] if build is not None else [path for path in root.iterdir() if path.is_dir()]
+    for build_root in build_roots:
+        pointer_root = build_root / "_runtime" / "veqpy"
+        if not pointer_root.is_dir():
+            continue
+        for pointer_path in pointer_root.glob("*.json"):
+            try:
+                payload = _read_json(pointer_path)
+                metadata_value = payload.get("metadata_path")
+                if not isinstance(metadata_value, str):
+                    continue
+                if Path(metadata_value).expanduser().resolve().parent in removed_roots:
+                    pointer_path.unlink()
+            except Exception as error:  # pragma: no cover - diagnostic cleanup only.
+                errors.append(f"{pointer_path}: {error}")
 
 
 def _artifact_is_reusable(metadata_path: Path, shared_library_path: Path) -> bool:

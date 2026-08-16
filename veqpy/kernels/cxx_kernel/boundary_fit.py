@@ -312,6 +312,9 @@ find_package(gcem CONFIG REQUIRED)
 if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     message(FATAL_ERROR "VEQPy boundary fitter requires clang++")
 endif()
+if(NOT CMAKE_CXX_COMPILER_VERSION MATCHES "^22[.]")
+    message(FATAL_ERROR "VEQPy boundary fitter requires LLVM/Clang 22")
+endif()
 
 nanobind_add_module(
     veqpy_boundary_fit_ext
@@ -358,7 +361,6 @@ if(APPLE)
         PRIVATE
             $<$<CONFIG:Release>:-Wl,-dead_strip>
             $<$<CONFIG:Release>:-flto=thin>
-            $<$<CONFIG:Release>:-fuse-ld=lld>
     )
 else()
     target_link_options(

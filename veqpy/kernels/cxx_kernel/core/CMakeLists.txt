@@ -294,6 +294,12 @@ function(cxx_require_clang)
     if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         message(FATAL_ERROR "Cxx backend requires clang++; configure with -DCMAKE_CXX_COMPILER=clang++")
     endif()
+    if(NOT CMAKE_CXX_COMPILER_VERSION MATCHES "^22[.]")
+        message(
+            FATAL_ERROR
+            "VEQPy Cxx artifacts require LLVM/Clang 22, got ${CMAKE_CXX_COMPILER_VERSION}"
+        )
+    endif()
 endfunction()
 
 function(cxx_link_dependencies target)
@@ -362,7 +368,7 @@ function(cxx_find_enzyme out_var)
             ENV ENZYME_PLUGIN_PATH
         PATHS
             "${PROJECT_SOURCE_DIR}/../.."
-            "$ENV{HOME}/opt/Enzyme/enzyme/build-llvm18/Enzyme"
+            "$ENV{HOME}/opt/Enzyme/enzyme/build-llvm22/Enzyme"
             /opt/homebrew/opt/enzyme
             /usr/local/opt/enzyme
             /usr/lib
@@ -398,14 +404,6 @@ function(cxx_enable_enzyme target)
             "use a compiler and Enzyme plugin built for the same LLVM major"
         )
     endif()
-    if(APPLE AND NOT clang_major STREQUAL "22")
-        message(
-            FATAL_ERROR
-            "VEQPy cxx-enzyme on macOS requires Homebrew Clang/LLVM 22, got "
-            "${CMAKE_CXX_COMPILER_VERSION}"
-        )
-    endif()
-
     if(NOT EXISTS "${VEQPY_CXX_ENZYME_INCLUDE_DIR}/enzyme/enzyme")
         message(
             FATAL_ERROR
