@@ -7,7 +7,7 @@ import sys
 
 from . import __version__
 from .api import build
-from .demo_case import make_demo_plasma
+from .demo_case import make_demo_inputs
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -70,8 +70,11 @@ def _run_demo(backend: str, *, check_only: bool) -> int:
             verbose=True,
             report=False,
         )
+        boundary, source, targets = make_demo_inputs()
         result = module.solve(
-            plasma=make_demo_plasma(),
+            boundary=boundary,
+            source=source,
+            targets=targets,
             materialize=not check_only,
             verbose=True,
             report=False,

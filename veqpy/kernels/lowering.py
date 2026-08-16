@@ -40,11 +40,6 @@ def source_case(topology: KernelTopology, value: KernelInput) -> _SourceCase:
 
     stop = int(value.source_count)
     pressure = np.asarray(value.pressure[:stop], dtype=np.float64)
-    derivative = (
-        None
-        if value.pressure_derivative is None
-        else np.asarray(value.pressure_derivative[:stop], dtype=np.float64)
-    )
     coordinate = topology.coordinate
     pressure_name = {
         "r": "P_r",
@@ -57,7 +52,7 @@ def source_case(topology: KernelTopology, value: KernelInput) -> _SourceCase:
     if value.pressure_code == 0:
         kwargs["p"] = pressure
     else:
-        kwargs[pressure_name] = pressure if derivative is None else derivative
+        kwargs[pressure_name] = pressure
         kwargs["p0"] = value.p0
     kwargs[driver_name] = np.asarray(value.driver[:stop], dtype=np.float64)
     return _SourceCase(**kwargs)

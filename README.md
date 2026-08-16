@@ -1,9 +1,9 @@
 # VEQPy
 
 VEQPy 2.x is the FusionPRIME fixed-boundary, axisymmetric equilibrium Module.
-It consumes a frozen `fusionprime-base.Plasma`, solves through its required
-Numba path or an optional Cxx path, and can materialize a new frozen base
-`Equilibrium`.
+It consumes standalone boundary, source, and target dictionaries, solves
+through its required Numba path or an optional Cxx path, and can materialize a
+new frozen base `Equilibrium`.
 
 ## Public API
 
@@ -14,7 +14,7 @@ Kernel ABI records (`KernelTopology`, `KernelInput`, `KernelConfig`, and
 
 ```python
 import veqpy
-from veqpy.demo_case import make_demo_plasma
+from veqpy.demo_case import make_demo_inputs
 
 topology = {
     "Nr": 8,
@@ -35,16 +35,31 @@ topology = {
 
 module = veqpy.build(topology=topology, backend="numba")
 try:
-    record = module.solve(plasma=make_demo_plasma(), verbose=False)
+    boundary, source, targets = make_demo_inputs()
+    record = module.solve(
+        boundary=boundary,
+        source=source,
+        targets=targets,
+        verbose=False,
+    )
 finally:
     module.close()
 ```
 
 The topology keeps the numerical discretization fields `quadrature`,
 `calculus`, `L_max`, `M_max`, and `K_max`. Source nodes are always explicit
-runtime data read from the Plasma. The Adapter owns a source buffer with
+runtime data. The Adapter owns a source buffer with
 capacity epochs 256, 512, and 1024; a larger source is rejected before solve,
 and growing the buffer does not rebuild the topology or backend artifact.
+
+`boundary` has exactly `a`, `R0`, `Z0`, `B0`, `kappa_lcfs`, `c_lcfs`, and
+`s_lcfs`. `source` has exactly one coordinate key selected by topology (`r`,
+`rho`, or `psin`), one pressure representation (`P` or the matching
+`P_r`/`P_rho`/`P_psin`), and the selected route driver. A derivative pressure
+also requires `P0`; a full `P` forbids it. `targets` has exactly the values
+selected by `constraint`: `Ip`, `beta`, both, or neither. Coordinate, pressure,
+and driver arrays share one shape and grid; the Adapter never remaps one source
+profile onto another. In particular, a `rho` source never requires `rho_r`.
 
 Build defaults are `materialize=True`, `verbose=True`, `report=False`, and
 `report_dir=None`. Each `run()`/`solve()` call can override materialization,
@@ -70,7 +85,7 @@ python3.12 -m venv .venv
 ```
 
 `python -m veqpy` is a thin forwarder to `veqpy.cli`. The CLI only exercises
-the public dictionary/Plasma path.
+the public three-dictionary path.
 
 GEQDSK is a pure file payload owned by `fusionprime-base`:
 `fusionprime_base.io.geqdsk` provides `Geqdsk`, `load_geqdsk`, and

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import veqpy
-from veqpy.demo_case import make_demo_plasma
+from veqpy.demo_case import make_demo_inputs
 
 TOPOLOGY = {
     "Nr": 8,
@@ -27,11 +27,12 @@ TOPOLOGY = {
 
 
 def main() -> int:
-    """Run one solve using only ordinary mappings and a frozen Plasma."""
+    """Run one solve using only ordinary mappings."""
 
     module = veqpy.build(topology=TOPOLOGY, backend="numba")
     try:
-        result = module.solve(plasma=make_demo_plasma())
+        boundary, source, targets = make_demo_inputs()
+        result = module.solve(boundary=boundary, source=source, targets=targets)
     finally:
         module.close()
 

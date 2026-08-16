@@ -1,9 +1,10 @@
 # VEQPy 2.x benchmarks
 
 `cxx_geqdsk.py` loads the passive GEQDSK payload through
-`fusionprime_base.io.load_geqdsk`; its small Plasma fixture builder is local to
-the benchmark. It measures the prepared Kernel/core path first and the public
-`VEQ.solve(materialize=False)` path second. Artifact compilation, imports, and
+`fusionprime_base.io.load_geqdsk` and creates direct boundary/source/target
+dictionaries on the native GEQDSK profile grid. The target current is
+`abs(Geqdsk.Ip)` from the file header. It measures the prepared Kernel/core
+path first and the public `VEQ.solve(materialize=False)` path second. Artifact compilation, imports, and
 Numba JIT work are outside the formal timing loop.
 
 The formal run requires at least five warmups and 100 interleaved repetitions:

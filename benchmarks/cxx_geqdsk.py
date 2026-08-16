@@ -115,10 +115,12 @@ def _measure_case(
         for backend in active:
             module = modules[backend]
             for _ in range(warmup):
-                module._adapter.fill(case.plasma)
+                module._adapter.fill(case.boundary, case.source, case.targets)
                 module._kernel.solve()
                 module.solve(
-                    plasma=case.plasma,
+                    boundary=case.boundary,
+                    source=case.source,
+                    targets=case.targets,
                     materialize=False,
                     verbose=False,
                     report=False,
@@ -145,12 +147,14 @@ def _measure_case(
         for iteration in range(repeat):
             for backend in monotonic_interleave(active, iteration):
                 module = modules[backend]
-                module._adapter.fill(case.plasma)
+                module._adapter.fill(case.boundary, case.source, case.targets)
                 output, core_elapsed_ms = time_call(module._kernel.solve)
                 core_snapshot = _snapshot_output(output)
                 record, module_elapsed_ms = time_call(
                     lambda: module.solve(
-                        plasma=case.plasma,
+                        boundary=case.boundary,
+                        source=case.source,
+                        targets=case.targets,
                         materialize=False,
                         verbose=False,
                         report=False,
@@ -215,7 +219,7 @@ def _measure_case(
             reference_x = np.asarray(numba_core["x"], dtype=np.float64)
             for backend in active:
                 module = modules[backend]
-                module._adapter.fill(case.plasma)
+                module._adapter.fill(case.boundary, case.source, case.targets)
                 same_input_raw = np.asarray(module._kernel.residual(reference_x), dtype=np.float64)
                 reference_raw = np.asarray(numba_core["raw"], dtype=np.float64)
                 engines[backend]["same_input_residual"] = {

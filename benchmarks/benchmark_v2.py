@@ -12,7 +12,7 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import veqpy
-from veqpy.demo_case import make_demo_plasma
+from veqpy.demo_case import make_demo_inputs
 
 
 def topology() -> dict[str, object]:
@@ -41,11 +41,17 @@ def measure(backend: str, repeats: int) -> dict[str, object]:
 
     module = veqpy.build(topology=topology(), backend=backend, verbose=False)
     try:
-        plasma = make_demo_plasma()
+        boundary, source, targets = make_demo_inputs()
         rows = []
         for _ in range(repeats):
             started = perf_counter()
-            record = module.solve(plasma=plasma, materialize=False, verbose=False)
+            record = module.solve(
+                boundary=boundary,
+                source=source,
+                targets=targets,
+                materialize=False,
+                verbose=False,
+            )
             rows.append(
                 {
                     "elapsed_ms": (perf_counter() - started) * 1000.0,

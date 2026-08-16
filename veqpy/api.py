@@ -6,8 +6,6 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from fusionprime_base import Plasma
-
 from .module import VEQ, VEQRecord
 
 __all__ = ["build", "solve"]
@@ -44,7 +42,9 @@ def build(
 
 def solve(
     *,
-    plasma: Plasma,
+    boundary: dict,
+    source: dict,
+    targets: dict,
     topology: Mapping[str, Any],
     solver: Mapping[str, Any] | None = None,
     backend: str = "numba",
@@ -57,7 +57,7 @@ def solve(
     report_dir: str | Path | None = None,
     solver_override: Mapping[str, Any] | None = None,
 ) -> VEQRecord:
-    """Build a short-lived Module, solve one frozen Plasma, and close it."""
+    """Build a short-lived Module, solve three direct input dictionaries, and close it."""
 
     module = build(
         topology=topology,
@@ -73,7 +73,9 @@ def solve(
     )
     try:
         return module.solve(
-            plasma=plasma,
+            boundary=boundary,
+            source=source,
+            targets=targets,
             solver=solver_override,
             materialize=materialize,
             verbose=verbose,

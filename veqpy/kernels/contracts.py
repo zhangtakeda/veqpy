@@ -123,7 +123,6 @@ class KernelInput:
     beta: float = np.nan
     x0: np.ndarray | None = None
     has_x0: bool = False
-    pressure_derivative: np.ndarray | None = None
     pressure_code: int = 1
     capacity_epoch: int = 0
 
@@ -141,16 +140,10 @@ class KernelInput:
         self.pressure = _owned_float_array(self.pressure, "pressure")
         self.driver = _owned_float_array(self.driver, "driver")
         self.source_nodes = _owned_float_array(self.source_nodes, "source_nodes")
-        if self.pressure_derivative is not None:
-            self.pressure_derivative = _owned_float_array(
-                self.pressure_derivative, "pressure_derivative"
-            )
         if self.pressure.shape != self.driver.shape:
             raise ValueError("pressure and driver must have identical shapes")
         if self.source_nodes.shape != self.pressure.shape:
             raise ValueError("source_nodes and pressure must have identical shapes")
-        if self.pressure_derivative is not None and self.pressure_derivative.shape != self.pressure.shape:
-            raise ValueError("pressure_derivative and pressure must have identical shapes")
         if type(self.source_count) is not int or self.source_count < 0:
             raise ValueError("source_count must be a non-negative int")
         if self.source_count > self.pressure.size:
@@ -214,10 +207,6 @@ class KernelInput:
             expanded = np.zeros(capacity, dtype=np.float64)
             expanded[:old_count] = old[:old_count]
             setattr(self, name, expanded)
-        if self.pressure_derivative is not None:
-            expanded = np.zeros(capacity, dtype=np.float64)
-            expanded[:old_count] = self.pressure_derivative[:old_count]
-            self.pressure_derivative = expanded
         self.capacity_epoch += 1
 
     def clear_unused_source_tail(self) -> None:
@@ -226,8 +215,6 @@ class KernelInput:
         self.pressure[self.source_count :] = 0.0
         self.driver[self.source_count :] = 0.0
         self.source_nodes[self.source_count :] = 0.0
-        if self.pressure_derivative is not None:
-            self.pressure_derivative[self.source_count :] = 0.0
 
 
 @dataclass(slots=True)

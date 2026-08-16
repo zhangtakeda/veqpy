@@ -13,7 +13,6 @@ from time import perf_counter_ns
 from typing import Any, Sequence
 
 import numpy as np
-from fusionprime_base import Current, Equilibrium, Flux, Geometry, Kinetic, Plasma, Source
 from fusionprime_base.io import Geqdsk, load_geqdsk
 
 from veqpy import build
@@ -294,7 +293,9 @@ class GeqdskBenchmarkCase:
     case_key: str
     config_label: str
     geqdsk: Geqdsk
-    plasma: Plasma
+    boundary: dict[str, Any]
+    source: dict[str, Any]
+    targets: dict[str, Any]
     topology: dict[str, Any]
     solver: dict[str, Any]
     signature: dict[str, int]
@@ -366,99 +367,36 @@ def profile_counts_from_signature(signature: dict[str, int]) -> dict[str, Any]:
     }
 
 
-def _geqdsk_axis(size: int) -> np.ndarray:
-    return np.linspace(0.0, 1.0, int(size), dtype=np.float64)
+def _make_inputs(
+    geqdsk: Geqdsk,
+    case_key: str,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Create direct PF/psin dictionaries on the native GEQDSK profile grid."""
 
-
-def _resample_profile(values: np.ndarray, target: np.ndarray) -> np.ndarray:
-    source = np.asarray(values, dtype=np.float64)
-    axis = _geqdsk_axis(source.size)
-    if source.size < 2 or not np.all(np.isfinite(source)):
-        return np.zeros_like(target)
-    return np.interp(target, axis, source).astype(np.float64, copy=False)
-
-
-def _make_plasma(geqdsk: Geqdsk, case_key: str, *, nr: int, nt: int) -> Plasma:
     fit = BOUNDARY_FITS[case_key]
-    radial_order = 10
-    boundary_order = 10
-    geometry = Geometry(
-        Nr=nr,
-        Nt=nt,
-        radial_rule="uniform",
-        radial_calculus="spectral",
-        K_max=20,
-        R0=float(fit["R0"]),
-        Z0=float(fit["Z0"]),
-        a=float(fit["a"]),
-        kappa_lcfs=float(fit["kappa"]),
-        c_lcfs=np.asarray(fit["c"], dtype=np.float64),
-        # Geometry and VEQ both use +s_m sin(m*theta) in the poloidal phase.
-        s_lcfs=np.asarray(fit["s"], dtype=np.float64),
-        h_coeffs=np.zeros(radial_order + 1, dtype=np.float64),
-        v_coeffs=np.zeros(radial_order + 1, dtype=np.float64),
-        kappa_coeffs=np.zeros(radial_order + 1, dtype=np.float64),
-        c_coeffs=np.zeros((boundary_order + 1, radial_order + 1), dtype=np.float64),
-        s_coeffs=np.zeros((boundary_order, radial_order + 1), dtype=np.float64),
-    )
-    r = np.asarray(geometry.r, dtype=np.float64)
-    ff_psi = _resample_profile(geqdsk.FF_psi, r)
-    p_psi = _resample_profile(geqdsk.P_psi, r)
-    q = _resample_profile(geqdsk.q, r)
-    if np.any(q == 0.0):
-        q = np.where(q == 0.0, 1.0, q)
-    equilibrium = Equilibrium(
-        geometry=geometry,
-        FF_psi=ff_psi,
-        P_psi=p_psi,
-        # A constant physical psi_r keeps psin=r on the uniform Plasma grid,
-        # while its integral retains the GEQDSK axis-to-LCFS flux span.  The
-        # Adapter therefore supplies the historical d/dpsin source values
-        # rather than silently treating d/dpsi as d/dpsin.
-        psi_r=np.full(
-            nr,
-            float(geqdsk.psi_bound - geqdsk.psi_axis),
-            dtype=np.float64,
-        ),
-        B0=float(geqdsk.Bt0) if geqdsk.Bt0 != 0.0 else 1.0,
-        P0=float(geqdsk.P[-1]) if geqdsk.P.size else 0.0,
-    )
-    rho = np.linspace(0.0, 1.0, nr, dtype=np.float64)
-    q_rho = np.gradient(q, rho)
-    current_total = abs(float(geqdsk.Ip))
-    itor = current_total * rho
-    current_density = np.full(nr, max(current_total, 1.0), dtype=np.float64)
-    current = Current(
-        rho=rho,
-        q=q,
-        q_rho=q_rho,
-        Itor=itor,
-        jtor=current_density,
-        jtotal=current_density,
-        ellpara=np.full(nr, 20.0, dtype=np.float64),
-        etapara=np.full(nr, 1.0e-8, dtype=np.float64),
-        jbootstrap=np.zeros(nr, dtype=np.float64),
-        jdriven=np.zeros(nr, dtype=np.float64),
-    )
-    kinetic = Kinetic(
-        rho=rho,
-        ion_names=("D",),
-        Aion=np.array([2.014], dtype=np.float64),
-        Znuc=np.array([1], dtype=np.int64),
-        Zion=np.ones((1, nr), dtype=np.float64),
-        Z2ion=np.ones((1, nr), dtype=np.float64),
-        ni=np.full((1, nr), 2.0e19, dtype=np.float64),
-        Ti=np.full((1, nr), 5.0e3, dtype=np.float64),
-        Te=np.full(nr, 5.0e3, dtype=np.float64),
-        omega=np.zeros((1, nr), dtype=np.float64),
-    )
-    return Plasma(
-        equilibrium=equilibrium,
-        kinetic=kinetic,
-        current=current,
-        flux=Flux(rho=rho, ion_names=("D",)),
-        source=Source(rho=rho, ion_names=("D",)),
-    ).freeze()
+    profile_count = int(geqdsk.P_psi.size)
+    if profile_count < 2 or geqdsk.FF_psi.shape != geqdsk.P_psi.shape:
+        raise ValueError("GEQDSK pressure and FF derivatives must share at least two samples")
+    flux_span = float(geqdsk.psi_bound - geqdsk.psi_axis)
+    if not np.isfinite(flux_span) or flux_span == 0.0:
+        raise ValueError("GEQDSK axis-to-boundary flux span must be finite and nonzero")
+    boundary = {
+        "a": float(fit["a"]),
+        "R0": float(fit["R0"]),
+        "Z0": float(fit["Z0"]),
+        "B0": float(geqdsk.Bt0) if geqdsk.Bt0 != 0.0 else 1.0,
+        "kappa_lcfs": float(fit["kappa"]),
+        "c_lcfs": np.asarray(fit["c"], dtype=np.float64),
+        "s_lcfs": np.asarray(fit["s"], dtype=np.float64),
+    }
+    source = {
+        "psin": np.linspace(0.0, 1.0, profile_count, dtype=np.float64),
+        "P_psin": np.asarray(geqdsk.P_psi, dtype=np.float64) * flux_span,
+        "FF_psin": np.asarray(geqdsk.FF_psi, dtype=np.float64) * flux_span,
+        "P0": float(geqdsk.P[-1]) if geqdsk.P.size else 0.0,
+    }
+    targets = {"Ip": abs(float(geqdsk.Ip))}
+    return boundary, source, targets
 
 
 def geqdsk_signature(case_key: str, config_label: str) -> dict[str, int]:
@@ -512,20 +450,16 @@ def geqdsk_kernel_case(
         "norm": "fast",
     }
     fit = BOUNDARY_FITS[case_key]
+    boundary, source, targets = _make_inputs(geqdsk, case_key)
     return GeqdskBenchmarkCase(
         case_key=case_key,
         config_label=config_label,
         geqdsk=geqdsk,
-        # The Module topology remains the requested 32x32 solve layout.  The
-        # external Plasma deliberately retains the GEQDSK profile grid so the
-        # benchmark exercises runtime explicit-source counts and capacity
-        # growth (128 for CHEASE, 257 for SOLOVEV/EFIT).
-        plasma=_make_plasma(
-            geqdsk,
-            case_key,
-            nr=int(geqdsk.P_psi.size),
-            nt=nt,
-        ),
+        # The solve layout remains 32x32 while direct source dictionaries keep
+        # the native GEQDSK profile counts (128 or 257) without remapping.
+        boundary=boundary,
+        source=source,
+        targets=targets,
         topology=topology,
         solver=solver,
         signature=signature,

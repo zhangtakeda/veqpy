@@ -10,7 +10,7 @@ from time import perf_counter
 from typing import Any
 
 import numpy as np
-from fusionprime_base import Equilibrium, Plasma, module, record
+from fusionprime_base import Equilibrium, module, record
 from rich.console import Console
 
 from .adapter import VEQAdapter
@@ -57,12 +57,13 @@ class VEQRecord:
     report_path: str | None = None
 
 
-@module
+@module(inputs=("boundary", "source", "targets"))
 class VEQ:
-    """Fixed-boundary VEQ solver with a frozen Plasma-only public run port.
+    """Fixed-boundary VEQ solver with three standalone physical input ports.
 
-    The constructor accepts only plain topology/solver mappings.  Four-buffer
-    ABI objects are created privately and remain owned by this Module.
+    The constructor accepts only plain topology/solver mappings. Boundary,
+    source, and target dictionaries are copied directly into private
+    four-buffer ABI objects.
     """
 
     def __init__(
@@ -133,8 +134,15 @@ class VEQ:
 
         self._kernel.prepare(force=self._rebuild)
 
-    def run(self, *, plasma: Plasma, materialize: bool = True) -> VEQRecord:
-        """Solve one frozen Plasma using the build-time behavior defaults."""
+    def run(
+        self,
+        *,
+        boundary: dict,
+        source: dict,
+        targets: dict,
+        materialize: bool = True,
+    ) -> VEQRecord:
+        """Solve one explicit standalone problem using behavior defaults."""
 
         options = self._active_options
         if options is None:
@@ -152,12 +160,14 @@ class VEQ:
         else:
             options = dict(options)
             options["materialize"] = materialize
-        return self._run_with_options(plasma, options)
+        return self._run_with_options(boundary, source, targets, options)
 
     def solve(
         self,
         *,
-        plasma: Plasma,
+        boundary: dict,
+        source: dict,
+        targets: dict,
         solver: Mapping[str, Any] | None = None,
         materialize: bool | object = _UNSET,
         verbose: bool | object = _UNSET,
@@ -179,7 +189,12 @@ class VEQ:
         }
         self._active_options = options
         try:
-            return self.run(plasma=plasma, materialize=bool(options["materialize"]))
+            return self.run(
+                boundary=boundary,
+                source=source,
+                targets=targets,
+                materialize=bool(options["materialize"]),
+            )
         finally:
             self._active_options = None
 
@@ -209,10 +224,16 @@ class VEQ:
 
         self._kernel.close()
 
-    def _run_with_options(self, plasma: Plasma, options: Mapping[str, object]) -> VEQRecord:
+    def _run_with_options(
+        self,
+        boundary: dict,
+        source: dict,
+        targets: dict,
+        options: Mapping[str, object],
+    ) -> VEQRecord:
         started = perf_counter()
         preprocess_started = perf_counter()
-        source_count = self._adapter.fill(plasma)
+        source_count = self._adapter.fill(boundary, source, targets)
         preprocess_ms = (perf_counter() - preprocess_started) * 1000.0
 
         run_config = solver_config(merge_solver(self._solver_mapping, options.get("solver")))

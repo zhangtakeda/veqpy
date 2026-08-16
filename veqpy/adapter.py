@@ -1,40 +1,88 @@
-"""VEQ Adapter: frozen Plasma values to a stable KernelInput."""
+"""VEQ input adapter: three explicit dictionaries to one stable KernelInput."""
 
 from __future__ import annotations
 
 import numpy as np
-from fusionprime_base import Plasma
 
+from .kernels.abi.enums import (
+    PRESSURE_DERIVATIVE_BY_COORDINATE,
+    SOURCE_COORDINATE_CODES,
+    SOURCE_DRIVER_NAMES,
+    source_driver_for,
+)
 from .kernels.contracts import KernelInput, KernelTopology
+
+_BOUNDARY_KEYS = frozenset(
+    {"a", "R0", "Z0", "B0", "kappa_lcfs", "c_lcfs", "s_lcfs"}
+)
+_PRESSURE_KEYS = frozenset({"P", *PRESSURE_DERIVATIVE_BY_COORDINATE.values()})
 
 
 class VEQAdapter:
-    """Copy and remap one Plasma equilibrium into a prepared input buffer."""
+    """Validate and copy one standalone VEQ problem without source remapping."""
 
     def __init__(self, topology: KernelTopology, buffer: KernelInput) -> None:
         self.topology = topology
         self.buffer = buffer
 
-    def fill(self, plasma: Plasma) -> int:
-        """Validate the frozen context and overwrite the bound input buffers."""
+    def fill(self, boundary: dict, source: dict, targets: dict) -> int:
+        """Overwrite the resident Kernel input from three exact dictionaries."""
 
-        equilibrium = plasma.equilibrium
-        geometry = equilibrium.geometry
-        coordinate_values = _coordinate_values(equilibrium, self.topology.coordinate)
-        pressure_values = _pressure_values(equilibrium, self.topology.coordinate)
-        driver_values = _driver_values(plasma, self.topology.route, self.topology.coordinate)
+        _require_exact_dict(boundary, "boundary")
+        _require_exact_dict(source, "source")
+        _require_exact_dict(targets, "targets")
+        _require_exact_keys(boundary, _BOUNDARY_KEYS, "boundary")
 
-        # Source coordinates are always a runtime explicit input.  The
-        # equilibrium grid is the default source representation, but the
-        # KernelInput owner may receive any strictly increasing source grid in
-        # the same normalized coordinate domain.
-        source_nodes = _canonical_normalized_nodes(
-            coordinate_values[0],
-            name="source nodes",
-        )
-        pressure = np.asarray(pressure_values[1], dtype=np.float64)
-        driver = _remap(driver_values[0], driver_values[1], source_nodes)
-        count = int(source_nodes.size)
+        coordinate = self.topology.coordinate
+        coordinate_keys = set(source).intersection(SOURCE_COORDINATE_CODES)
+        if coordinate_keys != {coordinate}:
+            raise ValueError(
+                f"source must contain exactly the topology coordinate {coordinate!r}; "
+                f"got {sorted(coordinate_keys)}"
+            )
+
+        pressure_keys = set(source).intersection(_PRESSURE_KEYS)
+        expected_derivative = PRESSURE_DERIVATIVE_BY_COORDINATE[coordinate]
+        if len(pressure_keys) != 1:
+            raise ValueError(
+                "source requires exactly one pressure input: "
+                f"'P' or {expected_derivative!r}"
+            )
+        pressure_name = next(iter(pressure_keys))
+        if pressure_name not in {"P", expected_derivative}:
+            raise ValueError(
+                f"coordinate={coordinate!r} requires pressure input 'P' or "
+                f"{expected_derivative!r}, got {pressure_name!r}"
+            )
+
+        expected_driver = source_driver_for(self.topology.route, coordinate)
+        driver_keys = set(source).intersection(SOURCE_DRIVER_NAMES)
+        if driver_keys != {expected_driver}:
+            raise ValueError(
+                f"route={self.topology.route!r}, coordinate={coordinate!r} requires "
+                f"source driver {expected_driver!r}; got {sorted(driver_keys)}"
+            )
+
+        expected_source_keys = {coordinate, pressure_name, expected_driver}
+        if pressure_name == "P":
+            if "P0" in source:
+                raise ValueError("source P0 cannot be supplied with the full pressure profile P")
+        else:
+            expected_source_keys.add("P0")
+        _require_exact_keys(source, frozenset(expected_source_keys), "source")
+
+        expected_targets = {
+            "none": frozenset(),
+            "ip": frozenset({"Ip"}),
+            "beta": frozenset({"beta"}),
+            "both": frozenset({"Ip", "beta"}),
+        }[self.topology.constraint]
+        _require_exact_keys(targets, expected_targets, "targets")
+
+        nodes = _canonical_normalized_nodes(source[coordinate], name=coordinate)
+        pressure = _source_profile(source[pressure_name], pressure_name, nodes.shape)
+        driver = _source_profile(source[expected_driver], expected_driver, nodes.shape)
+        count = int(nodes.size)
         if count > 1024:
             raise ValueError("VEQ source input has more than the supported 1024 nodes")
 
@@ -44,142 +92,105 @@ class VEQAdapter:
         if capacity > self.buffer.source_capacity:
             self.buffer.grow_source_capacity(capacity)
 
-        self.buffer.a = float(geometry.a)
-        self.buffer.R0 = float(geometry.R0)
-        self.buffer.Z0 = float(geometry.Z0)
-        self.buffer.B0 = float(equilibrium.B0)
-        self.buffer.kappa_lcfs = float(geometry.kappa_lcfs)
-        _copy_resized(self.buffer.c_lcfs, geometry.c_lcfs, "c_lcfs")
-        _copy_resized(self.buffer.s_lcfs, geometry.s_lcfs, "s_lcfs")
+        self.buffer.a = _positive_float(boundary["a"], "boundary.a")
+        self.buffer.R0 = _positive_float(boundary["R0"], "boundary.R0")
+        self.buffer.Z0 = _finite_float(boundary["Z0"], "boundary.Z0")
+        self.buffer.B0 = _finite_float(boundary["B0"], "boundary.B0")
+        if self.buffer.B0 == 0.0:
+            raise ValueError("boundary.B0 must be nonzero")
+        self.buffer.kappa_lcfs = _positive_float(
+            boundary["kappa_lcfs"], "boundary.kappa_lcfs"
+        )
+        _copy_resized(self.buffer.c_lcfs, boundary["c_lcfs"], "boundary.c_lcfs")
+        _copy_resized(self.buffer.s_lcfs, boundary["s_lcfs"], "boundary.s_lcfs")
         self.buffer.source_count = count
-        self.buffer.source_nodes[:count] = source_nodes
+        self.buffer.source_nodes[:count] = nodes
         self.buffer.pressure[:count] = pressure
         self.buffer.driver[:count] = driver
-        self.buffer.p0 = float(equilibrium.P0)
-        if self.topology.constraint in {"ip", "both"}:
-            self.buffer.Ip = _finite_or_default(equilibrium.Ip, 1.0e6)
-        else:
-            self.buffer.Ip = np.nan
-        if self.topology.constraint in {"beta", "both"}:
-            self.buffer.beta = _finite_or_default(equilibrium.betat, 0.01)
-        else:
-            self.buffer.beta = np.nan
+        self.buffer.pressure_code = 0 if pressure_name == "P" else 1
+        self.buffer.p0 = (
+            0.0 if pressure_name == "P" else _finite_float(source["P0"], "source.P0")
+        )
+        self.buffer.Ip = (
+            _finite_float(targets["Ip"], "targets.Ip")
+            if "Ip" in expected_targets
+            else np.nan
+        )
+        self.buffer.beta = (
+            _finite_float(targets["beta"], "targets.beta")
+            if "beta" in expected_targets
+            else np.nan
+        )
         self.buffer.has_x0 = False
         self.buffer.clear_unused_source_tail()
         return count
 
 
-def _coordinate_values(equilibrium: object, coordinate: str) -> tuple[np.ndarray, np.ndarray]:
-    key = str(coordinate).lower()
-    if key == "r":
-        return np.asarray(equilibrium.r, dtype=np.float64), np.asarray(equilibrium.r, dtype=np.float64)
-    if key == "psin":
-        return np.asarray(equilibrium.psin, dtype=np.float64), np.asarray(equilibrium.psin, dtype=np.float64)
-    if key == "rho":
-        return np.asarray(equilibrium.rho, dtype=np.float64), np.asarray(equilibrium.rho, dtype=np.float64)
-    raise ValueError(f"unsupported source coordinate {coordinate!r}")
+def _require_exact_dict(value: object, name: str) -> None:
+    if type(value) is not dict:
+        raise TypeError(f"{name} must be exactly dict, got {type(value).__name__}")
 
 
-def _pressure_values(equilibrium: object, coordinate: str) -> tuple[np.ndarray, np.ndarray]:
-    key = str(coordinate).lower()
-    if key == "r":
-        values = equilibrium.P_r
-    elif key == "psin":
-        values = equilibrium.P_psin
-    elif key == "rho":
-        values = np.divide(equilibrium.P_r, equilibrium.rho_r)
-    else:
-        raise ValueError(f"unsupported source coordinate {coordinate!r}")
-    return _coordinate_values(equilibrium, coordinate)[0], np.asarray(values, dtype=np.float64)
+def _require_exact_keys(value: dict, expected: frozenset[str], name: str) -> None:
+    actual = set(value)
+    if actual == expected:
+        return
+    missing = sorted(expected - actual)
+    extra = sorted(actual - expected)
+    details: list[str] = []
+    if missing:
+        details.append(f"missing {missing}")
+    if extra:
+        details.append(f"unexpected {extra}")
+    raise ValueError(f"{name} keys do not match the contract: {', '.join(details)}")
 
 
-def _driver_values(plasma: Plasma, route: str, coordinate: str) -> tuple[np.ndarray, np.ndarray]:
-    equilibrium = plasma.equilibrium
-    current = plasma.current
-    route_key = str(route).upper()
-    coordinate_key = str(coordinate).lower()
-    if route_key == "PP":
-        values = equilibrium.psi_r
-        nodes = equilibrium.rho if coordinate_key == "rho" else equilibrium.r
-    elif route_key == "PI":
-        values = equilibrium.Itor
-        nodes = equilibrium.rho if coordinate_key == "rho" else equilibrium.r
-    elif route_key == "PJ1":
-        values = equilibrium.jtor
-        nodes = equilibrium.rho if coordinate_key == "rho" else equilibrium.r
-    elif route_key == "PJ2":
-        values = equilibrium.jpara
-        nodes = equilibrium.rho if coordinate_key == "rho" else equilibrium.r
-    elif route_key == "PJ3":
-        values = equilibrium.jtotal
-        nodes = equilibrium.rho if coordinate_key == "rho" else equilibrium.r
-    elif route_key == "PQ":
-        current_q = np.asarray(current.q, dtype=np.float64)
-        if np.all(np.isfinite(current_q)):
-            values = current_q
-            nodes = np.asarray(current.rho, dtype=np.float64)
-        else:
-            values = np.asarray(equilibrium.q, dtype=np.float64)
-            nodes = np.asarray(
-                equilibrium.rho if coordinate_key == "rho" else equilibrium.r,
-                dtype=np.float64,
-            )
-    else:
-        if str(route_key) != "PF":
-            raise ValueError(f"unsupported source route {route!r}")
-        if coordinate_key == "r":
-            values = equilibrium.FF_r
-            nodes = equilibrium.r
-        elif coordinate_key == "psin":
-            values = equilibrium.FF_psin
-            nodes = equilibrium.psin
-        elif coordinate_key == "rho":
-            values = np.divide(equilibrium.FF_r, equilibrium.rho_r)
-            nodes = equilibrium.rho
-        else:
-            raise ValueError(f"unsupported source coordinate {coordinate!r}")
-    return np.asarray(nodes, dtype=np.float64), np.asarray(values, dtype=np.float64)
+def _source_profile(value: object, name: str, shape: tuple[int, ...]) -> np.ndarray:
+    profile = np.asarray(value, dtype=np.float64)
+    if profile.ndim != 1 or profile.shape != shape:
+        raise ValueError(f"source.{name} must share coordinate shape {shape}, got {profile.shape}")
+    if not np.all(np.isfinite(profile)):
+        raise ValueError(f"source.{name} must contain only finite values")
+    return profile
 
 
-def _remap(nodes: np.ndarray, values: np.ndarray, target: np.ndarray) -> np.ndarray:
-    source_nodes = np.asarray(nodes, dtype=np.float64)
-    source_values = np.asarray(values, dtype=np.float64)
-    if source_nodes.ndim != 1 or source_values.shape != source_nodes.shape:
-        raise ValueError("source coordinate and profile must share one-dimensional shape")
-    if not np.all(np.isfinite(source_nodes)) or not np.all(np.isfinite(source_values)):
-        raise ValueError("source coordinate and profile must be finite")
-    if np.any(np.diff(source_nodes) <= 0.0):
-        raise ValueError("source coordinate must be strictly increasing")
-    if source_nodes[0] > target[0] + 1.0e-12 or source_nodes[-1] < target[-1] - 1.0e-12:
-        raise ValueError("source profile does not cover the target normalized domain")
-    return np.interp(target, source_nodes, source_values).astype(np.float64, copy=False)
-
-
-def _copy_resized(destination: np.ndarray, source: np.ndarray, name: str) -> None:
-    source = np.asarray(source, dtype=np.float64)
-    if source.size > destination.size:
-        raise ValueError(f"{name} has {source.size} entries but topology stores {destination.size}")
+def _copy_resized(destination: np.ndarray, source: object, name: str) -> None:
+    values = np.asarray(source, dtype=np.float64)
+    if values.ndim != 1 or not np.all(np.isfinite(values)):
+        raise ValueError(f"{name} must be a finite one-dimensional array")
+    if values.size > destination.size:
+        raise ValueError(f"{name} has {values.size} entries but topology stores {destination.size}")
     destination.fill(0.0)
-    destination[: source.size] = source
+    destination[: values.size] = values
 
 
-def _canonical_normalized_nodes(values: np.ndarray, *, name: str) -> np.ndarray:
-    """Validate normalized source nodes and snap accepted endpoints to 0/1."""
+def _canonical_normalized_nodes(value: object, *, name: str) -> np.ndarray:
+    """Validate one shared source grid and snap accepted endpoints to 0/1."""
 
-    nodes = np.array(values, dtype=np.float64, copy=True)
+    nodes = np.array(value, dtype=np.float64, copy=True)
     if nodes.ndim != 1 or nodes.size < 2 or not np.all(np.isfinite(nodes)):
-        raise ValueError(f"{name} must contain at least two finite values")
+        raise ValueError(f"source.{name} must contain at least two finite values")
     if np.any(np.diff(nodes) <= 0.0):
-        raise ValueError(f"{name} must be strictly increasing")
+        raise ValueError(f"source.{name} must be strictly increasing")
     if abs(float(nodes[0])) > 1.0e-12 or abs(float(nodes[-1]) - 1.0) > 1.0e-12:
-        raise ValueError(f"{name} must cover the normalized [0, 1] domain")
+        raise ValueError(f"source.{name} must cover the normalized [0, 1] domain")
     nodes[0] = 0.0
     nodes[-1] = 1.0
     return nodes
 
 
-def _finite_or_default(value: float, default: float) -> float:
+def _finite_float(value: object, name: str) -> float:
     result = float(value)
-    return result if np.isfinite(result) else float(default)
+    if not np.isfinite(result):
+        raise ValueError(f"{name} must be finite")
+    return result
+
+
+def _positive_float(value: object, name: str) -> float:
+    result = _finite_float(value, name)
+    if result <= 0.0:
+        raise ValueError(f"{name} must be positive")
+    return result
+
 
 __all__ = ["VEQAdapter"]
