@@ -1,79 +1,35 @@
-# Python caches and tool state.
+# Python caches and local environments.
 __pycache__/
 *.py[cod]
-*$py.class
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
 .ipynb_checkpoints/
+.venv/
+.env
+.env.*
+!.env.example
 
-# Python build and editable-install metadata.
-build/
-dist/
+# Packaging and coverage artifacts.
+/build/
+/dist/
 *.egg-info/
+.coverage
+.coverage.*
+/htmlcov/
 
-# LaTeX build artifacts.
-*.aux
-*.bbl
-*.bcf
-*.blg
-*.fdb_latexmk
-*.fls
-*.log
-*.out
-*.run.xml
-*.synctex.gz
-*.toc
-*.lof
-*.lot
-*.nav
-*.snm
-*.spl
-*.patch
-*.vrb
-*-blx.bib
-
-# Local environments and hidden tool state.
-.*
-!/.gitignore
-
-# Keep CI configuration trackable if added later.
-!/.github/
-!/.github/**
-
-# Local-only root documents and manuscript reference material.
-/*.md
-!README.md
-/*.pdf
-AGENTS.md
-
-# Root-only scratch tools stay local.
-/tools/
-worklog/
-
-# Public input data is limited to the three reference GEQDSK files.
-data/*
-!data/CHEASE.geqdsk
-!data/EFIT.geqdsk
-!data/SOLOVEV.geqdsk
-!data/README.md
-
-# Test source is trackable; generated outputs stay local.
-tests/*
-!tests/*.py
-tests/_outputs/
-tests/demo/
-tests/benchmark/
-
-# Example/demo generated outputs stay local.
-outputs/
-tmp/
-veqlib/artifact/
-
-# Root-only manuscript scratch/artifact directories.
-/figures/
-/references/
+# VEQPy runtime and benchmark artifacts.
+/.veqpy-kernel-cache/
 /benchmarks/results/
-/docs_cn/
-/*.png
-/*.json
+/report/
+
+# Historical demo outputs that may exist in local checkouts.
+/demo_equilibrium.json
+/demo_init.png
+/demo_result.png
+/data/solovev-veqpy.geqdsk
+/data/solovev-veqpy-roundtrip.geqdsk
+/data/solovev-veqpy-comparison.png
+
+# Operating-system metadata.
+.DS_Store
