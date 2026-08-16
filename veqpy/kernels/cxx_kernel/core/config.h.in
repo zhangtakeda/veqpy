@@ -20,8 +20,9 @@ namespace config
 
         enum SourceCoordinateCode : int
         {
-            SourceCoordinateR  = 1,
+            SourceCoordinateR    = 1,
             SourceCoordinatePsin = 2,
+            SourceCoordinateRho  = 3,
         };
 
         enum SourceConstraintCode : int

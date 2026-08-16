@@ -549,8 +549,6 @@ class _SourceCase:
     jtotal: np.ndarray | list[float] | tuple[float, ...] | None = None
     q: np.ndarray | list[float] | tuple[float, ...] | None = None
     source_nodes: np.ndarray | list[float] | tuple[float, ...] | None = None
-    native_source_nodes: np.ndarray | list[float] | tuple[float, ...] | None = None
-    source_coordinate_jacobian: np.ndarray | list[float] | tuple[float, ...] | None = None
     p0: float | None = None
     Ip: float = np.nan
     beta: float = np.nan
@@ -619,34 +617,6 @@ class _SourceCase:
                 f"got {source_nodes.shape} and {pressure.shape}"
             )
         object.__setattr__(self, "source_nodes", source_nodes)
-        native_source_nodes = (
-            None
-            if self.native_source_nodes is None
-            else _readonly_1d(self.native_source_nodes, "native_source_nodes")
-        )
-        if native_source_nodes is not None and native_source_nodes.shape != pressure.shape:
-            raise ValueError(
-                "native_source_nodes must share the source-profile shape, "
-                f"got {native_source_nodes.shape} and {pressure.shape}"
-            )
-        object.__setattr__(self, "native_source_nodes", native_source_nodes)
-        source_coordinate_jacobian = (
-            None
-            if self.source_coordinate_jacobian is None
-            else _readonly_1d(
-                self.source_coordinate_jacobian,
-                "source_coordinate_jacobian",
-            )
-        )
-        if (
-            source_coordinate_jacobian is not None
-            and source_coordinate_jacobian.shape != pressure.shape
-        ):
-            raise ValueError(
-                "source_coordinate_jacobian must share the source-profile shape, "
-                f"got {source_coordinate_jacobian.shape} and {pressure.shape}"
-            )
-        object.__setattr__(self, "source_coordinate_jacobian", source_coordinate_jacobian)
         object.__setattr__(self, "p0", p0)
         object.__setattr__(self, "Ip", float(self.Ip))
         object.__setattr__(self, "beta", float(self.beta))

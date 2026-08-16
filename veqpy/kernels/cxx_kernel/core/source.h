@@ -35,6 +35,8 @@ namespace source::detail
 
     inline constexpr size_t pj2_psin_uniform_fixed_point_max_iter = 16;
     inline constexpr double pj2_psin_uniform_fixed_point_max_residual = 1.0e-10;
+    inline constexpr size_t rho_fixed_point_max_iter = 16;
+    inline constexpr double rho_fixed_point_max_residual = 1.0e-6;
     // Fixed axis cutoff: radial nodes with r below this value use axis-regularized profiles.
     inline constexpr double axis_fix_r = 0.05;
 
@@ -109,6 +111,20 @@ namespace source::detail
         SourceVector source_coordinate_nodes{};
         RadialVector source_psin_query{};
         RadialVector source_parameter_query{};
+        RadialVector source_rho_query{};
+        RadialVector source_rho_query_next{};
+        RadialVector source_rho_derivative{};
+        RadialVector source_rho_derivative_next{};
+        RadialVector source_rho_F{};
+        RadialVector source_rho_F2{};
+        RadialVector source_rho_u{};
+        RadialVector source_rho_u_next{};
+        RadialVector source_rho_current{};
+        RadialVector source_rho_current_next{};
+        RadialVector source_rho_ru0{};
+        RadialVector source_rho_ru1{};
+        RadialVector source_rho_rc0{};
+        RadialVector source_rho_rc1{};
         RadialVector materialized_pprime_input{};
         RadialVector materialized_driver_input{};
         RootFields   profile_root_fields{};
@@ -121,6 +137,10 @@ namespace source::detail
         double       alpha2 = 0.0;
         double       scaled_effective_p0 = 0.0;
         double       pressure_multiplier = 1.0;
+        size_t       rho_iterations = 0;
+        double       rho_defect = 0.0;
+        double       rho_value_defect = 0.0;
+        double       rho_derivative_defect = 0.0;
         size_t       active_count = sample_count;
         bool         explicit_source_interpolation = false;
         bool         source_nodes_uniform = false;
@@ -202,6 +222,232 @@ namespace source::detail
                 materialized_driver_input[i] = driver_input[i];
             }
             source_materialization_initialized = true;
+        }
+
+        template <typename GeometryRuntime>
+        constexpr bool initialize_rho_coordinate(const GeometryRuntime& geometry,
+                                                  double                 edge_f) noexcept
+        {
+            static_assert(GeometryRuntime::radial_nodes == radial_nodes, "source/geometry radial grids must match");
+            rho_iterations = 0;
+            rho_defect = 0.0;
+            rho_value_defect = 0.0;
+            rho_derivative_defect = 0.0;
+            for (size_t i = 0; i < radial_nodes; ++i)
+                source_rho_F[i] = edge_f;
+            if (!rebuild_rho_from_F(
+                    source_rho_query,
+                    source_rho_derivative,
+                    source_rho_F,
+                    geometry))
+            {
+                for (size_t i = 0; i < radial_nodes; ++i)
+                {
+                    source_rho_query[i] = GridType::nodes[i];
+                    source_rho_derivative[i] = 1.0;
+                }
+            }
+            return true;
+        }
+
+        constexpr void materialize_rho_sources(bool transform_driver_derivative) noexcept
+        {
+            for (size_t i = 0; i < radial_nodes; ++i)
+                source_parameter_query[i] = source_rho_query[i];
+            interpolate_source_pair();
+            for (size_t i = 0; i < radial_nodes; ++i)
+            {
+                materialized_pprime_input[i] *= source_rho_derivative[i];
+                if (transform_driver_derivative)
+                    materialized_driver_input[i] *= source_rho_derivative[i];
+            }
+        }
+
+        template <typename GeometryRuntime>
+        constexpr void initialize_pj23_rho_coordinate(const GeometryRuntime& geometry,
+                                                       double                 edge_f) noexcept
+        {
+            initialize_rho_coordinate(geometry, edge_f);
+            for (size_t i = 0; i < radial_nodes; ++i)
+            {
+                source_rho_u[i] = 0.0;
+                source_rho_current[i] = 0.0;
+            }
+        }
+
+        template <bool JtotalSemantic, typename GeometryRuntime>
+        constexpr int advance_pj23_rho_coordinate(const GeometryRuntime& geometry,
+                                                   double                 R0,
+                                                   double                 p0,
+                                                   double                 Ip,
+                                                   double                 beta,
+                                                   double                 B0) noexcept
+        {
+            ++rho_iterations;
+            const double pressure_multiplier_value =
+                pj23_pressure_multiplier(geometry, p0, beta, B0);
+            if (!math::is_finite(pressure_multiplier_value))
+                return -1;
+            const double strict_defect = map_pj23_state<JtotalSemantic>(
+                geometry,
+                source_rho_u_next,
+                source_rho_current_next,
+                pressure_multiplier_value,
+                Ip,
+                R0 * B0,
+                B0);
+            if (!math::is_finite(strict_defect) ||
+                !rebuild_rho_from_u(
+                    source_rho_query_next,
+                    source_rho_derivative_next,
+                    source_rho_u_next,
+                    R0 * B0,
+                    geometry))
+                return -1;
+
+            double value_defect = 0.0;
+            double derivative_defect = 0.0;
+            for (size_t i = 0; i < radial_nodes; ++i)
+            {
+                value_defect = math::max(
+                    value_defect,
+                    math::abs(source_rho_query_next[i] - source_rho_query[i]));
+                derivative_defect = math::max(
+                    derivative_defect,
+                    math::abs(source_rho_derivative_next[i] - source_rho_derivative[i]) /
+                        (1.0 + math::abs(source_rho_derivative_next[i])));
+            }
+            rho_value_defect = value_defect;
+            rho_derivative_defect = derivative_defect;
+            rho_defect = math::max(math::max(value_defect, derivative_defect), strict_defect);
+            if (rho_defect <= rho_fixed_point_max_residual)
+            {
+                if (!publish_pj23_state(
+                        geometry,
+                        p0,
+                        beta,
+                        pressure_multiplier_value,
+                        R0 * B0))
+                    return -1;
+                return 1;
+            }
+            for (size_t i = 0; i < radial_nodes; ++i)
+            {
+                source_rho_query[i] = source_rho_query_next[i];
+                source_rho_derivative[i] = source_rho_derivative_next[i];
+                source_rho_u[i] = source_rho_u_next[i];
+                source_rho_current[i] = source_rho_current_next[i];
+            }
+            return 0;
+        }
+
+        template <bool JtotalSemantic, typename GeometryRuntime>
+        constexpr bool solve_pj23_r_strict(const GeometryRuntime& geometry,
+                                           double                 R0,
+                                           double                 p0,
+                                           double                 Ip,
+                                           double                 beta,
+                                           double                 B0) noexcept
+        {
+            for (size_t i = 0; i < radial_nodes; ++i)
+            {
+                source_rho_u[i] = 0.0;
+                source_rho_current[i] = 0.0;
+            }
+            const double pressure_multiplier_value =
+                pj23_pressure_multiplier(geometry, p0, beta, B0);
+            if (!math::is_finite(pressure_multiplier_value))
+                return false;
+            for (size_t iteration = 0; iteration < 10; ++iteration)
+            {
+                const double defect = map_pj23_state<JtotalSemantic>(
+                    geometry,
+                    source_rho_u_next,
+                    source_rho_current_next,
+                    pressure_multiplier_value,
+                    Ip,
+                    R0 * B0,
+                    B0);
+                if (!math::is_finite(defect))
+                    return false;
+                if (defect <= rho_fixed_point_max_residual)
+                    return publish_pj23_state(
+                        geometry,
+                        p0,
+                        beta,
+                        pressure_multiplier_value,
+                        R0 * B0);
+                for (size_t i = 0; i < radial_nodes; ++i)
+                {
+                    source_rho_u[i] = source_rho_u_next[i];
+                    source_rho_current[i] = source_rho_current_next[i];
+                }
+            }
+            return false;
+        }
+
+        template <typename GeometryRuntime>
+        constexpr int advance_rho_coordinate(const GeometryRuntime& geometry,
+                                              double                 edge_f) noexcept
+        {
+            ++rho_iterations;
+            const RadialVector psin_r = const_root_row<root_psin_r>();
+            const double source_scale = alpha1 * alpha2;
+            double edge_integral = 0.0;
+            for (size_t i = 0; i < radial_nodes; ++i)
+            {
+                source_rho_F[i] = source_scale * FFn_psin[i] * psin_r[i];
+                edge_integral += GridType::weights[i] * source_rho_F[i];
+            }
+
+            const double edge_f2 = edge_f * edge_f;
+            const double sign_f = edge_f < 0.0 ? -1.0 : 1.0;
+            for (size_t i = 0; i < radial_nodes; ++i)
+            {
+                double prefix = 0.0;
+                for (size_t k = 0; k < radial_nodes; ++k)
+                    prefix += GridType::accumulator(i, k) * source_rho_F[k];
+                const double value = edge_f2 + 2.0 * (prefix - edge_integral);
+                if (!math::is_finite(value) || value <= 0.0)
+                    return -1;
+                source_rho_F2[i] = value;
+            }
+            // Keep the complete F*dF/dr integrand intact until every prefix
+            // integral has been evaluated.  Overwriting source_rho_F inside
+            // the loop above makes later radial nodes depend on loop order.
+            for (size_t i = 0; i < radial_nodes; ++i)
+                source_rho_F[i] = sign_f * math::sqrt(source_rho_F2[i]);
+            if (!rebuild_rho_from_F(
+                    source_rho_query_next,
+                    source_rho_derivative_next,
+                    source_rho_F,
+                    geometry))
+                return -1;
+
+            double value_defect = 0.0;
+            double derivative_defect = 0.0;
+            for (size_t i = 0; i < radial_nodes; ++i)
+            {
+                const double value_error = math::abs(source_rho_query_next[i] - source_rho_query[i]);
+                const double derivative_error =
+                    math::abs(source_rho_derivative_next[i] - source_rho_derivative[i]) /
+                    (1.0 + math::abs(source_rho_derivative_next[i]));
+                if (value_error > value_defect)
+                    value_defect = value_error;
+                if (derivative_error > derivative_defect)
+                    derivative_defect = derivative_error;
+            }
+            rho_value_defect = value_defect;
+            rho_derivative_defect = derivative_defect;
+            rho_defect = math::max(value_defect, derivative_defect);
+            if (rho_defect <= rho_fixed_point_max_residual)
+                return 1;
+            for (size_t i = 0; i < radial_nodes; ++i)
+            {
+                source_rho_query[i] = source_rho_query_next[i];
+                source_rho_derivative[i] = source_rho_derivative_next[i];
+            }
+            return 0;
         }
 
         template <int SourceParameterizationCode = 0, typename ProfilesRuntime>
@@ -752,6 +998,218 @@ namespace source::detail
         }
 
     private:
+        template <typename GeometryRuntime>
+        constexpr double pj23_pressure_multiplier(const GeometryRuntime& geometry,
+                                                   double                 p0,
+                                                   double                 beta,
+                                                   double                 B0) const noexcept
+        {
+            if (!math::is_finite(beta))
+                return 1.0;
+            RadialVector relative_pressure{uninitialized};
+            compute_Pn_out(relative_pressure, materialized_pprime_input);
+            const double denominator =
+                weighted_dot(relative_pressure, geometry, geometry::radial_V_r) +
+                p0 * dot_radial_moment(geometry, geometry::radial_V_r);
+            if (!math::is_finite(denominator) || math::abs(denominator) <= 1.0e-20)
+                return std::numeric_limits<double>::quiet_NaN();
+            return 0.5 * beta * B0 * B0 *
+                   dot_radial_moment(geometry, geometry::radial_V_r) / denominator;
+        }
+
+        template <bool JtotalSemantic, typename GeometryRuntime>
+        constexpr double map_pj23_state(const GeometryRuntime& geometry,
+                                         RadialVector&          out_u,
+                                         RadialVector&          out_current,
+                                         double                 pressure_multiplier_value,
+                                         double                 Ip,
+                                         double                 edge_f,
+                                         double                 B0) noexcept
+        {
+            constexpr double pi = geometry::detail::pi;
+            constexpr double four_pi2 = 4.0 * pi * pi;
+            for (size_t i = 0; i < radial_nodes; ++i)
+            {
+                const double F = edge_f * math::exp(0.5 * source_rho_u[i]);
+                source_rho_F[i] = F;
+                const double x = source_rho_current[i] /
+                                 geometry.radial_field(geometry::radial_Kn, i);
+                const double g1 = four_pi2 *
+                                  geometry.radial_field(geometry::radial_Ln_r, i) /
+                                  geometry.radial_field(geometry::radial_V_r, i);
+                const double H = four_pi2 *
+                                 geometry.radial_field(geometry::radial_Kn, i) /
+                                 geometry.radial_field(geometry::radial_V_r, i);
+                const double g5 = F * F * g1 + x * x * H;
+                if (!math::is_finite(g5) || g5 <= 1.0e-20)
+                    return std::numeric_limits<double>::quiet_NaN();
+                const double ru0 =
+                    -2.0 * pressure_multiplier_value * materialized_pprime_input[i] / g5;
+                double ru1 = 0.0;
+                double rc1 = 0.0;
+                if constexpr (JtotalSemantic)
+                {
+                    if (!math::is_finite(F) || math::abs(F) <= 1.0e-14)
+                        return std::numeric_limits<double>::quiet_NaN();
+                    ru1 = -2.0 * x * B0 * materialized_driver_input[i] /
+                          (F * g5);
+                    rc1 = geometry.radial_field(geometry::radial_Ln_r, i) *
+                          B0 * materialized_driver_input[i] / (F * g1);
+                }
+                else
+                {
+                    ru1 = -2.0 * x * g1 * materialized_driver_input[i] / g5;
+                    rc1 = geometry.radial_field(geometry::radial_Ln_r, i) *
+                          materialized_driver_input[i];
+                }
+                source_rho_ru0[i] = ru0;
+                source_rho_ru1[i] = ru1;
+                source_rho_rc0[i] = 0.5 * source_rho_current[i] * ru0;
+                source_rho_rc1[i] = rc1 + 0.5 * source_rho_current[i] * ru1;
+            }
+
+            double current_multiplier = 1.0;
+            if (math::is_finite(Ip))
+            {
+                const double edge0 = dot(source_rho_rc0, GridType::weights);
+                const double edge1 = dot(source_rho_rc1, GridType::weights);
+                if (!math::is_finite(edge1) || math::abs(edge1) <= 1.0e-20)
+                    return std::numeric_limits<double>::quiet_NaN();
+                current_multiplier = (Ip / (2.0 * pi) - edge0) / edge1;
+                if (!math::is_finite(current_multiplier))
+                    return std::numeric_limits<double>::quiet_NaN();
+            }
+            for (size_t i = 0; i < radial_nodes; ++i)
+            {
+                source_rho_ru0[i] += current_multiplier * source_rho_ru1[i];
+                source_rho_rc0[i] += current_multiplier * source_rho_rc1[i];
+            }
+            radial_grid_accumulator_matvec_into<GridType>(out_current, source_rho_rc0);
+            radial_grid_accumulator_matvec_into<GridType>(out_u, source_rho_ru0);
+            const double edge_u = dot(source_rho_ru0, GridType::weights);
+            for (size_t i = 0; i < radial_nodes; ++i)
+                out_u[i] -= edge_u;
+
+            double u_scale = 1.0;
+            double current_scale = math::is_finite(Ip)
+                                       ? math::max(1.0e-14, math::abs(Ip / (2.0 * pi)))
+                                       : 1.0e-14;
+            for (size_t i = 0; i < radial_nodes; ++i)
+            {
+                u_scale = math::max(u_scale, math::abs(source_rho_u[i]));
+                current_scale = math::max(current_scale, math::abs(source_rho_current[i]));
+            }
+            double defect = 0.0;
+            for (size_t i = 0; i < radial_nodes; ++i)
+            {
+                defect = math::max(
+                    defect,
+                    math::abs(out_u[i] - source_rho_u[i]) / u_scale);
+                defect = math::max(
+                    defect,
+                    math::abs(out_current[i] - source_rho_current[i]) / current_scale);
+            }
+            return defect;
+        }
+
+        template <typename GeometryRuntime>
+        constexpr bool rebuild_rho_from_u(RadialVector&          out_rho,
+                                          RadialVector&          out_rho_r,
+                                          const RadialVector&    u,
+                                          double                 edge_f,
+                                          const GeometryRuntime& geometry) noexcept
+        {
+            for (size_t i = 0; i < radial_nodes; ++i)
+            {
+                source_rho_F[i] = edge_f * math::exp(0.5 * u[i]);
+                if (!math::is_finite(source_rho_F[i]))
+                    return false;
+            }
+            return rebuild_rho_from_F(out_rho, out_rho_r, source_rho_F, geometry);
+        }
+
+        template <typename GeometryRuntime>
+        constexpr bool publish_pj23_state(const GeometryRuntime& geometry,
+                                           double                 p0,
+                                           double                 beta,
+                                           double                 pressure_multiplier_value,
+                                           double                 edge_f) noexcept
+        {
+            RadialVector psin_r{uninitialized};
+            for (size_t i = 0; i < radial_nodes; ++i)
+            {
+                source_rho_F[i] = edge_f * math::exp(0.5 * source_rho_u[i]);
+                source_rho_F2[i] = 0.5 * source_rho_F[i] * source_rho_ru0[i];
+                psin_r[i] = source_rho_current[i] /
+                            geometry.radial_field(geometry::radial_Kn, i);
+            }
+            alpha2 = dot(psin_r, GridType::weights);
+            if (!math::is_finite(alpha2) || math::abs(alpha2) <= 1.0e-14)
+                return false;
+            for (size_t i = 0; i < radial_nodes; ++i)
+                psin_r[i] /= alpha2;
+            store_root_row<root_psin_r>(psin_r);
+            RadialVector psin_rr{uninitialized};
+            RadialVector integrated{uninitialized};
+            radial_grid_multi_matvec_into<GridType>(psin_rr, integrated, psin_r);
+            store_root_row<root_psin_rr>(psin_rr);
+            store_psin_coordinate(integrated, full_integral(psin_r));
+
+            if (math::is_finite(beta))
+                alpha1 = pressure_multiplier_value / alpha2;
+            else
+            {
+                alpha1 = -dot(materialized_pprime_input, GridType::weights) / alpha2;
+                alpha1 = ensure_pressure_alpha1<true>(alpha1, p0, alpha2, psin_r);
+            }
+            for (size_t i = 0; i < radial_nodes; ++i)
+            {
+                const double denominator = alpha1 * alpha2 * psin_r[i];
+                if (!math::is_finite(denominator) || math::abs(denominator) <= 1.0e-20)
+                    return false;
+                Pn_psin[i] = pressure_multiplier_value * materialized_pprime_input[i] /
+                             denominator;
+                FFn_psin[i] = source_rho_F[i] * source_rho_F2[i] / denominator;
+            }
+            finalize_pressure_normalization<true>(p0, math::is_finite(beta));
+            return true;
+        }
+
+        template <typename GeometryRuntime>
+        constexpr bool rebuild_rho_from_F(RadialVector&          out_rho,
+                                          RadialVector&          out_rho_r,
+                                          const RadialVector&    F,
+                                          const GeometryRuntime& geometry) const noexcept
+        {
+            double phi_edge = 0.0;
+            for (size_t i = 0; i < radial_nodes; ++i)
+                phi_edge += GridType::weights[i] * F[i] *
+                            geometry.radial_field(geometry::radial_Ln_r, i);
+            if (!math::is_finite(phi_edge) || math::abs(phi_edge) <= 1.0e-14)
+                return false;
+
+            double previous = -1.0;
+            for (size_t i = 0; i < radial_nodes; ++i)
+            {
+                double phi = 0.0;
+                for (size_t k = 0; k < radial_nodes; ++k)
+                    phi += GridType::accumulator(i, k) * F[k] *
+                           geometry.radial_field(geometry::radial_Ln_r, k);
+                const double phin = phi / phi_edge;
+                if (!math::is_finite(phin) || phin <= 0.0 || phin >= 1.0)
+                    return false;
+                const double rho = math::sqrt(phin);
+                const double rho_r = F[i] * geometry.radial_field(geometry::radial_Ln_r, i) /
+                                     (2.0 * rho * phi_edge);
+                if (!math::is_finite(rho_r) || rho_r <= 0.0 || rho <= previous)
+                    return false;
+                out_rho[i] = rho;
+                out_rho_r[i] = rho_r;
+                previous = rho;
+            }
+            return true;
+        }
+
         template <size_t Row>
         constexpr RadialVector const_root_row() const noexcept
         {

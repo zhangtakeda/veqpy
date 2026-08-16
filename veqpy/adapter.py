@@ -34,15 +34,6 @@ class VEQAdapter:
         )
         pressure = np.asarray(pressure_values[1], dtype=np.float64)
         driver = _remap(driver_values[0], driver_values[1], source_nodes)
-        native_source_nodes, source_coordinate_jacobian = _native_source_mapping(
-            equilibrium,
-            self.topology.coordinate,
-            source_nodes,
-        )
-        native_source_nodes = _canonical_normalized_nodes(
-            native_source_nodes,
-            name="native source nodes",
-        )
         count = int(source_nodes.size)
         if count > 1024:
             raise ValueError("VEQ source input has more than the supported 1024 nodes")
@@ -62,8 +53,6 @@ class VEQAdapter:
         _copy_resized(self.buffer.s_lcfs, geometry.s_lcfs, "s_lcfs")
         self.buffer.source_count = count
         self.buffer.source_nodes[:count] = source_nodes
-        self.buffer.native_source_nodes[:count] = native_source_nodes
-        self.buffer.source_coordinate_jacobian[:count] = source_coordinate_jacobian
         self.buffer.pressure[:count] = pressure
         self.buffer.driver[:count] = driver
         self.buffer.p0 = float(equilibrium.P0)
@@ -192,22 +181,5 @@ def _canonical_normalized_nodes(values: np.ndarray, *, name: str) -> np.ndarray:
 def _finite_or_default(value: float, default: float) -> float:
     result = float(value)
     return result if np.isfinite(result) else float(default)
-
-
-def _native_source_mapping(
-    equilibrium: object,
-    coordinate: str,
-    source_nodes: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Return native-r nodes and d(coordinate)/dr for backend lowering."""
-
-    if str(coordinate).lower() != "rho":
-        return source_nodes.copy(), np.ones_like(source_nodes)
-    native_nodes = np.asarray(equilibrium.r, dtype=np.float64)
-    jacobian = np.asarray(equilibrium.rho_r, dtype=np.float64)
-    if native_nodes.shape != source_nodes.shape or jacobian.shape != source_nodes.shape:
-        raise ValueError("rho source mapping must match the equilibrium source grid")
-    return native_nodes, jacobian
-
 
 __all__ = ["VEQAdapter"]

@@ -75,8 +75,9 @@ namespace operators::detail
                             SourceConstraintCode == source_constraint_beta ||
                             SourceConstraintCode == source_constraint_ip_beta)),
                       "source topology constraint is not implemented for this native route");
-        static_assert(SourceCoordinateCode == source_coordinate_r || SourceCoordinateCode == source_coordinate_psin,
-                      "native source topology supports r or psin coordinates");
+        static_assert(SourceCoordinateCode == source_coordinate_r || SourceCoordinateCode == source_coordinate_psin ||
+                          SourceCoordinateCode == source_coordinate_rho,
+                      "native source topology supports r, psin, or rho coordinates");
         static_assert(SourceNodesCode == source_nodes_uniform || SourceNodesCode == source_nodes_grid,
                       "native source topology supports uniform or grid nodes");
         static_assert(SourceActiveFamilyCode == source_active_none || SourceActiveFamilyCode == source_active_psin ||
@@ -103,8 +104,11 @@ namespace operators::detail
                           SourceRouteCode == source_route_pj2 || SourceRouteCode == source_route_pj3,
                       "active F ownership is only implemented for PJ2/PJ3 source topology");
         static_assert((SourceRouteCode != source_route_pj2 && SourceRouteCode != source_route_pj3) ||
-                          SourceActiveFamilyCode == source_active_F,
-                      "PJ2/PJ3 source topology requires active F ownership");
+                          SourceActiveFamilyCode == source_active_F ||
+                          (SourceActiveFamilyCode == source_active_none &&
+                           (SourceCoordinateCode == source_coordinate_r ||
+                            SourceCoordinateCode == source_coordinate_rho)),
+                      "PJ2/PJ3 source topology requires active F ownership or a source-owned r/rho closure");
         static_assert(SourceActiveFamilyCode != source_active_psin ||
                           Shape::slot_for_profile_id(Shape::psin_profile_id).optimized(),
                       "profile-owned source topology requires an active psin profile");
@@ -199,6 +203,11 @@ namespace operators::detail
                         // PJ2/PJ3 remap their effective source samples inside
                         // the coupled psin/current fixed-point loop.
                     }
+                    else if constexpr (SourceCoordinateCode == source_coordinate_rho)
+                    {
+                        // rho samples are queried at the candidate equilibrium
+                        // coordinate inside the local source closure below.
+                    }
                     else if constexpr (SourceNodesCode == source_nodes_grid)
                         workspace.source_runtime.materialize_grid_sources();
                     else
@@ -211,7 +220,8 @@ namespace operators::detail
             const auto update_source = [&]() constexpr {
             if constexpr (SourceRouteCode == source_route_pf)
             {
-                if constexpr (SourceCoordinateCode == source_coordinate_r)
+                if constexpr (SourceCoordinateCode == source_coordinate_r ||
+                              SourceCoordinateCode == source_coordinate_rho)
                     workspace.source_runtime.template update_pf_r<SourceConstraintCode>(
                         workspace.geometry,
                         runtime_scalars.p0,
@@ -230,7 +240,8 @@ namespace operators::detail
             }
             else if constexpr (SourceRouteCode == source_route_pp)
             {
-                if constexpr (SourceCoordinateCode == source_coordinate_r)
+                if constexpr (SourceCoordinateCode == source_coordinate_r ||
+                              SourceCoordinateCode == source_coordinate_rho)
                     workspace.source_runtime.template update_pp_r<SourceConstraintCode>(
                         workspace.geometry,
                         runtime_scalars.p0,
@@ -249,7 +260,8 @@ namespace operators::detail
             }
             else if constexpr (SourceRouteCode == source_route_pi)
             {
-                if constexpr (SourceCoordinateCode == source_coordinate_r)
+                if constexpr (SourceCoordinateCode == source_coordinate_r ||
+                              SourceCoordinateCode == source_coordinate_rho)
                     workspace.source_runtime.template update_pi_r<SourceConstraintCode>(
                         workspace.geometry,
                         runtime_scalars.p0,
@@ -268,7 +280,8 @@ namespace operators::detail
             }
             else if constexpr (SourceRouteCode == source_route_pj1)
             {
-                if constexpr (SourceCoordinateCode == source_coordinate_r)
+                if constexpr (SourceCoordinateCode == source_coordinate_r ||
+                              SourceCoordinateCode == source_coordinate_rho)
                     workspace.source_runtime.template update_pj1_r<SourceConstraintCode>(
                         workspace.geometry,
                         runtime_scalars.p0,
@@ -287,7 +300,8 @@ namespace operators::detail
             }
             else if constexpr (SourceRouteCode == source_route_pj2)
             {
-                if constexpr (SourceCoordinateCode == source_coordinate_r)
+                if constexpr (SourceCoordinateCode == source_coordinate_r ||
+                              SourceCoordinateCode == source_coordinate_rho)
                     workspace.source_runtime.template update_pj2_r<SourceConstraintCode>(
                         workspace.geometry,
                         runtime_scalars.R0,
@@ -317,7 +331,8 @@ namespace operators::detail
             }
             else if constexpr (SourceRouteCode == source_route_pj3)
             {
-                if constexpr (SourceCoordinateCode == source_coordinate_r)
+                if constexpr (SourceCoordinateCode == source_coordinate_r ||
+                              SourceCoordinateCode == source_coordinate_rho)
                     workspace.source_runtime.template update_pj3_r<SourceConstraintCode>(
                         workspace.geometry,
                         runtime_scalars.R0,
@@ -347,7 +362,8 @@ namespace operators::detail
             }
             else
             {
-                if constexpr (SourceCoordinateCode == source_coordinate_r)
+                if constexpr (SourceCoordinateCode == source_coordinate_r ||
+                              SourceCoordinateCode == source_coordinate_rho)
                     workspace.source_runtime.template update_pq_r<SourceConstraintCode>(
                         workspace.geometry,
                         runtime_scalars.R0,
@@ -369,7 +385,111 @@ namespace operators::detail
 
             };
 
-            if constexpr (SourceCoordinateCode == source_coordinate_psin)
+            constexpr bool source_owned_pj23 =
+                (SourceRouteCode == source_route_pj2 || SourceRouteCode == source_route_pj3) &&
+                SourceActiveFamilyCode == source_active_none;
+
+            if constexpr (source_owned_pj23 && SourceCoordinateCode == source_coordinate_r)
+            {
+                workspace.source_runtime.set_pressure_input_scale(1.0);
+                workspace.source_runtime.set_driver_input_scale(1.0);
+                materialize_source();
+                bool valid = false;
+                if constexpr (SourceRouteCode == source_route_pj3)
+                    valid = workspace.source_runtime.template solve_pj23_r_strict<true>(
+                        workspace.geometry,
+                        runtime_scalars.R0,
+                        runtime_scalars.p0,
+                        runtime_scalars.Ip,
+                        runtime_scalars.beta,
+                        runtime_scalars.B0);
+                else
+                    valid = workspace.source_runtime.template solve_pj23_r_strict<false>(
+                        workspace.geometry,
+                        runtime_scalars.R0,
+                        runtime_scalars.p0,
+                        runtime_scalars.Ip,
+                        runtime_scalars.beta,
+                        runtime_scalars.B0);
+                if (!valid)
+                {
+                    for (double& value : out)
+                        value = std::numeric_limits<double>::quiet_NaN();
+                    return;
+                }
+            }
+            else if constexpr (SourceCoordinateCode == source_coordinate_rho)
+            {
+                workspace.source_runtime.set_pressure_input_scale(1.0);
+                workspace.source_runtime.set_driver_input_scale(1.0);
+                if constexpr (SourceActiveFamilyCode == source_active_F)
+                    workspace.source_runtime.materialize_active_F(workspace.profiles);
+                if constexpr (source_owned_pj23)
+                    workspace.source_runtime.initialize_pj23_rho_coordinate(
+                        workspace.geometry,
+                        runtime_scalars.R0 * runtime_scalars.B0);
+                else
+                    workspace.source_runtime.initialize_rho_coordinate(
+                        workspace.geometry,
+                        runtime_scalars.R0 * runtime_scalars.B0);
+                bool converged = false;
+                bool valid = true;
+                for (size_t iteration = 0; iteration < source::detail::rho_fixed_point_max_iter; ++iteration)
+                {
+                    workspace.source_runtime.materialize_rho_sources(SourceRouteCode == source_route_pf);
+                    int status = 0;
+                    if constexpr (source_owned_pj23)
+                    {
+                        if constexpr (SourceRouteCode == source_route_pj3)
+                            status = workspace.source_runtime.template advance_pj23_rho_coordinate<true>(
+                                workspace.geometry,
+                                runtime_scalars.R0,
+                                runtime_scalars.p0,
+                                runtime_scalars.Ip,
+                                runtime_scalars.beta,
+                                runtime_scalars.B0);
+                        else
+                            status = workspace.source_runtime.template advance_pj23_rho_coordinate<false>(
+                                workspace.geometry,
+                                runtime_scalars.R0,
+                                runtime_scalars.p0,
+                                runtime_scalars.Ip,
+                                runtime_scalars.beta,
+                                runtime_scalars.B0);
+                    }
+                    else
+                    {
+                        update_source();
+                        // rho-valued derivatives have already been transformed to
+                        // d/dr above. Normalize before rebuilding F because the
+                        // normalized alpha1 participates in F dF/dr.
+                        workspace.source_runtime.template finalize_pressure_normalization<true>(
+                            runtime_scalars.p0,
+                            SourceConstraintCode == source_constraint_beta ||
+                                SourceConstraintCode == source_constraint_ip_beta);
+                        status = workspace.source_runtime.advance_rho_coordinate(
+                            workspace.geometry,
+                            runtime_scalars.R0 * runtime_scalars.B0);
+                    }
+                    if (status < 0)
+                    {
+                        valid = false;
+                        break;
+                    }
+                    if (status > 0)
+                    {
+                        converged = true;
+                        break;
+                    }
+                }
+                if (!valid || !converged)
+                {
+                    for (double& value : out)
+                        value = std::numeric_limits<double>::quiet_NaN();
+                    return;
+                }
+            }
+            else if constexpr (SourceCoordinateCode == source_coordinate_psin)
             {
                 // Public P_psin and, for PF, FF_psin satisfy the same alpha2
                 // chain rule with the conventional P_psi/FF_psi consumed by
@@ -422,11 +542,12 @@ namespace operators::detail
                 update_source();
             }
 
-            workspace.source_runtime.template finalize_pressure_normalization<
-                SourceCoordinateCode == source_coordinate_r>(
-                runtime_scalars.p0,
-                SourceConstraintCode == source_constraint_beta ||
-                    SourceConstraintCode == source_constraint_ip_beta);
+            if constexpr (SourceCoordinateCode != source_coordinate_rho && !source_owned_pj23)
+                workspace.source_runtime.template finalize_pressure_normalization<
+                    SourceCoordinateCode != source_coordinate_psin>(
+                    runtime_scalars.p0,
+                    SourceConstraintCode == source_constraint_beta ||
+                        SourceConstraintCode == source_constraint_ip_beta);
 
             if constexpr (SourceActiveFamilyCode == source_active_none || SourceActiveFamilyCode == source_active_F)
                 workspace.source_runtime.publish_source_target_root_fields();

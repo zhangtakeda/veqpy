@@ -456,6 +456,8 @@ namespace cxx_python
         {
         case Topology::SourceCoordinateR:
             return "r";
+        case Topology::SourceCoordinateRho:
+            return "rho";
         case Topology::SourceCoordinatePsin:
             return "psin";
         default:
@@ -602,6 +604,10 @@ namespace cxx_python
             out["alpha2"]              = source_runtime.alpha2;
             out["scaled_effective_p0"] = source_runtime.scaled_effective_p0;
             out["pressure_multiplier"] = source_runtime.pressure_multiplier;
+            out["rho_iterations"] = source_runtime.rho_iterations;
+            out["rho_defect"] = source_runtime.rho_defect;
+            out["rho_value_defect"] = source_runtime.rho_value_defect;
+            out["rho_derivative_defect"] = source_runtime.rho_derivative_defect;
             return out;
         }
 

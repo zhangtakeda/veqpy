@@ -54,16 +54,6 @@ def source_case(topology: KernelTopology, value: KernelInput) -> _SourceCase:
     driver_name = _driver_name(topology.route, coordinate)
     kwargs: dict[str, object] = {"Ip": value.Ip, "beta": value.beta}
     kwargs["source_nodes"] = np.asarray(value.source_nodes[:stop], dtype=np.float64)
-    if value.native_source_nodes is not None:
-        kwargs["native_source_nodes"] = np.asarray(
-            value.native_source_nodes[:stop],
-            dtype=np.float64,
-        )
-    if value.source_coordinate_jacobian is not None:
-        kwargs["source_coordinate_jacobian"] = np.asarray(
-            value.source_coordinate_jacobian[:stop],
-            dtype=np.float64,
-        )
     if value.pressure_code == 0:
         kwargs["p"] = pressure
     else:

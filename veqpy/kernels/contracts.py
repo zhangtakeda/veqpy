@@ -118,8 +118,6 @@ class KernelInput:
     driver: np.ndarray
     source_nodes: np.ndarray
     source_count: int
-    native_source_nodes: np.ndarray | None = None
-    source_coordinate_jacobian: np.ndarray | None = None
     p0: float = 0.0
     Ip: float = np.nan
     beta: float = np.nan
@@ -143,16 +141,6 @@ class KernelInput:
         self.pressure = _owned_float_array(self.pressure, "pressure")
         self.driver = _owned_float_array(self.driver, "driver")
         self.source_nodes = _owned_float_array(self.source_nodes, "source_nodes")
-        if self.native_source_nodes is not None:
-            self.native_source_nodes = _owned_float_array(
-                self.native_source_nodes,
-                "native_source_nodes",
-            )
-        if self.source_coordinate_jacobian is not None:
-            self.source_coordinate_jacobian = _owned_float_array(
-                self.source_coordinate_jacobian,
-                "source_coordinate_jacobian",
-            )
         if self.pressure_derivative is not None:
             self.pressure_derivative = _owned_float_array(
                 self.pressure_derivative, "pressure_derivative"
@@ -161,18 +149,6 @@ class KernelInput:
             raise ValueError("pressure and driver must have identical shapes")
         if self.source_nodes.shape != self.pressure.shape:
             raise ValueError("source_nodes and pressure must have identical shapes")
-        if (
-            self.native_source_nodes is not None
-            and self.native_source_nodes.shape != self.pressure.shape
-        ):
-            raise ValueError("native_source_nodes and pressure must have identical shapes")
-        if (
-            self.source_coordinate_jacobian is not None
-            and self.source_coordinate_jacobian.shape != self.pressure.shape
-        ):
-            raise ValueError(
-                "source_coordinate_jacobian and pressure must have identical shapes"
-            )
         if self.pressure_derivative is not None and self.pressure_derivative.shape != self.pressure.shape:
             raise ValueError("pressure_derivative and pressure must have identical shapes")
         if type(self.source_count) is not int or self.source_count < 0:
@@ -208,8 +184,6 @@ class KernelInput:
             driver=np.zeros(capacity, dtype=np.float64),
             source_nodes=source_nodes,
             source_count=0,
-            native_source_nodes=np.zeros(capacity, dtype=np.float64),
-            source_coordinate_jacobian=np.ones(capacity, dtype=np.float64),
             x0=np.zeros(int(topology.x_size), dtype=np.float64),
             has_x0=False,
         )
@@ -233,8 +207,6 @@ class KernelInput:
             "pressure",
             "driver",
             "source_nodes",
-            "native_source_nodes",
-            "source_coordinate_jacobian",
         ):
             old = getattr(self, name)
             if old is None:
@@ -254,10 +226,6 @@ class KernelInput:
         self.pressure[self.source_count :] = 0.0
         self.driver[self.source_count :] = 0.0
         self.source_nodes[self.source_count :] = 0.0
-        if self.native_source_nodes is not None:
-            self.native_source_nodes[self.source_count :] = 0.0
-        if self.source_coordinate_jacobian is not None:
-            self.source_coordinate_jacobian[self.source_count :] = 1.0
         if self.pressure_derivative is not None:
             self.pressure_derivative[self.source_count :] = 0.0
 
