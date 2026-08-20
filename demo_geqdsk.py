@@ -12,7 +12,7 @@ import numpy as np
 import veqpy as veq
 
 ROOT = Path(__file__).resolve().parent
-INPUT = ROOT / "data" / "TEST.geqdsk"
+INPUT = ROOT / "data" / "SOLOVEV.geqdsk"
 OUTPUT = ROOT / "data" / "solovev-veqpy.geqdsk"
 FIGURE = ROOT / "data" / "solovev-veqpy-comparison.png"
 
