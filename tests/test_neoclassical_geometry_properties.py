@@ -273,8 +273,12 @@ def test_signed_f_and_q_follow_the_fixed_cocos_contract(b0: float, ip: float) ->
     assert geqdsk.boundary.shape[0] >= 65
 
 
-def test_geqdsk_roundtrip_preserves_an_asymmetric_vertical_grid(tmp_path) -> None:
+@pytest.mark.parametrize("alpha2_sign", [-1.0, 1.0])
+def test_geqdsk_roundtrip_preserves_an_asymmetric_vertical_grid(
+    tmp_path, alpha2_sign: float
+) -> None:
     equilibrium = _demo_equilibrium()
+    equilibrium.alpha2 = alpha2_sign * abs(equilibrium.alpha2)
     equilibrium.Z0 = 0.25
     z_range = (-1.7, 1.1)
 
@@ -288,6 +292,7 @@ def test_geqdsk_roundtrip_preserves_an_asymmetric_vertical_grid(tmp_path) -> Non
     # GEQDSK Z0 is zmid for the rectangular psi grid, not the equilibrium's
     # fitted plasma-boundary reference height.
     expected_zmid = 0.5 * sum(z_range)
+    assert np.sign(geqdsk.psi_bound - geqdsk.psi_axis) == alpha2_sign
     assert geqdsk.Z0 == pytest.approx(expected_zmid)
     assert geqdsk.Zaxis == pytest.approx(float(equilibrium.Z[0, 0]))
 
@@ -298,6 +303,7 @@ def test_geqdsk_roundtrip_preserves_an_asymmetric_vertical_grid(tmp_path) -> Non
     assert restored.Z0 == pytest.approx(expected_zmid)
     assert restored.Zmin == pytest.approx(z_range[0])
     assert restored.Zmax == pytest.approx(z_range[1])
+    assert np.sign(restored.psi_bound - restored.psi_axis) == alpha2_sign
     np.testing.assert_allclose(restored.psi, geqdsk.psi, rtol=5.0e-10, atol=5.0e-11)
     np.testing.assert_allclose(restored.boundary, geqdsk.boundary)
     np.testing.assert_array_equal(restored.boundary[-1], restored.boundary[0])

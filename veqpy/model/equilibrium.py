@@ -832,7 +832,14 @@ class Equilibrium(Reactive, Serial):
         psi_axis: float = 0.0,
         psi_outside: float | None = None,
     ) -> Geqdsk:
-        """Export a GEQDSK snapshot written in physical psi."""
+        """Export a GEQDSK snapshot written in physical psi.
+
+        By default, the rectangular region outside the LCFS is filled using the
+        CHEASE ``NEQDXTPO=1`` convention: the last interior flux interval is
+        extrapolated linearly along rays from the magnetic axis.  This preserves
+        a clear, one-sided ``psi_bound`` crossing for contour-following readers.
+        Passing ``psi_outside`` explicitly retains the fixed-value override.
+        """
         R_nodes, Z_nodes, Rmin, Rmax, Zmin, Zmax = _build_geqdsk_rectilinear_grid(
             R_range=R_range,
             Z_range=Z_range,
@@ -847,7 +854,7 @@ class Equilibrium(Reactive, Serial):
         # GEQDSK stores physical psi on a rectangular R/Z grid.  Internally this
         # snapshot carries normalized psin, so alpha2 supplies the physical span.
         psi_bound = psi_axis + psi_scale
-        psi_outside_value = psi_bound if psi_outside is None else float(psi_outside)
+        psi_outside_value = None if psi_outside is None else float(psi_outside)
         # GEQDSK owns the magnetic axis and LCFS explicitly.  A native Legendre
         # solve grid owns neither, so first lower the snapshot to an
         # endpoint-inclusive view instead of aliasing its first/last interior
@@ -1356,7 +1363,7 @@ def _interpolate_psin_to_rectilinear_grid(
     Z_nodes: np.ndarray,
     psi_axis: float,
     psi_scale: float,
-    psi_outside: float,
+    psi_outside: float | None,
 ) -> np.ndarray:
     R_surfaces = np.asarray(R_surfaces, dtype=np.float64)
     Z_surfaces = np.asarray(Z_surfaces, dtype=np.float64)
@@ -1382,7 +1389,7 @@ def _interpolate_psin_to_rectilinear_grid(
         Z_grid,
     )
 
-    psi_grid = np.full(R_grid.shape, float(psi_outside), dtype=np.float64)
+    psi_grid = np.empty(R_grid.shape, dtype=np.float64)
     inside = np.isfinite(rho2_grid)
     if np.any(inside):
         # First locate each R/Z cell in the flux-surface mesh, then convert the
@@ -1390,7 +1397,178 @@ def _interpolate_psin_to_rectilinear_grid(
         psi_grid[inside] = float(psi_axis) + float(psi_scale) * np.interp(
             rho2_grid[inside], rho2_src, psin
         )
+    outside = ~inside
+    if np.any(outside):
+        if psi_outside is None:
+            exterior_psin = _chease_exterior_psin(
+                R_grid,
+                Z_grid,
+                inside,
+                R_surfaces,
+                Z_surfaces,
+                psin,
+            )
+            psi_grid[outside] = float(psi_axis) + float(psi_scale) * exterior_psin[outside]
+        else:
+            psi_grid[outside] = float(psi_outside)
     return psi_grid
+
+
+def _chease_exterior_psin(
+    R_grid: np.ndarray,
+    Z_grid: np.ndarray,
+    inside: np.ndarray,
+    R_surfaces: np.ndarray,
+    Z_surfaces: np.ndarray,
+    psin: np.ndarray,
+) -> np.ndarray:
+    """Fill the LCFS exterior using CHEASE-style linear ray extrapolation.
+
+    CHEASE's ``PSIBOX`` routine maps a rectangular-grid point to a ray from the
+    magnetic axis, normalizes its radius so that the LCFS is ``sigma == 1``, and
+    extrapolates the final interior psi interval in ``sigma``.  VEQPy flux
+    surfaces need not be homothetic, so the reference ``sigma`` is recovered by
+    intersecting the same ray with the final strictly interior surface.
+
+    The resulting normalized psi is strictly greater than one outside the LCFS.
+    This is an export continuation, not a vacuum Grad--Shafranov solution.
+    """
+
+    R_grid = np.asarray(R_grid, dtype=np.float64)
+    Z_grid = np.asarray(Z_grid, dtype=np.float64)
+    inside = np.asarray(inside, dtype=bool)
+    R_surfaces = np.asarray(R_surfaces, dtype=np.float64)
+    Z_surfaces = np.asarray(Z_surfaces, dtype=np.float64)
+    psin = np.asarray(psin, dtype=np.float64)
+    if R_grid.shape != Z_grid.shape or R_grid.shape != inside.shape:
+        raise ValueError(
+            "R_grid, Z_grid, and inside must share a shape, got "
+            f"{R_grid.shape}, {Z_grid.shape}, and {inside.shape}"
+        )
+    if (
+        R_surfaces.ndim != 2
+        or Z_surfaces.ndim != 2
+        or R_surfaces.shape != Z_surfaces.shape
+    ):
+        raise ValueError(
+            "R_surfaces and Z_surfaces must share a 2D shape, got "
+            f"{R_surfaces.shape} and {Z_surfaces.shape}"
+        )
+    if R_surfaces.shape[0] < 3 or R_surfaces.shape[1] < 3:
+        raise ValueError(
+            "CHEASE exterior extrapolation requires at least three radial and poloidal samples"
+        )
+    if psin.ndim != 1 or psin.shape[0] != R_surfaces.shape[0]:
+        raise ValueError(
+            f"psin must have shape ({R_surfaces.shape[0]},), got {psin.shape}"
+        )
+    if not (
+        np.all(np.isfinite(R_surfaces))
+        and np.all(np.isfinite(Z_surfaces))
+        and np.all(np.isfinite(psin))
+    ):
+        raise ValueError("CHEASE exterior extrapolation inputs must be finite")
+
+    outside = ~inside
+    exterior_psin = np.full(R_grid.shape, np.nan, dtype=np.float64)
+    exterior_psin[inside] = 1.0
+    if not np.any(outside):
+        return exterior_psin
+
+    strictly_interior = np.flatnonzero(psin[:-1] < 1.0 - 1.0e-12)
+    if strictly_interior.size == 0:
+        raise ValueError("Need a strictly interior psi surface below psin == 1")
+    reference_index = int(strictly_interior[-1])
+    reference_psin = float(psin[reference_index])
+
+    center = np.array([R_surfaces[0, 0], Z_surfaces[0, 0]], dtype=np.float64)
+    boundary = np.column_stack((R_surfaces[-1], Z_surfaces[-1]))
+    reference = np.column_stack(
+        (R_surfaces[reference_index], Z_surfaces[reference_index])
+    )
+    points = np.column_stack((R_grid[outside], Z_grid[outside]))
+    offsets = points - center
+    point_radii = np.linalg.norm(offsets, axis=1)
+    if np.any(point_radii <= 0.0):
+        raise ValueError("An exterior point coincides with the magnetic axis")
+    directions = offsets / point_radii[:, None]
+
+    boundary_radii = _ray_polygon_radii(center, directions, boundary)
+    reference_radii = _ray_polygon_radii(center, directions, reference)
+    sigma = point_radii / boundary_radii
+    reference_sigma = reference_radii / boundary_radii
+    denominator = 1.0 - reference_sigma
+    if np.any(denominator <= 1.0e-12):
+        raise ValueError("The final interior surface is not separated from the LCFS")
+
+    slope = (1.0 - reference_psin) / denominator
+    if np.any(slope <= 0.0) or not np.all(np.isfinite(slope)):
+        raise ValueError("The final interior psi interval is not outward-monotone")
+    outside_values = 1.0 + slope * (sigma - 1.0)
+
+    # CHEASE uses a small positive fallback only when extrapolation fails to
+    # stay on the exterior side of psi_bound; valid arbitrarily close values
+    # are not floored.  Work in normalized psi so both alpha2 signs agree.
+    outside_values[outside_values <= 1.0] = 1.0 + 1.0e-5
+    if not np.all(np.isfinite(outside_values)):
+        raise ValueError("CHEASE exterior extrapolation did not produce finite psi")
+    exterior_psin[outside] = outside_values
+    return exterior_psin
+
+
+def _ray_polygon_radii(
+    center: np.ndarray,
+    directions: np.ndarray,
+    polygon: np.ndarray,
+) -> np.ndarray:
+    """Return the first positive intersection of each ray with a polygon."""
+
+    center = np.asarray(center, dtype=np.float64).reshape(2)
+    directions = np.asarray(directions, dtype=np.float64)
+    polygon = np.asarray(polygon, dtype=np.float64)
+    if directions.ndim != 2 or directions.shape[1] != 2:
+        raise ValueError(f"directions must have shape (n, 2), got {directions.shape}")
+    if polygon.ndim != 2 or polygon.shape[1] != 2 or polygon.shape[0] < 3:
+        raise ValueError(f"polygon must have shape (m, 2), m >= 3, got {polygon.shape}")
+    if np.array_equal(polygon[0], polygon[-1]):
+        polygon = polygon[:-1]
+
+    radii = np.full(directions.shape[0], np.inf, dtype=np.float64)
+    tolerance = 64.0 * np.finfo(np.float64).eps
+    for segment_start, segment_end in zip(
+        polygon,
+        np.roll(polygon, -1, axis=0),
+        strict=True,
+    ):
+        segment = segment_end - segment_start
+        offset = segment_start - center
+        denominator = directions[:, 0] * segment[1] - directions[:, 1] * segment[0]
+        valid_denominator = np.abs(denominator) > tolerance * max(
+            float(np.linalg.norm(segment)), 1.0
+        )
+        ray_radius = np.full(directions.shape[0], np.inf, dtype=np.float64)
+        segment_fraction = np.full(directions.shape[0], np.inf, dtype=np.float64)
+        ray_radius[valid_denominator] = (
+            offset[0] * segment[1] - offset[1] * segment[0]
+        ) / denominator[valid_denominator]
+        segment_fraction[valid_denominator] = (
+            offset[0] * directions[valid_denominator, 1]
+            - offset[1] * directions[valid_denominator, 0]
+        ) / denominator[valid_denominator]
+        intersects = (
+            valid_denominator
+            & (ray_radius >= -tolerance)
+            & (segment_fraction >= -tolerance)
+            & (segment_fraction <= 1.0 + tolerance)
+        )
+        radii[intersects] = np.minimum(radii[intersects], ray_radius[intersects])
+
+    if np.any(~np.isfinite(radii)) or np.any(radii <= 0.0):
+        raise ValueError(
+            "A flux surface is not star-shaped about the magnetic axis; "
+            "CHEASE-style ray extrapolation is undefined"
+        )
+    return radii
 
 
 def _interpolate_rho2_to_rectilinear_grid(

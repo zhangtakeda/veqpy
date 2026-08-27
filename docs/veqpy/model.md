@@ -23,6 +23,15 @@ GEQDSK LCFS points remain passive data in `Geqdsk.boundary`. Runtime boundary
 parameters and boundary-point fitting belong to `KernelBoundary`, not to a
 separate model object.
 
+`Equilibrium.to_geqdsk()` rasterizes the solved closed surfaces inside the LCFS.
+By default, the final strictly interior flux interval is extrapolated linearly
+along rays from the magnetic axis using the CHEASE `NEQDXTPO=1` convention. The
+normalized exterior flux remains strictly beyond the LCFS, giving contour
+followers a one-sided `psi_bound` crossing. This continuation is export data,
+not a vacuum Grad-Shafranov solution. `Geqdsk.boundary` retains the exact,
+explicitly closed LCFS polygon. Supplying `psi_outside` explicitly instead
+requests the legacy scalar exterior value.
+
 `Profile` represents a one-dimensional radial profile with scale, power,
 envelope, offset, and optional Chebyshev coefficients. Its persistent state is
 only those root parameters. When a `Grid` is bound, it lazily materializes
