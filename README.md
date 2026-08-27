@@ -241,6 +241,8 @@ User-facing architecture notes:
   semantics, and warm continuation.
 - [`backends.md`][backends-doc]: Numba/Cxx backend responsibilities, cache
   behavior, and benchmark entry points.
+- [`release-1.3.4.md`][release-1.3.4]: 1.3.4 CHEASE-compatible GEQDSK exterior
+  flux continuation.
 - [`release-1.3.3.md`][release-1.3.3]: 1.3.3 reactive snapshots and closed,
   refined GEQDSK boundary export.
 - [`release-1.3.2.md`][release-1.3.2]: 1.3.2 source-closure, default-backend,
@@ -304,6 +306,7 @@ VEQPy is associated with the companion manuscript **[Zhang2026]**. Related VEQ-f
 [tests]: tests/
 [architecture-doc]: docs/veqpy/architecture.md
 [model-doc]: docs/veqpy/model.md
+[release-1.3.4]: docs/veqpy/release-1.3.4.md
 [release-1.3.3]: docs/veqpy/release-1.3.3.md
 [release-1.3.2]: docs/veqpy/release-1.3.2.md
 [release-1.3.1]: docs/veqpy/release-1.3.1.md
